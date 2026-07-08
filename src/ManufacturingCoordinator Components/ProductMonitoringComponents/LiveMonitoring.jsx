@@ -1,1159 +1,433 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { 
-  Card, Row, Col, Statistic, Progress, Badge, Space, Button, 
-  Input, Select, Tooltip, Tag, Modal, Drawer, Switch, Empty,
-  Divider, Table, Tabs, Avatar, Alert, Spin, Typography, DatePicker
-} from 'antd';
-import { 
-  RefreshCw, Search, Grid, List, Filter, Bell, 
-  Activity, CheckCircle, PauseCircle, Clock, 
-  Zap, Percent, Award, Target, Box, Monitor,
-  FileText, HashIcon, Code, Server, BarChart2, Settings,
-  Cpu, RotateCw, Disc,
-  Eye, Calendar
-} from 'lucide-react';
-import { 
-  EyeOutlined, InfoCircleOutlined, CloseCircleFilled, 
-  ToolOutlined, SortAscendingOutlined, SortDescendingOutlined,
-  ToolFilled
-} from '@ant-design/icons';
-
+import React, { useEffect, useState, useMemo } from 'react';
+import { Button, Empty, Input, Modal, Select, Spin, Tooltip } from 'antd';
+import { Activity, Cpu, Filter, PauseCircle, RefreshCw, WifiOff } from 'lucide-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
 
-
 dayjs.extend(relativeTime);
-
-const { TabPane } = Tabs;
 const { Search: SearchInput } = Input;
-const { Text, Title } = Typography;
 
+/* ─── Status config ─────────────────────────────────────────── */
+const STATUS = {
+  PRODUCTION: {
+    cardBg: '#f0fdf4', cardBorder: '#86efac',
+    pillBg: '#16a34a', pillText: '#fff', dot: '#22c55e',
+    label: 'Production', pulse: true,
+  },
+  RUNNING: {
+    cardBg: '#f0fdf4', cardBorder: '#86efac',
+    pillBg: '#16a34a', pillText: '#fff', dot: '#22c55e',
+    label: 'Running', pulse: true,
+  },
+  ON: {
+    cardBg: '#fffbeb', cardBorder: '#fcd34d',
+    pillBg: '#f59e0b', pillText: '#fff', dot: '#f59e0b',
+    label: 'Idle', pulse: false,
+  },
+  IDLE: {
+    cardBg: '#fffbeb', cardBorder: '#fcd34d',
+    pillBg: '#f59e0b', pillText: '#fff', dot: '#f59e0b',
+    label: 'Idle', pulse: false,
+  },
+  OFF: {
+    cardBg: '#f8fafc', cardBorder: '#cbd5e1',
+    pillBg: '#64748b', pillText: '#fff', dot: '#94a3b8',
+    label: 'Offline', pulse: false,
+  },
+  OFFLINE: {
+    cardBg: '#f8fafc', cardBorder: '#cbd5e1',
+    pillBg: '#64748b', pillText: '#fff', dot: '#94a3b8',
+    label: 'Offline', pulse: false,
+  },
+  STOPPED: {
+    cardBg: '#fff1f2', cardBorder: '#fca5a5',
+    pillBg: '#dc2626', pillText: '#fff', dot: '#ef4444',
+    label: 'Stopped', pulse: false,
+  },
+  MAINTENANCE: {
+    cardBg: '#eff6ff', cardBorder: '#93c5fd',
+    pillBg: '#2563eb', pillText: '#fff', dot: '#3b82f6',
+    label: 'Maintenance', pulse: false,
+  },
+};
+const getS = (s) => STATUS[s] || STATUS.OFFLINE;
+
+/* ─── Filter key → matching statuses ───────────────────────── */
+const FILTER_MATCH = {
+  ALL:        () => true,
+  PRODUCTION: (s) => s === 'PRODUCTION' || s === 'RUNNING',
+  IDLE:       (s) => s === 'ON' || s === 'IDLE',
+  OFFLINE:    (s) => s === 'OFF' || s === 'OFFLINE',
+};
+
+/* ─── Helpers ───────────────────────────────────────────────── */
+const formatProgram = (path) => {
+  if (!path) return null;
+  if (path.includes('\\')) return path.split('\\').pop();
+  if (path.includes('/')) return path.split('/').pop();
+  return path;
+};
+const safeGet = (obj, key, fallback = null) => {
+  if (obj?.[key] != null) return obj[key];
+  if (obj?.production_details?.[key] != null) return obj.production_details[key];
+  return fallback;
+};
+
+/* ─── Status Pill ───────────────────────────────────────────── */
+const StatusPill = ({ status }) => {
+  const s = getS(status);
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '4px 10px', borderRadius: 99,
+      background: s.pillBg, fontSize: 11, fontWeight: 700,
+      color: s.pillText, letterSpacing: '0.05em', textTransform: 'uppercase',
+      flexShrink: 0, whiteSpace: 'nowrap',
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%',
+        background: 'rgba(255,255,255,0.75)', display: 'inline-block',
+        boxShadow: s.pulse ? '0 0 0 3px rgba(255,255,255,0.3)' : 'none',
+      }} />
+      {s.label}
+    </span>
+  );
+};
+
+/* ─── Field ─────────────────────────────────────────────────── */
+const Field = ({ label, value, mono }) => (
+  <div>
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#64748b', marginBottom: 3 }}>
+      {label}
+    </div>
+    <div style={{
+      fontSize: 13, fontWeight: 500, color: value ? '#0f172a' : '#94a3b8',
+      fontFamily: mono ? 'ui-monospace, monospace' : 'inherit',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    }}>
+      {value || '—'}
+    </div>
+  </div>
+);
+
+/* ─── Machine Card ──────────────────────────────────────────── */
+const MachineCard = ({ machine, onClick }) => {
+  const status = machine.status || 'OFFLINE';
+  const s = getS(status);
+  const order   = safeGet(machine, 'production_order') || safeGet(machine, 'sale_order_number');
+  const partNo  = safeGet(machine, 'part_number');
+  const opNo    = safeGet(machine, 'operation_number');
+  const opDesc  = safeGet(machine, 'operation_description') || safeGet(machine, 'operation_name');
+  const rawProg = safeGet(machine, 'active_program') || safeGet(machine, 'program_number') || safeGet(machine, 'selected_program');
+  const prog    = formatProgram(rawProg);
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: s.cardBg, border: `1.5px solid ${s.cardBorder}`,
+        borderRadius: 10, cursor: 'pointer',
+        transition: 'box-shadow 0.15s, transform 0.15s', overflow: 'hidden',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 18px rgba(0,0,0,0.10)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)'; }}
+    >
+      <div style={{ padding: '12px 14px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', lineHeight: 1.3, wordBreak: 'break-word' }}>
+            {machine.machine_name || 'Unknown'}
+          </div>
+        </div>
+        <StatusPill status={status} />
+      </div>
+      <div style={{ height: 1, background: s.cardBorder, opacity: 0.5, margin: '0 14px' }} />
+      <div style={{ padding: '11px 14px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+          <Field label="Production Order" value={order} />
+          <Field label="Part Number" value={partNo} />
+        </div>
+        <Field label="Operation" value={opNo ? `${opNo}${opDesc ? ' · ' + opDesc : ''}` : null} />
+       
+      </div>
+    </div>
+  );
+};
+
+/* ─── KPI Tile ──────────────────────────────────────────────── */
+const KpiTile = ({ label, value, icon: Icon, bg, filterKey, activeFilter, onClick }) => {
+  const isActive = activeFilter === filterKey;
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: bg,
+        borderRadius: 10,
+        padding: '16px 20px',
+        flex: 1,
+        minWidth: 130,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        cursor: 'pointer',
+        transition: 'transform 0.15s, box-shadow 0.15s',
+        boxShadow: isActive
+          ? '0 0 0 3px rgba(255,255,255,0.9), 0 0 0 5px rgba(255,255,255,0.5), 0 6px 20px rgba(0,0,0,0.25)'
+          : '0 2px 8px rgba(0,0,0,0.12)',
+        transform: isActive ? 'translateY(-2px)' : 'none',
+        outline: isActive ? '2px solid rgba(255,255,255,0.8)' : 'none',
+        position: 'relative',
+      }}
+      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)'; } }}
+      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; } }}
+    >
+      <Icon size={28} color="rgba(255,255,255,0.85)" strokeWidth={1.8} style={{ flexShrink: 0 }} />
+      <div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: '#fff', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 4 }}>
+          {label}
+        </div>
+      </div>
+      {isActive && (
+        <div style={{
+          position: 'absolute', top: 8, right: 10,
+          width: 8, height: 8, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.9)',
+          boxShadow: '0 0 0 3px rgba(255,255,255,0.3)',
+        }} />
+      )}
+    </div>
+  );
+};
+
+/* ─── Machine Details Modal ─────────────────────────────────── */
+const MachineModal = ({ machine, onClose }) => {
+  if (!machine) return null;
+  const status = machine.status || 'OFFLINE';
+  const s = getS(status);
+  const order   = safeGet(machine, 'production_order') || safeGet(machine, 'sale_order_number');
+  const partNo  = safeGet(machine, 'part_number');
+  const partDesc= safeGet(machine, 'part_description');
+  const opNo    = safeGet(machine, 'operation_number');
+  const opDesc  = safeGet(machine, 'operation_description') || safeGet(machine, 'operation_name');
+  const rawProg = safeGet(machine, 'active_program') || safeGet(machine, 'program_number') || safeGet(machine, 'selected_program');
+  const prog    = formatProgram(rawProg);
+
+  const MRow = ({ label, value, mono }) => (
+    <div style={{ paddingBottom: 12, marginBottom: 12, borderBottom: '1px solid #f1f5f9' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 3 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 14, color: value ? '#0f172a' : '#cbd5e1', fontFamily: mono ? 'ui-monospace, monospace' : 'inherit' }}>
+        {value || 'Not assigned'}
+      </div>
+    </div>
+  );
+
+  return (
+    <Modal open={!!machine} onCancel={onClose} footer={null} width={560} centered styles={{ body: { padding: 0 } }} title={null}>
+      <div style={{ padding: '18px 22px 14px', background: s.cardBg, borderBottom: `2px solid ${s.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: '#94a3b8', textTransform: 'uppercase', marginBottom: 2 }}>Machine Details</div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{machine.machine_name || 'Unknown'}</h2>
+        </div>
+        <StatusPill status={status} />
+      </div>
+      <div style={{ padding: '18px 22px 22px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+          <MRow label="Production Order" value={order} />
+          <MRow label="Part Number" value={partNo} />
+          <MRow label="Part Description" value={partDesc} />
+          <MRow label="Operation" value={opNo ? `${opNo}${opDesc ? ' · ' + opDesc : ''}` : null} />
+        </div>
+        
+        <div style={{ fontSize: 11, color: '#94a3b8' }}>
+          Last updated: <span style={{ color: '#475569', fontWeight: 600 }}>{dayjs(machine.last_updated).format('YYYY-MM-DD HH:mm:ss')}</span>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+/* ─── Main ──────────────────────────────────────────────────── */
 const MachineDashboard = () => {
-  const [machines, setMachines] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [overallOEEMetrics, setOverallOEEMetrics] = useState({
-    oee: 0,
-    availability: 0,
-    performance: 0,
-    quality: 0,
-    lastUpdated: new Date()
-  });
-  
+  const [machines, setMachines]               = useState([]);
+  const [isLoading, setIsLoading]             = useState(false);
+  const [selectedMachine, setSelectedMachine] = useState(null);
+  const [filterStatus, setFilterStatus]       = useState('ALL');
+  const [searchQuery, setSearchQuery]         = useState('');
+  const [refreshing, setRefreshing]           = useState(false);
+  const [showFilters, setShowFilters]         = useState(false);
+  const [sortOrder, setSortOrder]             = useState('status');
+
   const fetchMachines = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/monitoring/live`);
-      const formattedMachines = response.data.map(m => ({
+      const res = await axios.get(`${API_BASE_URL}/monitoring/live`);
+      setMachines(res.data.map(m => ({
         ...m,
-        machine_id: m.machine_id,
-        machine_name: m.machine_name,
         status: (m.status || 'OFF').toUpperCase(),
         production_order: m.sale_order_number,
-        part_number: m.part_number,
-        operation_number: m.operation_number,
         operation_description: m.operation_name,
         part_count: m.completed_qty,
         launched_quantity: m.target_qty,
-        last_updated: m.last_updated
-      }));
-      setMachines(formattedMachines);
-      
-      if (formattedMachines.length > 0) {
-        const totalOEE = formattedMachines.reduce((acc, m) => acc + (m.status === 'PRODUCTION' ? 85 : 0), 0);
-        setOverallOEEMetrics(prev => ({
-          ...prev,
-          oee: totalOEE / formattedMachines.length,
-          lastUpdated: new Date()
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to fetch machines:', error);
+      })));
+    } catch (e) {
+      console.error('Fetch failed:', e);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const [selectedMachine, setSelectedMachine] = useState(null);
-  const [filterStatus, setFilterStatus] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('grid');
-  const [refreshing, setRefreshing] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const [showAlertsDrawer, setShowAlertsDrawer] = useState(false);
-  const [alertsCount, setAlertsCount] = useState(3); // Mock alerts count
-  const [sortOrder, setSortOrder] = useState('status');
-  const [machineTimers, setMachineTimers] = useState({});
-  // Set date range to today only (from 00:00 to 23:59:59)
-  const [dateRange, setDateRange] = useState([dayjs().startOf('day'), dayjs().endOf('day')]);
-  
-  // OEE refresh interval ref
-  const oeeRefreshIntervalRef = useRef(null);
-  
-  // Updated status colors and icons mapping
-  const statusConfig = {
-    'PRODUCTION': { 
-      color: '#52c41a', // Green for production
-      bgColor: '#f6ffed', 
-      borderColor: '#b7eb8f',
-      icon: <Activity size={16} />,
-      label: 'Production'
-    },
-    'ON': { 
-      color: '#faad14', // Yellow for ON (idle)
-      bgColor: '#fffbe6', 
-      borderColor: '#ffe58f',
-      icon: <PauseCircle size={16} />,
-      label: 'Idle'
-    },
-    'OFF': { 
-      color: '#8c8c8c', // Grey for OFF (offline)
-      bgColor: '#fafafa', 
-      borderColor: '#d9d9d9',
-      icon: <InfoCircleOutlined />,
-      label: 'Offline'
-    },
-    // Keep these for backward compatibility
-    'RUNNING': { 
-      color: '#52c41a',
-      bgColor: '#f6ffed', 
-      borderColor: '#b7eb8f',
-      icon: <CheckCircle size={16} />,
-      label: 'Running'
-    },
-    'IDLE': { 
-      color: '#faad14',
-      bgColor: '#fffbe6', 
-      borderColor: '#ffe58f',
-      icon: <PauseCircle size={16} />,
-      label: 'Idle'
-    },
-    'STOPPED': { 
-      color: '#ff4d4f',
-      bgColor: '#fff2f0', 
-      borderColor: '#ffccc7',
-      icon: <CloseCircleFilled />,
-      label: 'Stopped'
-    },
-    'MAINTENANCE': { 
-      color: '#1890ff',
-      bgColor: '#e6f7ff', 
-      borderColor: '#91d5ff',
-      icon: <ToolOutlined />,
-      label: 'Maintenance'
-    },
-    'OFFLINE': { 
-      color: '#8c8c8c',
-      bgColor: '#fafafa', 
-      borderColor: '#d9d9d9',
-      icon: <InfoCircleOutlined />,
-      label: 'Offline'
-    }
-  };
-
-  // Mock data for alerts
-  const alerts = [
-    { id: 1, machine: 'CNC-001', type: 'error', message: 'Machine stopped unexpectedly', time: '10 minutes ago' },
-    { id: 2, machine: 'MILL-003', type: 'warning', message: 'Approaching maintenance threshold', time: '25 minutes ago' },
-    { id: 3, machine: 'LASER-002', type: 'info', message: 'Production order completed', time: '1 hour ago' },
-  ];
-
-  // Updated stats calculation
-  const stats = {
-    totalMachines: machines.length,
-    production: machines.filter(m => m?.status === 'PRODUCTION').length,
-    on: machines.filter(m => m?.status === 'ON').length,
-    off: machines.filter(m => m?.status === 'OFF').length,
-    // Keep these for backward compatibility
-    running: machines.filter(m => m?.status === 'RUNNING').length,
-    idle: machines.filter(m => m?.status === 'IDLE').length,
-    stopped: machines.filter(m => m?.status === 'STOPPED').length,
-    maintenance: machines.filter(m => m?.status === 'MAINTENANCE').length,
-    offline: machines.filter(m => m?.status === 'OFFLINE').length,
-    activeJobs: machines.filter(m => m?.job_status === 1).length,
-  };
-
-  // Connection status (assuming connected if component is loaded)
-  const connectionStatus = true;
-
-  // Filter machines based on status and search query
-  const filteredMachines = machines.filter(machine => {
-    const matchesStatus = filterStatus === 'ALL' || machine.status === filterStatus;
-    const matchesSearch = !searchQuery || 
-      (machine.machine_name && machine.machine_name.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesStatus && matchesSearch;
-  });
-
-  // No date range presets or handlers needed as we're using today's date only
-
-  // Get machine data in a stable order that won't change positions
-  const stableSortedMachines = useMemo(() => {
-    if (!filteredMachines.length) return [];
-    
-    // Create a stable sort key for each machine
-    const machinesWithSortKey = filteredMachines.map(machine => ({
-      ...machine,
-      stableSortKey: `${machine.machine_id}-${machine.machine_name}`
-    }));
-    
-    return machinesWithSortKey.sort((a, b) => {
-      // First sort by the stable sort key
-      const stableCompare = a.stableSortKey.localeCompare(b.stableSortKey);
-      if (stableCompare !== 0) return stableCompare;
-      
-      // Then apply user-selected sort if machines have the same stable key
-      if (sortOrder === 'name') {
-        return (a.machine_name || '').localeCompare(b.machine_name || '');
-      } else if (sortOrder === 'status') {
-        const statusPriority = {
-          'ON': 0,
-          'IDLE': 0,
-          'PRODUCTION': 1,
-          'RUNNING': 1,
-          'OFF': 2,
-          'OFFLINE': 2,
-          'STOPPED': 3,
-          'MAINTENANCE': 4
-        };
-        return (statusPriority[a.status] || 99) - (statusPriority[b.status] || 99);
-      } else if (sortOrder === 'parts') {
-        return (b.part_count || 0) - (a.part_count || 0);
-      }
-      return 0;
-    });
-  }, [filteredMachines, sortOrder]);
-
-  // Helper function to safely access machine properties
-  const getMachineData = (machine, property, defaultValue = 'N/A') => {
-    // Check if the property exists directly on the machine object
-    if (machine[property] !== undefined && machine[property] !== null) {
-      return machine[property];
-    }
-    
-    // Check if the property exists in the production_details
-    if (machine.production_details && 
-        machine.production_details[property] !== undefined && 
-        machine.production_details[property] !== null) {
-      return machine.production_details[property];
-    }
-    
-    // Return default value if not found
-    return defaultValue;
-  };
-
-  // Handle manual refresh
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchMachines();
-    
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1500);
-  };
-
-  // Initialize data fetching on component mount
   useEffect(() => {
     fetchMachines();
-    
-    // Set up 5-minute interval for refresh
-    const interval = setInterval(() => {
-      fetchMachines();
-    }, 5 * 60 * 1000); // 5 minutes
-    
-    return () => clearInterval(interval);
+    const t = setInterval(fetchMachines, 5 * 60 * 1000);
+    return () => clearInterval(t);
   }, []);
 
-  // Update machine idle timers
-  useEffect(() => {
-    const timerInterval = setInterval(() => {
-      const updatedTimers = { ...machineTimers };
-      let hasChanges = false;
-      
-      machines.forEach(machine => {
-        if (machine.status === 'IDLE' || machine.status === 'ON') {
-          const lastUpdated = machine.last_updated ? new Date(machine.last_updated) : new Date();
-          const now = new Date();
-          const duration = Math.floor((now - lastUpdated) / 1000); // in seconds
-          
-          if (!updatedTimers[machine.machine_id] || updatedTimers[machine.machine_id].duration !== duration) {
-            updatedTimers[machine.machine_id] = {
-              duration,
-              lastUpdated
-            };
-            hasChanges = true;
-          }
-        }
-      });
-      
-      if (hasChanges) {
-        setMachineTimers(updatedTimers);
-      }
-    }, 1000);
-    
-    return () => clearInterval(timerInterval);
-  }, [machines]);
+  const handleRefresh = () => { setRefreshing(true); fetchMachines(); setTimeout(() => setRefreshing(false), 1500); };
 
-  // Extract workcenter and machine name
-  const extractMachineInfo = (machineName) => {
-    if (!machineName) return { workcenter: '', machine: 'Unknown' };
-    
-    // Check if the machine name contains a hyphen (indicating workcenter-machine format)
-    const parts = machineName.split('-');
-    if (parts.length >= 2) {
-      // The last part is the machine name, the rest is the workcenter
-      const machine = parts[parts.length - 1];
-      const workcenter = parts.slice(0, parts.length - 1).join('-');
-      return { workcenter, machine };
-    }
-    
-    return { workcenter: '', machine: machineName };
+  const handleKpiClick = (key) => {
+    // Toggle off if already active
+    setFilterStatus(prev => prev === key ? 'ALL' : key);
   };
 
-  // Format program name for better display
-  const formatProgramName = (programPath) => {
-    if (!programPath) return 'No Program';
-    
-    // If it has backslashes, get the filename only
-    if (programPath.includes('\\')) {
-      const parts = programPath.split('\\');
-      return parts[parts.length - 1];
-    }
-    
-    // If it has forward slashes, get the filename only
-    if (programPath.includes('/')) {
-      const parts = programPath.split('/');
-      return parts[parts.length - 1];
-    }
-    
-    return programPath;
+  const stats = {
+    total:      machines.length,
+    production: machines.filter(m => FILTER_MATCH.PRODUCTION(m.status)).length,
+    idle:       machines.filter(m => FILTER_MATCH.IDLE(m.status)).length,
+    offline:    machines.filter(m => FILTER_MATCH.OFFLINE(m.status)).length,
   };
 
-  // Render machine card - completely redesigned with fixed data access
-  const renderMachineCard = (machine) => {
-    const status = machine.status || 'OFFLINE';
-    const statusInfo = statusConfig[status] || statusConfig.OFFLINE;
-    const hasIdleTimer = (status === 'IDLE' || status === 'ON') && machineTimers[machine.machine_id];
-    
-    // Extract workcenter and machine name
-    const { workcenter, machine: machineName } = extractMachineInfo(machine.machine_name);
-    
-    // Get data safely with our helper function
-    const part_count = getMachineData(machine, 'part_count', 0);
-    const required_quantity = getMachineData(machine, 'required_quantity', 0);
-    const launched_quantity = getMachineData(machine, 'launched_quantity', 0);
-    const production_order = getMachineData(machine, 'production_order', '');
-    const part_number = getMachineData(machine, 'part_number', '');
-    const part_description = getMachineData(machine, 'part_description', '');
-    const operation_number = getMachineData(machine, 'operation_number', '');
-    const operation_description = getMachineData(machine, 'operation_description', '');
-    
-    // Format program name - handle both direct and nested properties
-    const active_program = getMachineData(machine, 'active_program', '');
-    const program_number = getMachineData(machine, 'program_number', '');
-    const selected_program = getMachineData(machine, 'selected_program', '');
-    
-    const fullProgramPath = active_program || program_number || selected_program;
-    const programName = formatProgramName(fullProgramPath);
-
-    
-    
-    return (
-      <div 
-        className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 cursor-pointer"
-        style={{ 
-          borderLeft: `6px solid ${statusInfo.color}`,
-        }}
-        onClick={() => setSelectedMachine(machine)}
-      >
-        {/* Status bar on top with machine name and status */}
-        <div className="flex justify-between items-center px-4 py-3" style={{ backgroundColor: `${statusInfo.color}40` }}>
-          <div className="flex items-center gap-2">
-            <div className="bg-white p-2 rounded-lg shadow-sm ">
-              <Cpu size={18} className="text-gray-700" />
-            </div>
-            <div>
-              {workcenter && (
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{workcenter}</div>
-              )}
-              <div className="text-lg font-bold text-gray-800">{machineName}</div>
-            </div>
-          </div>
-          <Tag color={statusInfo.color} className="flex items-center gap-1 rounded-full py-1 px-3">
-            {statusInfo.icon}
-            <span className="font-medium">{statusInfo.label}</span>
-          </Tag>
-        </div>
-        
-        {/* Main content */}
-        <div className="p-4 "style={{ backgroundColor: `${statusInfo.color}25` }}>
-          {/* Order and Part number section */}
-          <div className="flex flex-wrap gap-3 mb-2">
-            <div className="flex-1 min-w-[140px] bg-blue-50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <FileText size={16} className="text-blue-500" />
-                <span className="text-xs flex font-semibold text-blue-600">PRODUCTION ORDER</span>
-              </div>
-              <div className="text-base font-bold text-gray-800">{production_order || 'N/A'}</div>
-            </div>
-            
-            <div className="flex-1 min-w-[140px] bg-green-50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Box size={16} className="text-green-500" />
-                <span className="text-xs font-semibold text-green-600">PART NUMBER</span>
-              </div>
-              <div className="text-base font-bold text-gray-800">{part_number || 'N/A'}</div>
-            </div>
-          </div>
-          
-          
-          
-          {/* Production metrics */}
-          {/* <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: `${statusInfo.color}25` }}>
-                <BarChart2 size={20} style={{ color: statusInfo.color }} />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 font-medium">PART COUNT</div>
-                <div className="text-xl font-bold">{part_count}</div>
-              </div>
-            </div>
-            
-            <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
-                <Target size={20} className="text-purple-500" />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 font-medium">TARGET</div>
-                <div className="text-xl font-bold">{launched_quantity}</div>
-              </div>
-            </div>
-          </div> */}
-          
-          {/* Idle Timer Alert */}
-          {/* {hasIdleTimer && (
-            <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-2">
-              <Clock size={18} className="text-amber-500" />
-              <span className="font-medium text-amber-700">
-                Idle for: <span className="font-bold">{formatDuration(machineTimers[machine.machine_id].duration)}</span>
-              </span>
-            </div>
-          )} */}
-          
-          {/* Program and Operation Info */}
-          <div className="space-y-3 mt-4">
-            {/* Program Info */}
-            <div className="relative">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Code size={14} className="text-gray-500" />
-                <div className="text-xs font-semibold text-gray-600">PROGRAM</div>
-              </div>
-              <Tooltip title={fullProgramPath || 'No program'} placement="bottom">
-                <div className="text-sm bg-gray-50 p-2.5 rounded-lg border border-gray-200 truncate hover:bg-gray-100 transition-colors">
-                  {programName || 'No program'}
-                </div>
-              </Tooltip>
-            </div>
-            
-            {/* Operation Info */}
-            <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="flex items-center gap-1.5 mb-1">
-                <ToolFilled size={14} className="text-gray-500" />
-                <div className="text-xs font-semibold text-gray-600">OPERATION</div>
-              </div>
-              <div className="text-sm">
-                {operation_number ? (
-                  <span>
-                    <span className="font-medium">{operation_number}</span>
-                    {operation_description && (
-                      <span className="text-gray-600 ml-1">- {operation_description}</span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-gray-400">-</span>
-                )}
-              </div>
-            </div>
-            
-            
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Render machine as a table row - with fixed data access
-  const renderMachineListItem = (machine) => {
-    const status = machine.status || 'OFFLINE';
-    const statusInfo = statusConfig[status] || statusConfig.OFFLINE;
-    const hasIdleTimer = (status === 'IDLE' || status === 'ON') && machineTimers[machine.machine_id];
-
-    
-    
-    // Extract workcenter and machine name
-    const { workcenter, machine: machineName } = extractMachineInfo(machine.machine_name);
-    
-    // Get data safely with our helper function
-    const part_count = getMachineData(machine, 'part_count', 0);
-    const required_quantity = getMachineData(machine, 'required_quantity', 0);
-    const launched_quantity = getMachineData(machine, 'launched_quantity', 0);
-    const production_order = getMachineData(machine, 'production_order', '');
-    const part_number = getMachineData(machine, 'part_number', '');
-    
-    // Format program name
-    const active_program = getMachineData(machine, 'active_program', '');
-    const program_number = getMachineData(machine, 'program_number', '');
-    const selected_program = getMachineData(machine, 'selected_program', '');
-    
-    const fullProgramPath = active_program || program_number || selected_program;
-    const programName = formatProgramName(fullProgramPath);
-
-    const completionPercentage = launched_quantity > 0
-    ? Math.min(Math.round((parseInt(part_count) || 0) / parseInt(launched_quantity) * 100), 100)
-    : 0;
-  
-  // Determine if the machine is behind, on track, or ahead of schedule
-  
-    
-    return (
-      <Card 
-        key={machine.machine_id}
-        className="shadow-sm hover:shadow-md transition-shadow"
-        bodyStyle={{ padding: '12px' }}
-        onClick={() => setSelectedMachine(machine)}
-      >
-        <div className="flex items-center">
-          <div 
-            className="w-2 h-full min-h-[60px]"
-            style={{ backgroundColor: statusInfo.color }}
-          />
-          <div className="flex-grow flex flex-col md:flex-row md:items-center justify-between px-4 py-2 gap-4">
-            <div className="flex items-center gap-4">
-              <div className="flex flex-col">
-                {workcenter && (
-                  <div className="text-xs font-medium text-gray-500 uppercase">{workcenter}</div>
-                )}
-                <div className="text-lg font-bold">{machineName}</div>
-                <Tag color={statusInfo.color} className="mt-1 flex items-center gap-1 w-fit">
-                  {statusInfo.icon}
-                  <span>{statusInfo.label}</span>
-                  {hasIdleTimer && (
-                    <span className="ml-1 text-xs">
-                      ({formatDuration(machineTimers[machine.machine_id].duration)})
-                    </span>
-                  )}
-                </Tag>
-              </div>
-            </div>
-            
-            <div className="flex flex-wrap md:flex-nowrap items-center gap-4 md:gap-6 mt-3 md:mt-0">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center">
-                  <BarChart2 size={14} className="text-blue-500" />
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Parts</div>
-                  <div className="font-medium">{part_count}/{launched_quantity}</div>
-                </div>
-              </div>
-              
-              {production_order && (
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-indigo-50 flex items-center justify-center">
-                    <FileText size={14} className="text-indigo-500" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Order</div>
-                    <div className="font-medium">{production_order}</div>
-                  </div>
-                </div>
-              )}
-              
-              {part_number && (
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-green-50 flex items-center justify-center">
-                    <Box size={14} className="text-green-500" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Part</div>
-                    <div className="font-medium">{part_number}</div>
-                  </div>
-                </div>
-              )}
-              
-              <Tooltip title={fullProgramPath || 'No program'}>
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-teal-50 flex items-center justify-center">
-                    <Code size={14} className="text-teal-500" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Program</div>
-                    <div className="font-medium truncate max-w-[120px]">{programName}</div>
-                  </div>
-                </div>
-              </Tooltip>
-              
-              <Button 
-                type="primary" 
-                size="small"
-                icon={<EyeOutlined />} 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedMachine(machine);
-                }}
-              >
-                Details
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Card>
-    );
-  };
-
-  // Completely redesigned machine details modal
-  const renderMachineDetailsModal = () => {
-    if (!selectedMachine) return null;
-    
-    const status = selectedMachine.status || 'OFFLINE';
-    const statusInfo = statusConfig[status] || statusConfig.OFFLINE;
-    const hasIdleTimer = (status === 'IDLE' || status === 'ON') && machineTimers[selectedMachine.machine_id];
-    
-    // Extract workcenter and machine name
-    const { workcenter, machine: machineName } = extractMachineInfo(selectedMachine.machine_name);
-    
-    // Get data safely with our helper function
-    const part_count = getMachineData(selectedMachine, 'part_count', 0);
-    const required_quantity = getMachineData(selectedMachine, 'required_quantity', 0);
-    const launched_quantity = getMachineData(selectedMachine, 'launched_quantity', 0);
-    const production_order = getMachineData(selectedMachine, 'production_order', 'N/A');
-    const part_number = getMachineData(selectedMachine, 'part_number', 'N/A');
-    const part_description = getMachineData(selectedMachine, 'part_description', 'N/A');
-    const operation_number = getMachineData(selectedMachine, 'operation_number', 'N/A');
-    const operation_description = getMachineData(selectedMachine, 'operation_description', 'N/A');
-    
-    // Format program name
-    const active_program = getMachineData(selectedMachine, 'active_program', '');
-    const program_number = getMachineData(selectedMachine, 'program_number', '');
-    const selected_program = getMachineData(selectedMachine, 'selected_program', '');
-    
-    const fullProgramPath = active_program || program_number || selected_program;
-    const programName = formatProgramName(fullProgramPath);
-    
-    return (
-      <Modal
-        title={
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-md bg-gray-100">
-              <Cpu size={20} className="text-gray-700" />
-            </div>
-            <div className="flex flex-col">
-              {workcenter && (
-                <span className="text-xs font-medium text-gray-500 uppercase">{workcenter}</span>
-              )}
-              <span className="text-xl font-bold">{machineName}</span>
-            </div>
-            <Tag color={statusInfo.color} className="ml-auto flex items-center gap-1 rounded-full px-3">
-              {statusInfo.icon}
-              <span>{statusInfo.label}</span>
-              {/* {hasIdleTimer && (
-                <span className="ml-1 text-xs">
-                  ({formatDuration(machineTimers[selectedMachine.machine_id].duration)})
-                </span>
-              )} */}
-            </Tag>
-          </div>
-        }
-        open={!!selectedMachine}
-        onCancel={() => setSelectedMachine(null)}
-        footer={null}
-        width={800}
-        bodyStyle={{ padding: '20px' }}
-        centered
-      >
-        <div className="space-y-6">
-          {/* Main Information Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Status Card */}
-            
-           
-           
-          </div>
-          
-          {/* Production Details */}
-          <Card 
-            title={
-              <div className="flex items-center gap-2">
-                <FileText size={18} className="text-blue-500" />
-                <span>Production Details</span>
-              </div>
-            }
-            className="shadow-sm"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-              {/* Production Order */}
-              <div>
-                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1.5">
-                  <HashIcon size={14} />
-                  <span>Production Order</span>
-                </div>
-                <div className="font-medium text-lg">
-                  {production_order}
-                </div>
-              </div>
-              
-              {/* Part Information */}
-              <div>
-                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1.5">
-                  <Box size={14} />
-                  <span>Part Number</span>
-                </div>
-                <div className="font-medium text-lg">
-                  {part_number}
-                </div>
-                {part_description && part_description !== 'N/A' && (
-                  <div className="text-sm text-gray-500">
-                    {part_description}
-                  </div>
-                )}
-              </div>
-              
-              {/* Operation */}
-              <div>
-                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1.5">
-                  <ToolFilled size={14} />
-                  <span>Operation</span>
-                </div>
-                <div className="font-medium">
-                  {operation_number !== 'N/A' 
-                    ? `${operation_number} - ${operation_description}`
-                    : 'N/A'
-                  }
-                </div>
-              </div>
-              
-             
-              
-              {/* Active Program */}
-              <div className="col-span-2">
-                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1.5">
-                  <Code size={14} />
-                  <span>Active Program</span>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-md border border-gray-200 font-mono text-sm break-words">
-                  {fullProgramPath || 'No program'}
-                </div>
-                {programName !== fullProgramPath && fullProgramPath && (
-                  <div className="text-xs text-gray-500 mt-1">
-                    File: {programName}
-                  </div>
-                )}
-              </div>
-              
-              {/* Last Update */}
-              <div className="col-span-2 pt-2 mt-2 border-t border-gray-100">
-                <div className="text-sm text-gray-500 flex items-center gap-1.5">
-                  <RotateCw size={14} />
-                  <span>Last Updated:</span>
-                  <span className="font-medium">{dayjs(selectedMachine.last_updated).format('YYYY-MM-DD HH:mm:ss')}</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </Modal>
-    );
-  };
+  const sorted = useMemo(() => {
+    const PRI = { PRODUCTION: 0, RUNNING: 0, ON: 1, IDLE: 1, STOPPED: 2, MAINTENANCE: 3, OFF: 4, OFFLINE: 4 };
+    const matchFn = FILTER_MATCH[filterStatus] || FILTER_MATCH.ALL;
+    return [...machines]
+      .filter(m =>
+        matchFn(m.status) &&
+        (!searchQuery || (m.machine_name || '').toLowerCase().includes(searchQuery.toLowerCase()))
+      )
+      .sort((a, b) =>
+        sortOrder === 'name'
+          ? (a.machine_name || '').localeCompare(b.machine_name || '')
+          : (PRI[a.status] ?? 9) - (PRI[b.status] ?? 9)
+      );
+  }, [machines, filterStatus, searchQuery, sortOrder]);
 
   return (
-    <div className="bg-gray-50 min-h-screen">
-      {/* Main Content */}
-      <div className="p-6 space-y-6">
-        {/* Header Section */}
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold text-gray-800">Production Monitoring</h1>
-                <div className={`w-2 h-2 rounded-full ${connectionStatus ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <span className={connectionStatus ? 'text-green-600' : 'text-red-600'}>
-                  {connectionStatus ? 'System Connected' : 'Connection Lost'}
-                </span>
-                <span className="text-gray-500">·</span>
-                <span className="text-gray-500">Last updated: {dayjs().format('HH:mm:ss')}</span>
-                <Tooltip title="Refresh data">
-                  <Button 
-                    type="text" 
-                    icon={<RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />} 
-                    onClick={handleRefresh}
-                  />
-                </Tooltip>
-              </div>
-            </div>
+    <div style={{ background: '#f1f5f9', minHeight: '100vh', fontFamily: 'Inter, system-ui, -apple-system, sans-serif', padding: '24px' }}>
 
-            <div className="flex items-center gap-3">
-              
-              
-              <Button 
-                icon={<Filter size={16} />} 
-                onClick={() => setShowFilters(!showFilters)}
-                type={showFilters ? 'primary' : 'default'}
-              >
-                Filters
-              </Button>
-            </div>
-          </div>
-
-          {/* Filters Section */}
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <div className="flex flex-wrap gap-4 items-center">
-                <div>
-                  <div className="text-sm text-gray-500 mb-1">Status Filter</div>
-                  <Select
-                    value={filterStatus}
-                    onChange={setFilterStatus}
-                    style={{ width: 150 }}
-                  >
-                    <Select.Option value="ALL">All Status</Select.Option>
-                    <Select.Option value="PRODUCTION">Production</Select.Option>
-                    <Select.Option value="ON">Idle</Select.Option>
-                    <Select.Option value="OFF">Offline</Select.Option>
-                  </Select>
-                </div>
-                
-                
-                
-                <div>
-                  <div className="text-sm text-gray-500 mb-1">Search</div>
-                  <SearchInput 
-                    placeholder="Search machines..." 
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    style={{ width: 200 }}
-                    allowClear
-                  />
-                </div>
-                
-                {/* <div>
-                  <div className="text-sm text-gray-500 mb-1">View Mode</div>
-                  <div className="flex border rounded-md overflow-hidden">
-                    <Button 
-                      type={viewMode === 'grid' ? 'primary' : 'default'} 
-                      icon={<Grid size={16} />}
-                      onClick={() => setViewMode('grid')}
-                      className="rounded-none border-0"
-                    />
-                    <Button 
-                      type={viewMode === 'list' ? 'primary' : 'default'} 
-                      icon={<List size={16} />}
-                      onClick={() => setViewMode('list')}
-                      className="rounded-none border-0"
-                    />
-                  </div>
-                </div> */}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Merged OEE and Status Summary - Combined into one modern section */}
-        <Card className="shadow-sm overflow-hidden">
-          <div className="flex flex-col lg:flex-row">
-            {/* Left side - OEE Summary with radial gauges */}
-            <div className="flex-1 bg-gradient-to-br from-blue-50 to-white p-4 lg:p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Activity size={20} className="text-blue-500" />
-                  <span className="font-bold text-gray-800">Today's Overall Efficiency</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <Tooltip title="Last updated">
-                    <div className="text-xs text-gray-500 flex items-center">
-                      <Clock size={14} className="mr-1 text-blue-400" />
-                      {overallOEEMetrics?.lastUpdated ? dayjs(overallOEEMetrics.lastUpdated).format('HH:mm') : '--:--'}
-                    </div>
-                  </Tooltip>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-4 gap-3">
-                {/* Overall OEE */}
-                <div className="col-span-4 md:col-span-1 flex flex-col items-center">
-                  <div className="relative w-20 h-20">
-                    <Progress
-                      type="circle"
-                      percent={Math.round(overallOEEMetrics?.oee || 0)}
-                      size={80}
-                      strokeColor="#1890ff"
-                      strokeWidth={10}
-                    />
-                    {/* <div className="absolute inset-0 flex items-center justify-center">
-                      <Award size={24} className="text-blue-500" />
-                    </div> */}
-                  </div>
-                  <div className="mt-2 text-center">
-                    <div className='flex'><Award size={24} className="text-blue-500" />
-                    <div className="text-sm font-medium text-gray-600">OEE</div></div>
-                   
-                    <div className="text-xl font-bold text-blue-600">{overallOEEMetrics?.oee?.toFixed(1)}%</div>
-                  </div>
-                </div>
-                
-                {/* OEE Factors */}
-                <div className="col-span-4 md:col-span-3 grid grid-cols-3 gap-2">
-                  {/* Availability */}
-                  <div className="flex flex-col items-center">
-                    <div className="relative w-16 h-16">
-                      <Progress
-                        type="circle"
-                        percent={Math.round(overallOEEMetrics?.availability || 0)}
-                        size={64}
-                        strokeColor="#52c41a"
-                        strokeWidth={8}
-                      />
-                     
-                    </div>
-                    <div className="mt-1 text-center">
-                    <div className='flex gap-1'> <Clock size={15} className="text-green-500" />
-                    <div className="text-xs font-medium text-gray-500">Availability</div></div>
-                   
-                     
-                      <div className="text-base font-bold text-green-600">{overallOEEMetrics?.availability?.toFixed(1)}%</div>
-                    </div>
-                  </div>
-                  
-                  {/* Performance */}
-                  <div className="flex flex-col items-center">
-                    <div className="relative w-16 h-16">
-                      <Progress
-                        type="circle"
-                        percent={Math.round(overallOEEMetrics?.performance || 0)}
-                        size={64}
-                        strokeColor="#faad14"
-                        strokeWidth={8}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                       
-                      </div>
-                    </div>
-                    <div className="mt-1 text-center ">
-                    <div className='flex gap-1'>  <Zap size={15} className="text-yellow-500" />
-                    <div className="text-xs font-medium text-gray-500">Performance</div></div>
-                      
-                      <div className="text-base font-bold text-yellow-600">{overallOEEMetrics?.performance?.toFixed(1)}%</div>
-                    </div>
-                  </div>
-                  
-                  {/* Quality */}
-                  <div className="flex flex-col items-center">
-                    <div className="relative w-16 h-16">
-                      <Progress
-                        type="circle"
-                        percent={Math.round(overallOEEMetrics?.quality || 0)}
-                        size={64}
-                        strokeColor="#722ed1"
-                        strokeWidth={8}
-                      />
-                      
-                    </div>
-                    <div className="mt-1 text-center">
-                    <div className='flex gap-1'> <Target size={15} className="text-purple-500" />
-                    <div className="text-xs font-medium text-gray-500">Quality</div></div>
-                     
-                      <div className="text-base font-bold text-purple-600">{overallOEEMetrics?.quality?.toFixed(1)}%</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Right side - Machine Status Summary */}
-            <div className="flex-1 p-4 lg:p-6 bg-gradient-to-br from-gray-50 to-white border-t lg:border-t-0 lg:border-l border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Server size={20} className="text-gray-700" />
-                  <span className="font-bold text-gray-800">Machine Status</span>
-                </div>
-                <div className="text-sm flex items-center">
-                  <span className="font-medium text-gray-600">Total: </span>
-                  <span className="font-bold text-gray-800 ml-1">{stats.totalMachines}</span>
-                </div>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {/* Status pills with animations */}
-                <div className="flex-1 min-w-[110px] p-3 rounded-xl flex items-center gap-3 bg-gradient-to-r from-green-50 to-green-100 border border-green-100 shadow-sm transition-all hover:shadow-md">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-white shadow-sm">
-                    <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center pulse-animation">
-                      <Activity size={16} className="text-white" />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-green-600">Production</div>
-                    <div className="text-xl font-bold text-gray-800">{stats.production}</div>
-                  </div>
-                </div>
-                
-                <div className="flex-1 min-w-[110px] p-3 rounded-xl flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-yellow-100 border border-yellow-100 shadow-sm transition-all hover:shadow-md">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-white shadow-sm">
-                    <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center">
-                      <PauseCircle size={16} className="text-white" />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-yellow-600">Idle</div>
-                    <div className="text-xl font-bold text-gray-800">{stats.on + stats.idle}</div>
-                  </div>
-                </div>
-                
-                <div className="flex-1 min-w-[110px] p-3 rounded-xl flex items-center gap-3 bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 shadow-sm transition-all hover:shadow-md">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-white shadow-sm">
-                    <div className="w-6 h-6 rounded-full bg-gray-500 flex items-center justify-center">
-                      <InfoCircleOutlined className="text-white" />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-500">Offline</div>
-                    <div className="text-xl font-bold text-gray-800">{stats.off + stats.offline}</div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Machine distribution bar */}
-              <div className="mt-4">
-                <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>Machine Distribution</span>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                      <span>Production</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                      <span>Idle</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-                      <span>Offline</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="h-3 w-full rounded-full overflow-hidden flex">
-                  <div 
-                    className="bg-green-500 transition-all duration-500" 
-                    style={{ width: `${stats.totalMachines ? (stats.production / stats.totalMachines) * 100 : 0}%` }}
-                  ></div>
-                  <div 
-                    className="bg-yellow-500 transition-all duration-500" 
-                    style={{ width: `${stats.totalMachines ? ((stats.on + stats.idle) / stats.totalMachines) * 100 : 0}%` }}
-                  ></div>
-                  <div 
-                    className="bg-gray-500 transition-all duration-500" 
-                    style={{ width: `${stats.totalMachines ? ((stats.off + stats.offline) / stats.totalMachines) * 100 : 0}%` }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* View Toggle and Machine Count */}
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold">Machine Status ({filteredMachines.length})</h2>
-          <div className="bg-white rounded-lg shadow-sm p-1">
-            <Space>
-              {/* <Button
-                type={viewMode === 'grid' ? 'primary' : 'default'}
-                icon={<Grid size={16} />}
-                onClick={() => setViewMode('grid')}
-              >
-                Grid
-              </Button> */}
-              {/* <Button
-                type={viewMode === 'list' ? 'primary' : 'default'}
-                icon={<List size={16} />}
-                onClick={() => setViewMode('list')}
-              >
-                List
-              </Button> */}
-            </Space>
+      {/* Top bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block', boxShadow: '0 0 0 3px #22c55e28' }} />
+            <span style={{ fontSize: 14, color: '#0f172a' }}>Live · {dayjs().format('HH:mm:ss')}</span>
           </div>
         </div>
-
-        {/* Machines Grid/List */}
-        {isLoading ? (
-          <div className="flex justify-center items-center py-20 bg-white rounded-lg shadow-sm">
-            <div className="text-center">
-              <Spin size="large" />
-              <div className="mt-4 text-gray-500">Loading machine data...</div>
-            </div>
-          </div>
-        ) : stableSortedMachines.length > 0 ? (
-          <div className={`
-            ${viewMode === 'grid' 
-            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4'
-            : 'space-y-3'
-            }
-          `}>
-            {stableSortedMachines.map(machine => (
-              <div key={machine.machine_id}>
-                {viewMode === 'grid' 
-                  ? renderMachineCard(machine)
-                  : renderMachineListItem(machine)
-                }
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <Empty 
-              description={
-                <div className="space-y-2">
-                  <p>No machines match your current filters</p>
-                  <Button onClick={() => {
-                    setFilterStatus('ALL');
-                    setSearchQuery('');
-                  }}>
-                    Reset Filters
-                  </Button>
-                </div>
-              } 
-              className="py-10"
-            />
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button size="small" onClick={handleRefresh} icon={<RefreshCw size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            Refresh
+          </Button>
+          <Button size="small" type={showFilters ? 'primary' : 'default'} onClick={() => setShowFilters(v => !v)} icon={<Filter size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            Filters
+          </Button>
+        </div>
       </div>
 
-      {/* Machine Details Modal */}
-      {renderMachineDetailsModal()}
-      
-      {/* Alerts Drawer */}
-      
+      {/* KPI row — clickable tiles filter the grid */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <KpiTile
+          label="Total Machines"  value={stats.total}
+          icon={Cpu}         bg="#2563eb"
+          filterKey="ALL"    activeFilter={filterStatus}
+          onClick={() => handleKpiClick('ALL')}
+        />
+        <KpiTile
+          label="In Production"   value={stats.production}
+          icon={Activity}    bg="#16a34a"
+          filterKey="PRODUCTION"  activeFilter={filterStatus}
+          onClick={() => handleKpiClick('PRODUCTION')}
+        />
+        <KpiTile
+          label="Idle"            value={stats.idle}
+          icon={PauseCircle} bg="#d97706"
+          filterKey="IDLE"   activeFilter={filterStatus}
+          onClick={() => handleKpiClick('IDLE')}
+        />
+        <KpiTile
+          label="Offline"         value={stats.offline}
+          icon={WifiOff}     bg="#475569"
+          filterKey="OFFLINE" activeFilter={filterStatus}
+          onClick={() => handleKpiClick('OFFLINE')}
+        />
+      </div>
+
+      {/* Filters panel */}
+      {showFilters && (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '13px 16px', marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Status</div>
+            <Select value={filterStatus} onChange={setFilterStatus} size="small" style={{ width: 140 }}>
+              <Select.Option value="ALL">All</Select.Option>
+              <Select.Option value="PRODUCTION">Production</Select.Option>
+              <Select.Option value="IDLE">Idle</Select.Option>
+              <Select.Option value="OFFLINE">Offline</Select.Option>
+            </Select>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Sort</div>
+            <Select value={sortOrder} onChange={setSortOrder} size="small" style={{ width: 130 }}>
+              <Select.Option value="status">By Status</Select.Option>
+              <Select.Option value="name">By Name</Select.Option>
+            </Select>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Search</div>
+            <SearchInput placeholder="Search machines…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} size="small" style={{ width: 200 }} allowClear />
+          </div>
+          {(filterStatus !== 'ALL' || searchQuery) && (
+            <Button size="small" type="link" style={{ fontSize: 12, padding: 0 }} onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear all</Button>
+          )}
+        </div>
+      )}
+
+      {/* Grid label */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
+          {sorted.length} machine{sorted.length !== 1 ? 's' : ''}{filterStatus !== 'ALL' || searchQuery ? ' · filtered' : ''}
+        </span>
+      </div>
+
+      {/* Machine grid */}
+      {isLoading ? (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0', textAlign: 'center' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: 12, fontSize: 13, color: '#94a3b8' }}>Loading machine data…</div>
+        </div>
+      ) : sorted.length > 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: 12 }}>
+          {sorted.map(machine => (
+            <MachineCard key={machine.machine_id} machine={machine} onClick={() => setSelectedMachine(machine)} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0' }}>
+          <Empty description={
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: '#94a3b8' }}>No machines match your filters</span>
+              <Button size="small" onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear filters</Button>
+            </div>
+          } />
+        </div>
+      )}
+
+      <MachineModal machine={selectedMachine} onClose={() => setSelectedMachine(null)} />
     </div>
   );
 };
 
 export default MachineDashboard;
-
-<style jsx>{`
-  .pulse-animation {
-    animation: pulse 2s infinite;
-  }
-  
-  @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4);
-    }
-    70% {
-      box-shadow: 0 0 0 10px rgba(74, 222, 128, 0);
-    }
-    100% {
-      box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
-    }
-  }
-`}</style>

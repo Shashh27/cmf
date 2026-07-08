@@ -149,6 +149,7 @@ const OperationImportModal = ({ open, onCancel, existingOperations = [], onUseOp
 
   return (
     <Modal
+      className="pdm-container"
       title={
         <div className="flex items-center gap-2">
           <FileTextOutlined className="text-blue-500" />

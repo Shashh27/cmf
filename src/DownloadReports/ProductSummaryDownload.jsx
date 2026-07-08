@@ -23,7 +23,10 @@ const fmtCost = (val) =>
 // ── PDF Export ────────────────────────────────────────────────────────────────
 
 const exportPDF = (summaryData, productName) => {
-  const { machineRows, rows, totalSetup, totalCycle, totalAll, totalCost } = summaryData;
+  const {
+    machineRows, rows, totalSetup, totalCycle, totalAll, totalCost,
+    additionalCosts = [], additionalCostsSubtotal = 0, grandTotal,
+  } = summaryData;
   if (!rows?.length && !machineRows?.length) { message.warning("No data to export"); return; }
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -62,12 +65,12 @@ const exportPDF = (summaryData, productName) => {
   // ── 1. Summary Stats table ──
   autoTable(doc, {
     startY: 27,
-    head: [["Total Setup Time", "Total Cycle Time", "Total (Setup + Cycle)", "Total Machining Cost"]],
-    body: [[formatHms(totalSetup), formatHms(totalCycle), formatHms(totalAll), fmtCost(totalCost)]],
+    head: [["Total Setup Time", "Total Cycle Time", "Total (Setup + Cycle)", "Total Machining Cost", "Additional Cost", "Grand Total"]],
+    body: [[formatHms(totalSetup), formatHms(totalCycle), formatHms(totalAll), fmtCost(totalCost), fmtCost(additionalCostsSubtotal), fmtCost(grandTotal ?? (totalCost + additionalCostsSubtotal))]],
     styles: { ...baseStyles, fontStyle: "bold", halign: "center" },
     headStyles,
     alternateRowStyles: { fillColor: [239, 246, 255] },
-    columnStyles: { 3: { textColor: [21, 128, 61] } },
+    columnStyles: { 3: { textColor: [21, 128, 61] }, 4: { textColor: [217, 119, 6] }, 5: { textColor: [220, 38, 38] } },
     margin: { left: margin, right: margin, top: 27, bottom: 18 },
     didDrawPage: pageFooter,
   });
@@ -150,13 +153,54 @@ const exportPDF = (summaryData, productName) => {
     });
   }
 
+  // ── 4. Additional Project Costs table (Tooling / Fixture / Inspection etc.) ──
+  if (additionalCosts.length > 0) {
+    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(30, 64, 175);
+    doc.text(`Additional Project Costs (${additionalCosts.length})`, margin, doc.lastAutoTable.finalY + 8);
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 12,
+      head: [["Cost Name", "Cost Value"]],
+      body: [
+        ...additionalCosts.map((c) => [c.cost_name || "—", fmtCost(c.cost_value)]),
+        ["Subtotal (Additional Costs)", fmtCost(additionalCostsSubtotal)],
+      ],
+      styles: baseStyles,
+      headStyles,
+      alternateRowStyles: { fillColor: [239, 246, 255] },
+      columnStyles: {
+        0: { halign: "left", cellWidth: 80 },
+        1: { halign: "right", textColor: [124, 58, 237], fontStyle: "bold" },
+      },
+      didParseCell: (d) => {
+        if (d.section === "body" && d.row.index === additionalCosts.length) {
+          d.cell.styles.fontStyle = "bold";
+          d.cell.styles.fillColor = [239, 246, 255];
+        }
+      },
+      margin: { left: margin, right: margin, top: 27, bottom: 18 },
+      didDrawPage: pageFooter,
+    });
+
+    // Grand total callout
+    doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(220, 38, 38);
+    doc.text(
+      `GRAND TOTAL (Machining + Additional Costs): ${fmtCost(grandTotal ?? (totalCost + additionalCostsSubtotal))}`,
+      margin,
+      doc.lastAutoTable.finalY + 10
+    );
+  }
+
   doc.save(`Product_Summary_${(productName || "report").replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
 // ── Excel Export ──────────────────────────────────────────────────────────────
 
 const exportExcel = async (summaryData, productName) => {
-  const { machineRows, rows, totalSetup, totalCycle, totalAll, totalCost } = summaryData;
+  const {
+    machineRows, rows, totalSetup, totalCycle, totalAll, totalCost,
+    additionalCosts = [], additionalCostsSubtotal = 0, grandTotal,
+  } = summaryData;
   if (!rows?.length && !machineRows?.length) { message.warning("No data to export"); return; }
 
   const wb = new ExcelJS.Workbook();
@@ -203,15 +247,20 @@ const exportExcel = async (summaryData, productName) => {
 
   // ── Sheet 1: Summary ──
   const ws1 = wb.addWorksheet("Summary", { pageSetup: { orientation: "landscape" } });
-  addTitleRows(ws1, "PRODUCT SUMMARY REPORT", 4);
-  styleHeaderRow(ws1.addRow(["Total Setup Time", "Total Cycle Time", "Total (Setup + Cycle)", "Total Machining Cost"]));
-  const statsRow = ws1.addRow([formatHms(totalSetup), formatHms(totalCycle), formatHms(totalAll), fmtCost(totalCost)]);
+  addTitleRows(ws1, "PRODUCT SUMMARY REPORT", 6);
+  styleHeaderRow(ws1.addRow(["Total Setup Time", "Total Cycle Time", "Total (Setup + Cycle)", "Total Machining Cost", "Additional Cost", "Grand Total"]));
+  const statsRow = ws1.addRow([
+    formatHms(totalSetup), formatHms(totalCycle), formatHms(totalAll),
+    fmtCost(totalCost), fmtCost(additionalCostsSubtotal), fmtCost(grandTotal ?? (totalCost + additionalCostsSubtotal)),
+  ]);
   styleDataRow(statsRow, 0);
   statsRow.getCell(1).font = { bold: true, color: { argb: "FF1E40AF" }, size: 10 };
   statsRow.getCell(2).font = { bold: true, color: { argb: "FF16A34A" }, size: 10 };
   statsRow.getCell(3).font = { bold: true, color: { argb: "FF2563EB" }, size: 10 };
   statsRow.getCell(4).font = { bold: true, color: { argb: "FF7C3AED" }, size: 10 };
-  [25, 25, 25, 25].forEach((w, i) => { ws1.getColumn(i + 1).width = w; });
+  statsRow.getCell(5).font = { bold: true, color: { argb: "FFD97706" }, size: 10 };
+  statsRow.getCell(6).font = { bold: true, color: { argb: "FFDC2626" }, size: 10 };
+  [25, 25, 25, 25, 25, 25].forEach((w, i) => { ws1.getColumn(i + 1).width = w; });
   ws1.views = [{ state: "frozen", ySplit: 4 }];
 
   // ── Sheet 2: Machine-wise ──
@@ -280,6 +329,37 @@ const exportExcel = async (summaryData, productName) => {
     [6, 16, 24, 6, 24, 6, 20, 12, 12, 12, 14, 18, 12].forEach((w, i) => { ws3.getColumn(i + 1).width = w; });
     ws3.views = [{ state: "frozen", ySplit: 4 }];
     ws3.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: oCols.length } };
+  }
+
+  // ── Sheet 4: Additional Project Costs (Tooling / Fixture / Inspection etc.) ──
+  if (additionalCosts.length > 0) {
+    const ws4 = wb.addWorksheet("Additional Costs", { pageSetup: { orientation: "landscape" } });
+    const aCols = ["S.No", "Cost Name", "Cost Value (Rs.)"];
+    addTitleRows(ws4, "ADDITIONAL PROJECT COSTS", aCols.length);
+    styleHeaderRow(ws4.addRow(aCols));
+    additionalCosts.forEach((c, idx) => {
+      const dr = ws4.addRow([idx + 1, c.cost_name || "—", fmtCost(c.cost_value)]);
+      styleDataRow(dr, idx);
+      dr.getCell(3).font = { bold: true, color: { argb: "FF7C3AED" } };
+    });
+    const subRow = ws4.addRow(["", "SUBTOTAL", fmtCost(additionalCostsSubtotal)]);
+    subRow.height = 16;
+    subRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.font = { bold: true, color: { argb: "FF1E293B" }, size: 10 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = dataBorder;
+    });
+    const grandRow = ws4.addRow(["", "GRAND TOTAL (Machining + Additional)", fmtCost(grandTotal ?? (totalCost + additionalCostsSubtotal))]);
+    grandRow.height = 18;
+    grandRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDC2626" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = { top: { style: "medium", color: { argb: "FF93C5FD" } }, bottom: { style: "medium", color: { argb: "FF93C5FD" } }, left: { style: "thin", color: { argb: "FF93C5FD" } }, right: { style: "thin", color: { argb: "FF93C5FD" } } };
+    });
+    [8, 36, 22].forEach((w, i) => { ws4.getColumn(i + 1).width = w; });
+    ws4.views = [{ state: "frozen", ySplit: 4 }];
   }
 
   const buf = await wb.xlsx.writeBuffer();

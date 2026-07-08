@@ -7,7 +7,7 @@ import { API_BASE_URL } from '../Config/auth';
 const { TextArea } = Input;
 const { Text } = Typography;
 
-const OperationChecklist = ({ visible, onClose, operationId }) => {
+const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
   const [checklistData, setChecklistData] = useState([]);
   const [checklistId, setChecklistId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -20,6 +20,7 @@ const OperationChecklist = ({ visible, onClose, operationId }) => {
   const [existingSubmission, setExistingSubmission] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [disabledChecklists, setDisabledChecklists] = useState([]);
+  const [usingDefaultGeneral, setUsingDefaultGeneral] = useState(false);
 
   useEffect(() => {
     if (visible && operationId) {
@@ -42,13 +43,15 @@ const OperationChecklist = ({ visible, onClose, operationId }) => {
         console.error('Error parsing user from local storage', e);
       }
 
-      // Fetch checklist assignments
+      // Fetch assigned checklists; fall back to all general checklists when MC has not assigned any
       const response = await axios.get(
-        `${API_BASE_URL}/operation-checklists/assignments?operation_id=${operationId}`
+        `${API_BASE_URL}/operation-checklists/assignments?operation_id=${operationId}&fallback_to_general=true`
       );
       if (response.status === 200) {
         console.log('Checklist API Response:', response.data);
         const assignments = response.data || [];
+        const isDefaultGeneral = assignments.length > 0 && assignments.every((item) => item.is_default);
+        setUsingDefaultGeneral(isDefaultGeneral);
         
         // Each assignment IS a checklist item
         setChecklistData(assignments);
@@ -243,6 +246,7 @@ const OperationChecklist = ({ visible, onClose, operationId }) => {
 
       console.log('Submissions Response:', submissionsResponse.data);
       message.success('Checklist submitted successfully');
+      onSubmitted?.();
       onClose();
     } catch (error) {
       console.error('Failed to submit checklist:', error);
@@ -342,14 +346,21 @@ const OperationChecklist = ({ visible, onClose, operationId }) => {
             <div style={{ marginTop: 4, color: '#595959' }}>{existingSubmission.sup_remarks}</div>
           </div>
         )}
+        {usingDefaultGeneral && (
+          <div style={{ marginBottom: 12, padding: 10, backgroundColor: '#e6f4ff', border: '1px solid #91caff', borderRadius: 4 }}>
+            <Text style={{ color: '#0958d9', fontSize: 12 }}>
+              Showing default general checklists. Manufacturing Coordinator has not assigned operation-specific checklists yet.
+            </Text>
+          </div>
+        )}
         <Spin spinning={loading}>
           {checklistData.length === 0 && !loading ? (
-            <Text type="secondary">No checklist items assigned for this operation</Text>
+            <Text type="secondary">No checklist items available for this operation</Text>
           ) : (
             <>
               <Table
                 dataSource={checklistData}
-                rowKey="id"
+                rowKey={(record) => record.checklist_id ?? record.id}
                 columns={[
                   {
                     title: 'Checklist Name',

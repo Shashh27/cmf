@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Tabs, Typography, App as AntApp } from "antd";
 import { 
@@ -6,14 +6,16 @@ import {
   LinkOutlined, 
   SafetyCertificateOutlined,
   ShoppingOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  DatabaseOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 // Import split components
 import RawMaterialsTab from "./RawMaterialComponents/RawMaterialsTab";
-import LinkGeneralStockImproved from "./RawMaterialComponents/LinkGeneralStockImproved";
+import RawMaterialInventoryTab from "./RawMaterialComponents/RawMaterialInventoryTab";
+import OrderRMHierarchyTable from "./RawMaterialComponents/OrderRMHierarchyTable";
 import PartsWithRawMaterialStatusTab from "./RawMaterialComponents/PartsWithRawMaterialStatusTab";
 import RawMaterialHistoryTab from "./RawMaterialComponents/RawMaterialHistoryTab";
 
@@ -25,6 +27,12 @@ const RawMaterialsContent = () => {
   const [sharedRawMaterials, setSharedRawMaterials] = useState([]);
   const [rawMaterialsLoading, setRawMaterialsLoading] = useState(true);
   const initializedRef = useRef(false);
+
+  // Per-tab refresh triggers — increment to tell a tab to refetch
+  const [triggers, setTriggers] = useState({ 'order-rm-hierarchy': 0, 'order-status': 0 });
+
+  // Which tabs need a refresh next time they become active
+  const dirtyTabsRef = useRef(new Set());
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -48,6 +56,25 @@ const RawMaterialsContent = () => {
     fetchSharedRawMaterials();
   };
 
+  // When any mutation happens, mark all tabs except the currently active one as dirty
+  useEffect(() => {
+    const handleRMChanged = () => {
+      const otherTabs = ['order-rm-hierarchy', 'order-status'].filter(t => t !== activeTab);
+      otherTabs.forEach(t => dirtyTabsRef.current.add(t));
+    };
+    window.addEventListener('rawMaterialChanged', handleRMChanged);
+    return () => window.removeEventListener('rawMaterialChanged', handleRMChanged);
+  }, [activeTab]);
+
+  // When tab changes, if that tab is dirty — increment its trigger to force a refetch
+  const handleTabChange = useCallback((key) => {
+    setSearchParams({ tab: key });
+    if (dirtyTabsRef.current.has(key)) {
+      dirtyTabsRef.current.delete(key);
+      setTriggers(prev => ({ ...prev, [key]: prev[key] + 1 }));
+    }
+  }, [setSearchParams]);
+
   const tabItems = [
     {
       key: 'raw-materials',
@@ -55,14 +82,19 @@ const RawMaterialsContent = () => {
       children: <RawMaterialsTab rawMaterials={sharedRawMaterials} onRawMaterialsChange={setSharedRawMaterials} onRefresh={refreshRawMaterials} />
     },
     {
-      key: 'link-general-stock',
-      label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign General Stock</span>,
-      children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
+      key: 'raw-material-inventory',
+      label: <span className="flex items-center gap-2 px-2"><DatabaseOutlined /> Raw Material Inventory</span>,
+      children: <RawMaterialInventoryTab />
+    },
+    {
+      key: 'order-rm-hierarchy',
+      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Plan & Procure RM</span>,
+      children: <OrderRMHierarchyTable rawMaterials={sharedRawMaterials} refreshTrigger={triggers['order-rm-hierarchy']} />
     },
     {
       key: 'order-status',
       label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procure Raw Material</span>,
-      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} />
+      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} refreshTrigger={triggers['order-status']} />
     },
     {
       key: 'history',
@@ -104,7 +136,7 @@ const RawMaterialsContent = () => {
       <div className="bg-white rounded-lg lg:rounded-xl shadow-lg border border-gray-100 p-1 sm:p-2">
         <Tabs 
             activeKey={activeTab} 
-            onChange={(key) => setSearchParams({ tab: key })} 
+            onChange={handleTabChange} 
             items={tabItems}
             type="card"
             className="custom-tabs"

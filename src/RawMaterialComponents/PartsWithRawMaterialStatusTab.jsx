@@ -14,19 +14,22 @@ import {
 
 } from "antd";
 
-import { 
+import {
 
-  ShoppingCartOutlined, 
+  ShoppingCartOutlined,
 
   CheckCircleOutlined,
 
   DeleteOutlined,
 
-  SafetyCertificateOutlined
+  SafetyCertificateOutlined,
+
+  FileWordOutlined
 
 } from "@ant-design/icons";
 
 import OrderMaterialsPdfDownload from "../DownloadReports/OrderMaterialsPdfDownload";
+import PurchaseRequestTemplateDownload from "../DownloadReports/PurchaseRequestTemplateDownload";
 
 
 
@@ -132,6 +135,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
   const [selectedVendors, setSelectedVendors] = useState([]);
 
   const [vendorSelectLoading, setVendorSelectLoading] = useState(false);
+
+  // Purchase Request Template Modal state
+  const [purchaseRequestModalOpen, setPurchaseRequestModalOpen] = useState(false);
+  const [purchaseRequestRecord, setPurchaseRequestRecord] = useState(null);
 
 
 
@@ -297,7 +304,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       .map(item => item.merge_group_id)
 
-      .filter(group => group && group.trim() !== '');
+      .filter(group => group && group.trim() !== '' && group.trim() !== "Group");
 
     return [...new Set(groups)].sort();
   };
@@ -408,13 +415,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       // Check if this record is part of a group
 
-      if (record.merge_group_id) {
+      const trimmedGroupId = record.merge_group_id ? record.merge_group_id.trim() : "";
+      
+      if (trimmedGroupId && trimmedGroupId !== "" && trimmedGroupId !== "Group") {
 
         // Update all items in the group
 
         await axios.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${record.merge_group_id}`,
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
 
           updateData,
 
@@ -422,9 +431,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         );
 
-        const count = await getGroupCount(record.merge_group_id);
+        const count = await getGroupCount(trimmedGroupId);
 
         message.success(`Status updated successfully for ${count} grouped orders`);
+
+      } else if (record.merge_group_id) {
+
+        // Invalid group ID - show error and don't proceed
+        message.error(`Invalid group ID: "${record.merge_group_id}". Cannot update grouped orders.`);
+        return;
 
       } else {
 
@@ -602,13 +617,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       // Check if this record is part of a group
 
-      if (vendorSelectRecord.merge_group_id) {
+      const trimmedGroupId = vendorSelectRecord.merge_group_id ? vendorSelectRecord.merge_group_id.trim() : "";
+      
+      if (trimmedGroupId && trimmedGroupId !== "" && trimmedGroupId !== "Group") {
 
         // Update all items in the group
 
         await axios.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${vendorSelectRecord.merge_group_id}`,
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
 
           {
 
@@ -618,7 +635,13 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         );
 
-        message.success(`Vendors linked successfully to ${await getGroupCount(vendorSelectRecord.merge_group_id)} grouped orders`);
+        message.success(`Vendors linked successfully to ${await getGroupCount(trimmedGroupId)} grouped orders`);
+
+      } else if (vendorSelectRecord.merge_group_id) {
+
+        // Invalid group ID - show error and don't proceed
+        message.error(`Invalid group ID: "${vendorSelectRecord.merge_group_id}". Cannot link vendors to grouped orders.`);
+        return;
 
       } else {
 
@@ -886,6 +909,26 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
 
 
+  const handleOpenPurchaseRequest = (record) => {
+
+    setPurchaseRequestRecord(record);
+
+    setPurchaseRequestModalOpen(true);
+
+  };
+
+
+
+  const handleClosePurchaseRequest = () => {
+
+    setPurchaseRequestModalOpen(false);
+
+    setPurchaseRequestRecord(null);
+
+  };
+
+
+
   const colFilterOptions = useMemo(() => ({
     process: [...new Set(linkedMaterials.map(i => i.process_type).filter(Boolean))].sort(),
     form: [...new Set(linkedMaterials.map(i => i.form_type).filter(Boolean))].sort(),
@@ -1074,7 +1117,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     <div className="mt-4">
 
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Ordered Raw Materials</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select mode="multiple" placeholder="Material" allowClear value={filterMaterialName} onChange={v => setFilterMaterialName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueMaterialNames().map(mname => <Option key={mname} value={mname}>{mname}</Option>)}</Select><Select mode="multiple" placeholder="Project" allowClear value={filterProjectNumber} onChange={v => setFilterProjectNumber(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select mode="multiple" placeholder="Vendor" allowClear value={filterVendorName} onChange={v => setFilterVendorName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><Select mode="multiple" placeholder="Group" allowClear value={filterGroup} onChange={v => setFilterGroup(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueGroups().map(group => <Option key={group} value={group}>{group}</Option>)}</Select><Button type="primary" size="middle" onClick={handleGroupOrders} loading={groupLoading} disabled={selectedRowKeys.length < 2 || areSelectedRowsAlreadyGrouped()} className="bg-blue-600">Group ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && !r.merge_group_id).length})</Button><Button size="middle" onClick={handleUngroupOrders} loading={groupLoading} disabled={!canUngroupSelectedRows()}>Ungroup ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && r.merge_group_id).length})</Button><OrderMaterialsPdfDownload rows={filteredDataWithRowSpans} label={[filterProjectNumber, filterMaterialName, filterVendorName].filter(Boolean).join(" | ") || "All Records"} /></Space></div>}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Ordered Raw Materials</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select mode="multiple" placeholder="Material" allowClear value={filterMaterialName} onChange={v => setFilterMaterialName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}>{getUniqueMaterialNames().map(mname => <Option key={mname} value={mname}>{mname}</Option>)}</Select><Select mode="multiple" placeholder="Project" allowClear value={filterProjectNumber} onChange={v => setFilterProjectNumber(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}>{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select mode="multiple" placeholder="Vendor" allowClear value={filterVendorName} onChange={v => setFilterVendorName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}>{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><Select mode="multiple" placeholder="Group" allowClear value={filterGroup} onChange={v => setFilterGroup(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}>{getUniqueGroups().map(group => <Option key={group} value={group}>{group}</Option>)}</Select><Button type="primary" size="middle" onClick={handleGroupOrders} loading={groupLoading} disabled={selectedRowKeys.length < 2 || areSelectedRowsAlreadyGrouped()} className="bg-blue-600">Group ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && !r.merge_group_id).length})</Button><Button size="middle" onClick={handleUngroupOrders} loading={groupLoading} disabled={!canUngroupSelectedRows()}>Ungroup ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && r.merge_group_id).length})</Button><OrderMaterialsPdfDownload rows={filteredDataWithRowSpans} label={[filterProjectNumber, filterMaterialName, filterVendorName].filter(Boolean).join(" | ") || "All Records"} /></Space></div>}>
 
         {loading ? (
 
@@ -1105,8 +1148,20 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
                       onChange={(e) => {
 
                         if (e.target.checked) {
-
-                          setSelectedRowKeys(filteredDataWithRowSpans.map(row => row.id));
+                          // Check if there are both grouped and ungrouped items
+                          const hasGrouped = filteredDataWithRowSpans.some(row => row.merge_group_id !== null && row.merge_group_id !== undefined);
+                          const hasUngrouped = filteredDataWithRowSpans.some(row => row.merge_group_id === null || row.merge_group_id === undefined);
+                          
+                          // If both exist, select only ungrouped items (safer default)
+                          if (hasGrouped && hasUngrouped) {
+                            const ungroupedKeys = filteredDataWithRowSpans
+                              .filter(row => row.merge_group_id === null || row.merge_group_id === undefined)
+                              .map(row => row.id);
+                            setSelectedRowKeys(ungroupedKeys);
+                          } else {
+                            // Only one type exists, select all
+                            setSelectedRowKeys(filteredDataWithRowSpans.map(row => row.id));
+                          }
 
                         } else {
 
@@ -1182,8 +1237,36 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
                         onChange={(e) => {
 
                           if (e.target.checked) {
+                            // Check if this selection would mix grouped and ungrouped items
+                            const isRowGrouped = row.merge_group_id !== null && row.merge_group_id !== undefined;
+                            const hasGroupedSelected = selectedRowKeys.some(key => {
+                              const selectedRow = filteredDataWithRowSpans.find(r => r.id === key);
+                              return selectedRow && selectedRow.merge_group_id !== null && selectedRow.merge_group_id !== undefined;
+                            });
+                            const hasUngroupedSelected = selectedRowKeys.some(key => {
+                              const selectedRow = filteredDataWithRowSpans.find(r => r.id === key);
+                              return selectedRow && (selectedRow.merge_group_id === null || selectedRow.merge_group_id === undefined);
+                            });
 
-                            setSelectedRowKeys([...selectedRowKeys, row.id]);
+                            // Prevent mixing grouped and ungrouped selections
+                            if (isRowGrouped && hasUngroupedSelected) {
+                              // Deselect all ungrouped items and select this grouped item
+                              const groupedKeys = selectedRowKeys.filter(key => {
+                                const selectedRow = filteredDataWithRowSpans.find(r => r.id === key);
+                                return selectedRow && selectedRow.merge_group_id !== null && selectedRow.merge_group_id !== undefined;
+                              });
+                              setSelectedRowKeys([...groupedKeys, row.id]);
+                            } else if (!isRowGrouped && hasGroupedSelected) {
+                              // Deselect all grouped items and select this ungrouped item
+                              const ungroupedKeys = selectedRowKeys.filter(key => {
+                                const selectedRow = filteredDataWithRowSpans.find(r => r.id === key);
+                                return selectedRow && (selectedRow.merge_group_id === null || selectedRow.merge_group_id === undefined);
+                              });
+                              setSelectedRowKeys([...ungroupedKeys, row.id]);
+                            } else {
+                              // Normal selection - same type
+                              setSelectedRowKeys([...selectedRowKeys, row.id]);
+                            }
 
                           } else {
 
@@ -1347,6 +1430,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                             </Tooltip>
 
+                            <Tooltip title="Download Purchase Request">
+
+                              <Button type="text" size="small" icon={<FileWordOutlined />} className="text-blue-600 hover:bg-blue-50" onClick={() => handleOpenPurchaseRequest(row)} />
+
+                            </Tooltip>
+
                             <Tooltip title="Delete Link (applies to all grouped orders)">
 
                               <Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(row)} />
@@ -1376,6 +1465,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
                             <Tooltip title="Quick Status Change">
 
                               <Button type="text" size="small" icon={<CheckCircleOutlined />} className="text-green-600 hover:bg-green-50" onClick={() => handleQuickStatusChange(row, 'purchase_request')} />
+
+                            </Tooltip>
+
+                            <Tooltip title="Download Purchase Request">
+
+                              <Button type="text" size="small" icon={<FileWordOutlined />} className="text-blue-600 hover:bg-blue-50" onClick={() => handleOpenPurchaseRequest(row)} />
 
                             </Tooltip>
 
@@ -1589,7 +1684,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         onCancel={handleCloseVendorSelect}
 
-        title={<div className="flex items-center gap-2"><ShoppingCartOutlined className="text-purple-500" /><span className="font-bold text-gray-800">{vendorSelectRecord?.merge_group_id ? 'Link Vendors for Enquiry (Merged Orders)' : 'Link Vendors for Enquiry'}</span></div>}
+        title={<div className="flex items-center gap-2"><ShoppingCartOutlined className="text-purple-500" /><span className="font-bold text-gray-800">{vendorSelectRecord?.merge_group_id ? `Link Vendors for Enquiry (Group: ${vendorSelectRecord.merge_group_id})` : 'Link Vendors for Enquiry'}</span></div>}
 
         width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }}
 
@@ -1688,6 +1783,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
         </div>
 
       </Modal>
+
+      {/* Purchase Request Template Modal */}
+      <PurchaseRequestTemplateDownload
+        visible={purchaseRequestModalOpen}
+        onClose={handleClosePurchaseRequest}
+        stockRecord={purchaseRequestRecord}
+        linkedMaterials={linkedMaterials}
+      />
 
     </div>
 

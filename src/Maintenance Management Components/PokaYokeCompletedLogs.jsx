@@ -1,490 +1,222 @@
 import React, { useState, useEffect } from 'react';
-import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
-import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
-import { API_BASE_URL } from "../Config/auth";
+import {
+  Table, Select, Typography, Button, Tag, Input, Space, message,
+} from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import {
+  PM_T, btnSharp, pmFetch, formatDateTime, machineLabel, STATUS_COLORS,
+} from './pmUtils';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
 
-/* ─── Design tokens (matching Machine Assignments) ────────────────────────── */
-const T = {
-  bg:         '#FDFBF7',
-  surface:    '#FFFFFF',
-  sidebar:    '#F5F5F5',
-  border:     '#D1D5DB',
-  borderMid:  '#E5E5E5',
-  primary:    '#4A6CF7',
-  primaryBg:  '#EEF2FF',
-  success:    '#22C55E',
-  successBg:  '#DCFCE7',
-  warning:    '#F59E0B',
-  warningBg:  '#FEF3C7',
-  weekend:    '#F9FAFB',
-  text:       '#111827',
-  textMid:    '#374151',
-  textSub:    '#6B7280',
-  textMuted:  '#9CA3AF',
-  radius:     '12px',
-  radiusSm:   '8px',
-  shadow:     '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
-};
-
 const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }) => {
-  const [logs, setLogs] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+  const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [selectedLog, setSelectedLog] = useState(null);
-  const [selectedLogDetails, setSelectedLogDetails] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 15 });
 
   useEffect(() => {
-    fetchLogs();
+    loadSubmissions();
+    pmFetch('/checklists').then((data) => setChecklists(Array.isArray(data) ? data : [])).catch(() => {});
   }, []);
 
-  const fetchLogs = async (machineId = null) => {
+  const loadSubmissions = async (machineId = selectedMachine, status = statusFilter) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const url = machineId
-        ? `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
-        : `${API_BASE_URL}/pokayoke-completed-logs/`;
-
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch completion logs');
-      const data = await response.json();
-      setLogs(Array.isArray(data) ? data : []);
-    } catch (error) {
-      message.error(error.message || 'Failed to load completion logs');
+      const params = new URLSearchParams();
+      if (status) params.set('status_filter', status);
+      const qs = params.toString();
+      const suffix = qs ? `?${qs}` : '';
+      const path = machineId
+        ? `/machines/${machineId}/submissions${suffix}`
+        : `/submissions${suffix}`;
+      const data = await pmFetch(path);
+      setSubmissions(Array.isArray(data) ? data : []);
+    } catch (e) {
+      message.error(e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleMachineChange = (value) => {
-    const newMachine = value || null;
-    setSelectedMachine(newMachine);
-    fetchLogs(newMachine);
+  const handleRefresh = async () => {
+    setPagination((p) => ({ ...p, current: 1 }));
+    await loadSubmissions();
   };
 
-  const handleRefresh = () => {
-    fetchLogs(selectedMachine);
-  };
-
-  const formatDateTime = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return '-';
-
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-
-    let hours = date.getHours();
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    if (hours === 0) hours = 12;
-    const hoursStr = String(hours).padStart(2, '0');
-
-    return `${day}/${month}/${year}, ${hoursStr}:${minutes}:${seconds} ${ampm}`;
-  };
-
-  const getMachineLabel = (id) => {
-    const machine = machines.find((m) => m.id === id);
-    if (!machine) return '-';
-    if (machine.make && machine.model) {
-      return `${machine.make} ${machine.model}`;
+  const checklistNameFor = (row) => {
+    if (row.checklist_name) return row.checklist_name;
+    if (row.checklist_id) {
+      const found = checklists.find((c) => c.id === row.checklist_id);
+      if (found) return found.name;
     }
-    return machine.make || `Machine ${machine.id}`;
+    return '—';
   };
 
-  const getStatusTag = (allItemsPassed) => {
-    if (allItemsPassed) {
-      return (
-        <Tag color="green" style={{ borderRadius: '16px', padding: '0 12px' }}>
-          ALL PASSED
-        </Tag>
-      );
-    }
+  const filtered = submissions.filter((s) => {
+    const q = searchText.toLowerCase();
+    if (!q) return true;
     return (
-      <Tag color="red" style={{ borderRadius: '16px', padding: '0 12px' }}>
-        HAS FAILURES
-      </Tag>
+      checklistNameFor(s).toLowerCase().includes(q) ||
+      (s.checklist_item?.item_text || '').toLowerCase().includes(q) ||
+      (s.machine_label || '').toLowerCase().includes(q) ||
+      (s.response_value || '').toLowerCase().includes(q) ||
+      (s.status || '').toLowerCase().includes(q)
     );
-  };
-
-  const handleViewDetails = (log) => {
-    setSelectedLog(log);
-    setDetailModalVisible(true);
-    setSelectedLogDetails(log);
-  };
-
-  const getItemText = (response) => {
-    return response.item?.item_text || '-';
-  };
-
-  const getResponseStatusTag = (isConfirming) => {
-    if (isConfirming) {
-      return (
-        <Tag color="green" style={{ borderRadius: '12px', padding: '0 10px' }}>
-          PASSED
-        </Tag>
-      );
-    }
-    return (
-      <Tag color="red" style={{ borderRadius: '12px', padding: '0 10px' }}>
-        FAILED
-      </Tag>
-    );
-  };
+  });
 
   const columns = [
     {
-      title: 'ID',
-      key: 'sl_no',
-      width: 70,
+      title: 'SL NO',
+      key: 'sl',
+      width: 55,
       align: 'center',
       className: 'table-header-styled',
-      render: (_, __, index) => index + 1,
+      render: (_, __, i) => (pagination.current - 1) * pagination.pageSize + i + 1,
     },
     {
-      title: 'Checklist',
-      dataIndex: 'checklist',
+      title: 'CHECKLIST',
       key: 'checklist',
+      width: 180,
+      className: 'table-header-styled',
+      ellipsis: true,
+      sorter: (a, b) => checklistNameFor(a).localeCompare(checklistNameFor(b)),
+      render: (_, r) => <Text strong style={{ fontSize: 12 }}>{checklistNameFor(r)}</Text>,
+    },
+    {
+      title: 'Checkpoint',
+      key: 'checkpoint',
       width: 200,
       className: 'table-header-styled',
-      sorter: (a, b) => (a.checklist?.name || '').localeCompare(b.checklist?.name || ''),
-      render: (checklist) => <Text strong>{checklist?.name || '-'}</Text>,
+      ellipsis: true,
+      sorter: (a, b) => (a.checklist_item?.item_text || '').localeCompare(b.checklist_item?.item_text || ''),
+      render: (_, r) => <Text style={{ fontSize: 12 }}>{r.checklist_item?.item_text || '—'}</Text>,
     },
     {
       title: 'Machine',
-      dataIndex: 'machine',
       key: 'machine',
-      width: 260,
+      width: 180,
       className: 'table-header-styled',
-      sorter: (a, b) => {
-        const machineA = a.machine ? `${a.machine.make} ${a.machine.model || ''}` : '';
-        const machineB = b.machine ? `${b.machine.make} ${b.machine.model || ''}` : '';
-        return machineA.localeCompare(machineB);
-      },
-      render: (machine) => (
-        <div style={{ whiteSpace: 'normal' }}>
-          <Text>{machine ? `${machine.make} ${machine.model || ''}` : '-'}</Text>
-        </div>
+      ellipsis: true,
+      sorter: (a, b) => (a.machine_label || '').localeCompare(b.machine_label || ''),
+      render: (_, r) => (
+        <Text style={{ fontSize: 12 }}>
+          {r.machine_label || machineLabel(machines.find((m) => m.id === r.machine_id)) || '—'}
+        </Text>
       ),
-    },
-    {
-      title: 'Frequency',
-      dataIndex: 'frequency',
-      key: 'frequency',
-      width: 120,
-      className: 'table-header-styled',
-      sorter: (a, b) => (a.frequency || '').localeCompare(b.frequency || ''),
-      render: (frequency, record) => {
-        const shift = record?.shift;
-        return (
-          <div>
-            {frequency ? (
-              <Tag color="blue" style={{ borderRadius: '12px' }}>
-                {frequency}{shift ? ` (${shift})` : ''}
-              </Tag>
-            ) : (
-              '-'
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      title: 'Operator',
-      dataIndex: 'operator',
-      key: 'operator',
-      width: 160,
-      className: 'table-header-styled',
-      sorter: (a, b) => (a.operator?.user_name || '').localeCompare(b.operator?.user_name || ''),
-      render: (operator) => operator?.user_name || '-',
-    },
-    {
-      title: 'Completed At',
-      dataIndex: 'completed_at',
-      key: 'completed_at',
-      width: 220,
-      className: 'table-header-styled',
-      sorter: (a, b) =>
-        new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime(),
-      render: (date) => formatDateTime(date),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'all_items_passed',
-      key: 'status',
-      width: 140,
-      align: 'center',
-      className: 'table-header-styled',
-      sorter: (a, b) => a.all_items_passed - b.all_items_passed,
-      render: (value) => getStatusTag(value),
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 100,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, record) => (
-        <Button
-          type="text"
-          icon={<FileTextOutlined />}
-          onClick={() => handleViewDetails(record)}
-        />
-      ),
-    },
-  ];
-
-  const responseColumns = [
-    {
-      title: 'Checklist Item',
-      key: 'item_id',
-      width: 250,
-      className: 'table-header-styled',
-      render: (_, record) => getItemText(record),
     },
     {
       title: 'Response',
       dataIndex: 'response_value',
-      key: 'response_value',
-      width: 150,
+      key: 'response',
+      width: 90,
+      align: 'center',
       className: 'table-header-styled',
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
     {
       title: 'Status',
-      dataIndex: 'is_confirming',
-      key: 'is_confirming',
-      width: 120,
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
       align: 'center',
       className: 'table-header-styled',
-      render: (value) => getResponseStatusTag(value),
+      sorter: (a, b) => a.status.localeCompare(b.status),
+      render: (s) => <Tag color={STATUS_COLORS[s]} style={{ fontSize: 11, borderRadius: 0, margin: 0 }}>{s}</Tag>,
     },
     {
-      title: 'Timestamp',
-      dataIndex: 'timestamp',
-      key: 'timestamp',
-      width: 220,
+      title: 'Submitted At',
+      dataIndex: 'submitted_at',
+      key: 'submitted_at',
+      width: 155,
       className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
+      sorter: (a, b) => new Date(a.submitted_at) - new Date(b.submitted_at),
+      render: (d) => <Text type="secondary" style={{ fontSize: 11 }}>{formatDateTime(d)}</Text>,
+    },
+    {
+      title: 'Reviewed At',
+      dataIndex: 'reviewed_at',
+      key: 'reviewed_at',
+      width: 155,
+      className: 'table-header-styled',
+      sorter: (a, b) => new Date(a.reviewed_at || 0) - new Date(b.reviewed_at || 0),
+      render: (d) => <Text type="secondary" style={{ fontSize: 11 }}>{d ? formatDateTime(d) : '—'}</Text>,
+    },
+    {
+      title: 'Remarks',
+      key: 'remarks',
+      className: 'table-header-styled',
+      ellipsis: true,
+      render: (_, r) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {r.supervisor_comments || r.operator_comments || '—'}
+        </Text>
+      ),
     },
   ];
 
   return (
-    <div style={{ padding: 0, fontFamily: "'DM Sans', 'Inter', system-ui, sans-serif", background: T.bg }}>
-      {/* ── Top bar ── */}
-      <div style={{
-        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-        padding: '10px 14px', marginBottom: 10, boxShadow: T.shadow,
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-      }}>
-        <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Completion Logs:</Text>
-        <div style={{ flex: '0 0 400px', maxWidth: '100%' }}>
+    <div style={{ padding: 0, background: PM_T.bg }}>
+      <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+        <Space wrap>
           <Select
             allowClear
-            placeholder="Select Machine"
+            placeholder="Machine"
+            style={{ width: 220 }}
             loading={machinesLoading}
-            onFocus={() => fetchMachines()}
-            style={{ width: '100%' }}
             value={selectedMachine}
-            onChange={handleMachineChange}
-            showSearch
-            optionFilterProp="children"
+            onFocus={fetchMachines}
+            onChange={(v) => { setSelectedMachine(v || null); loadSubmissions(v || null, statusFilter); }}
           >
-            {machines.map((machine) => (
-              <Option key={machine.id} value={machine.id}>
-                {getMachineLabel(machine.id)}
-              </Option>
-            ))}
+            {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
           </Select>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            loading={loading}
-            style={{ borderRadius: 8 }}
-          >Refresh</Button>
-        </div>
-      </div>
+          <Select
+            allowClear
+            placeholder="Status"
+            style={{ width: 140 }}
+            value={statusFilter}
+            onChange={(v) => { setStatusFilter(v || null); loadSubmissions(selectedMachine, v || null); }}
+            options={[
+              { value: 'Submitted', label: 'Submitted' },
+              { value: 'Approved', label: 'Approved' },
+              { value: 'Rejected', label: 'Rejected' },
+            ]}
+          />
+          <Input.Search
+            placeholder="Search checklist, checkpoint, machine..."
+            allowClear
+            style={{ width: 280, borderRadius: 0 }}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </Space>
+        <Button icon={<ReloadOutlined />} loading={loading} style={btnSharp} onClick={handleRefresh}>
+          Refresh
+        </Button>
+      </Space>
 
-      {/* ── Main content card ── */}
-      <div style={{
-        background: T.surface, border: `1px solid ${T.border}`,
-        borderRadius: T.radius, boxShadow: T.shadow, overflow: 'hidden',
-        minHeight: 'calc(100vh - 320px)',
-      }}>
-        <Table
-        columns={columns}
-        dataSource={logs}
-        loading={loading}
+      <Table
         rowKey="id"
         size="small"
-        scroll={{ x: 1100 }}
         bordered
+        tableLayout="fixed"
+        loading={loading}
+        columns={columns}
+        dataSource={filtered}
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
-          showTotal: (total, range) =>
-            `${range[0]}-${range[1]} of ${total} items`,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          onChange: (page, pageSize) => {
-            setPagination({ current: page, pageSize: pageSize });
-          },
-          onShowSizeChange: (current, size) => {
-            setPagination({ current: 1, pageSize: size });
-          },
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+          pageSizeOptions: ['10', '15', '20', '50'],
+          onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
         }}
-        style={{
-          background: T.surface,
-        }}
+        style={{ background: PM_T.surface }}
       />
-      </div>
-
-      <Modal
-        title={
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              width: '100%',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>Checklist Completion Details</span>
-              {selectedLogDetails && (
-                <span
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    fontSize: 13,
-                  }}
-                >
-                  {selectedLogDetails.all_items_passed ? (
-                    <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                  ) : (
-                    <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                  )}
-                  <span>
-                    {selectedLogDetails.all_items_passed
-                      ? 'All Items Passed'
-                      : 'Has Failures'}
-                  </span>
-                </span>
-              )}
-            </div>
-          </div>
-        }
-        open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        footer={
-          <Button onClick={() => setDetailModalVisible(false)}>Close</Button>
-        }
-        width={900}
-      >
-        {selectedLogDetails && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <Card
-                bordered={false}
-                style={{ background: '#fafafa', borderRadius: 8 }}
-              >
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                    rowGap: 8,
-                    columnGap: 40,
-                  }}
-                >
-                  <div>
-                    <Text type="secondary">Checklist</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.checklist?.name || '-'}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">Machine</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.machine ? `${selectedLogDetails.machine.make} ${selectedLogDetails.machine.model || ''}` : '-'}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">Operator</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.operator?.user_name || '-'}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">Completed At</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {formatDateTime(selectedLogDetails.completed_at)}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">Frequency</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.frequency ? (
-                        <Tag color="blue" style={{ borderRadius: '12px' }}>
-                          {selectedLogDetails.frequency}{selectedLogDetails.shift ? ` (${selectedLogDetails.shift})` : ''}
-                        </Tag>
-                      ) : '-'}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              <Card
-                bordered={false}
-                style={{
-                  background: '#f5f9ff',
-                  borderRadius: 8,
-                }}
-              >
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                  Operator Comments
-                </Text>
-                <div style={{ minHeight: 40 }}>
-                  {selectedLogDetails.comments || '-'}
-                </div>
-              </Card>
-
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 8,
-                  }}
-                >
-                  <Text strong>Checklist Responses</Text>
-                </div>
-                <Table
-                  columns={responseColumns}
-                  dataSource={selectedLogDetails.item_responses || []}
-                  rowKey="id"
-                  pagination={false}
-                  size="small"
-                  scroll={{ x: 800 }}
-                  style={{
-                    background: '#fff',
-                    borderRadius: 8,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-      </Modal>
     </div>
   );
 };

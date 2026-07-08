@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Table, DatePicker, Select, Button, Card, Space, Tag, Typography, message, Row, Col, Avatar, Empty } from 'antd';
-import { HistoryOutlined, FilterOutlined, ReloadOutlined, StockOutlined, LinkOutlined, ShoppingOutlined, AppstoreOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { DatePicker, Select, Button, Card, Space, Tag, Typography, message, Empty, Spin } from 'antd';
+import { HistoryOutlined, FilterOutlined, ReloadOutlined, StockOutlined, LinkOutlined, ShoppingOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
 import dayjs from 'dayjs';
@@ -9,17 +9,81 @@ import RawMaterialHistoryDownload from '../DownloadReports/RawMaterialHistoryDow
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
 
-const RawMaterialHistoryTab = ({ materials }) => {
+// ── Column filter dropdown ────────────────────────────────────────────────────
+const FilterHeader = ({ label, options, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const ref = useRef(null);
+  
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  
+  useEffect(() => {
+    if (open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      const dropdownWidth = 180;
+      const viewportWidth = window.innerWidth;
+      
+      let left = rect.left;
+      // If dropdown would go off right edge, align to right side
+      if (left + dropdownWidth > viewportWidth) {
+        left = viewportWidth - dropdownWidth - 10;
+      }
+      
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: left
+      });
+    }
+  }, [open]);
+  
+  const active = value && value.length > 0;
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => setOpen(o => !o)}>
+      <span>{label}</span>
+      <span style={{ fontSize: 9, color: active ? '#2563eb' : '#aaa' }}>▼</span>
+      {active && <span style={{ background: '#2563eb', color: '#fff', borderRadius: 0, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>{value.length}</span>}
+      {open && (
+        <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: dropdownPosition.top, left: dropdownPosition.left, background: '#fff', border: '1px solid #d9d9d9', borderRadius: 0, boxShadow: '0 4px 12px rgba(0,0,0,.15)', zIndex: 10000, minWidth: 180, maxWidth: 250, maxHeight: 260, overflowY: 'auto', padding: '6px 0' }}>
+          <div style={{ padding: '2px 10px', fontSize: 10, color: '#999', borderBottom: '1px solid #f0f0f0', marginBottom: 3 }}>Filter</div>
+          {options.map(opt => (
+            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={value.includes(opt)} onChange={() => onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt])} />
+              {opt}
+            </label>
+          ))}
+          {value.length > 0 && (
+            <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 3, padding: '3px 10px' }}>
+              <span onClick={() => onChange([])} style={{ fontSize: 10, color: '#2563eb', cursor: 'pointer' }}>Clear</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const border = "1px solid #d0d0d0";
+const thStyle = {
+  border, padding: "5px 8px", textAlign: "center",
+  fontWeight: 600, fontSize: 12, background: "#f0f5ff",
+  whiteSpace: "nowrap",
+};
+const tdStyle = {
+  border, padding: "4px 8px", fontSize: 11,
+  verticalAlign: "middle", textAlign: "center", color: "#333",
+};
+
+const RawMaterialHistoryTab = () => {
   const [allHistory, setAllHistory] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-  const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [isResetting, setIsResetting] = useState(false);
-  const [pagination, setPagination] = useState({
-    current: 1,
-    pageSize: 10,
-  });
   
   // Filter states
   const [startDate, setStartDate] = useState(null);
@@ -27,11 +91,21 @@ const RawMaterialHistoryTab = ({ materials }) => {
   const [year, setYear] = useState(null);
   const [month, setMonth] = useState(null);
   const [day, setDay] = useState(null);
-  const [sourceType, setSourceType] = useState(null);
-  const [activityType, setActivityType] = useState(null);
-  const [materialId, setMaterialId] = useState(null);
-  const [filterOrderNumber, setFilterOrderNumber] = useState(null);
-  const [filterVendorName, setFilterVendorName] = useState(null);
+  const [sourceType, setSourceType] = useState([]);
+  const [activityType, setActivityType] = useState([]);
+  const [filterMaterial, setFilterMaterial] = useState([]);
+  const [filterOrderNumber, setFilterOrderNumber] = useState([]);
+  const [filterVendorName, setFilterVendorName] = useState([]);
+  
+  // Column filter states
+  const [colMaterial, setColMaterial] = useState([]);
+  const [colActivity, setColActivity] = useState([]);
+  const [colFormType, setColFormType] = useState([]);
+  const [colSource, setColSource] = useState([]);
+  const [colOrder, setColOrder] = useState([]);
+  const [colPart, setColPart] = useState([]);
+  const [colUser, setColUser] = useState([]);
+  const [colVendor, setColVendor] = useState([]);
 
   const getCurrentUserId = () => {
     const user = localStorage.getItem('user');
@@ -83,13 +157,61 @@ const RawMaterialHistoryTab = ({ materials }) => {
   const applyFilters = (data = allHistory) => {
     let filteredData = [...data];
     
-    // Filter by material
-    if (materialId) {
+    // Filter by material (multiple)
+    if (filterMaterial && filterMaterial.length > 0) {
       filteredData = filteredData.filter(item => {
-        // Try multiple possible fields for material matching
-        return item.material_id === materialId || 
-               item.raw_material_id === materialId ||
-               item.material?.id === materialId;
+        return filterMaterial.includes(item.material_name) || 
+               filterMaterial.includes(item.raw_material_name) ||
+               filterMaterial.includes(item.material?.material_name);
+      });
+    }
+    
+    // Filter by column filters
+    if (colMaterial.length > 0) {
+      filteredData = filteredData.filter(item => {
+        return colMaterial.includes(item.material_name) || 
+               colMaterial.includes(item.raw_material_name) ||
+               colMaterial.includes(item.material?.material_name);
+      });
+    }
+    if (colActivity.length > 0) {
+      filteredData = filteredData.filter(item => colActivity.includes(getActivityTypeLabel(item.activity_type)));
+    }
+    if (colFormType.length > 0) {
+      filteredData = filteredData.filter(item => colFormType.includes(item.form_type));
+    }
+    if (colSource.length > 0) {
+      filteredData = filteredData.filter(item => colSource.includes(item.source_type?.toUpperCase()));
+    }
+    if (colOrder.length > 0) {
+      filteredData = filteredData.filter(item => colOrder.includes(item.order_number));
+    }
+    if (colPart.length > 0) {
+      filteredData = filteredData.filter(item => colPart.includes(item.part_name));
+    }
+    if (colUser.length > 0) {
+      filteredData = filteredData.filter(item => colUser.includes(item.user_name));
+    }
+    if (colVendor.length > 0) {
+      filteredData = filteredData.filter(item => {
+        for (const vendor of colVendor) {
+          if (item.received_vendor_name && item.received_vendor_name === vendor) {
+            return true;
+          }
+          if (item.enquiry_vendor_name) {
+            const enquiryVendors = item.enquiry_vendor_name.split(',').map(v => v.trim());
+            if (enquiryVendors.includes(vendor)) {
+              return true;
+            }
+          }
+          if (item.vendor_name) {
+            const vendors = item.vendor_name.split(',').map(v => v.trim());
+            if (vendors.includes(vendor)) {
+              return true;
+            }
+          }
+        }
+        return false;
       });
     }
     
@@ -112,40 +234,43 @@ const RawMaterialHistoryTab = ({ materials }) => {
       });
     }
     
-    // Filter by source type
-    if (sourceType) {
-      filteredData = filteredData.filter(item => item.source_type === sourceType);
+    // Filter by source type (multiple)
+    if (sourceType && sourceType.length > 0) {
+      filteredData = filteredData.filter(item => sourceType.includes(item.source_type));
     }
     
-    // Filter by activity type
-    if (activityType) {
-      filteredData = filteredData.filter(item => item.activity_type === activityType);
+    // Filter by activity type (multiple)
+    if (activityType && activityType.length > 0) {
+      filteredData = filteredData.filter(item => activityType.includes(item.activity_type));
     }
     
-    // Filter by order number
-    if (filterOrderNumber) {
-      filteredData = filteredData.filter(item => item.order_number === filterOrderNumber);
+    // Filter by order number (multiple)
+    if (filterOrderNumber && filterOrderNumber.length > 0) {
+      filteredData = filteredData.filter(item => filterOrderNumber.includes(item.order_number));
     }
     
-    // Filter by vendor name
-    if (filterVendorName) {
+    // Filter by vendor name (multiple)
+    if (filterVendorName && filterVendorName.length > 0) {
       filteredData = filteredData.filter(item => {
-        // Check received vendor name
-        if (item.received_vendor_name && item.received_vendor_name === filterVendorName) {
-          return true;
-        }
-        // Check enquiry vendor name (split by comma for individual vendors)
-        if (item.enquiry_vendor_name) {
-          const enquiryVendors = item.enquiry_vendor_name.split(',').map(v => v.trim());
-          if (enquiryVendors.includes(filterVendorName)) {
+        // Check if any of the selected vendors match
+        for (const vendor of filterVendorName) {
+          // Check received vendor name
+          if (item.received_vendor_name && item.received_vendor_name === vendor) {
             return true;
           }
-        }
-        // Check vendor name (split by comma for individual vendors)
-        if (item.vendor_name) {
-          const vendors = item.vendor_name.split(',').map(v => v.trim());
-          if (vendors.includes(filterVendorName)) {
-            return true;
+          // Check enquiry vendor name (split by comma for individual vendors)
+          if (item.enquiry_vendor_name) {
+            const enquiryVendors = item.enquiry_vendor_name.split(',').map(v => v.trim());
+            if (enquiryVendors.includes(vendor)) {
+              return true;
+            }
+          }
+          // Check vendor name (split by comma for individual vendors)
+          if (item.vendor_name) {
+            const vendors = item.vendor_name.split(',').map(v => v.trim());
+            if (vendors.includes(vendor)) {
+              return true;
+            }
           }
         }
         return false;
@@ -162,13 +287,6 @@ const RawMaterialHistoryTab = ({ materials }) => {
   }, []);
 
   useEffect(() => {
-    // Apply filters whenever materialId changes, but not during reset
-    if (allHistory.length > 0 && !isResetting) {
-      applyFilters();
-    }
-  }, [materialId, isResetting]);
-
-  useEffect(() => {
     // Apply filters when date filters change
     if (allHistory.length > 0 && !isResetting) {
       applyFilters();
@@ -180,13 +298,8 @@ const RawMaterialHistoryTab = ({ materials }) => {
     if (allHistory.length > 0 && !isResetting) {
       applyFilters();
     }
-  }, [activityType, sourceType, filterOrderNumber, filterVendorName]);
+  }, [activityType, sourceType, filterMaterial, filterOrderNumber, filterVendorName, colMaterial, colActivity, colFormType, colSource, colOrder, colPart, colUser, colVendor]);
 
-  const handleMaterialSelect = (material) => {
-    // Always select the material - don't deselect on same click
-    setSelectedMaterial(material);
-    setMaterialId(material.id);
-  };
 
   const handleResetFilters = () => {
     setIsResetting(true);
@@ -196,12 +309,21 @@ const RawMaterialHistoryTab = ({ materials }) => {
     setYear(null);
     setMonth(null);
     setDay(null);
-    setSourceType(null);
-    setActivityType(null);
-    setMaterialId(null);
-    setSelectedMaterial(null);
-    setFilterOrderNumber(null);
-    setFilterVendorName(null);
+    setSourceType([]);
+    setActivityType([]);
+    setFilterMaterial([]);
+    setFilterOrderNumber([]);
+    setFilterVendorName([]);
+    
+    // Reset column filters
+    setColMaterial([]);
+    setColActivity([]);
+    setColFormType([]);
+    setColSource([]);
+    setColOrder([]);
+    setColPart([]);
+    setColUser([]);
+    setColVendor([]);
     
     // Clear history immediately to show all data
     setHistory(allHistory);
@@ -215,16 +337,34 @@ const RawMaterialHistoryTab = ({ materials }) => {
 
   const getActivityTypeColor = (type) => {
     switch (type) {
-      case 'stock_created':
+      case 'material_created':
         return 'blue';
-      case 'material_linked':
+      case 'material_updated':
+        return 'cyan';
+      case 'material_deleted':
+        return 'red';
+      case 'stock_created':
         return 'green';
-      case 'order_status_changed':
-        return 'orange';
       case 'stock_updated':
         return 'purple';
+      case 'stock_deleted':
+        return 'red';
+      case 'stock_status_changed':
+        return 'orange';
+      case 'unit_created':
+        return 'geekblue';
+      case 'unit_deleted':
+        return 'red';
+      case 'unit_status_changed':
+        return 'gold';
+      case 'material_linked':
+        return 'green';
       case 'material_unlinked':
         return 'red';
+      case 'order_status_changed':
+        return 'orange';
+      case 'vendor_changed':
+        return 'magenta';
       default:
         return 'default';
     }
@@ -232,157 +372,105 @@ const RawMaterialHistoryTab = ({ materials }) => {
 
   const getActivityTypeLabel = (type) => {
     switch (type) {
+      case 'material_created':
+        return 'Material Created';
+      case 'material_updated':
+        return 'Material Updated';
+      case 'material_deleted':
+        return 'Material Deleted';
       case 'stock_created':
         return 'Stock Created';
-      case 'material_linked':
-        return 'Material Linked';
-      case 'order_status_changed':
-        return 'Order Status Changed';
       case 'stock_updated':
         return 'Stock Updated';
+      case 'stock_deleted':
+        return 'Stock Deleted';
+      case 'stock_status_changed':
+        return 'Stock Status Changed';
+      case 'unit_created':
+        return 'Unit Created';
+      case 'unit_deleted':
+        return 'Unit Deleted';
+      case 'unit_status_changed':
+        return 'Unit Status Changed';
+      case 'material_linked':
+        return 'Material Linked';
       case 'material_unlinked':
         return 'Material Unlinked';
+      case 'order_status_changed':
+        return 'Order Status Changed';
+      case 'vendor_changed':
+        return 'Vendor Changed';
       default:
         return type;
     }
   };
 
-  const columns = [
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Date & Time</span>,
-      dataIndex: 'timestamp',
-      key: 'timestamp',
-      render: (timestamp) => dayjs(timestamp).format('YYYY-MM-DD HH:mm'),
-      sorter: (a, b) => dayjs(a.timestamp).unix() - dayjs(b.timestamp).unix(),
-      defaultSortOrder: 'descend',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Activity</span>,
-      dataIndex: 'activity_type',
-      key: 'activity_type',
-      render: (type, record) => {
-        const tag = (
-          <Tag color={getActivityTypeColor(type)} icon={type === 'stock_created' ? <StockOutlined /> : type === 'material_linked' ? <LinkOutlined /> : null}>
-            {getActivityTypeLabel(type)}
-          </Tag>
-        );
-        
-        // For order status changes, show the description below the tag
-        if (type === 'order_status_changed' && record.description) {
-          return (
-            <div>
-              {tag}
-              <div style={{ fontSize: '11px', color: '#666', marginTop: '4px', fontWeight: 'bold' }}>
-                {record.description}
-              </div>
-            </div>
-          );
-        }
-        
-        return tag;
-      },
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Raw Material</span>,
-      key: 'raw_material',
-      render: (_, record) => {
-        const materialName = record.material_name || record.raw_material_name || record.material?.material_name;
-        return materialName ? (
-          <div>
-            <Text strong>{materialName}</Text>
-            {record.material_code && (
-              <div>
-                <Text type="secondary" style={{ fontSize: '11px' }}>{record.material_code}</Text>
-              </div>
-            )}
-          </div>
-        ) : '-';
-      },
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Form Type</span>,
-      dataIndex: 'form_type',
-      key: 'form_type',
-      render: (formType) => formType || '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Dimensions</span>,
-      dataIndex: 'dimensions',
-      key: 'dimensions',
-      render: (dimensions) => dimensions || '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Source</span>,
-      dataIndex: 'source_type',
-      key: 'source_type',
-      render: (type) => type ? type.toUpperCase() : '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Order</span>,
-      key: 'order',
-      render: (_, record) => record.order_number || '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Part</span>,
-      key: 'part',
-      render: (_, record) => record.part_name ? (
-        <div>
-          <Text strong>{record.part_name}</Text>
-          <br />
-          <Text type="secondary" style={{ fontSize: '11px' }}>{record.part_number}</Text>
-        </div>
-      ) : '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Length Used</span>,
-      key: 'length',
-      render: (_, record) => {
-        if (record.activity_type === 'material_linked' && record.used_length) {
-          return `${record.used_length}mm`;
-        } else if (record.quantity) {
-          return `${record.quantity} units`;
-        }
-        return '-';
-      },
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>User</span>,
-      dataIndex: 'user_name',
-      key: 'user_name',
-      render: (name) => name || '-',
-    },
-    {
-      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Vendor</span>,
-      key: 'vendor',
-      render: (_, record) => {
-        if (record.activity_type === 'order_status_changed') {
-          // For order status changes, show both enquiry vendors and received vendor
-          if (record.received_vendor_name) {
-            return (
-              <div>
-                <div style={{ fontSize: '11px' }}>
-                  <Text type="secondary">Enquiry Vendors: </Text>
-                  <Text>{record.enquiry_vendor_name || '-'} ({record.enquiry_vendor_count || 0})</Text>
-                </div>
-                <div style={{ fontSize: '11px', marginTop: '2px' }}>
-                  <Text type="secondary">Received From: </Text>
-                  <Text strong style={{ color: '#52c41a' }}>{record.received_vendor_name}</Text>
-                </div>
-              </div>
-            );
-          } else if (record.enquiry_vendor_name) {
-            return (
-              <div style={{ fontSize: '11px' }}>
-                <Text type="secondary">Enquiry Vendors: </Text>
-                <Text>{record.enquiry_vendor_name} ({record.enquiry_vendor_count})</Text>
-              </div>
-            );
-          }
-        }
-        return record.vendor_name || '-';
-      },
-    },
-  ];
+  // Group history by material for rowspan
+  const groupedHistory = useMemo(() => {
+    const grouped = {};
+    history.forEach(item => {
+      const materialKey = item.material_id || item.raw_material_id || item.material?.id || 'unknown';
+      const materialName = item.material_name || item.raw_material_name || item.material?.material_name || 'Unknown';
+      const materialCode = item.material_code || item.material?.material_code || '';
+      
+      if (!grouped[materialKey]) {
+        grouped[materialKey] = {
+          materialId: materialKey,
+          materialName,
+          materialCode,
+          entries: []
+        };
+      }
+      grouped[materialKey].entries.push(item);
+    });
+    
+    return Object.values(grouped).map(group => ({
+      ...group,
+      rowCount: group.entries.length
+    }));
+  }, [history]);
+
+  // Column filter options
+  const colFilterOptions = useMemo(() => {
+    const materials = new Set();
+    const activities = new Set();
+    const formTypes = new Set();
+    const sources = new Set();
+    const orders = new Set();
+    const parts = new Set();
+    const users = new Set();
+    const vendors = new Set();
+    
+    allHistory.forEach(h => {
+      if (h.material_name) materials.add(h.material_name);
+      if (h.raw_material_name) materials.add(h.raw_material_name);
+      if (h.material?.material_name) materials.add(h.material.material_name);
+      if (h.activity_type) activities.add(getActivityTypeLabel(h.activity_type));
+      if (h.form_type) formTypes.add(h.form_type);
+      if (h.source_type) sources.add(h.source_type.toUpperCase());
+      if (h.order_number) orders.add(h.order_number);
+      if (h.part_name) parts.add(h.part_name);
+      if (h.user_name) users.add(h.user_name);
+      if (h.vendor_name) {
+        h.vendor_name.split(',').forEach(v => vendors.add(v.trim()));
+      }
+      if (h.received_vendor_name) vendors.add(h.received_vendor_name);
+      if (h.enquiry_vendor_name) {
+        h.enquiry_vendor_name.split(',').forEach(v => vendors.add(v.trim()));
+      }
+    });
+    
+    return {
+      materials: Array.from(materials).sort(),
+      activities: Array.from(activities).sort(),
+      formTypes: Array.from(formTypes).sort(),
+      sources: Array.from(sources).sort(),
+      orders: Array.from(orders).sort(),
+      parts: Array.from(parts).sort(),
+      users: Array.from(users).sort(),
+      vendors: Array.from(vendors).sort(),
+    };
+  }, [allHistory]);
 
   // Generate year options (last 5 years)
   const currentYear = new Date().getFullYear();
@@ -414,63 +502,37 @@ const RawMaterialHistoryTab = ({ materials }) => {
   }
 
   return (
-    <div style={{ padding: '16px', height: '100%', minHeight: 'calc(100vh - 120px)' }}>
-      <Row gutter={16} style={{ height: '100%' }}>
-        {/* Left Sidebar - Materials Only */}
-        <Col xs={24} sm={24} md={4} lg={4} xl={4} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* Materials List */}
-          <Card
-            title={
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>
-                  <AppstoreOutlined /> Materials
-                </span>
-                <Button size="small" onClick={handleResetFilters}>
-                  Reset
-                </Button>
-              </div>
-            }
-            size="small"
-            style={{ height: '100%' }}
-            styles={{ body: { padding: 0, height: '100%', overflowY: 'auto' } }}
-          >
-            <div style={{ padding: '8px' }}>
-              {materials.length === 0 ? (
-                <Empty description="No materials" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : (
-                materials.map((material) => (
-                  <div
-                    key={material.id}
-                    style={{
-                      cursor: 'pointer',
-                      backgroundColor: selectedMaterial?.id === material.id ? '#e6f7ff' : 'transparent',
-                      borderRadius: '4px',
-                      padding: '6px 8px',
-                      marginBottom: '4px',
-                      border: selectedMaterial?.id === material.id ? '1px solid #1890ff' : '1px solid transparent'
-                    }}
-                    onClick={() => handleMaterialSelect(material)}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Avatar size="small" icon={<StockOutlined />} />
-                      <div>
-                        <Text strong style={{ fontSize: '11px', display: 'block' }}>{material.material_name}</Text>
-                        <Text type="secondary" style={{ fontSize: '10px' }}>{material.material_code}</Text>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </Col>
-
-        {/* Main Content - History */}
-        <Col xs={24} sm={24} md={20} lg={20} xl={20} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* Header with Filters */}
-          <Card size="small" style={{ marginBottom: 16, flex: '0 0 auto' }} styles={{ body: { padding: '12px' } }}>
-            <Space size="small" wrap>
-              <Text strong style={{ fontSize: '12px' }}>Date Range:</Text>
+    <div style={{ padding: '16px', height: '100%', minHeight: 'calc(100vh - 120px)' }} className="raw-material-history-container">
+      <style>{`
+        .raw-material-history-container * {
+          border-radius: 0 !important;
+        }
+        .raw-material-history-container .ant-select-selector,
+        .raw-material-history-container .ant-picker,
+        .raw-material-history-container .ant-btn,
+        .raw-material-history-container .ant-card,
+        .raw-material-history-container .ant-tag,
+        .raw-material-history-container .ant-select-dropdown,
+        .raw-material-history-container .ant-picker-dropdown,
+        .raw-material-history-container .ant-dropdown,
+        .raw-material-history-container .ant-popover,
+        .raw-material-history-container .ant-modal,
+        .raw-material-history-container .ant-message,
+        .raw-material-history-container .ant-notification {
+          border-radius: 0 !important;
+        }
+        .raw-material-history-container .ant-select-dropdown .ant-select-item-option-selected {
+          border-radius: 0 !important;
+        }
+        .raw-material-history-container td, 
+        .raw-material-history-container th {
+          border-radius: 0 !important;
+        }
+      `}</style>
+      {/* Header with Filters */}
+      <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: '12px' } }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto' }}>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Date Range:</Text>
               <RangePicker
                 size="small"
                 style={{ width: 200 }}
@@ -484,61 +546,101 @@ const RawMaterialHistoryTab = ({ materials }) => {
                 }}
               />
 
-              <Text strong style={{ fontSize: '12px' }}>Activity:</Text>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Material:</Text>
               <Select
                 size="small"
-                style={{ width: 120 }}
-                placeholder="Select activity"
+                style={{ width: 150 }}
+                placeholder="Materials"
+                value={filterMaterial}
+                onChange={setFilterMaterial}
+                allowClear
+                showSearch
+                mode="multiple"
+                maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+                optionFilterProp="children"
+                options={(() => {
+                  const materials = new Set();
+                  allHistory.forEach(h => {
+                    if (h.material_name) materials.add(h.material_name);
+                    if (h.raw_material_name) materials.add(h.raw_material_name);
+                    if (h.material?.material_name) materials.add(h.material.material_name);
+                  });
+                  return Array.from(materials).sort().map(m => ({ label: m, value: m }));
+                })()}
+              />
+
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Activity:</Text>
+              <Select
+                size="small"
+                style={{ width: 150 }}
+                placeholder="Select activities"
                 value={activityType}
                 onChange={setActivityType}
                 allowClear
+                mode="multiple"
+                maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
                 options={[
+                  { label: 'Material Created', value: 'material_created' },
+                  { label: 'Material Updated', value: 'material_updated' },
+                  { label: 'Material Deleted', value: 'material_deleted' },
                   { label: 'Stock Created', value: 'stock_created' },
-                  { label: 'Material Linked', value: 'material_linked' },
-                  { label: 'Order Status Changed', value: 'order_status_changed' },
                   { label: 'Stock Updated', value: 'stock_updated' },
+                  { label: 'Stock Deleted', value: 'stock_deleted' },
+                  { label: 'Stock Status Changed', value: 'stock_status_changed' },
+                  { label: 'Unit Created', value: 'unit_created' },
+                  { label: 'Unit Deleted', value: 'unit_deleted' },
+                  { label: 'Unit Status Changed', value: 'unit_status_changed' },
+                  { label: 'Material Linked', value: 'material_linked' },
                   { label: 'Material Unlinked', value: 'material_unlinked' },
+                  { label: 'Order Status Changed', value: 'order_status_changed' },
+                  { label: 'Vendor Changed', value: 'vendor_changed' },
                 ]}
               />
 
-              <Text strong style={{ fontSize: '12px' }}>Source:</Text>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Source:</Text>
               <Select
                 size="small"
-                style={{ width: 80 }}
+                style={{ width: 100 }}
                 placeholder="Source"
                 value={sourceType}
                 onChange={setSourceType}
                 allowClear
+                mode="multiple"
+                maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
                 options={[
                   { label: 'General', value: 'general' },
                   { label: 'Order', value: 'order' },
                 ]}
               />
 
-              <Text strong style={{ fontSize: '12px' }}>Order:</Text>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Order:</Text>
               <Select
                 size="small"
-                style={{ width: 120 }}
-                placeholder="Order Number"
+                style={{ width: 150 }}
+                placeholder="Order Numbers"
                 value={filterOrderNumber}
                 onChange={setFilterOrderNumber}
                 allowClear
                 showSearch
+                mode="multiple"
+                maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
                 optionFilterProp="children"
                 options={[
                   ...new Set(allHistory.filter(h => h.order_number).map(h => h.order_number))
                 ].map(order => ({ label: order, value: order }))}
               />
 
-              <Text strong style={{ fontSize: '12px' }}>Vendor:</Text>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Vendor:</Text>
               <Select
                 size="small"
-                style={{ width: 120 }}
-                placeholder="Vendor Name"
+                style={{ width: 150 }}
+                placeholder="Vendor Names"
                 value={filterVendorName}
                 onChange={setFilterVendorName}
                 allowClear
                 showSearch
+                mode="multiple"
+                maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
                 optionFilterProp="children"
                 options={(() => {
                   const vendorNames = new Set();
@@ -557,45 +659,113 @@ const RawMaterialHistoryTab = ({ materials }) => {
                 })()}
               />
 
-              <RawMaterialHistoryDownload historyData={history} selectedMaterial={selectedMaterial} />
-            </Space>
+              <Button size="small" onClick={handleResetFilters}>
+                Reset
+              </Button>
 
-            {/* Selected Material Info */}
-            {selectedMaterial && (
-              <div style={{ marginTop: 8 }}>
-                <Tag color="blue" icon={<StockOutlined />}>
-                  Filtering: {selectedMaterial.material_name} ({selectedMaterial.material_code})
-                </Tag>
-              </div>
-            )}
+              <RawMaterialHistoryDownload historyData={history} />
+            </div>
           </Card>
 
           {/* History Table */}
-          <Card style={{ flex: '1 1 auto', height: '100%' }} styles={{ body: { padding: 0, height: '100%', overflow: 'hidden' } }}>
-            <Table
-              columns={columns}
-              dataSource={history}
-              loading={loading}
-              rowKey="id"
-              scroll={{ x: 1000, y: 'calc(100vh - 400px)' }}
-              size="small"
-              pagination={{
-                ...pagination,
-                total: history.length,
-                showSizeChanger: true,
-                showTotal: (total) => `Total ${total} records`,
-                pageSizeOptions: [10, 20, 50, 100],
-                onChange: (page, pageSize) => {
-                  setPagination({ current: page, pageSize });
-                },
-                onShowSizeChange: (current, size) => {
-                  setPagination({ current: 1, pageSize: size });
-                },
-              }}
-            />
+          <Card style={{ height: 'calc(100vh - 200px)' }} styles={{ body: { padding: 0, height: '100%', overflow: 'hidden' } }}>
+            {loading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <Spin size="large" />
+              </div>
+            ) : groupedHistory.length === 0 ? (
+              <Empty description="No history found" style={{ marginTop: 40 }} />
+            ) : (
+              <div style={{ overflowX: 'auto', overflowY: 'auto', height: '100%' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 1200, border }}>
+                  <thead>
+                    <tr>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Raw Material" options={colFilterOptions.materials} value={colMaterial} onChange={setColMaterial} /></th>
+                      <th rowSpan={2} style={thStyle}>Date & Time</th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Activity" options={colFilterOptions.activities} value={colActivity} onChange={setColActivity} /></th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Form Type" options={colFilterOptions.formTypes} value={colFormType} onChange={setColFormType} /></th>
+                      <th rowSpan={2} style={thStyle}>Dimensions</th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Source" options={colFilterOptions.sources} value={colSource} onChange={setColSource} /></th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Order" options={colFilterOptions.orders} value={colOrder} onChange={setColOrder} /></th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Part" options={colFilterOptions.parts} value={colPart} onChange={setColPart} /></th>
+                      <th rowSpan={2} style={thStyle}>Length Used</th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="User" options={colFilterOptions.users} value={colUser} onChange={setColUser} /></th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Vendor" options={colFilterOptions.vendors} value={colVendor} onChange={setColVendor} /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupedHistory.map((group, groupIdx) => (
+                      group.entries.map((entry, entryIdx) => (
+                        <tr key={entry.id} style={{ background: (groupIdx + entryIdx) % 2 === 0 ? '#fff' : '#fafafa' }}>
+                          {entryIdx === 0 && (
+                            <td rowSpan={group.rowCount} style={{ ...tdStyle, fontWeight: 600, textAlign: 'left', background: '#f5f5ff' }}>
+                              <div>
+                                <Text strong>{group.materialName}</Text>
+                                {group.materialCode && (
+                                  <div>
+                                    <Text type="secondary" style={{ fontSize: '10px' }}>{group.materialCode}</Text>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                          <td style={tdStyle}>{dayjs(entry.timestamp).format('YYYY-MM-DD HH:mm')}</td>
+                          <td style={tdStyle}>
+                            <Tag color={getActivityTypeColor(entry.activity_type)} icon={entry.activity_type === 'stock_created' ? <StockOutlined /> : entry.activity_type === 'material_linked' ? <LinkOutlined /> : null}>
+                              {getActivityTypeLabel(entry.activity_type)}
+                            </Tag>
+                            {entry.activity_type === 'order_status_changed' && entry.description && (
+                              <div style={{ fontSize: '10px', color: '#666', marginTop: '2px', fontWeight: 'bold' }}>
+                                {entry.description}
+                              </div>
+                            )}
+                          </td>
+                          <td style={tdStyle}>{entry.form_type || '-'}</td>
+                          <td style={tdStyle}>{entry.dimensions || '-'}</td>
+                          <td style={tdStyle}>{entry.source_type ? entry.source_type.toUpperCase() : '-'}</td>
+                          <td style={tdStyle}>{entry.order_number || '-'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'left' }}>
+                            {entry.part_name ? (
+                              <div>
+                                <Text strong style={{ fontSize: '11px' }}>{entry.part_name}</Text>
+                                <br />
+                                <Text type="secondary" style={{ fontSize: '10px' }}>{entry.part_number}</Text>
+                              </div>
+                            ) : '-'}
+                          </td>
+                          <td style={tdStyle}>
+                            {entry.activity_type === 'material_linked' && entry.used_length ? `${entry.used_length}mm` : entry.quantity ? `${entry.quantity} units` : '-'}
+                          </td>
+                          <td style={tdStyle}>{entry.user_name || '-'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'left', fontSize: '10px' }}>
+                            {entry.activity_type === 'order_status_changed' ? (
+                              entry.received_vendor_name ? (
+                                <div>
+                                  <div>
+                                    <Text type="secondary">Enquiry: </Text>
+                                    <Text>{entry.enquiry_vendor_name || '-'} ({entry.enquiry_vendor_count || 0})</Text>
+                                  </div>
+                                  <div style={{ marginTop: '2px' }}>
+                                    <Text type="secondary">From: </Text>
+                                    <Text strong style={{ color: '#52c41a' }}>{entry.received_vendor_name}</Text>
+                                  </div>
+                                </div>
+                              ) : entry.enquiry_vendor_name ? (
+                                <div>
+                                  <Text type="secondary">Enquiry: </Text>
+                                  <Text>{entry.enquiry_vendor_name} ({entry.enquiry_vendor_count})</Text>
+                                </div>
+                              ) : '-'
+                            ) : entry.vendor_name || '-'}
+                          </td>
+                        </tr>
+                      ))
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
-        </Col>
-      </Row>
     </div>
   );
 };

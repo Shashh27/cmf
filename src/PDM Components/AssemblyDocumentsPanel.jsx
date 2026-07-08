@@ -690,6 +690,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         dataSource={latestDocs}
         rowKey="id"
         size="small"
+        bordered
         pagination={false}
         columns={columns}
         className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"

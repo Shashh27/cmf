@@ -265,34 +265,77 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
 
   return (
     <div>
-      {/* Recommended Stocks - only show if not already assigned and recommendations have available units */}
-      {!linkedStock && recommendations && recommendations.length > 0 && generalStock.some(stock => 
-        recommendations.some(rec => rec.stock_id === stock.id) && 
-        (stockUnits[stock.id] || []).some(unit => unit.status !== 'exhausted')
-      ) ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
-          <Text style={{ color: '#1890ff', fontSize: isMobile ? 9 : 11, fontWeight: 500 }}>
+      {/* Stock Assignment Status */}
+      {linkedStock ? (
+        <div style={{ 
+          marginBottom: 8, 
+          padding: '4px 8px', 
+          backgroundColor: '#f6ffed',
+          border: '1px solid #b7eb8f',
+          borderRadius: '2px',
+          fontSize: isMobile ? 9 : 10,
+          fontWeight: 600,
+          color: '#52c41a',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4
+        }}>
+          <span style={{ fontSize: isMobile ? 10 : 12 }}>✓</span>
+          {isLinkedToOrderStock ? (linkedStock.orderStatus || 'Material procured') : 'Assigned to general stock'}
+        </div>
+      ) : isSaved && materialExists ? (
+        <div style={{ 
+          marginBottom: 8, 
+          padding: '4px 8px', 
+          backgroundColor: '#fff2f0',
+          border: '1px solid #ffccc7',
+          borderRadius: '2px',
+          fontSize: isMobile ? 9 : 10,
+          fontWeight: 600,
+          color: '#ff4d4f',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4
+        }}>
+          <span style={{ fontSize: isMobile ? 10 : 12 }}>✗</span>
+          Not assigned to stock
+        </div>
+      ) : !isSaved ? (
+        <div style={{ 
+          marginBottom: 8, 
+          padding: '4px 8px', 
+          backgroundColor: '#f5f5f5',
+          border: '1px solid #d9d9d9',
+          borderRadius: '2px',
+          fontSize: isMobile ? 9 : 10,
+          fontWeight: 600,
+          color: '#999',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4
+        }}>
+          <span style={{ fontSize: isMobile ? 10 : 12 }}>○</span>
+          Save to see stock options
+        </div>
+      ) : null}
+
+      {/* Recommended Stocks - show if not already assigned and recommendations exist with available units */}
+      {!linkedStock && recommendations && recommendations.length > 0 && recommendations.some(rec => rec.status === 'available') && (
+        <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
+          <Text style={{ color: '#1890ff', fontSize: isMobile ? 9 : 10, fontWeight: 600, display: 'block', marginBottom: 2 }}>
             Recommended Stocks:
           </Text>
-          {recommendations.slice(0, 3).map((rec, idx) => (
+          {recommendations.filter(rec => rec.status === 'available').slice(0, 3).map((rec, idx) => (
             <div key={idx} style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
               {rec.stock_size} (Score: {Math.round(rec.match_score * 100)}%)
             </div>
           ))}
-          {recommendations.length > 3 && (
+          {recommendations.filter(rec => rec.status === 'available').length > 3 && (
             <Text style={{ fontSize: isMobile ? 8 : 9, color: '#999' }}>
-              +{recommendations.length - 3} more
+              +{recommendations.filter(rec => rec.status === 'available').length - 3} more
             </Text>
           )}
         </div>
-      ) : linkedStock ? (
-        <Text style={{ color: '#52c41a', fontSize: isMobile ? 9 : 11, fontWeight: 500 }}>
-          {isLinkedToOrderStock ? (linkedStock.orderStatus || 'Material procured') : 'Assigned to general stock'}
-        </Text>
-      ) : isSaved ? (
-        <Text style={{ color: '#ff4d4f', fontSize: isMobile ? 9 : 11, fontWeight: 500 }}>No stock available</Text>
-      ) : (
-        <Text style={{ color: '#ccc', fontSize: isMobile ? 9 : 11 }}>Save to see recommendations</Text>
       )}
 
       {/* Link General Stock Button */}
@@ -306,7 +349,8 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           fontSize: isMobile ? 8 : 10, 
           padding: isMobile ? '1px 4px' : '2px 8px',
           height: isMobile ? '20px' : '24px',
-          marginTop: 4
+          marginTop: 4,
+          width: '100%'
         }}
       >
         Assign General Stock
@@ -323,7 +367,8 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           fontSize: isMobile ? 8 : 10, 
           padding: isMobile ? '1px 4px' : '2px 8px',
           height: isMobile ? '20px' : '24px',
-          marginTop: 4
+          marginTop: 4,
+          width: '100%'
         }}
       >
         Procure Raw Material
@@ -358,11 +403,8 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           <Text strong>Planned Length (Required):</Text> <Text>{plannedLength ? `${plannedLength} mm` : 'Not planned'}</Text>
         </div>
         
-        {/* Recommended Stocks Section - only show if not already assigned and recommendations have available units */}
-        {!linkedStock && recommendations && recommendations.length > 0 && generalStock.some(stock => 
-          recommendations.some(rec => rec.stock_id === stock.id) && 
-          (stockUnits[stock.id] || []).some(unit => unit.status !== 'exhausted')
-        ) && (
+        {/* Recommended Stocks Section - show if not already assigned and recommendations exist with available units */}
+        {!linkedStock && recommendations && recommendations.length > 0 && recommendations.some(rec => rec.status === 'available') && (
           <div style={{ marginBottom: 24, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
             <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks :</Text>
             <div style={{ marginTop: 8, maxHeight: '300px', overflowY: 'auto' }}>
@@ -375,7 +417,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                   </tr>
                 </thead>
                 <tbody>
-                  {recommendations.map((rec, idx) => (
+                  {recommendations.filter(rec => rec.status === 'available').map((rec, idx) => (
                     <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? 'white' : '#f9f9f9' }}>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_id}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_size}</td>

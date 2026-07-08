@@ -41,12 +41,12 @@ const OutSourceDates = ({ form, index, itemsWatch }) => {
 const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCreated, initialOperations = [], existingOperations = [] }) => {
   const [form] = Form.useForm();
   const [loading, setLoading]           = useState(false);
-  const [workCenters, setWorkCenters]   = useState([]);
+  const [workcenters, setworkcenters]   = useState([]);
   const [allMachines, setAllMachines]   = useState([]);
   const [partTypes, setPartTypes]       = useState([]);
   const [vendors, setVendors]         = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
-  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [workcentersLoading, setworkcentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [vendorsLoading, setVendorsLoading]         = useState(false);
   const [existingOperationNames, setExistingOperationNames] = useState([]);
@@ -91,7 +91,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   };
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
-  const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
+  const fetchworkcenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setworkcenters, setworkcentersLoading, workcenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,     setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
@@ -331,11 +331,11 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const actionLabel = actionType ? actionType.charAt(0).toUpperCase() + actionType.slice(1) + 's' : 'Items';
 
   return (
-    <Modal title={`Create ${actionLabel}`} open={open} onCancel={onCancel} footer={null} width="95%" style={{ maxWidth: 1000 }} destroyOnHidden centered>
-      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2563eb!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
+    <Modal className="pdm-container" title={`Create ${actionLabel}`} open={open} onCancel={onCancel} footer={null} width="95%" style={{ maxWidth: 1000 }} destroyOnHidden centered>
+      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2E8B57!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
 
       <div style={{ marginBottom: 16 }}>
-        <Badge count={`For Part: ${selectedPart?.part_name}`} style={{ backgroundColor: '#e6f7ff', color: '#1890ff', padding: '0 12px', borderRadius: 4, border: '1px solid #91d5ff' }} />
+        <Badge count={`For Part: ${selectedPart?.part_name}`} style={{ backgroundColor: '#e6f7ff', color: '#1890ff', padding: '0 12px', borderRadius: 0, border: '1px solid #91d5ff' }} />
       </div>
 
       <Form form={form} layout="vertical" onFinish={handleFinish}>
@@ -347,8 +347,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                   <Card key={key} size="small"
                     title={`${actionType === 'operation' ? 'Operation' : 'Document'} ${index + 1}`}
                     extra={fields.length > 1 ? <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} /> : null}
-                    style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
-                    styles={{ header: { backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0', borderRadius: '8px 8px 0 0' } }}
+                    style={{ marginBottom: 16, borderRadius: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
+                    styles={{ header: { backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0', borderRadius: 0 } }}
                   >
                     {actionType === 'operation' && (
                       <>
@@ -505,10 +505,10 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                               <>
                                 <Row gutter={[12, 12]}>
                                   <Col xs={24} sm={12} md={8} lg={6}>
-                                    <Form.Item {...restField} name={[name, 'workcenter_id']} label="Workcenter">
-                                      <Select placeholder="Select WC" allowClear loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }}
+                                    <Form.Item {...restField} name={[name, 'workcenter_id']} label="workcenter">
+                                      <Select placeholder="Select WC" allowClear loading={workcentersLoading} onOpenChange={o => { if (o) fetchworkcenters(); }}
                                         onChange={() => { const items = form.getFieldValue('items'); if (items?.[index]) { items[index].machine_id = undefined; form.setFieldsValue({ items }); } }}>
-                                        {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
+                                        {workcenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
                                       </Select>
                                     </Form.Item>
                                   </Col>

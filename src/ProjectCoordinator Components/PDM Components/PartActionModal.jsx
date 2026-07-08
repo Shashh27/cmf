@@ -235,11 +235,11 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
 const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCreated, initialOperations = [], existingOperations = [] }) => {
   const [form] = Form.useForm();
   const [loading, setLoading]           = useState(false);
-  const [workCenters, setWorkCenters]   = useState([]);
+  const [workcenters, setworkcenters]   = useState([]);
   const [allMachines, setAllMachines]   = useState([]);
   const [partTypes, setPartTypes]       = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
-  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [workcentersLoading, setworkcentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [vendorsLoading, setVendorsLoading]         = useState(false);
   const [vendors, setVendors]                       = useState([]);
@@ -257,7 +257,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     return (index + 1) * 10;
   };
 
-  const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
+  const fetchworkcenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setworkcenters, setworkcentersLoading, workcenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,     setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`, setVendors, setVendorsLoading, vendors.length > 0);
@@ -579,10 +579,10 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                               <>
                                 <Row gutter={[12, 12]}>
                                   <Col xs={24} sm={12} md={8} lg={6}>
-                                    <Form.Item {...restField} name={[name, 'workcenter_id']} label="Workcenter">
-                                      <Select placeholder="Select WC" loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }}
+                                    <Form.Item {...restField} name={[name, 'workcenter_id']} label="workcenter">
+                                      <Select placeholder="Select WC" loading={workcentersLoading} onOpenChange={o => { if (o) fetchworkcenters(); }}
                                         onChange={() => { const items = form.getFieldValue('items'); if (items?.[index]) { items[index].machine_id = undefined; form.setFieldsValue({ items }); } }}>
-                                        {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
+                                        {workcenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
                                       </Select>
                                     </Form.Item>
                                   </Col>

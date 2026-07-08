@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
-import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined, DownloadOutlined } from "@ant-design/icons";
+import { PlusOutlined, PartitionOutlined, ToolOutlined, EditOutlined, DeleteOutlined, DeleteRowOutlined, CaretDownOutlined, CaretRightOutlined, SearchOutlined, DownloadOutlined, AppstoreOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
+import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography, Dropdown } from "antd";
+import "./pdm-theme.css";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
@@ -34,42 +35,113 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [isDeleting, setIsDeleting] = useState(false);
   const hasFetchedData = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
 
   const getTypeIcon = (type, level = 0) => {
     const normalized = (type || "").toString().toLowerCase();
-    // Product: purple (deployment/root)
+    
+    // CAD-like 3D icons
     if (normalized === "product") {
-      return <DeploymentUnitOutlined className="text-purple-600" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-product">
+          <path d="M12 2L2 7V17L12 22L22 17V7L12 2Z" fill="currentColor" opacity="0.3"/>
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor"/>
+          <path d="M2 7L12 12V22L2 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M22 7L12 12V22L22 17V7Z" fill="currentColor" opacity="0.5"/>
+        </svg>
+      );
     }
-    // Top-level assembly (direct under product): blue – cluster of units
+    
     if (normalized === "assembly" && level <= 1) {
-      return <ClusterOutlined className="text-blue-500" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-assembly">
+          <path d="M8 4L2 7V17L8 20L14 17V7L8 4Z" fill="currentColor" opacity="0.3"/>
+          <path d="M8 4L2 7L8 10L14 7L8 4Z" fill="currentColor"/>
+          <path d="M2 7L8 10V20L2 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M14 7L8 10V20L14 17V7Z" fill="currentColor" opacity="0.5"/>
+          <path d="M16 8L22 11V21L16 24L10 21V11L16 8Z" fill="currentColor" opacity="0.3"/>
+          <path d="M16 8L22 11L16 14L10 11L16 8Z" fill="currentColor"/>
+          <path d="M10 11L16 14V24L10 21V11Z" fill="currentColor" opacity="0.7"/>
+          <path d="M22 11L16 14V24L22 21V11Z" fill="currentColor" opacity="0.5"/>
+        </svg>
+      );
     }
-    // Subassembly (nested): indigo – single block to show it's one level down
+    
     if (normalized === "assembly" && level > 1) {
-      return <BlockOutlined className="text-indigo-600" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-subassembly">
+          <path d="M6 3L1 6V14L6 17L11 14V6L6 3Z" fill="currentColor" opacity="0.3"/>
+          <path d="M6 3L1 6L6 9L11 6L6 3Z" fill="currentColor"/>
+          <path d="M1 6L6 9V17L1 14V6Z" fill="currentColor" opacity="0.7"/>
+          <path d="M11 6L6 9V17L11 14V6Z" fill="currentColor" opacity="0.5"/>
+          <path d="M13 7L18 10V18L13 21L8 18V10L13 7Z" fill="currentColor" opacity="0.3"/>
+          <path d="M13 7L18 10L13 13L8 10L13 7Z" fill="currentColor"/>
+          <path d="M8 10L13 13V21L8 18V10Z" fill="currentColor" opacity="0.7"/>
+          <path d="M18 10L13 13V21L18 18V10Z" fill="currentColor" opacity="0.5"/>
+        </svg>
+      );
     }
+    
     const inHouseTypes = ["make", "in-house", "in house", "inhouse"];
     const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
-    // In-house part: emerald – component/box (made here)
+    
     if (inHouseTypes.includes(normalized)) {
-      return <CodeSandboxOutlined className="text-emerald-600" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-inhouse">
+          <path d="M12 3L4 7V17L12 21L20 17V7L12 3Z" fill="currentColor" opacity="0.3"/>
+          <path d="M12 3L4 7L12 11L20 7L12 3Z" fill="currentColor"/>
+          <path d="M4 7L12 11V21L4 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M20 7L12 11V21L20 17V7Z" fill="currentColor" opacity="0.5"/>
+        </svg>
+      );
     }
-    // Outsource part: amber – external/supplied
+    
     if (outSourceTypes.includes(normalized)) {
-      return <CodepenOutlined className="text-amber-600" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-outsource">
+          <path d="M12 3L4 7V17L12 21L20 17V7L12 3Z" fill="currentColor" opacity="0.3"/>
+          <path d="M12 3L4 7L12 11L20 7L12 3Z" fill="currentColor"/>
+          <path d="M4 7L12 11V21L4 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M20 7L12 11V21L20 17V7Z" fill="currentColor" opacity="0.5"/>
+          <path d="M10 8L14 10V16L10 18L6 16V10L10 8Z" fill="currentColor" opacity="0.8"/>
+        </svg>
+      );
     }
-    // Standard part: gray – same icon as outsource but gray
+    
     if (normalized === "standard") {
-      return <CodepenOutlined className="text-gray-500" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-standard">
+          <path d="M12 3L4 7V17L12 21L20 17V7L12 3Z" fill="currentColor" opacity="0.3"/>
+          <path d="M12 3L4 7L12 11L20 7L12 3Z" fill="currentColor"/>
+          <path d="M4 7L12 11V21L4 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M20 7L12 11V21L20 17V7Z" fill="currentColor" opacity="0.5"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.9"/>
+        </svg>
+      );
     }
+    
     if (normalized === "part") {
-      return <FileTextOutlined className="text-gray-500" />;
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-standard">
+          <path d="M12 3L4 7V17L12 21L20 17V7L12 3Z" fill="currentColor" opacity="0.3"/>
+          <path d="M12 3L4 7L12 11L20 7L12 3Z" fill="currentColor"/>
+          <path d="M4 7L12 11V21L4 17V7Z" fill="currentColor" opacity="0.7"/>
+          <path d="M20 7L12 11V21L20 17V7Z" fill="currentColor" opacity="0.5"/>
+        </svg>
+      );
     }
-    return <FileTextOutlined className="text-gray-500" />;
+    
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="pdm-cad-icon pdm-cad-icon-standard">
+        <path d="M12 3L4 7V17L12 21L20 17V7L12 3Z" fill="currentColor" opacity="0.3"/>
+        <path d="M12 3L4 7L12 11L20 7L12 3Z" fill="currentColor"/>
+        <path d="M4 7L12 11V21L4 17V7Z" fill="currentColor" opacity="0.7"/>
+        <path d="M20 7L12 11V21L20 17V7Z" fill="currentColor" opacity="0.5"/>
+      </svg>
+    );
   };
 
   const getTypeColor = (type) => {
@@ -77,12 +149,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
     const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
 
-    if (normalized === "product") return 'purple';
-    if (normalized === "assembly") return 'blue';
-    if (inHouseTypes.includes(normalized)) return 'green';
-    if (outSourceTypes.includes(normalized)) return 'orange';
-    if (normalized === "standard") return 'gray';
-    return 'default';
+    if (normalized === "product") return '#9333EA';
+    if (normalized === "assembly") return '#2563EB';
+    if (inHouseTypes.includes(normalized)) return '#16A34A';
+    if (outSourceTypes.includes(normalized)) return '#F59E0B';
+    if (normalized === "standard") return '#6B7280';
+    return '#6B7280';
   };
 
   const getCurrentUserId = () => {
@@ -371,6 +443,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const handleDelete = async (item, type) => {
+    if (isDeleting) return;
     const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}/soft-delete`, part: `/parts/${item.id}/soft-delete` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
     
@@ -380,7 +453,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       okText: 'Yes',
       okType: 'danger',
       cancelText: 'No',
+      okButtonProps: { id: `delete-ok-${type}-${item.id}` },
       onOk: async () => {
+        setIsDeleting(true);
         try {
           if (type === 'part') {
             // Use soft delete for parts (move to recycle bin)
@@ -416,6 +491,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             error?.message ||
             `Error deleting ${type} "${names[type]}".`;
           message.error(detail);
+        } finally {
+          setIsDeleting(false);
         }
       }
     });
@@ -428,6 +505,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       okText: 'Yes, Delete',
       okType: 'danger',
       cancelText: 'No',
+      okButtonProps: { id: `delete-all-parts-${product.id}` },
       onOk: async () => {
         try {
           const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-product/${product.id}`);
@@ -639,87 +717,93 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       (productHierarchy.assemblies && productHierarchy.assemblies.length > 0)
     );
     const isInRecycleBin = (type === 'part' || type === 'assembly') && item.recycle_bin === true;
-    const buttons = {
-      part: [
-        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit", disabled: isInRecycleBin },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete", disabled: isInRecycleBin }
-      ],
-      assembly: [
-        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly", disabled: isInRecycleBin },
-        { icon: ToolOutlined, onClick: () => {
-            const product = products.find(p => p.id === item.product_id);
-            if (product) {
-              handleCreatePart(product, item);
-            }
-          }, title: "Add Part", disabled: isInRecycleBin },
-        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit", disabled: isInRecycleBin },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete", disabled: isInRecycleBin }
-      ],
-      product: [
-        { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
-        { icon: ToolOutlined, onClick: () => handleCreatePart(item), title: "Add Part" },
-        { icon: EditOutlined, onClick: () => handleEditProduct(item), title: "Edit" },
-        { 
-          icon: DeleteOutlined, 
-          onClick: hasParts ? () => handleDeleteAllParts(item) : () => handleDelete(item, 'product'), 
-          danger: true, 
-          title: hasParts ? "Delete All Parts" : "Delete" 
+
+    // Define dropdown menu items based on type
+    const getMenuItems = () => {
+      if (type === 'part') {
+        return [
+          { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditPart(item), disabled: isInRecycleBin },
+          { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'part'), disabled: isInRecycleBin, danger: true }
+        ];
+      }
+      
+      if (type === 'assembly') {
+        const isSubAssembly = item.parent_id !== null;
+        if (isSubAssembly) {
+          // Sub-Assembly: Add Part, Edit, Delete
+          return [
+            { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => {
+              const product = products.find(p => p.id === item.product_id);
+              if (product) handleCreatePart(product, item);
+            }, disabled: isInRecycleBin },
+            { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditAssembly(item), disabled: isInRecycleBin },
+            { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'assembly'), disabled: isInRecycleBin, danger: true }
+          ];
+        } else {
+          // Assembly: Add Sub-Assembly, Add Part, Edit, Delete
+          return [
+            { key: 'add-sub-assembly', label: 'Add Sub-Assembly', icon: <PartitionOutlined />, onClick: () => handleCreateSubAssembly(item), disabled: isInRecycleBin },
+            { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => {
+              const product = products.find(p => p.id === item.product_id);
+              if (product) handleCreatePart(product, item);
+            }, disabled: isInRecycleBin },
+            { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditAssembly(item), disabled: isInRecycleBin },
+            { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'assembly'), disabled: isInRecycleBin, danger: true }
+          ];
         }
-      ]
+      }
+      
+      if (type === 'product') {
+        return [
+          { key: 'add-assembly', label: 'Add Assembly', icon: <PartitionOutlined />, onClick: () => handleCreateAssembly(item) },
+          { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => handleCreatePart(item) },
+          { key: 'edit', label: 'Edit Product', icon: <EditOutlined />, onClick: () => handleEditProduct(item) },
+          { key: 'delete', label: hasParts ? 'Delete All Parts' : 'Delete', icon: <DeleteOutlined />, onClick: hasParts ? () => handleDeleteAllParts(item) : () => handleDelete(item, 'product'), danger: true }
+        ];
+      }
+      
+      return [];
     };
+
+    const menuItems = getMenuItems();
+
     return (
-      <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
-        <div className="flex-shrink-0 flex gap-1 justify-start lg:w-[180px]">
-          {tagName && (
-            <span className="hidden lg:inline-block">
-              <Tag color={tagColor} className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+      <div className="pdm-action-buttons flex items-center gap-0" style={{ width: 180, minWidth: 180, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+        {/* Col 1: type tag — fixed 80px, truncates if needed */}
+        <div style={{ width: 80, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          {isInRecycleBin ? (
+            <Tooltip title="RECYCLE BIN">
+              <UndoOutlined style={{ color: '#dc2626', fontSize: 14 }} />
+            </Tooltip>
+          ) : tagName ? (
+            <Tooltip title={tagName.toUpperCase()}>
+              <Tag color={tagColor} style={{ fontSize: 9, padding: '0 3px', margin: 0, lineHeight: '14px', whiteSpace: 'nowrap', maxWidth: 78, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>
                 {tagName.toUpperCase()}
               </Tag>
-            </span>
-          )}
-          {isInRecycleBin && type === 'part' && (
-            <span className="hidden lg:inline-block">
-              <Tag color="red" className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
-                RECYCLE BIN
-              </Tag>
-            </span>
-          )}
-          {type === 'part' ? (
-            <>
-              {buttons.part.map(({ icon: Icon, onClick, danger, title, color, disabled }, idx) => (
-                <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-                  <Button 
-                    type="text" 
-                    size="small" 
-                    danger={danger}
-                    disabled={disabled}
-                    onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }} 
-                    icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
-                    style={{ padding: 4, minWidth: 24, height: 24 }}
-                  />
-                </Tooltip>
-              ))}
-              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
-            </>
-          ) : (
-          buttons[type].map(({ icon: Icon, onClick, danger, title, color, disabled }, idx) => (
-            <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-              <Button 
-                type="text" 
-                size="small" 
-                danger={danger}
-                disabled={disabled}
-                onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }} 
-                icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
-                style={{ padding: 4, minWidth: 24, height: 24 }}
-              />
             </Tooltip>
-          ))
-          )}
-          {type === 'product' && (
-            <ProductBOMPdfDownload product={item} bomExport={bomExport} />
-          )}
+          ) : null}
         </div>
+        {/* Col 2: download for product (centered), raw material status for part, empty for assembly — fixed 76px */}
+        <div style={{ width: 76, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {type === 'product' && <ProductBOMPdfDownload product={item} bomExport={bomExport} />}
+          {type === 'part' && getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
+        </div>
+        {menuItems.length > 0 && (
+          <Dropdown
+            key={`dropdown-${type}-${item.id}`}
+            menu={{ items: menuItems }}
+            trigger={['click']}
+            disabled={isInRecycleBin}
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              onClick={(e) => e.stopPropagation()}
+              style={{ padding: 4, minWidth: 24, height: 24 }}
+            />
+          </Dropdown>
+        )}
       </div>
     );
   };
@@ -727,28 +811,28 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const getRawMaterialStatusTag = (status, stockStatus, stockDetails, partDetail, rawMaterialId) => {
     // If part is WITHOUT_RAW_MATERIAL, don't show raw material status
     if (partDetail === 'WITHOUT_RAW_MATERIAL' || !rawMaterialId) {
-      return <Tag className="m-0 text-[10px] shrink-0" color="default">N/A</Tag>;
+      return <Tooltip title="No Raw Material"><Tag className="m-0 text-[10px] shrink-0" color="default" style={{ cursor: 'pointer' }}>N/A</Tag></Tooltip>;
     }
     
     // Show stock status if available, otherwise fall back to material status
     const statusToShow = stockStatus || status || "N/A";
     const s = statusToShow.toString().toLowerCase();
     
-    if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
-    if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
+    if (s === "available") return <Tooltip title="Raw Material Available"><Tag className="m-0 text-[10px] shrink-0" color="success" style={{ cursor: 'pointer' }}>Available</Tag></Tooltip>;
+    if (s === "not available") return <Tooltip title="Raw Material Not Available"><Tag className="m-0 text-[10px] shrink-0" color="error" style={{ cursor: 'pointer' }}>Not Available</Tag></Tooltip>;
     
     // If we have stock details, show stock-specific status
     if (stockDetails) {
       if (stockDetails.status === 'available') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
+        return <Tooltip title="Stock Available"><Tag className="m-0 text-[10px] shrink-0" color="success" style={{ cursor: 'pointer' }}>In Stock</Tag></Tooltip>;
       } else if (stockDetails.status === 'reserved') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
+        return <Tooltip title="Stock Reserved"><Tag className="m-0 text-[10px] shrink-0" color="warning" style={{ cursor: 'pointer' }}>Reserved</Tag></Tooltip>;
       } else if (stockDetails.status === 'used') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
+        return <Tooltip title="Stock Used"><Tag className="m-0 text-[10px] shrink-0" color="default" style={{ cursor: 'pointer' }}>Used</Tag></Tooltip>;
       }
     }
     
-    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
+    return <Tooltip title={statusToShow}><Tag className="m-0 text-[10px] shrink-0" style={{ cursor: 'pointer' }}>{statusToShow}</Tag></Tooltip>;
   };
 
   const renderPartInTree = (part, level = 0, productId = null) => {
@@ -760,52 +844,56 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     return (
       <div
         key={`part-${part.id}`}
-        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
+        className={`pdm-bom-item pdm-bom-item-${(part.type_name || 'part').toLowerCase().replace(/[^a-z]/g, '')} ${
           isInRecycleBin
-            ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
+            ? 'opacity-60'
             : hasUnacknowledgedDocs
-            ? 'bg-amber-50 border-amber-500 text-amber-900'
+            ? 'bg-amber-50'
             : isSelected
-            ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
-            : 'hover:bg-slate-100 border-transparent'
+            ? 'pdm-bom-item-selected'
+            : ''
         }`}
-        style={{ marginLeft: `${level * 14}px` }}
+        style={{ marginLeft: `${level * 12}px` }}
         onClick={() => !isInRecycleBin && handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <div className="flex flex-col min-w-0">
-            <Text className={`text-sm font-medium truncate ${
-              isInRecycleBin
-                ? 'text-gray-400'
-                : hasUnacknowledgedDocs
-                ? 'text-amber-900'
-                : isSelected
-                ? 'text-indigo-800'
-                : 'text-slate-700'
-            }`}>
-              {part.part_name}
-            </Text>
-            <Text className={`text-[10px] truncate ${
-              isInRecycleBin
-                ? 'text-gray-400'
-                : hasUnacknowledgedDocs
-                ? 'text-amber-700'
-                : 'text-slate-400'
-            }`}>
-              {part.part_number}
-              {part.raw_material_name && (
-                <span className="ml-1 text-[9px] text-indigo-500">({part.raw_material_name})</span>
-              )}
-            </Text>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon(part.type_name || 'part')}</span>
+          <div className="flex flex-col min-w-0 flex-1">
+            <Tooltip title={`${part.part_name}${part.raw_material_name ? ' · ' + part.raw_material_name : ''}`} placement="topLeft">
+              <Text className={`text-sm font-semibold truncate ${
+                isInRecycleBin
+                  ? 'text-gray-400'
+                  : hasUnacknowledgedDocs
+                  ? 'text-amber-900'
+                  : isSelected
+                  ? 'text-[#2E8B57]'
+                  : 'text-[#2F2F2F]'
+              }`} style={{ fontSize: 13 }}>
+                {part.part_name}
+              </Text>
+            </Tooltip>
+            <Tooltip title={`${part.part_number}${part.raw_material_name ? ' (' + part.raw_material_name + ')' : ''}`} placement="bottomLeft">
+              <Text className={`text-xs truncate ${
+                isInRecycleBin
+                  ? 'text-gray-400'
+                  : hasUnacknowledgedDocs
+                  ? 'text-amber-700'
+                  : 'text-[#5D4037]'
+              }`} style={{ fontSize: 11 }}>
+                {part.part_number}
+                {part.raw_material_name && (
+                  <span className="ml-1 text-[10px] text-[#2E8B57]" style={{ fontSize: 10 }}>({part.raw_material_name})</span>
+                )}
+              </Text>
+            </Tooltip>
           </div>
+          <ActionButtons 
+            item={part} 
+            type="part" 
+            tagName={part.type_name || 'part'} 
+            tagColor={getTypeColor(part.type_name || 'part')} 
+          />
         </div>
-        <ActionButtons 
-          item={part} 
-          type="part" 
-          tagName={part.type_name || 'part'} 
-          tagColor={getTypeColor(part.type_name || 'part')} 
-        />
       </div>
     );
   };
@@ -831,37 +919,45 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
         <div
-          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
-          style={{ marginLeft: `${level * 14}px` }}
+          className={`pdm-bom-item pdm-bom-item-${level > 1 ? 'subassembly' : 'assembly'} ${
+            isSelected ? 'pdm-bom-item-selected' : ''
+          }`}
+          style={{ marginLeft: `${level * 12}px` }}
           onClick={() => handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
         >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="flex-shrink-0 w-5 flex justify-center">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="flex-shrink-0 w-5 flex justify-center items-center">
               {hasChildren ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                   onClick={(e) => { e.stopPropagation(); toggleExpand(getExpandKey('assembly', assembly.id)); }}
-                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
+                  className="w-5 h-5 flex items-center justify-center p-0 text-[#5D4037] hover:bg-[#F5F5DC]" />
               ) : <div className="w-5" />}
             </div>
-            <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
-            <div className="flex flex-col min-w-0">
-              <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
-                {assembly.assembly_name}
-              </Text>
-              <Text className="text-[10px] text-slate-400 truncate">
-                {assembly.assembly_number}
-              </Text>
+            <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon('assembly', level)}</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <Tooltip title={assembly.assembly_name} placement="topLeft">
+                <Text className={`text-sm font-semibold truncate ${
+                  isSelected ? 'text-[#2E8B57]' : 'text-[#2F2F2F]'
+                }`} style={{ fontSize: 13 }}>
+                  {assembly.assembly_name}
+                </Text>
+              </Tooltip>
+              <Tooltip title={assembly.assembly_number} placement="bottomLeft">
+                <Text className="text-xs text-[#5D4037] truncate" style={{ fontSize: 11 }}>
+                  {assembly.assembly_number}
+                </Text>
+              </Tooltip>
             </div>
+            <ActionButtons 
+              item={assembly} 
+              type="assembly" 
+              tagName={level > 1 ? 'SUB-ASSEMBLY' : 'ASSEMBLY'}
+              tagColor={getTypeColor('assembly')}
+            />
           </div>
-          <ActionButtons 
-            item={assembly} 
-            type="assembly" 
-            tagName={level > 1 ? 'SUB-ASSEMBLY' : 'ASSEMBLY'}
-            tagColor={getTypeColor('assembly')}
-          />
         </div>
         {isExpanded && hasChildren && (
-          <div className="mt-0.5">
+          <div>
             {combinedChildren.map(child =>
               child.__childType === 'part'
                 ? renderPartInTree(child, level + 1, productId)
@@ -897,31 +993,46 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const isSelected = activeItemId === product.id && activeItemType === 'product';
 
     return (
-      <div key={product.id} className="select-none mb-1">
+      <div key={product.id} className="select-none">
         <div
-          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+          className={`pdm-bom-item pdm-bom-item-product ${
+            isSelected ? 'pdm-bom-item-selected' : ''
+          }`}
           onClick={() => handleItemClick(product, 'product')}
         >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="flex-shrink-0 w-5 flex justify-center">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="flex-shrink-0 w-5 flex justify-center items-center">
               {showArrow ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                   onClick={(e) => { e.stopPropagation(); handleExpandProduct(product); }}
-                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
+                  className="w-5 h-5 flex items-center justify-center p-0 text-[#5D4037] hover:bg-[#F5F5DC]" />
               ) : <div className="w-5" />}
             </div>
-            <span className="flex-shrink-0 text-sm">{getTypeIcon('product')}</span>
-            <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>{product.product_name}</Text>
+            <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon('product')}</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <Tooltip title={product.product_name} placement="topLeft">
+                <Text className={`text-sm font-semibold truncate ${
+                  isSelected ? 'text-[#2E8B57]' : 'text-[#2F2F2F]'
+                }`} style={{ fontSize: 13 }}>{product.product_name}</Text>
+              </Tooltip>
+              {product.product_number && (
+                <Tooltip title={product.product_number} placement="bottomLeft">
+                  <Text className="text-xs text-[#5D4037] truncate" style={{ fontSize: 11 }}>
+                    {product.product_number}
+                  </Text>
+                </Tooltip>
+              )}
+            </div>
+            <ActionButtons 
+              item={product} 
+              type="product" 
+              tagName="product"
+              tagColor={getTypeColor('product')}
+            />
           </div>
-          <ActionButtons 
-            item={product} 
-            type="product" 
-            tagName="product"
-            tagColor={getTypeColor('product')}
-          />
         </div>
         {isExpanded && hasChildren && (
-          <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
+          <div className="ml-2 border-l border-[#D6D3C4] pl-1">
             {combinedChildren.map(child =>
               child.__childType === 'part'
                 ? renderPartInTree(child, 1, product.id)
@@ -1180,7 +1291,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           onClick={() => handleItemClick(result)}
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
               <span className="w-5 flex justify-center text-sm">
                 {getTypeIcon(result.type === 'part' ? (result.item.type_name || 'part') : 'assembly', result.path.length)}
               </span>
@@ -1264,35 +1375,22 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   return (
     <>
-      <style>
-        {`
-          .bom-primary-btn, .bom-primary-btn:hover { background: #2563eb !important; color: #fff !important; border: none !important; }
-          .bom-scroll::-webkit-scrollbar { width: 5px; }
-          .bom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
-          .bom-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
-        `}
-      </style>
-      <div className="flex flex-col h-full bg-slate-50/50">
-        <div className="p-2 sm:p-3 border-b border-slate-200 bg-white shrink-0">
-          <div className="flex justify-between items-center gap-2 mb-2 sm:mb-3">
-            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <div className="p-1 sm:p-1.5 bg-indigo-100 rounded-lg shrink-0">
-                <AppstoreOutlined className="text-indigo-600 text-sm sm:text-base" />
-              </div>
-              <h2 className="text-xs sm:text-sm font-semibold text-slate-800 m-0 truncate">
-                Bill of Materials
-              </h2>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
+      <div className="pdm-container flex flex-col h-full bg-[#F5F5DC]">
+        <div className="pdm-section-header flex-wrap gap-2" style={{ margin: 0, padding: '4px 8px' }}>
+          <div className="pdm-section-header-title">
+            <AppstoreOutlined style={{ color: '#2E8B57', fontSize: 16 }} />
+            <span className="text-sm font-semibold" style={{ fontSize: 14 }}>Bill of Materials</span>
+          </div>
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0 flex-wrap">
               <Tooltip title="Download Parts Template">
                 <Button
                   type="default"
                   size="small"
                   icon={<DownloadOutlined />}
                   onClick={() => downloadTemplate('parts')}
-                  className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-300 text-xs font-medium px-2 py-1 rounded-md shadow-sm"
+                  className="pdm-action-button"
                 >
-                  <span className="hidden sm:inline">Parts Template</span>
+                  <span className="hidden lg:inline">Parts Template</span>
                 </Button>
               </Tooltip>
               {filteredProducts.length === 1 && (
@@ -1300,7 +1398,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   <AssemblyPartsUploadPanel
                     selectedItem={{ ...filteredProducts[0], itemType: 'product' }}
                     onPartsCreated={() => {
-                      // Refresh the product hierarchy after parts are uploaded
                       fetchProductHierarchy(filteredProducts[0].id, true);
                     }}
                   />
@@ -1309,9 +1406,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                     size="small"
                     icon={<ToolOutlined />}
                     onClick={() => handleViewAllTools(filteredProducts[0])}
-                    className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
+                    className="pdm-action-button"
                   >
-                    View Tools
+                    <span className="hidden md:inline">View Tools</span>
                   </Button>
                 </>
               )}
@@ -1321,7 +1418,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={handleCreateProduct}
-                  className="bom-primary-btn shrink-0"
+                  className="pdm-action-button"
+                  style={{ backgroundColor: '#2E8B57', borderColor: '#2E8B57', color: '#FFFFFF' }}
                 >
                   <span className="hidden sm:inline">New Product</span>
                   <span className="sm:hidden">New</span>
@@ -1331,19 +1429,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           </div>
         
         {/* Search Bar & Filters */}
-        <div className="px-2 pb-2 flex items-center gap-2 w-full max-w-3xl">
+        <div className="px-3 pb-3 pt-2 flex items-center gap-2 w-full flex-wrap">
           <div className="flex-1 min-w-0">
-            <Input
-              placeholder="Search by assembly name/number or part name/number..."
-              prefix={<SearchOutlined className="text-slate-400" />}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              allowClear
-              className="w-full"
-              size="small"
-            />
+            <div className="pdm-search-bar">
+              <SearchOutlined style={{ color: '#5D4037' }} />
+              <input
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-          <div className="w-44 sm:w-52 shrink-0">
+          <div className="w-32 sm:w-40 md:w-44 lg:w-52 shrink-0">
             <BOMFilters 
               stats={getBOMStats()} 
               activeFilter={activeFilter} 
@@ -1355,14 +1452,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             />
           </div>
         </div>
-        </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
+        
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 min-h-0">
           {searchTerm.trim() ? (
             renderSearchResults()
           ) : filteredProducts.length > 0 ? (
             filteredProducts.map(product => renderProductTree(product))
           ) : (
-            <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+            <div className="pdm-empty-state">
               <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           )}

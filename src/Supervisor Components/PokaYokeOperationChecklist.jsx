@@ -343,7 +343,11 @@ const PokaYokeOperationChecklist = () => {
       title: 'Actions',
       key: 'actions',
       fixed: 'right',
-      render: (_, record) => (
+      render: (_, record) => {
+        const isPending = record.status?.toLowerCase() === 'pending';
+        const respondedStyle = { color: '#bfbfbf', opacity: 0.45, cursor: 'not-allowed' };
+
+        return (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Tooltip title="View Details">
             <Button
@@ -353,26 +357,27 @@ const PokaYokeOperationChecklist = () => {
               style={{ color: '#1890ff' }}
             />
           </Tooltip>
-          <Tooltip title="Approve">
+          <Tooltip title={isPending ? 'Approve' : 'Already responded'}>
             <Button
               type="text"
               icon={<CheckOutlined />}
               onClick={() => openActionModal(record, 'approved')}
-              style={{ color: '#52c41a' }}
-              disabled={record.status !== 'pending'}
+              style={isPending ? { color: '#52c41a' } : respondedStyle}
+              disabled={!isPending}
             />
           </Tooltip>
-          <Tooltip title="Reject">
+          <Tooltip title={isPending ? 'Reject' : 'Already responded'}>
             <Button
               type="text"
               icon={<CloseOutlined />}
               onClick={() => openActionModal(record, 'rejected')}
-              style={{ color: '#ff4d4f' }}
-              disabled={record.status !== 'pending'}
+              style={isPending ? { color: '#ff4d4f' } : respondedStyle}
+              disabled={!isPending}
             />
           </Tooltip>
         </div>
-      ),
+        );
+      },
     },
   ];
 

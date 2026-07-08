@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, Table, Typography, Tag, message, DatePicker, Button, Space, Select, Tooltip } from 'antd';
-import { ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Table, Typography, Tag, message, DatePicker, Button, Space, Select, Tooltip } from 'antd';
+import { ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined, ClearOutlined } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
@@ -10,6 +10,8 @@ import cmtisLogo from '../assets/cmtis.png';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
+
+const clearButtonStyle = { color: '#ff4d4f', borderColor: '#ff4d4f' };
 
 const highlightText = (text, query) => {
   if (!query || !text) return text ?? '-';
@@ -393,7 +395,7 @@ const ProductionLogsHistory = () => {
         log.approved_quantity ?? '-',
         log.rework_quantity ?? '-',
         log.rejected_quantity ?? '-',
-        log.supervisor?.user_name || 'N/A',
+        log.supervisor?.user_name || log.reviewer?.user_name || 'N/A',
         log.remarks || '-',
       ]);
 
@@ -604,7 +606,9 @@ const ProductionLogsHistory = () => {
       key: 'supervisor',
       width: 100,
       render: (_, record) => (
-        <Text style={{ fontSize: 12 }}>{highlightText(record.supervisor?.user_name, '') || 'N/A'}</Text>
+        <Text style={{ fontSize: 12 }}>
+          {highlightText(record.supervisor?.user_name || record.reviewer?.user_name, '') || 'N/A'}
+        </Text>
       ),
     },
     {
@@ -626,7 +630,7 @@ const ProductionLogsHistory = () => {
   ];
 
   return (
-    <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -637,17 +641,14 @@ const ProductionLogsHistory = () => {
         .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
         .search-highlight-row > td { background-color: #e6f4ff !important; }
         .search-highlight-row:hover > td { background-color: #bae0ff !important; }
-        .production-logs-table-wrap {
+        .production-log-table-wrap {
           flex: 1;
           min-height: 0;
           overflow: auto;
         }
       `}</style>
 
-      <Card style={{ height: '84vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-            styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 16 } }}
-      >
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space wrap>
             <Select
               mode="multiple"
@@ -721,7 +722,7 @@ const ProductionLogsHistory = () => {
               style={{ minWidth: 250 }}
             />
             {hasActiveFilters && (
-              <Button onClick={handleClearFilters} style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}>
+              <Button icon={<ClearOutlined />} onClick={handleClearFilters} style={clearButtonStyle}>
                 Clear
               </Button>
             )}
@@ -736,7 +737,7 @@ const ProductionLogsHistory = () => {
           </Space>
         </div>
 
-        <div className="production-logs-table-wrap">
+        <div className="production-log-table-wrap">
           <Table
             columns={columns}
             dataSource={filteredLogs}
@@ -756,10 +757,9 @@ const ProductionLogsHistory = () => {
               onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
               onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
             }}
-            scroll={{ x: 'max-content', y: 'calc(84vh - 300px)' }}
+            scroll={{ x: 'max-content', y: 'calc(84vh - 280px)' }}
           />
         </div>
-      </Card>
     </div>
   );
 };

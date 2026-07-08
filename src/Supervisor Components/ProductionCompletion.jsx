@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Table, Card, Typography, Tag, message, Button, Space,
+  Table, Typography, Tag, message, Button, Space,
   Tooltip, Empty, Modal, Input, Select, DatePicker,
 } from 'antd';
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
   SyncOutlined, ReloadOutlined, EditOutlined, CheckSquareOutlined,
-  DownloadOutlined,
+  DownloadOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,6 +18,8 @@ import cmtisLogo from '../assets/cmtis.png';
 const { Text } = Typography;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
+
+const clearButtonStyle = { color: '#ff4d4f', borderColor: '#ff4d4f' };
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
 const highlightText = (text, query) => {
@@ -59,6 +61,13 @@ const QuantityInput = ({ label, value, onChange }) => (
     />
   </div>
 );
+
+const getApprovedByName = (log) =>
+  log?.supervisor?.user_name ||
+  log?.reviewer?.user_name ||
+  (log?.supervisor_id ? `User #${log.supervisor_id}` : null) ||
+  (log?.user_id ? `User #${log.user_id}` : null) ||
+  '-';
 
 const ProductionCompletion = () => {
   const [logs, setLogs] = useState([]);
@@ -104,15 +113,13 @@ const ProductionCompletion = () => {
       if (!response.ok) throw new Error('Failed to fetch production logs');
       const allLogs = await response.json();
 
-      const supervisorLogs = allLogs.filter(
-        (log) =>
-          (log.supervisor_id === null || String(log.supervisor_id) === String(supervisorId)) &&
-          log.operator_status?.toLowerCase() !== 'inprogress'
+      const visibleLogs = allLogs.filter(
+        (log) => log.operator_status?.toLowerCase() !== 'inprogress'
       );
 
-      if (supervisorLogs.length === 0) { setLogs([]); return; }
+      if (visibleLogs.length === 0) { setLogs([]); return; }
 
-      const enrichedLogs = supervisorLogs.map((log) => ({
+      const enrichedLogs = visibleLogs.map((log) => ({
         ...log,
         planned_schedule_item: {
           ...log.planned_schedule_item,
@@ -170,6 +177,24 @@ const ProductionCompletion = () => {
     } catch { /* ignore */ }
     return { name: 'N/A', id: null };
   }, []);
+
+  const hasActiveFilters = useMemo(() => (
+    selectedMachines.length > 0 ||
+    Boolean(searchText?.trim()) ||
+    Boolean(selectedProjectId) ||
+    selectedParts.length > 0 ||
+    (dateRange && dateRange.length === 2)
+  ), [selectedMachines, searchText, selectedProjectId, selectedParts, dateRange]);
+
+  const clearFilters = () => {
+    setSelectedMachines([]);
+    setSearchText('');
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setParts([]);
+    setDateRange(null);
+    setCurrentPage(1);
+  };
 
   const selectedSaleOrder = useMemo(() => {
     if (!selectedProjectId) return null;
@@ -278,6 +303,7 @@ const ProductionCompletion = () => {
         log.planned_schedule_item?.operation_number,
         log.planned_schedule_item?.machine_name,
         log.operator?.user_name,
+        getApprovedByName(log),
         log.status,
         log.notes,
         log.remarks,
@@ -433,6 +459,7 @@ const ProductionCompletion = () => {
       record.planned_schedule_item?.operation_number,
       record.planned_schedule_item?.machine_name,
       record.operator?.user_name,
+      getApprovedByName(record),
       record.status,
       record.notes,
       record.remarks,
@@ -554,9 +581,10 @@ const ProductionCompletion = () => {
         formatDateTime(log.from_date, log.from_time),
         formatDateTime(log.to_date, log.to_time),
         log.remarks || '-',
+        getApprovedByName(log),
       ]);
 
-      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 16, 18, 12, 11, 11, 11, 11, 14, 20, 20, 16];
+      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 16, 18, 12, 11, 11, 11, 11, 14, 20, 20, 16, 14];
       const pdfColWeightTotal = pdfColWeights.reduce((sum, w) => sum + w, 0);
       const pdfColumnStyles = Object.fromEntries(
         pdfColWeights.map((weight, index) => [
@@ -575,7 +603,7 @@ const ProductionCompletion = () => {
         head: [[
           'Sl No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
           'Operator', 'Machine', 'Total Qty', 'Produced', 'Approved', 'Rework', 'Rejected',
-          'Notes', 'Start Time', 'End Time', 'Remarks',
+          'Notes', 'Start Time', 'End Time', 'Remarks', 'Approved By',
         ]],
         body: tableData,
         theme: 'grid',
@@ -779,6 +807,14 @@ const ProductionCompletion = () => {
       },
     },
     {
+      title: 'Approved By',
+      key: 'approved_by',
+      width: 110,
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>{highlightText(getApprovedByName(record), searchText)}</Text>
+      ),
+    },
+    {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
@@ -803,7 +839,7 @@ const ProductionCompletion = () => {
   const isComplete = remarkModal.newStatus === 'completed';
 
   return (
-    <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -814,18 +850,14 @@ const ProductionCompletion = () => {
         .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
         .search-highlight-row > td { background-color: #e6f4ff !important; }
         .search-highlight-row:hover > td { background-color: #bae0ff !important; }
-        .production-completion-table-wrap {
+        .production-log-table-wrap {
           flex: 1;
           min-height: 0;
           overflow: auto;
         }
       `}</style>
 
-      <Card
-        style={{ height: '84vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 16 } }}
-      >
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space wrap>
             <Select
               mode="multiple"
@@ -889,6 +921,11 @@ const ProductionCompletion = () => {
             />
           </Space>
           <Space>
+            {hasActiveFilters && (
+              <Button icon={<ClearOutlined />} onClick={clearFilters} style={clearButtonStyle}>
+                Clear
+              </Button>
+            )}
             <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
               Download PDF
             </Button>
@@ -898,7 +935,7 @@ const ProductionCompletion = () => {
           </Space>
         </div>
 
-        <div className="production-completion-table-wrap">
+        <div className="production-log-table-wrap">
           <Table
             columns={columns}
             dataSource={filteredLogs}
@@ -908,7 +945,7 @@ const ProductionCompletion = () => {
             className="modern-table"
             locale={{
               emptyText: (
-                <Empty description={selectedMachines.length > 0 ? 'No production logs found for selected machines' : 'No production logs found for this supervisor'} />
+                <Empty description={selectedMachines.length > 0 ? 'No production logs found for selected machines' : 'No production logs found'} />
               ),
             }}
             pagination={{
@@ -923,10 +960,9 @@ const ProductionCompletion = () => {
               onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
               onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
             }}
-            scroll={{ x: 'max-content', y: 'calc(84vh - 300px)' }}
+            scroll={{ x: 'max-content', y: 'calc(84vh - 280px)' }}
           />
         </div>
-      </Card>
 
       {/* ── Remark / Status Modal ─────────────────────────────────────────── */}
       <Modal

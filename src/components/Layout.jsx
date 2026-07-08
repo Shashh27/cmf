@@ -11,6 +11,9 @@ const AppLayout = ({ children }) => {
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
   const isQmsInspector = location.pathname.includes('/qms-inspector');
+  const isPdmPage = location.pathname.includes('/pdm/');
+  const isDashboardPage = location.pathname === '/admin/dashboard';
+  const isManufacturingDashboard = location.pathname === '/manufacturing_coordinator/dashboard';
   const [collapsed, setCollapsed] = useState(false);
 
   if (isLoginPage || isQmsInspector) {
@@ -36,18 +39,20 @@ const AppLayout = ({ children }) => {
             }
           }
         `}</style>
-        <Navbar collapsed={collapsed} />
-        <Content 
-          style={{ 
-            margin: 'clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)', 
-            overflowY: 'auto', 
-            backgroundColor: 'transparent', 
-            padding: 0 
+        {!isPdmPage && !isDashboardPage && !isManufacturingDashboard && <Navbar collapsed={collapsed} />}
+        <Content
+          style={{
+            margin: (isPdmPage || isDashboardPage || isManufacturingDashboard) ? '0' : 'clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)',
+            height: (isPdmPage || isDashboardPage || isManufacturingDashboard) ? '100%' : 'auto',
+            overflowY: (isPdmPage || isDashboardPage || isManufacturingDashboard) ? 'hidden' : 'auto',
+            overflowX: 'hidden',
+            backgroundColor: 'transparent',
+            padding: 0
           }}
         >
           {children}
         </Content>
-        <Footer collapsed={collapsed} />
+        {!isPdmPage && !isDashboardPage && !isManufacturingDashboard && <Footer collapsed={collapsed} />}
       </Layout>
     </Layout>
   );

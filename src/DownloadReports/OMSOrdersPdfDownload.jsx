@@ -223,32 +223,44 @@ const OMSOrdersPdfDocument = ({
 
 const OMSOrdersPdfDownload = ({
   orders,
+  orderCount,
+  getOrdersForExport,
   formatDate,
   fileName = "oms-orders-report.pdf",
 }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [exportOrders, setExportOrders] = useState([]);
+
+  const resolvedOrderCount = orderCount ?? orders?.length ?? 0;
+
+  const resolveExportOrders = () => {
+    if (getOrdersForExport) return getOrdersForExport();
+    return orders || [];
+  };
+
+  const handleOpenModal = () => {
+    setExportOrders(resolveExportOrders());
+    setIsModalVisible(true);
+  };
 
   const handleDownloadExcel = () => {
-    if (!orders || orders.length === 0) return;
+    if (!exportOrders || exportOrders.length === 0) return;
 
-    // Create workbook and worksheet
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([]);
 
-    // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
       ["CMF DIGITIZATION - CMTI"],
       ["Order Management System – Orders Summary Report"],
       [],
-      [`Total Orders: ${orders.length}`],
+      [`Total Orders: ${exportOrders.length}`],
       [`Generated on: ${new Date().toLocaleString()}`],
       []
     ], { origin: "A1" });
 
-    // Add table headers
     const headers = [
       "SL NO",
-      "PROJECT NO", 
+      "PROJECT NO",
       "PROJECT NAME",
       "CUSTOMER",
       "PRODUCT",
@@ -259,15 +271,13 @@ const OMSOrdersPdfDownload = ({
       "COORDINATOR"
     ];
 
-    // Merge cells for header titles and metadata
     ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }, // CMF DIGITIZATION - CMTI
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } }, // Order Management System – Orders Summary Report
-      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } }, // Total Orders
-      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } }  // Generated on
+      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } },
+      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } }
     ];
 
-    // Apply styling to header cells
     if (ws['A1']) ws['A1'].s = { font: { sz: 16, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
     if (ws['A2']) ws['A2'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
     if (ws['A4']) ws['A4'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
@@ -275,20 +285,18 @@ const OMSOrdersPdfDownload = ({
 
     XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A7" });
 
-    // Apply styling to table headers
     for (let i = 0; i < headers.length; i++) {
       const cellAddress = XLSX.utils.encode_cell({ r: 6, c: i });
       if (ws[cellAddress]) {
-        ws[cellAddress].s = { 
-          font: { bold: true }, 
+        ws[cellAddress].s = {
+          font: { bold: true },
           alignment: { horizontal: "center", vertical: "center" },
           fill: { fgColor: { rgb: "F3F4F6" } }
         };
       }
     }
 
-    // Prepare and add table data
-    const excelData = orders.map((order, index) => [
+    const excelData = exportOrders.map((order, index) => [
       index + 1,
       order.sale_order_number || "-",
       order.product_name || order.product || order.project_name || "-",
@@ -303,32 +311,28 @@ const OMSOrdersPdfDownload = ({
 
     XLSX.utils.sheet_add_aoa(ws, excelData, { origin: "A8" });
 
-    // Set column widths
-    const colWidths = [
-      { wch: 8 },   // SL NO
-      { wch: 15 },  // PROJECT NO
-      { wch: 25 },  // PROJECT NAME
-      { wch: 20 },  // CUSTOMER
-      { wch: 20 },  // PRODUCT
-      { wch: 8 },   // QTY
-      { wch: 12 },  // ORDER DATE
-      { wch: 12 },  // DUE DATE
-      { wch: 12 },  // STATUS
-      { wch: 15 }   // COORDINATOR
+    ws['!cols'] = [
+      { wch: 8 },
+      { wch: 15 },
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 8 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 15 }
     ];
-    ws['!cols'] = colWidths;
 
-    // Add worksheet to workbook
     XLSX.utils.book_append_sheet(wb, ws, "Orders Report");
 
-    // Generate and download Excel file
     const excelFileName = fileName.replace('.pdf', '.xlsx');
     XLSX.writeFile(wb, excelFileName);
-    
+
     setIsModalVisible(false);
   };
 
-  if (!orders || orders.length === 0) {
+  if (resolvedOrderCount === 0) {
     return (
       <Tooltip title="No orders available for export">
         <Button icon={<DownloadOutlined />} disabled>
@@ -340,9 +344,9 @@ const OMSOrdersPdfDownload = ({
 
   return (
     <>
-      <Button 
-        icon={<DownloadOutlined />} 
-        onClick={() => setIsModalVisible(true)}
+      <Button
+        icon={<DownloadOutlined />}
+        onClick={handleOpenModal}
         type="default"
       >
         Download Orders
@@ -355,45 +359,47 @@ const OMSOrdersPdfDownload = ({
         footer={null}
         centered
         width={400}
+        destroyOnHidden
       >
-        <div style={{ padding: "20px 0" }}>
-          <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
-            Choose your preferred download format:
-          </p>
-          
-          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <PDFDownloadLink
-              document={<OMSOrdersPdfDocument orders={orders} formatDate={formatDate} />}
-              fileName={fileName}
-              style={{ textDecoration: "none", width: "100%" }}
-            >
-              {({ loading }) => (
-                <Button 
-                  icon={<FilePdfOutlined />} 
-                  size="large"
-                  style={{ width: "100%", height: "50px" }}
-                  type="default"
-                >
-                  {loading ? "Preparing PDF..." : "Download PDF"}
-                </Button>
-              )}
-            </PDFDownloadLink>
+        {isModalVisible && exportOrders.length > 0 && (
+          <div style={{ padding: "20px 0" }}>
+            <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
+              Choose your preferred download format:
+            </p>
 
-            <Button 
-              icon={<FileExcelOutlined />} 
-              size="large"
-              style={{ width: "100%", height: "50px" }}
-              type="default"
-              onClick={handleDownloadExcel}
-            >
-              Download Excel
-            </Button>
-          </Space>
-        </div>
+            <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+              <PDFDownloadLink
+                document={<OMSOrdersPdfDocument orders={exportOrders} formatDate={formatDate} />}
+                fileName={fileName}
+                style={{ textDecoration: "none", width: "100%" }}
+              >
+                {({ loading }) => (
+                  <Button
+                    icon={<FilePdfOutlined />}
+                    size="large"
+                    style={{ width: "100%", height: "50px" }}
+                    type="default"
+                  >
+                    {loading ? "Preparing PDF..." : "Download PDF"}
+                  </Button>
+                )}
+              </PDFDownloadLink>
+
+              <Button
+                icon={<FileExcelOutlined />}
+                size="large"
+                style={{ width: "100%", height: "50px" }}
+                type="default"
+                onClick={handleDownloadExcel}
+              >
+                Download Excel
+              </Button>
+            </Space>
+          </div>
+        )}
       </Modal>
     </>
   );
 };
 
 export default OMSOrdersPdfDownload;
-

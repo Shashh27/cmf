@@ -1,21 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Button, Tabs, Badge, Select, Space } from 'antd';
+import { Card, Table, Tag, Spin, message, Button, Tabs, Badge, Select, Space } from 'antd';
 import { CheckOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import { API_BASE_URL } from '../Config/auth.js';
-import config from '../Config/config';
-import dayjs from 'dayjs';
 import NotificationPokaYoke from './NotificationPokaYoke';
-
-const { Title, Text } = Typography;
+import OTNotification from './OTNotification';
 
 const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
-  const [pokayokeNotifications, setPokayokeNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [pokayokeLoading, setPokayokeLoading] = useState(true);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-  const [pokayokePagination, setPokayokePagination] = useState({ current: 1, pageSize: 10 });
   const [activeTab, setActiveTab] = useState('production');
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
   const [productionMachineFilter, setProductionMachineFilter] = useState([]);
@@ -25,12 +19,10 @@ const Notifications = () => {
   const [selectedParts, setSelectedParts] = useState([]);
   const [selectedOperations, setSelectedOperations] = useState([]);
   const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
-  const [pokayokeMachineFilter, setPokayokeMachineFilter] = useState([]);
-  const [pokayokeChecklistFilter, setPokayokeChecklistFilter] = useState([]);
+  const [otUnacknowledgedCount, setOtUnacknowledgedCount] = useState(0);
 
   useEffect(() => {
     fetchNotifications();
-    fetchPokayokeNotifications();
   }, []);
 
   useEffect(() => {
@@ -103,16 +95,19 @@ const Notifications = () => {
       const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
-        // Filter to show only logs where supervisor has responded (supervisor_id is not null)
-        // and produced_quantity > 0
-        const supervisorRespondedLogs = (data || []).filter(
-          log => (log.supervisor_id !== null && log.supervisor_id !== undefined) &&
-                 (log.produced_quantity || 0) > 0
-        );
+        // Show logs that have been reviewed (supervisor_id, user_id/reviewer) and produced_quantity > 0
+        const supervisorRespondedLogs = (data || []).filter((log) => {
+          const hasReviewer =
+            (log.supervisor_id !== null && log.supervisor_id !== undefined) ||
+            (log.user_id !== null && log.user_id !== undefined) ||
+            Boolean(log.supervisor) ||
+            Boolean(log.reviewer);
+          return hasReviewer && (log.produced_quantity || 0) > 0;
+        });
         // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorRespondedLogs.sort((a, b) => {
-          const isAckA = a.operator_acknowledged_at || a.acknowledged;
-          const isAckB = b.operator_acknowledged_at || b.acknowledged;
+          const isAckA = a.operator_acknowledged_at || a.operator_acknowledged || a.acknowledged;
+          const isAckB = b.operator_acknowledged_at || b.operator_acknowledged || b.acknowledged;
           // Unacknowledged (false) comes before acknowledged (true)
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
@@ -133,82 +128,6 @@ const Notifications = () => {
       setNotifications([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchPokayokeNotifications = async () => {
-    setPokayokeLoading(true);
-    try {
-      // Get operator ID from localStorage
-      let operatorId = null;
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          operatorId = user.id;
-        } catch (e) {
-          console.error("Error parsing user from local storage", e);
-        }
-      }
-      if (!operatorId) operatorId = localStorage.getItem('operator_id');
-
-      if (!operatorId) {
-        message.error('Operator not found in session. Please log in again.');
-        setPokayokeLoading(false);
-        return;
-      }
-
-      // Get machine ID from localStorage
-      let machineId = null;
-      const storedMachine = localStorage.getItem('selectedMachine');
-      if (storedMachine) {
-        try {
-          const machine = JSON.parse(storedMachine);
-          machineId = machine.id;
-        } catch (e) {
-          console.error("Error parsing machine_id from local storage", e);
-        }
-      }
-      if (!machineId) machineId = localStorage.getItem('machine_id');
-
-      if (!machineId) {
-        message.error('Machine ID not found in session. Please log in again.');
-        setPokayokeLoading(false);
-        return;
-      }
-
-      // Fetch Pokayoke completed logs for specific machine
-      const apiUrl = `${config.API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs/simple`;
-
-      const response = await fetch(apiUrl);
-      if (response.ok) {
-        const data = await response.json();
-        // Show all logs where supervisor has responded, sort by acknowledgment status first (unacknowledged at top), then by completed_at descending
-        const sortedLogs = (data || []).filter(
-          log => log.overall_status !== 'pending'
-        ).sort((a, b) => {
-          const isAckA = a.operator_acknowledged;
-          const isAckB = b.operator_acknowledged;
-          // Unacknowledged (false) comes before acknowledged (true)
-          if (isAckA !== isAckB) {
-            return isAckA ? 1 : -1;
-          }
-          // Within same acknowledgment status, sort by completed_at descending
-          const dateA = new Date(a.completed_at).getTime();
-          const dateB = new Date(b.completed_at).getTime();
-          return dateB - dateA;
-        });
-        setPokayokeNotifications(sortedLogs || []);
-      } else {
-        message.error('Failed to fetch Pokayoke notifications');
-        setPokayokeNotifications([]);
-      }
-    } catch (error) {
-      console.error('Error fetching Pokayoke notifications:', error);
-      message.error('Failed to fetch Pokayoke notifications');
-      setPokayokeNotifications([]);
-    } finally {
-      setPokayokeLoading(false);
     }
   };
 
@@ -272,75 +191,6 @@ const Notifications = () => {
     } catch (error) {
       console.error('Error acknowledging notification:', error);
       message.error('Failed to acknowledge notification');
-      // Remove from acknowledging set on error
-      setAcknowledgingIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(logId);
-        return newSet;
-      });
-    }
-  };
-
-  const handlePokayokeAcknowledge = async (logId) => {
-    try {
-      // Add to acknowledging set to disable button
-      setAcknowledgingIds(prev => new Set(prev).add(logId));
-
-      // Get operator ID from localStorage
-      const storedUser = localStorage.getItem('user');
-      let operatorId = null;
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          operatorId = user.id;
-        } catch (e) {
-          console.error("Error parsing user from local storage", e);
-        }
-      }
-      if (!operatorId) operatorId = localStorage.getItem('operator_id');
-
-      // Call the PUT endpoint for Pokayoke acknowledgment with operator_id as query parameter
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/${logId}/acknowledge?operator_id=${operatorId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        message.success('Pokayoke notification acknowledged');
-        // Refresh the Pokayoke notifications list to update the UI
-        await fetchPokayokeNotifications();
-        // Remove from acknowledging set after refresh completes
-        setAcknowledgingIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(logId);
-          return newSet;
-        });
-      } else {
-        const errorData = await response.json();
-        console.error('Pokayoke acknowledgment error:', errorData);
-        let errorMessage = 'Unknown error';
-        if (Array.isArray(errorData.detail)) {
-          errorMessage = errorData.detail.map(err => err.msg || err.message || err).join(', ');
-        } else if (typeof errorData.detail === 'string') {
-          errorMessage = errorData.detail;
-        } else if (errorData.message) {
-          errorMessage = errorData.message;
-        } else if (errorData.error) {
-          errorMessage = errorData.error;
-        }
-        message.error(`Failed to acknowledge Pokayoke notification: ${errorMessage}`);
-        // Remove from acknowledging set on error
-        setAcknowledgingIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(logId);
-          return newSet;
-        });
-      }
-    } catch (error) {
-      console.error('Error acknowledging Pokayoke notification:', error);
-      message.error('Failed to acknowledge Pokayoke notification');
       // Remove from acknowledging set on error
       setAcknowledgingIds(prev => {
         const newSet = new Set(prev);
@@ -438,50 +288,12 @@ const Notifications = () => {
     });
   }, [notifications, productionMachineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
 
-  const pokayokeMachineOptions = useMemo(() => {
-    const machineMap = new Map();
-    pokayokeNotifications.forEach((record) => {
-      if (record.machine_id !== undefined && record.machine_id !== null && !machineMap.has(record.machine_id)) {
-        machineMap.set(record.machine_id, record.machine_name || `Machine ${record.machine_id}`);
-      }
-    });
-    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
-  }, [pokayokeNotifications]);
-
-  const pokayokeChecklistOptions = useMemo(() => {
-    const checklistMap = new Map();
-    pokayokeNotifications.forEach((record) => {
-      if (record.checklist_id !== undefined && record.checklist_id !== null && !checklistMap.has(record.checklist_id)) {
-        checklistMap.set(record.checklist_id, record.checklist_name || `Checklist ${record.checklist_id}`);
-      }
-    });
-    return Array.from(checklistMap.entries()).map(([id, label]) => ({ value: id, label }));
-  }, [pokayokeNotifications]);
-
-  const filteredPokayokeNotifications = useMemo(() => {
-    return pokayokeNotifications.filter((record) => {
-      if (pokayokeMachineFilter.length > 0 && !pokayokeMachineFilter.includes(record.machine_id)) {
-        return false;
-      }
-
-      if (pokayokeChecklistFilter.length > 0 && !pokayokeChecklistFilter.includes(record.checklist_id)) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [pokayokeNotifications, pokayokeMachineFilter, pokayokeChecklistFilter]);
-
   const hasProductionFilters = useMemo(() => (
     productionMachineFilter.length > 0 ||
     selectedProjectId != null ||
     selectedParts.length > 0 ||
     selectedOperations.length > 0
   ), [productionMachineFilter, selectedProjectId, selectedParts, selectedOperations]);
-
-  const hasPmFilters = useMemo(() => (
-    pokayokeMachineFilter.length > 0 || pokayokeChecklistFilter.length > 0
-  ), [pokayokeMachineFilter, pokayokeChecklistFilter]);
 
   const clearProductionFilters = () => {
     setProductionMachineFilter([]);
@@ -490,12 +302,6 @@ const Notifications = () => {
     setSelectedOperations([]);
     setParts([]);
     setPagination((prev) => ({ ...prev, current: 1 }));
-  };
-
-  const clearPmFilters = () => {
-    setPokayokeMachineFilter([]);
-    setPokayokeChecklistFilter([]);
-    setPokayokePagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const columns = [
@@ -651,11 +457,12 @@ const Notifications = () => {
       ),
     },
     {
-      title: 'Supervisor',
+      title: 'Approved By',
       key: 'supervisorName',
       align: 'center',
       width: 100,
-      render: (text, record) => record.supervisor?.user_name || 'N/A',
+      render: (text, record) =>
+        record.supervisor?.user_name || record.reviewer?.user_name || 'N/A',
     },
     {
       title: 'Remarks',
@@ -706,142 +513,7 @@ const Notifications = () => {
           icon={<CheckOutlined />}
           size="small"
           onClick={() => handleAcknowledge(record.id)}
-          disabled={record.operator_acknowledged_at || record.acknowledged || acknowledgingIds.has(record.id)}
-        >
-          Acknowledge
-        </Button>
-      ),
-    },
-  ];
-
-  const pokayokeColumns = [
-    {
-      title: 'Sl No',
-      key: 'slNo',
-      align: 'center',
-      width: 50,
-      render: (text, record, index) =>
-        (pokayokePagination.current - 1) * pokayokePagination.pageSize + index + 1,
-    },
-    {
-      title: 'Checklist Name',
-      dataIndex: 'checklist_name',
-      key: 'checklistName',
-      align: 'center',
-      width: 120,
-      sorter: (a, b) => (a.checklist_name || '').localeCompare(b.checklist_name || ''),
-    },
-    {
-      title: 'Machine Name',
-      dataIndex: 'machine_name',
-      key: 'machineName',
-      align: 'center',
-      width: 100,
-    },
-    {
-      title: 'Operator',
-      dataIndex: 'operator_name',
-      key: 'operatorName',
-      align: 'center',
-      width: 100,
-      render: (text) => text || 'N/A',
-    },
-    {
-      title: 'Supervisor',
-      dataIndex: 'supervisor_name',
-      key: 'supervisorName',
-      align: 'center',
-      width: 100,
-      render: (text) => text || 'N/A',
-    },
-    {
-      title: 'Completed At',
-      dataIndex: 'completed_at',
-      key: 'completedAt',
-      align: 'center',
-      width: 120,
-      sorter: (a, b) => {
-        const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
-        const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
-        return dateA - dateB;
-      },
-      render: (text) => {
-        if (!text) return 'N/A';
-        try {
-          const date = new Date(text);
-          return date.toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-          });
-        } catch (error) {
-          return 'N/A';
-        }
-      },
-    },
-    {
-      title: 'Status',
-      dataIndex: 'overall_status',
-      key: 'overallStatus',
-      align: 'center',
-      width: 80,
-      filters: [
-        { text: 'Pending', value: 'pending' },
-        { text: 'Approved', value: 'approved' },
-        { text: 'Rejected', value: 'rejected' },
-      ],
-      onFilter: (value, record) => record.overall_status?.toLowerCase() === value,
-      render: (text) => (
-        <Tag color={getStatusColor(text)}>
-          {(text || 'N/A').toUpperCase()}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Acknowledged At',
-      dataIndex: 'operator_acknowledged_at',
-      key: 'acknowledgedAt',
-      align: 'center',
-      width: 120,
-      sorter: (a, b) => {
-        const dateA = a.operator_acknowledged_at ? new Date(a.operator_acknowledged_at).getTime() : 0;
-        const dateB = b.operator_acknowledged_at ? new Date(b.operator_acknowledged_at).getTime() : 0;
-        return dateA - dateB;
-      },
-      render: (text) => {
-        if (!text) return 'N/A';
-        try {
-          const date = new Date(text);
-          return date.toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          });
-        } catch (error) {
-          return 'N/A';
-        }
-      },
-    },
-    {
-      title: 'Action',
-      key: 'action',
-      align: 'center',
-      width: 50,
-      fixed: 'right',
-      render: (text, record) => (
-        <Button
-          type="primary"
-          icon={<CheckOutlined />}
-          size="small"
-          onClick={() => handlePokayokeAcknowledge(record.log_id)}
-          disabled={record.operator_acknowledged || acknowledgingIds.has(record.log_id)}
+          disabled={record.operator_acknowledged_at || record.operator_acknowledged || record.acknowledged || acknowledgingIds.has(record.id)}
         >
           Acknowledge
         </Button>
@@ -985,94 +657,6 @@ const Notifications = () => {
               ),
             },
             {
-              key: 'pokayoke',
-              label: (
-                <Badge count={pokayokeNotifications.filter(log => !log.operator_acknowledged).length} showZero={false}>
-                  Preventive Maintenance Checklists
-                </Badge>
-              ),
-              children: (
-                <Spin spinning={pokayokeLoading}>
-                  <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
-                    <Space wrap>
-                      <Select
-                        mode="multiple"
-                        showSearch
-                        allowClear
-                        placeholder="Filter by machine"
-                        style={{ minWidth: 220, maxWidth: 320 }}
-                        value={pokayokeMachineFilter}
-                        onChange={(value) => {
-                          setPokayokeMachineFilter(value || []);
-                          setPokayokePagination((prev) => ({ ...prev, current: 1 }));
-                        }}
-                        options={pokayokeMachineOptions}
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                      />
-                      <Select
-                        mode="multiple"
-                        showSearch
-                        allowClear
-                        placeholder="Filter by checklist"
-                        style={{ minWidth: 220, maxWidth: 320 }}
-                        value={pokayokeChecklistFilter}
-                        onChange={(value) => {
-                          setPokayokeChecklistFilter(value || []);
-                          setPokayokePagination((prev) => ({ ...prev, current: 1 }));
-                        }}
-                        options={pokayokeChecklistOptions}
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                      />
-                      {hasPmFilters && (
-                        <Button icon={<ClearOutlined />} onClick={clearPmFilters}>
-                          Clear
-                        </Button>
-                      )}
-                    </Space>
-                    <Button icon={<ReloadOutlined />} onClick={fetchPokayokeNotifications} loading={pokayokeLoading}>
-                      Refresh
-                    </Button>
-                  </div>
-                  <Table
-                    columns={pokayokeColumns}
-                    dataSource={filteredPokayokeNotifications}
-                    rowKey="log_id"
-                    pagination={{
-                      current: pokayokePagination.current,
-                      pageSize: pokayokePagination.pageSize,
-                      pageSizeOptions: [10, 20, 50, 100],
-                      showSizeChanger: true,
-                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                      onChange: (page, pageSize) => {
-                        setPokayokePagination({ current: page, pageSize });
-                      },
-                      onShowSizeChange: (current, size) => {
-                        setPokayokePagination({ current: 1, pageSize: size });
-                      },
-                    }}
-                    variant="outlined"
-                    scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-                    style={{
-                      textAlign: 'center',
-                    }}
-                    components={{
-                      header: {
-                        cell: (props) => (
-                          <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
-                            {props.children}
-                          </th>
-                        ),
-                      },
-                    }}
-                  />
-                </Spin>
-              ),
-            },
-            {
               key: 'pokayoke-checklist',
               label: (
                 <Badge count={pokayokeChecklistUnacknowledgedCount} showZero={false}>
@@ -1081,6 +665,17 @@ const Notifications = () => {
               ),
               children: (
                 <NotificationPokaYoke onUnacknowledgedCountChange={setPokayokeChecklistUnacknowledgedCount} />
+              ),
+            },
+            {
+              key: 'ot-assignments',
+              label: (
+                <Badge count={otUnacknowledgedCount} showZero={false}>
+                  OT Assignments
+                </Badge>
+              ),
+              children: (
+                <OTNotification onUnacknowledgedCountChange={setOtUnacknowledgedCount} />
               ),
             },
           ]}

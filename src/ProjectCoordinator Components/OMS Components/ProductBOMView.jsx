@@ -542,7 +542,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
         ),
       },
       {
-        title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Workcenter</span>,
+        title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> workcenter</span>,
         key: 'workcenter',
         render: (_, record) => (
           <Tag color="purple" icon={<EnvironmentOutlined />}>

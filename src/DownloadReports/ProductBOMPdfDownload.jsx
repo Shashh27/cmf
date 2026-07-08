@@ -301,7 +301,7 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   Cycle
                 </Text>
                 <Text style={[styles.headerCell, { width: operationsColumnWidths.workcenter }]}>
-                  Workcenter
+                  workcenter
                 </Text>
               </View>
               {operations.map((op, index) => (
@@ -697,7 +697,7 @@ const ProductBOMPdfDownload = ({
         "Machine": op.machine_name || op.machine_id || "-",
         "Setup Time": op.setup_time || "00:00:00",
         "Cycle Time": op.cycle_time || "00:00:00",
-        "Workcenter": op.work_center_name || op.workcenter_id || "-",
+        "workcenter": op.work_center_name || op.workcenter_id || "-",
         "Work Instructions": op.work_instructions || "-",
         "Notes": op.notes || "-",
       }));

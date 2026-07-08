@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import dayjs from "dayjs";
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
+import { isMachineAvailableForAssignmentOnDate } from "./breakdownDateUtils.js";
 import {
   Card, Button, Modal, Form, Select, Spin, Popconfirm, Tag, Space, Tooltip, message,
 } from "antd";
@@ -186,9 +187,22 @@ const ShiftDayAssignmentsPanel = ({
     assignmentForm.resetFields();
   };
 
-  const availableMachines = machines.filter(
-    (m) => m.status_name?.toLowerCase() !== "off" && m.status_id !== 2
+  const assignmentDate = selectedDate || (currentConfig?.date ? dayjs(currentConfig.date) : null);
+
+  const availableMachines = machines.filter((machine) =>
+    isMachineAvailableForAssignmentOnDate(machine, assignmentDate)
   );
+
+  const machinesForSelect = editingAssignment
+    ? [
+        ...availableMachines,
+        ...machines.filter(
+          (m) =>
+            m.machine_id === editingAssignment.machine_id &&
+            !availableMachines.some((a) => a.machine_id === m.machine_id)
+        ),
+      ]
+    : availableMachines;
 
   const renderBody = () => {
     if (!selectedDate) {
@@ -325,8 +339,18 @@ const ShiftDayAssignmentsPanel = ({
             name="machine_id"
             rules={[{ required: true, message: "Select a machine" }]}
           >
-            <Select placeholder="Choose machine" showSearch optionFilterProp="label" size="large">
-              {availableMachines.map((machine) => (
+            <Select
+              placeholder={
+                machinesForSelect.length
+                  ? "Choose machine"
+                  : "No machines available on this date (all in breakdown)"
+              }
+              showSearch
+              optionFilterProp="label"
+              size="large"
+              notFoundContent="No machines available for this date"
+            >
+              {machinesForSelect.map((machine) => (
                 <Option
                   key={machine.machine_id}
                   value={machine.machine_id}

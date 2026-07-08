@@ -16,7 +16,7 @@ export const handleInputKeyDown = (e) => {
   }
 };
 
-const DimensionInputs = ({ formType, dimensions, onChange }) => {
+const DimensionInputs = ({ formType, dimensions, onChange, disabled = false }) => {
   if (formType === 'Round') {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -32,6 +32,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.diameter}
             onChange={(value) => onChange('diameter', value)}
+            disabled={disabled}
           />
         </div>
         <div>
@@ -46,6 +47,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.length}
             onChange={(value) => onChange('length', value)}
+            disabled={disabled}
           />
         </div>
       </div>
@@ -67,6 +69,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.breadth}
             onChange={(value) => onChange('breadth', value)}
+            disabled={disabled}
           />
         </div>
         <div>
@@ -81,6 +84,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.height}
             onChange={(value) => onChange('height', value)}
+            disabled={disabled}
           />
         </div>
         <div>
@@ -95,6 +99,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.length}
             onChange={(value) => onChange('length', value)}
+            disabled={disabled}
           />
         </div>
       </div>
@@ -116,6 +121,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.inner_diameter}
             onChange={(value) => onChange('inner_diameter', value)}
+            disabled={disabled}
           />
         </div>
         <div>
@@ -130,6 +136,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.outer_diameter}
             onChange={(value) => onChange('outer_diameter', value)}
+            disabled={disabled}
           />
         </div>
         <div>
@@ -144,6 +151,7 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.length}
             onChange={(value) => onChange('length', value)}
+            disabled={disabled}
           />
         </div>
       </div>

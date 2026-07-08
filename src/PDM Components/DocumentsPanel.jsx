@@ -41,7 +41,7 @@ const SortableRow = (props) => {
 const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
   if (loading) return <div className="p-4 flex justify-center"><Spin size="small"><span className="text-xs text-gray-600">Loading documents...</span></Spin></div>;
   if (!docs || !docs.length) return (
-    <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
+    <div className="p-6 text-center border border-dashed border-gray-300 bg-gray-50">
       <FileTextOutlined className="text-2xl text-gray-300 mb-2" />
       <p className="text-sm text-gray-500">No documents attached to this operation</p>
     </div>
@@ -71,11 +71,11 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
         expandedRowRender: r => {
           const versions = [...(grouped[r.parent_id || r.id] || [])].sort((a, b) => a.id - b.id);
           return (
-            <div className="bg-gray-50 p-3 rounded">
+            <div className="bg-gray-50 p-3">
               <p className="text-xs font-medium text-gray-600 mb-2">Revision History:</p>
               <div className="flex flex-col gap-2">
                 {versions.map(ver => (
-                  <div key={ver.id} className="flex justify-between items-center bg-white px-3 py-2 rounded border border-gray-200 shadow-sm">
+                  <div key={ver.id} className="flex justify-between items-center bg-white px-3 py-2 border border-gray-200 shadow-sm">
                     <div className="flex items-center gap-3 min-w-0">
                       <Tag color="blue" variant="filled" className="text-[10px] m-0 px-2">{ver.document_version || 'N/A'}</Tag>
                       <span className="text-xs text-gray-700 truncate">{ver.document_name}</span>
@@ -125,7 +125,7 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
 };
 
 // ── DocumentsPanel ──────────────────────────────────────────────────────────
-const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab }) => {
+const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab, denseMode = false }) => {
   const { message } = App.useApp();
   const [documents, setDocuments]   = useState([]);
   const [operations, setOperations] = useState([]);
@@ -507,7 +507,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: t => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
     { title: <span><ClockCircleOutlined className="mr-0.5" />Cycle</span>, dataIndex: 'cycle_time', key: 'cycle', width: 100,
       render: t => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <span><EnvironmentOutlined className="mr-0.5" />Workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
+    { title: <span><EnvironmentOutlined className="mr-0.5" />workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
       render: (id, r) => <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.work_center_name || id || 'N/A'}</Tag> },
     { title: <span className="font-semibold text-slate-700">Machine</span>, dataIndex: 'machine_id', key: 'mc',
       render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag> },
@@ -559,7 +559,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
+      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
     },
     { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
@@ -687,12 +687,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           <div className="flex-1 min-h-0 overflow-hidden">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOperationDragEnd}>
               <SortableContext items={operations.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-                <FitTable 
-                  dataSource={operations} 
-                  columns={operationsColumns} 
-                  rowKey="id" 
-                  className="docs-ops-table" 
+                <FitTable
+                  dataSource={operations}
+                  columns={operationsColumns}
+                  rowKey="id"
+                  className="docs-ops-table"
+                  bordered
                   locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                  pagination={denseMode ? {
+                    pageSize: 20,
+                    showSizeChanger: true,
+                    showTotal: (total) => `Total: ${total} operations`,
+                    pageSizeOptions: ['10', '20', '50', '100'],
+                    size: 'small',
+                    position: ['bottomCenter'],
+                  } : false}
+                  scroll={{ y: denseMode ? 'calc(100vh - 380px)' : '100%', x: 'max-content' }}
                   components={{
                     body: {
                       row: SortableRow,
@@ -719,7 +729,23 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <FitTable dataSource={latestPartDocs} rowKey="id" size="small" pagination={false} className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden" scrollX="max-content" columns={eBomColumns} />
+            <FitTable
+              dataSource={latestPartDocs}
+              rowKey="id"
+              size="small"
+              bordered
+              pagination={denseMode ? {
+                pageSize: 20,
+                showSizeChanger: true,
+                showTotal: (total) => `Total: ${total} documents`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                size: 'small',
+                position: ['bottomCenter'],
+              } : false}
+              className="docs-ebom-table border border-slate-100 overflow-hidden"
+              scroll={{ y: denseMode ? 'calc(100vh - 380px)' : '100%', x: 'max-content' }}
+              columns={eBomColumns}
+            />
           </div>
 
           {/* Upload Modal */}
@@ -741,9 +767,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
 
               {/* Selected File Display - Moved for clarity */}
               {selectedFileList.length > 0 && (
-                <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm">
+                <div className="p-2 bg-blue-50 border border-blue-200 flex items-center justify-between shadow-sm">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="bg-blue-500 p-1 rounded shadow-sm"><FileTextOutlined className="text-white text-[10px]" /></div>
+                    <div className="bg-blue-500 p-1 shadow-sm"><FileTextOutlined className="text-white text-[10px]" /></div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-[9px] text-blue-500 font-bold uppercase leading-none mb-0.5">Selected File</span>
                       <span className="text-[11px] text-gray-800 truncate font-bold">{selectedFileList[0].name}</span>
@@ -805,13 +831,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   ];
 
   return (
-    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full" style={{ height: '100%' }}>
+    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full pdm-container" style={{ height: '100%' }}>
       <style>{`
-        .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2563eb!important;color:#fff!important;border:none!important;}
-        .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th{padding:${compactMode ? '4px 6px' : '6px 8px'}!important;}
-        .docs-ops-table .ant-table-thead>tr>th{font-weight:600;color:#334155!important;}
+        .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2E8B57!important;color:#fff!important;border:none!important;}
+        .docs-ops-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
+        .docs-ops-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
+        .docs-ebom-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
+        .docs-ebom-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;}
+        .ant-pagination-item{font-size:${denseMode ? '11px' : '12px'}!important;}
+        .ant-pagination-total-text{font-size:${denseMode ? '11px' : '12px'}!important;}
         /* Blur operations table when modal is open */
         .ant-modal-mask + * .docs-ops-table,
         .ant-modal-mask + * .custom-fit-table,
@@ -894,24 +924,24 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         destroyOnHidden
       >
         {viewOperation && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 rounded-lg border border-blue-200 space-y-3 sm:space-y-4">
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 border border-blue-200 space-y-3 sm:space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
-                <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
+                <div className="bg-white p-2 sm:p-3 border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
                   {viewOperation.work_instructions || 'No instructions available'}
                 </div>
               </div>
               <div>
                 <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
-                <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
+                <div className="bg-white p-2 sm:p-3 border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
                   {viewOperation.notes || 'None specified'}
                 </div>
               </div>
             </div>
 
             {((viewOperation.tools && viewOperation.tools.length > 0)) && (
-              <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
+              <div className="bg-white p-2 sm:p-3 border border-gray-200 shadow-sm overflow-x-auto">
                 <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                   <ToolOutlined /> Tools Required:
                 </p>
@@ -932,7 +962,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               </div>
             )}
 
-            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
+            <div className="bg-white p-2 sm:p-3 border border-gray-200 shadow-sm">
               <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                 <FileTextOutlined /> Operation Documents:
               </p>

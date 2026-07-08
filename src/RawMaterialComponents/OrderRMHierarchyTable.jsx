@@ -791,16 +791,16 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: isMobile ? 10 : 14, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: isMobile ? 14 : 16, whiteSpace: 'nowrap' }}>Plan & Procure Raw Materials</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount="responsive" style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartNumber([]); }}>
+          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartNumber([]); }}>
             {orderOptions.map(o => <Option key={o} value={o}>{o}</Option>)}
           </Select>
-          <Select mode="multiple" value={selectedPartNumber} placeholder="Part Number" allowClear showSearch maxTagCount="responsive" style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartNumber(val || [])}>
+          <Select mode="multiple" value={selectedPartNumber} placeholder="Part Number" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartNumber(val || [])}>
             {partNumberOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
           </Select>
-          <Select mode="multiple" value={selectedRM} placeholder="Raw Material" allowClear showSearch maxTagCount="responsive" style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedRM(val || [])}>
+          <Select mode="multiple" value={selectedRM} placeholder="Raw Material" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedRM(val || [])}>
             {rmOptions.map(r => <Option key={r} value={r}>{r}</Option>)}
           </Select>
-          <Select mode="multiple" value={selectedStockSource} placeholder="Stock Source" allowClear maxTagCount="responsive" style={{ minWidth: isMobile ? 110 : 140 }} onChange={val => setSelectedStockSource(val || [])}>
+          <Select mode="multiple" value={selectedStockSource} placeholder="Stock Source" allowClear maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 140 }} onChange={val => setSelectedStockSource(val || [])}>
             <Option value="general">General Stock</Option>
             <Option value="order">Procured</Option>
             <Option value="not_assigned">Not Assigned</Option>
@@ -878,8 +878,30 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                     </Select>
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left', minWidth: isMobile ? '150px' : '220px', verticalAlign: 'top' }}>
+                    {/* Material Availability Status */}
+                    {row.rmName !== '2D Document Not Uploaded' && (
+                      <div style={{ 
+                        marginBottom: 8, 
+                        padding: '4px 8px', 
+                        backgroundColor: row.materialExists ? '#f6ffed' : '#fff2f0',
+                        border: `1px solid ${row.materialExists ? '#b7eb8f' : '#ffccc7'}`,
+                        borderRadius: '2px',
+                        fontSize: isMobile ? 9 : 10,
+                        fontWeight: 600,
+                        color: row.materialExists ? '#52c41a' : '#ff4d4f',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}>
+                        <span style={{ fontSize: isMobile ? 10 : 12 }}>
+                          {row.materialExists ? '✓' : '✗'}
+                        </span>
+                        {row.materialExists ? 'Material Available' : 'Material Not Available - Create First'}
+                      </div>
+                    )}
+                    
                     {savedRows[row.key] && planningData[row.key]?.formType && (
-                      <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
+                      <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
                         <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 600, color: '#1890ff', marginBottom: 2 }}>
                           Planned: {planningData[row.key].formType}
                         </div>
@@ -920,7 +942,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           style={{ 
                             fontSize: isMobile ? 9 : 10, 
                             padding: isMobile ? '1px 4px' : '2px 8px',
-                            borderRadius: '3px',
+                            borderRadius: '2px',
                             fontWeight: 500,
                             height: isMobile ? '20px' : '24px',
                             minWidth: isMobile ? '50px' : '70px',
@@ -929,11 +951,6 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                         >
                           {savedRows[row.key] ? 'Update' : 'Save'}
                         </Button>
-                        {!row.materialExists && row.rmName !== '2D Document Not Uploaded' && (
-                          <div style={{ marginTop: 4, fontSize: 9, color: '#ff4d4f', maxWidth: 150 }}>
-                            Raw material not available. Please create it first.
-                          </div>
-                        )}
                       </div>
                     )}
                   </td>

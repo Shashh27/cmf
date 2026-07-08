@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -43,6 +44,7 @@ const InventoryRequestsTable = () => {
   };
 
   const fetchInventoryRequests = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (!response.ok) {
@@ -53,6 +55,8 @@ const InventoryRequestsTable = () => {
     } catch (error) {
       console.error('Failed to fetch inventory requests:', error);
       message.error('Failed to fetch inventory requests: ' + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -236,49 +240,38 @@ const InventoryRequestsTable = () => {
     setDateRange([null, null]);
     setTypeFilter('all');
     setSearchText('');
+    setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const columns = [
     {
-      title: 'SL NO',
+      title: 'Sl no',
       key: 'sl_no',
-      width: 50,
-      fixed: 'left',
       align: 'center',
-      className: 'table-header-styled',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 120,
-      fixed: 'left',
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Range',
       dataIndex: 'tool_range',
       key: 'tool_range',
-      width: 80,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'ID Code',
       dataIndex: 'identification_code',
       key: 'identification_code',
-      width: 100,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Project',
-      dataIndex: 'project_name',
       key: 'project_number',
-      width: 140,
-      className: 'table-header-styled',
+      sortValue: (r) => `${r.project_name || ''} ${r.product_name || ''}`,
       render: (_, record) => {
         const projName = record.project_name || '-';
         const productName = record.product_name || '';
@@ -292,10 +285,8 @@ const InventoryRequestsTable = () => {
     },
     {
       title: 'Part',
-      dataIndex: 'part_name',
       key: 'part_name',
-      width: 140,
-      className: 'table-header-styled',
+      sortValue: (r) => `${r.part_name || ''} ${r.part_number || ''}`,
       render: (_, record) => {
         const partName = record.part_name || '-';
         const partNum = record.part_number || '';
@@ -310,8 +301,7 @@ const InventoryRequestsTable = () => {
     {
       title: 'Operation',
       key: 'operation',
-      width: 130,
-      className: 'table-header-styled',
+      sortValue: (r) => `${r.operation_name || ''} ${r.operation_number || ''}`,
       render: (_, record) => {
         const opName = record.operation_name || '-';
         const opNum = record.operation_number || '';
@@ -327,17 +317,13 @@ const InventoryRequestsTable = () => {
       title: 'Quantity',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 100,
       align: 'center',
-      className: 'table-header-styled',
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
       align: 'center',
-      className: 'table-header-styled',
       filters: [
         { text: 'Pending', value: 'pending' },
         { text: 'Approved', value: 'approved' },
@@ -354,25 +340,34 @@ const InventoryRequestsTable = () => {
       title: 'Requested By',
       dataIndex: 'operator_name',
       key: 'operator_name',
-      width: 140,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Approved By',
       dataIndex: 'inventory_supervisor_name',
       key: 'inventory_supervisor_name',
-      width: 140,
-      className: 'table-header-styled',
       render: (text) => text || '-',
+    },
+    {
+      title: 'Requested At',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      align: 'center',
+      render: (v) => formatDateTime(v),
+    },
+    {
+      title: 'Approved At',
+      key: 'approved_at',
+      align: 'center',
+      sortValue: (r) => ((r.status || '').toLowerCase() !== 'pending' ? r.updated_at : ''),
+      render: (_, record) =>
+        (record.status || '').toLowerCase() !== 'pending' ? formatDateTime(record.updated_at) : '-',
     },
     {
       title: 'Action',
       key: 'action',
-      width: 180,
-      fixed: 'right',
       align: 'center',
-      className: 'table-header-styled',
+      sorter: false,
       render: (_, record) => {
         const { role } = getCurrentUserInfo();
         // Only show actions for inventory_supervisor
@@ -467,48 +462,35 @@ const InventoryRequestsTable = () => {
           </Col>
         </Row>
       </div>
+      <InventoryOverviewTableStyles />
       <Table
-        columns={columns}
-        dataSource={filteredRequests}
-        rowKey="id"
-        loading={loading}
-        className="modern-table"
-        pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          onChange: (page, pageSize) => {
-            setPagination({
-              current: page,
-              pageSize: pageSize || pagination.pageSize,
-            });
+        {...getInventoryOverviewTableProps({
+          columns,
+          dataSource: filteredRequests,
+          rowKey: 'id',
+          loading,
+          scrollX: 1400,
+          pagination: {
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onChange: (page, pageSize) => {
+              setPagination({
+                current: page,
+                pageSize: pageSize || pagination.pageSize,
+              });
+            },
+            onShowSizeChange: (current, size) => {
+              setPagination({
+                current: 1,
+                pageSize: size,
+              });
+            },
           },
-          onShowSizeChange: (current, size) => {
-            setPagination({
-              current: 1,
-              pageSize: size,
-            });
-          },
-        }}
-        size="small"
-        components={{
-          header: {
-            cell: (props) => (
-              <th
-                {...props}
-                style={{
-                  ...(props.style || {}),
-                  paddingTop: 10,
-                  paddingBottom: 10,
-                }}
-              />
-            ),
-          },
-        }}
-        scroll={{ x: 1200 }}
+        })}
       />
     </div>
   );

@@ -9,6 +9,7 @@ import {
   DownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
+import cmtisLogo from '../assets/cmtis.png';
 
 /* ─── Month colors ─────────────────────────────────────────────────────── */
 const MONTH_COLORS = [
@@ -25,6 +26,121 @@ const MONTH_COLORS = [
   { bg: '#eab308', text: '#fff', label: 'Nov' },
   { bg: '#e53e3e', text: '#fff', label: 'Dec' },
 ];
+
+const PDF_MARK_CHECK = '3';
+const PDF_MARK_CROSS = '7';
+
+const loadImageAsDataUrl = (src) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+
+function drawPmPdfHeader(doc, pageWidth, { machineDisplay, monthLabel, currentYear, periodLabel, logoDataUrl }) {
+  const margin = 10;
+  const boxTop = 8;
+  const headerH = 28;
+  const navy = [30, 58, 95];
+
+  doc.setDrawColor(navy[0], navy[1], navy[2]);
+  doc.setLineWidth(0.35);
+  doc.rect(margin, boxTop, pageWidth - margin * 2, headerH);
+
+  doc.line(margin + 42, boxTop, margin + 42, boxTop + 18);
+  if (logoDataUrl) {
+    const logoW = 34;
+    const logoH = 12;
+    doc.addImage(
+      logoDataUrl,
+      'PNG',
+      margin + (42 - logoW) / 2,
+      boxTop + (18 - logoH) / 2,
+      logoW,
+      logoH,
+    );
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('CENTRAL MANUFACTURING FACILITY (CMF)', pageWidth / 2, boxTop + 7, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(55, 65, 81);
+  doc.text('ISO 9001-2015', pageWidth / 2, boxTop + 12, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Preventive Maintenance Checklist', pageWidth / 2, boxTop + 17, { align: 'center' });
+
+  const metaTop = boxTop + 18;
+  doc.line(margin, metaTop, pageWidth - margin, metaTop);
+
+  const metaFields = [
+    { label: 'Machine', value: machineDisplay, flex: 2 },
+    { label: 'Month', value: monthLabel, flex: 1 },
+    { label: 'Year', value: String(currentYear), flex: 1 },
+    { label: 'Location', value: 'Workshop', flex: 1 },
+  ];
+  const innerW = pageWidth - margin * 2;
+  const totalFlex = metaFields.reduce((sum, field) => sum + field.flex, 0);
+  let x = margin;
+  metaFields.forEach((field, index) => {
+    const colW = (innerW * field.flex) / totalFlex;
+    if (index > 0) doc.line(x, metaTop, x, boxTop + headerH);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(17, 24, 39);
+    doc.text(`${field.label}:`, x + 2, metaTop + 5.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(29, 78, 216);
+    const labelW = doc.getTextWidth(`${field.label}: `);
+    doc.text(String(field.value), x + 2 + labelW, metaTop + 5.5, { maxWidth: colW - labelW - 4 });
+    x += colW;
+  });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(80, 80, 80);
+  doc.text(`Period: ${periodLabel}`, margin, boxTop + headerH + 5);
+  doc.setTextColor(0, 0, 0);
+
+  return boxTop + headerH + 9;
+}
+
+function buildPdfColumnStyles(pageWidth, dayCount, viewMode) {
+  const margin = 10;
+  const usable = pageWidth - margin * 2;
+  const slW = 8;
+  const pointW = viewMode === 'year' || viewMode === 'custom' ? 38 : 46;
+  const freqW = viewMode === 'year' || viewMode === 'custom' ? 20 : 24;
+  const dayW = Math.max(3.6, (usable - slW - pointW - freqW) / Math.max(dayCount, 1));
+  const dayFont = dayW < 4.5 ? 5 : 6;
+
+  const columnStyles = {
+    0: { cellWidth: slW, halign: 'center', fontSize: 6 },
+    1: { cellWidth: pointW, halign: 'left', fontSize: 6 },
+    2: { cellWidth: freqW, halign: 'center', fontSize: 5 },
+  };
+  for (let i = 0; i < dayCount; i += 1) {
+    columnStyles[3 + i] = {
+      cellWidth: dayW,
+      halign: 'center',
+      fontSize: dayFont,
+      overflow: 'hidden',
+      minCellHeight: 4,
+    };
+  }
+  return { columnStyles, tableWidth: usable, margin };
+}
 
 /* ─── Frequency helpers ─────────────────────────────────────────────────── */
 const freqLabel = (item) => {
@@ -62,25 +178,22 @@ const toYMD = (d) =>
 
 const parseYMD = (str) => { const [y,m,d] = str.split('-').map(Number); return new Date(y,m-1,d); };
 
-const isConformingResponse = (sub, item = {}) => {
-  if (sub.is_confirming !== undefined && sub.is_confirming !== null) {
-    return sub.is_confirming === true || sub.is_confirming === 'true';
-  }
-  const status = String(sub.status ?? sub.approval_status ?? '').toLowerCase();
-  if (status === 'approved') return true;
-  if (status === 'rejected') return false;
-
-  const val = String(sub.response_value ?? '').toLowerCase();
-  const expected = String(item.expected_value ?? sub.expected_value ?? 'yes').toLowerCase();
+const isPositiveResponse = (responseValue, expectedValue = 'yes') => {
+  const val = String(responseValue ?? '').toLowerCase().trim();
+  const expected = String(expectedValue ?? 'yes').toLowerCase().trim();
   const truthy = new Set(['true', 'yes', 'y', '1', 'on']);
   const falsy = new Set(['false', 'no', 'n', '0', 'off']);
   if (truthy.has(val) && truthy.has(expected)) return true;
   if (falsy.has(val) && falsy.has(expected)) return true;
+  if (truthy.has(val) && falsy.has(expected)) return false;
+  if (falsy.has(val) && truthy.has(expected)) return false;
   return val === expected;
 };
 
-const isApprovedSubmission = (sub) =>
-  String(sub?.approval_status ?? sub?.status ?? sub?.overall_approval_status ?? '').toLowerCase() === 'approved';
+const hasSubmittedResponse = (sub) =>
+  !!(sub.submitted_at ?? sub.completed_at ?? sub.created_at ?? sub.timestamp)
+  && sub.response_value != null
+  && String(sub.response_value).trim() !== '';
 
 const normalizePmSubmissions = (data) => {
   const rawList = Array.isArray(data)
@@ -92,7 +205,7 @@ const normalizePmSubmissions = (data) => {
         : [];
 
   if (rawList.length > 0 && rawList[0].item_responses) {
-    return rawList.filter((log) => isApprovedSubmission(log));
+    return rawList.filter((log) => log.completed_at && (log.item_responses?.length ?? 0) > 0);
   }
 
   const flatSubmissions = rawList.flatMap((entry) => {
@@ -107,7 +220,7 @@ const normalizePmSubmissions = (data) => {
   });
 
   return flatSubmissions
-    .filter((sub) => isApprovedSubmission(sub))
+    .filter((sub) => hasSubmittedResponse(sub))
     .map((sub) => {
       const item = sub.checklist_item ?? {};
       return {
@@ -127,7 +240,6 @@ const normalizePmSubmissions = (data) => {
           inspection_interval: item.inspection_interval ?? sub.inspection_interval,
           expected_value: item.expected_value ?? sub.expected_value,
           is_required: item.is_required ?? sub.is_required ?? true,
-          is_confirming: isConformingResponse(sub, item),
           approval_status: sub.approval_status ?? sub.status,
           response_value: sub.response_value,
         }],
@@ -254,8 +366,7 @@ const PokayokeHistory = ({ machineId }) => {
       if (!map[cid]) map[cid] = { id: cid, name: cName, items: {} };
       const logTs = new Date(log.completed_at).getTime();
       for (const item of (log.item_responses ?? [])) {
-        const itemStatus = String(item.approval_status ?? log.overall_approval_status ?? '').toLowerCase();
-        if (itemStatus !== 'approved') continue;
+        if (item.response_value == null || String(item.response_value).trim() === '') continue;
 
         const ikey = String(item.item_id);
         if (!map[cid].items[ikey]) {
@@ -278,10 +389,10 @@ const PokayokeHistory = ({ machineId }) => {
         const prevTs = ex ? new Date(ex._ts ?? 0).getTime() : 0;
         if (!ex || logTs > prevTs) {
           map[cid].items[ikey].submissions[ymd] = {
-            is_confirming:   item.is_confirming,
             approval_status: item.approval_status ?? log.overall_approval_status ?? null,
-            response_value:  item.response_value,
-            _ts:             log.completed_at,
+            response_value: item.response_value,
+            expected_value: item.expected_value,
+            _ts: log.completed_at,
           };
         }
       }
@@ -331,21 +442,14 @@ const PokayokeHistory = ({ machineId }) => {
   };
 
   /* ── Cell renderer ── */
-  const renderCell = (submissions, col) => {
+  const renderCell = (submissions, col, expectedValue) => {
     const sub = submissions[col.key];
     let content = null;
-
     if (sub) {
-      const ok = sub.is_confirming === true || sub.is_confirming === 'true';
-      if (isDay) {
-        content = ok
-          ? <span style={{ display:'inline-flex', alignItems:'center', gap:5, color:'#15803d', fontWeight:600, fontSize:12 }}><CheckCircleFilled style={{ fontSize:15, color:'#22c55e' }} /> Yes</span>
-          : <span style={{ display:'inline-flex', alignItems:'center', gap:5, color:'#dc2626', fontWeight:600, fontSize:12 }}><CloseCircleFilled  style={{ fontSize:15, color:'#ef4444' }} /> No</span>;
-      } else {
-        content = ok
-          ? <CheckCircleFilled style={{ color:'#22c55e', fontSize:13 }} />
-          : <CloseCircleFilled  style={{ color:'#ef4444', fontSize:13 }} />;
-      }
+      const ok = isPositiveResponse(sub.response_value, sub.expected_value ?? expectedValue);
+      content = ok
+        ? <CheckCircleFilled style={{ color: '#22c55e', fontSize: isDay ? 15 : 13 }} />
+        : <CloseCircleFilled style={{ color: '#ef4444', fontSize: isDay ? 15 : 13 }} />;
     }
 
     return (
@@ -378,45 +482,33 @@ const PokayokeHistory = ({ machineId }) => {
     return '';
   };
 
-  const pdfCellMark = (sub) => {
+  const pdfCellMark = (sub, expectedValue) => {
     if (!sub) return '';
-    const ok = sub.is_confirming === true || sub.is_confirming === 'true';
-    return ok ? '✓' : '✗';
+    return isPositiveResponse(sub.response_value, sub.expected_value ?? expectedValue) ? PDF_MARK_CHECK : PDF_MARK_CROSS;
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     try {
-      const doc = new jsPDF(viewMode === 'year' || viewMode === 'custom' ? 'l' : 'p', 'mm', 'a4');
+      const useLandscape = viewMode === 'year' || viewMode === 'custom' || viewMode === 'month';
+      const doc = new jsPDF(useLandscape ? 'l' : 'p', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
-      let y = 12;
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
-      doc.text('CENTRAL MANUFACTURING FACILITY (CMF)', pageWidth / 2, y, { align: 'center' });
-      y += 6;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text('ISO 9001-2015', pageWidth / 2, y, { align: 'center' });
-      y += 5;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Preventive Maintenance Checklist', pageWidth / 2, y, { align: 'center' });
-      y += 8;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(
-        `Machine: ${machineDisplay}    Month: ${monthLabel}    Year: ${currentYear}    Location: Workshop`,
-        14,
-        y
-      );
-      y += 5;
-      doc.text(`Period: ${getViewPeriodLabel()}`, 14, y);
-      y += 6;
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cmtisLogo);
+      } catch {
+        /* logo optional */
+      }
+      const startY = drawPmPdfHeader(doc, pageWidth, {
+        machineDisplay,
+        monthLabel,
+        currentYear,
+        periodLabel: getViewPeriodLabel(),
+        logoDataUrl,
+      });
 
       if (grouped.length === 0) {
         doc.setFontSize(11);
-        doc.text('No approved checklist history found.', pageWidth / 2, y + 10, { align: 'center' });
+        doc.text('No checklist history found.', pageWidth / 2, startY + 10, { align: 'center' });
         doc.save(`pm_checklist_history_${machineId ?? 'machine'}.pdf`);
         message.success('PDF downloaded successfully');
         return;
@@ -424,6 +516,7 @@ const PokayokeHistory = ({ machineId }) => {
 
       const dayHeaders = columns.map((col) => String(col.day));
       const headRow = ['Sl.', 'Check Point', 'Frequency', ...dayHeaders];
+      const { columnStyles, tableWidth, margin } = buildPdfColumnStyles(pageWidth, columns.length, viewMode);
 
       const bodyRows = [];
       grouped.forEach((checklist, ci) => {
@@ -434,7 +527,7 @@ const PokayokeHistory = ({ machineId }) => {
         }]);
 
         const items = Object.values(checklist.items).sort(
-          (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0)
+          (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0),
         );
 
         items.forEach((item, ii) => {
@@ -445,43 +538,51 @@ const PokayokeHistory = ({ machineId }) => {
             `${ii + 1}.`,
             pointLabel,
             freqLabel(item),
-            ...columns.map((col) => pdfCellMark(item.submissions[col.key])),
+            ...columns.map((col) => pdfCellMark(item.submissions[col.key], item.expected_value)),
           ]);
         });
       });
 
       autoTable(doc, {
-        startY: y,
+        startY,
+        margin: { left: margin, right: margin },
+        tableWidth,
         head: [headRow],
         body: bodyRows,
         styles: {
-          fontSize: viewMode === 'year' || viewMode === 'custom' ? 5 : 7,
-          cellPadding: 1.5,
+          fontSize: viewMode === 'year' || viewMode === 'custom' ? 5 : 6,
+          cellPadding: 1,
           overflow: 'linebreak',
           valign: 'middle',
+          lineWidth: 0.1,
+          lineColor: [209, 213, 219],
         },
         headStyles: {
-          fillColor: [240, 245, 255],
+          fillColor: [243, 244, 246],
           textColor: [30, 58, 95],
           fontStyle: 'bold',
           halign: 'center',
+          fontSize: 6,
+          cellPadding: 0.8,
+          overflow: 'hidden',
+          minCellHeight: 5,
         },
-        columnStyles: {
-          0: { cellWidth: 8, halign: 'center' },
-          1: { cellWidth: viewMode === 'year' || viewMode === 'custom' ? 40 : 55 },
-          2: { cellWidth: viewMode === 'year' || viewMode === 'custom' ? 22 : 28 },
-        },
+        columnStyles,
         didParseCell: (data) => {
+          if (data.section === 'head' && data.column.index >= 3) {
+            data.cell.styles.overflow = 'hidden';
+            data.cell.styles.halign = 'center';
+            data.cell.styles.minCellHeight = 5;
+          }
           if (data.section === 'body' && data.column.index >= 3) {
             const text = data.cell.raw;
-            if (text === '✓') {
-              data.cell.styles.textColor = [34, 197, 94];
-              data.cell.styles.fontStyle = 'bold';
+            if (text === PDF_MARK_CHECK || text === PDF_MARK_CROSS) {
+              data.cell.styles.font = 'ZapfDingbats';
+              data.cell.styles.fontSize = 7;
+              data.cell.styles.textColor = text === PDF_MARK_CHECK ? [34, 197, 94] : [239, 68, 68];
               data.cell.styles.halign = 'center';
-            } else if (text === '✗') {
-              data.cell.styles.textColor = [239, 68, 68];
-              data.cell.styles.fontStyle = 'bold';
-              data.cell.styles.halign = 'center';
+              data.cell.styles.valign = 'middle';
+              data.cell.styles.overflow = 'hidden';
             }
           }
         },
@@ -499,14 +600,14 @@ const PokayokeHistory = ({ machineId }) => {
   const legend = (
     <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
       {[
-        { icon: <CheckCircleFilled  style={{ color:'#22c55e', fontSize:13 }} />,    label:'Conforming' },
-        { icon: <CloseCircleFilled  style={{ color:'#ef4444', fontSize:13 }} />,    label:'Non-conforming' },
-        { icon: <CalendarOutlined   style={{ fontSize:13, color:'#0284c7' }} />,    label:'Time based' },
-        { icon: <ThunderboltOutlined style={{ fontSize:13, color:'#7c3aed' }} />,   label:'Usage based' },
-        { icon: <ClockCircleOutlined style={{ fontSize:13, color:'#059669' }} />,   label:'Condition based' },
-        { icon: <span style={{ color:'#ef4444', fontWeight:700 }}>*</span>,          label:'Required' },
+        { icon: <CheckCircleFilled style={{ color: '#22c55e', fontSize: 13 }} />, label: 'Conforming' },
+        { icon: <CloseCircleFilled style={{ color: '#ef4444', fontSize: 13 }} />, label: 'Non-conforming' },
+        { icon: <CalendarOutlined style={{ fontSize: 13, color: '#0284c7' }} />, label: 'Time based' },
+        { icon: <ThunderboltOutlined style={{ fontSize: 13, color: '#7c3aed' }} />, label: 'Usage based' },
+        { icon: <ClockCircleOutlined style={{ fontSize: 13, color: '#059669' }} />, label: 'Condition based' },
+        { icon: <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span>, label: 'Required' },
       ].map(({ icon, label }) => (
-        <span key={label} style={{ fontSize:11, color:'#6b7280', display:'flex', alignItems:'center', gap:4 }}>
+        <span key={label} style={{ fontSize: 11, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
           {icon} {label}
         </span>
       ))}
@@ -645,7 +746,7 @@ const PokayokeHistory = ({ machineId }) => {
           {loading ? (
             <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48 }}><Spin size="large" /></td></tr>
           ) : grouped.length === 0 ? (
-            <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48, color:'#9ca3af' }}>No approved checklist history found.</td></tr>
+            <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48, color:'#9ca3af' }}>No checklist history found.</td></tr>
           ) : grouped.map((checklist, ci) => {
             const items = Object.values(checklist.items).sort(
               (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0)
@@ -697,7 +798,7 @@ const PokayokeHistory = ({ machineId }) => {
                           {freqIcon(item)} {freqLabel(item)}
                         </span>
                       </td>
-                      {columns.map((col) => renderCell(item.submissions, col))}
+                      {columns.map((col) => renderCell(item.submissions, col, item.expected_value))}
                     </tr>
                   );
                 })}
@@ -719,11 +820,10 @@ const PokayokeHistory = ({ machineId }) => {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <img
-              src="/src/assets/cmtis.png" alt="CMTI Logo"
+              src={cmtisLogo}
+              alt="CMTI Logo"
               style={{ maxWidth: 120, maxHeight: 48, objectFit: 'contain' }}
-              onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
             />
-            <span style={{ display: 'none', fontWeight: 900, fontSize: 20, color: '#1e3a5f', fontStyle: 'italic' }}>cmti</span>
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 16px' }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: '#1e3a5f', letterSpacing: 0.5 }}>CENTRAL MANUFACTURING FACILITY (CMF)</div>

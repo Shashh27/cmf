@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
+import { Card } from 'antd';
 import InspectionResults from '../Operator Components/InspectionResults';
 import InventoryData from '../Operator Components/InventoryData';
 import Documents from '../Operator Components/Documents';
@@ -34,7 +35,19 @@ const OperatorDashboard = () => {
       return <OperatorNotifications />;
     }
     if (path.includes('/production-logs')) {
-      return <ProductionLogsHistory />;
+      return (
+        <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
+          <Card
+            bordered={false}
+            style={{
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            }}
+          >
+            <ProductionLogsHistory />
+          </Card>
+        </div>
+      );
     }
 
     // Default Dashboard View

@@ -28,6 +28,7 @@ const OMS = () => {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [dateRange, setDateRange] = useState(null);
+  const [selectedKpiFilter, setSelectedKpiFilter] = useState(null);
   const [filterCustomers, setFilterCustomers] = useState([]);
   const [filterProjects, setFilterProjects] = useState([]);
   const hasFetchedData = useRef(false);
@@ -212,19 +213,31 @@ const OMS = () => {
     return orders
       .map(o => ({ id: o.product_id, label: o.product_name || `Project ${o.product_id}` }))
       .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
-      .sort((a, b) => a.label.localeCompare(b.label))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)))
       .map(({ id, label }) => ({ value: id, label }));
   }, [orders]);
 
   const filteredOrders = orders.filter((order, index) => {
-    // 0. Product ID Filter (from URL)
+    // 0. KPI Filter
+    if (selectedKpiFilter) {
+      if (selectedKpiFilter === 'Pending' && order.status !== 'Pending') return false;
+      if (selectedKpiFilter === 'In Progress' && order.status !== 'In Progress') return false;
+      if (selectedKpiFilter === 'Completed' && order.status !== 'Completed') return false;
+    }
+
+    // 1. Product ID Filter (from URL)
     if (productId && order.product_id?.toString() !== productId) return false;
 
     // Customer multi-select filter
     if (filterCustomers.length > 0 && !filterCustomers.includes(order.customer_id)) return false;
 
-    // Project multi-select filter
-    if (filterProjects.length > 0 && !filterProjects.includes(order.product_id)) return false;
+    // Project multi-select filter (normalize id types — API may return number or string)
+    if (
+      filterProjects.length > 0 &&
+      !filterProjects.some((id) => String(id) === String(order.product_id))
+    ) {
+      return false;
+    }
 
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
@@ -493,12 +506,12 @@ const OMS = () => {
     },
   ];
 
-  // KPI stats
-  const totalOrders = filteredOrders.length;
-  const pendingCount = filteredOrders.filter(o => o.status === 'Pending').length;
-  const scheduledCount = filteredOrders.filter(o => o.status === 'Scheduled').length;
-  const inProgressCount = filteredOrders.filter(o => o.status === 'In Progress').length;
-  const completedCount = filteredOrders.filter(o => o.status === 'Completed').length;
+  // KPI stats (calculated from all orders, not filtered)
+  const totalOrders = orders.length;
+  const pendingCount = orders.filter(o => o.status === 'Pending').length;
+  const scheduledCount = orders.filter(o => o.status === 'Scheduled').length;
+  const inProgressCount = orders.filter(o => o.status === 'In Progress').length;
+  const completedCount = orders.filter(o => o.status === 'Completed').length;
 
   const ordersForPdf = filteredOrders.map(order => ({
     ...order,
@@ -557,8 +570,15 @@ const OMS = () => {
       {contextHolder}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 lg:mb-6">
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3 mb-4 lg:mb-6">
+          <div 
+            className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+              selectedKpiFilter === null 
+                ? 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-100 ring-2 ring-blue-400' 
+                : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-100'
+            }`}
+            onClick={() => setSelectedKpiFilter(null)}
+          >
             <div className="flex items-center justify-between gap-1">
               <div>
                 <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Orders</div>
@@ -567,7 +587,14 @@ const OMS = () => {
               <ShoppingOutlined className="text-blue-600 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
+          <div 
+            className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+              selectedKpiFilter === 'Pending' 
+                ? 'bg-gradient-to-br from-orange-50 to-orange-100 border-orange-100 ring-2 ring-orange-400' 
+                : 'bg-gradient-to-br from-orange-50 to-orange-100 border-orange-100'
+            }`}
+            onClick={() => setSelectedKpiFilter('Pending')}
+          >
             <div className="flex items-center justify-between gap-1">
               <div>
                 <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Pending</div>
@@ -576,7 +603,14 @@ const OMS = () => {
               <AppstoreOutlined className="text-orange-500 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+          <div 
+            className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+              selectedKpiFilter === 'In Progress' 
+                ? 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-100 ring-2 ring-blue-400' 
+                : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-100'
+            }`}
+            onClick={() => setSelectedKpiFilter('In Progress')}
+          >
             <div className="flex items-center justify-between gap-1">
               <div>
                 <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">In Progress</div>
@@ -585,16 +619,14 @@ const OMS = () => {
               <SyncOutlined className="text-blue-600 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between gap-1">
-              <div>
-                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Scheduled</div>
-                <div className="text-lg sm:text-xl font-bold text-purple-600 leading-tight">{scheduledCount}</div>
-              </div>
-              <ClockCircleOutlined className="text-purple-500 text-lg sm:text-xl" />
-            </div>
-          </div>
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
+          <div 
+            className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+              selectedKpiFilter === 'Completed' 
+                ? 'bg-gradient-to-br from-green-50 to-green-100 border-green-100 ring-2 ring-green-400' 
+                : 'bg-gradient-to-br from-green-50 to-green-100 border-green-100'
+            }`}
+            onClick={() => setSelectedKpiFilter('Completed')}
+          >
             <div className="flex items-center justify-between gap-1">
               <div>
                 <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Completed</div>
@@ -607,61 +639,50 @@ const OMS = () => {
 
       {/* Header */}
       <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
-            <div className="w-full lg:w-auto">
-                <Typography.Title 
-                  level={2} 
-                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
-                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
-                >
-                    <ShoppingOutlined className="text-blue-600" />
-                    <span className="hidden sm:inline">Order Management</span>
-                    <span className="sm:hidden">Orders</span>
-                </Typography.Title>
-                <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
-                    Manage sales orders, track status, and handle documents
-                </Typography.Text>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-end gap-3 lg:gap-4">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
               <RangePicker
                 onChange={handleDateRangeChange}
                 disabledDate={disabledDate}
-                className="w-full sm:w-64"
                 format="DD/MM/YYYY"
                 placeholder={["Start Date", "End Date"]}
                 inputReadOnly
+                size="middle"
+                style={{ minWidth: 150, flex: 1, fontWeight: 600 }}
               />
               <Input.Search
-                placeholder="Search by any field..."
+                placeholder="Search..."
                 allowClear
                 onSearch={handleSearch}
                 onChange={(e) => handleSearch(e.target.value)}
                 value={searchText}
                 maxLength={20}
-                className="w-full sm:w-64 lg:w-80"
                 size="middle"
+                style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
               />
               <Select
                 mode="multiple"
                 allowClear
-                placeholder="Filter by Project"
+                placeholder="Project"
                 value={filterProjects}
                 onChange={setFilterProjects}
                 options={uniqueProjectOptions}
-                maxTagCount="responsive"
-                style={{ minWidth: 180 }}
+                maxTagCount={1}
+                maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} more`}
                 size="middle"
+                style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
               />
               <Select
                 mode="multiple"
                 allowClear
-                placeholder="Filter by Customer"
+                placeholder="Customer"
                 value={filterCustomers}
                 onChange={setFilterCustomers}
                 options={uniqueCustomerOptions}
-                maxTagCount="responsive"
-                style={{ minWidth: 180 }}
+                maxTagCount={1}
+                maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} more`}
                 size="middle"
+                style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
               />
               <div className="flex gap-2">
                 <OMSOrdersPdfDownload

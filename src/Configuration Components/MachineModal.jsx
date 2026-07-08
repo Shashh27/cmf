@@ -4,7 +4,7 @@ import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, DatePicker, Button, message, InputNumber, Select } from "antd";
 import dayjs from "dayjs";
 
-const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }) => {
+const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [frequencyUnit, setFrequencyUnit] = useState(null);
@@ -14,7 +14,7 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
       const freqUnit = machine.calibration_frequency ? machine.calibration_frequency.split(' ')[1] : null;
       setFrequencyUnit(freqUnit);
       form.setFieldsValue({
-        work_center_id: machine.work_center_id || workCenterId,
+        work_center_id: machine.work_center_id || workcenterId,
         type: machine.type || "",
         make: machine.make || "",
         model: machine.model || "",
@@ -31,16 +31,16 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
     } else {
       form.resetFields();
       setFrequencyUnit(null);
-      form.setFieldsValue({ work_center_id: workCenterId });
+      form.setFieldsValue({ work_center_id: workcenterId });
     }
-  }, [machine, workCenterId, isOpen, form]);
+  }, [machine, workcenterId, isOpen, form]);
 
   const handleSubmit = async (values) => {
     setLoading(true);
 
     // Prepare data with proper types
     const submitData = {
-      work_center_id: parseInt(workCenterId),
+      work_center_id: parseInt(workcenterId),
       type: values.type,
       make: values.make,
       model: values.model,

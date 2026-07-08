@@ -70,9 +70,9 @@ const PDM = () => {
         }
       `}</style>
       
-      <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ paddingTop: fromOms ? 0 : 10, paddingBottom: fromOms ? 10 : 10, height: fromOms ? 'calc(100vh - 10px)' : 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {fromOms && (
-          <div style={{ padding: '0 4px 10px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '0 4px 4px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Tabs
               activeKey={activeTopTab}
               onChange={setActiveTopTab}
@@ -160,6 +160,19 @@ const PDM = () => {
             <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
               <ProductSummary
                 productId={selectedItem?.id}
+                orderId={initialOrderId}
+                userId={(() => {
+                  const userStr = localStorage.getItem('user');
+                  if (userStr) {
+                    try {
+                      const user = JSON.parse(userStr);
+                      return user.id || null;
+                    } catch {
+                      return null;
+                    }
+                  }
+                  return null;
+                })()}
               />
             </div>
           ) : (

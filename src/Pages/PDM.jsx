@@ -11,6 +11,7 @@ import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import QualityManagement from "../Quality Management Components/QualityManagement";
 import Recyclebin from "./Recyclebin";
 import AdminDocumentNotifications from "./AdminDocumentNotifications";
+import "../PDM Components/pdm-theme.css";
 
 const { Sider, Content } = Layout;
 
@@ -29,6 +30,10 @@ const PDM = () => {
   const [productHierarchies, setProductHierarchies] = useState({});
   const [activeTopTab, setActiveTopTab] = useState("pdm");
   const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
+
+  // Get user from localStorage for additional costs tracking
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const userId = user?.id;
 
   // Detect screen size
   React.useEffect(() => {
@@ -69,16 +74,15 @@ const PDM = () => {
             top: 80px;
             left: 16px;
             z-index: 1001;
-            background: white;
+            background: #FFFFFF;
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            border-radius: 8px;
           }
         }
       `}</style>
       
-      <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="pdm-container" style={{ height: '100vh', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {fromOms && (
-          <div style={{ padding: '0 4px 10px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="pdm-section-header" style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Tabs
               activeKey={activeTopTab}
               onChange={setActiveTopTab}
@@ -99,7 +103,7 @@ const PDM = () => {
         )}
 
       {(!fromOms || activeTopTab === "pdm") ? (
-      <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
+      <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex', margin: 0, padding: 0 }}>
         {/* Mobile: Hamburger button */}
         {isMobile && (
           <Button
@@ -112,17 +116,20 @@ const PDM = () => {
 
         {/* Desktop: Fixed Sidebar - scrolls independently */}
         {!isMobile && (
-          <Sider 
-            width="33%" 
-            theme="light" 
-            style={{ 
-              borderRight: "1px solid #f0f0f0", 
+          <Sider
+            width="30%"
+            theme="light"
+            style={{
+              borderRight: "1px solid #D6D3C4",
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
-              minWidth: 300,
-              maxWidth: 500,
-              height: '100%'
+              minWidth: 280,
+              maxWidth: 480,
+              height: '100%',
+              backgroundColor: '#F5F5DC',
+              margin: 0,
+              padding: 0
             }}
           >
             <div className="flex flex-col h-full overflow-hidden">
@@ -157,20 +164,22 @@ const PDM = () => {
         )}
         
         {/* Right: Product summary for product; otherwise details + documents */}
-        <Content 
-          style={{ 
-            display: "flex", 
-            flexDirection: "column", 
-            overflow: "hidden", 
-            backgroundColor: "#f8fafc", 
+        <Content
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            backgroundColor: "#F5F5DC",
             height: "100%",
-            marginLeft: isMobile ? 0 : undefined
+            margin: 0
           }}
         >
           {isProductSelected ? (
             <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
               <ProductSummary 
                 productId={selectedItem?.id} 
+                orderId={initialOrderId}
+                userId={userId}
               />
             </div>
           ) : (
@@ -211,11 +220,11 @@ const PDM = () => {
         </Content>
       </Layout>
       ) : activeTopTab === "pps" ? (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
+        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#F5F5DC" }}>
           <ProcessPlanning initialOrderId={initialOrderId} />
         </div>
       ) : activeTopTab === "quality" ? (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
+        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#F5F5DC" }}>
           <QualityManagement 
             initialProductId={fromOms ? initialProductId : null} 
             initialOrderId={initialOrderId}
@@ -223,7 +232,7 @@ const PDM = () => {
           />
         </div>
       ) : activeTopTab === "recycle-bin" ? (
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%", background: "#F5F5DC" }}>
           <Recyclebin orderId={initialOrderId} />
         </div>
       ) : null}

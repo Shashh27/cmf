@@ -64,7 +64,7 @@ const EditOperationModal = ({
   const [uploadType, setUploadType]             = useState('IPID');
   const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
-  const [workCenters, setWorkCenters]           = useState([]);
+  const [workcenters, setworkcenters]           = useState([]);
   const [allMachines, setAllMachines]           = useState([]);
   const [existingTools, setExistingTools]       = useState([]);
   const [loadingTools, setLoadingTools]         = useState(false);
@@ -73,7 +73,7 @@ const EditOperationModal = ({
   const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
   const [partTypes, setPartTypes]               = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
-  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [workcentersLoading, setworkcentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [vendorsLoading, setVendorsLoading]         = useState(false);
   const [vendors, setVendors]                       = useState([]);
@@ -84,7 +84,7 @@ const EditOperationModal = ({
   const operationNameWatch = Form.useWatch('operation_name', form);
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
-  const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
+  const fetchworkcenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setworkcenters, setworkcentersLoading, workcenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
@@ -132,7 +132,7 @@ const EditOperationModal = ({
   useEffect(() => { if (open) setActiveTab(defaultTab); }, [open, defaultTab]);
   useEffect(() => {
     if (open && !showAddToolForm) {
-      fetchWorkCenters();
+      fetchworkcenters();
       fetchMachines();
       fetchPartTypes();
     }
@@ -634,9 +634,9 @@ const EditOperationModal = ({
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="workcenter_id" label="Workcenter">
-                    <Select placeholder="Select WC" allowClear loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }} onChange={() => form.setFieldValue('machine_id', undefined)}>
-                      {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
+                  <Form.Item name="workcenter_id" label="workcenter">
+                    <Select placeholder="Select WC" allowClear loading={workcentersLoading} onOpenChange={o => { if (o) fetchworkcenters(); }} onChange={() => form.setFieldValue('machine_id', undefined)}>
+                      {workcenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
                     </Select>
                   </Form.Item>
                 </Col>

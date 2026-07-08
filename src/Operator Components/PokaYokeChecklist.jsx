@@ -45,6 +45,14 @@ const freqColor = (item) => {
   return { color: '#6b7280', bg: '#f3f4f6', border: '#d1d5db' };
 };
 
+const isConditionBased = (item) =>
+  (item?.frequency_type ?? '').toLowerCase() === 'condition based';
+
+const hasCheckpointResponse = (responses, cp) => {
+  const val = responses[String(cp.id)];
+  return val !== undefined && val !== null && val !== '';
+};
+
 const todayDateStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -164,6 +172,41 @@ const buildTodayStateFromAssignments = (assignments) => {
   return { todayItemIds, todayMap, approvalMap };
 };
 
+function usePmTableScrollY(titleRef, footerRef, extraPadding = 64, recalcKey = '') {
+  const [scrollY, setScrollY] = useState(280);
+
+  useEffect(() => {
+    const calculate = () => {
+      if (!titleRef.current) return;
+      const titleH = titleRef.current.offsetHeight || 0;
+      const footerH = footerRef.current?.offsetHeight || 0;
+      const cardEl = titleRef.current.closest('.pm-checklist-right-card');
+      const panelTop = cardEl?.getBoundingClientRect().top ?? titleRef.current.getBoundingClientRect().top;
+      const available = window.innerHeight - panelTop - titleH - footerH - extraPadding;
+      setScrollY(Math.max(160, available));
+    };
+
+    calculate();
+    const timer = window.setTimeout(calculate, 0);
+    window.addEventListener('resize', calculate);
+
+    let resizeObserver;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(calculate);
+      if (titleRef.current) resizeObserver.observe(titleRef.current);
+      if (footerRef.current) resizeObserver.observe(footerRef.current);
+    }
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('resize', calculate);
+      resizeObserver?.disconnect();
+    };
+  }, [titleRef, footerRef, extraPadding, recalcKey]);
+
+  return scrollY;
+}
+
 /* ─── Main Component ─────────────────────────────────────────────────────── */
 const PokaYokeChecklist = ({
   open,
@@ -179,6 +222,7 @@ const PokaYokeChecklist = ({
   const [activeTab, setActiveTab]                 = useState('1');
   const [selectedChecklistId, setSelectedChecklistId] = useState(null);
   const [pendingResponses, setPendingResponses]   = useState({});
+  const [pendingRemarks, setPendingRemarks]       = useState({});
   const [submitting, setSubmitting]               = useState(false);
   const [todayItemIds, setTodayItemIds]           = useState(new Set());
   const [checkpointPage, setCheckpointPage]       = useState(1);
@@ -186,6 +230,8 @@ const PokaYokeChecklist = ({
 
   const prevOpenRef  = useRef(false);
   const submittedRef = useRef(false);
+  const pmTitleRowRef = useRef(null);
+  const pmTableFooterRef = useRef(null);
 
   /* ── Machine / operator from localStorage ── */
   const machineId = useMemo(() => {
@@ -297,6 +343,7 @@ const PokaYokeChecklist = ({
       submittedRef.current = false;
       setActiveTab('1');
       setPendingResponses({});
+      setPendingRemarks({});
       setSelectedChecklistId(null);
     }
   }, [open]);
@@ -319,27 +366,79 @@ const PokaYokeChecklist = ({
     }));
   };
 
+  const setCheckpointRemark = (checklistId, itemId, remark) => {
+    const cid = String(checklistId);
+    const iid = String(itemId);
+    setPendingRemarks((prev) => ({
+      ...prev,
+      [cid]: { ...(prev[cid] ?? {}), [iid]: remark },
+    }));
+  };
+
   const getSubmittableItems = (assignment) =>
     (assignment?.checklist?.items ?? []).filter(itemIsDue);
+
+  const getItemsToSubmit = (assignment, responses) => {
+    const dueCheckpoints = getSubmittableItems(assignment);
+    const scheduledDue = dueCheckpoints.filter((cp) => !isConditionBased(cp));
+    const conditionDue = dueCheckpoints.filter((cp) => isConditionBased(cp));
+    const requiredScheduled = scheduledDue.filter((cp) => cp.is_required ?? true);
+    const allRequiredScheduledDone = requiredScheduled.every((cp) => hasCheckpointResponse(responses, cp));
+    const conditionWithResponse = conditionDue.filter((cp) => hasCheckpointResponse(responses, cp));
+
+    if (allRequiredScheduledDone && scheduledDue.length > 0) {
+      return scheduledDue
+        .filter((cp) => hasCheckpointResponse(responses, cp))
+        .concat(conditionWithResponse);
+    }
+
+    return conditionWithResponse;
+  };
+
+  const canSubmitChecklist = (assignment, responses) => {
+    const dueCheckpoints = getSubmittableItems(assignment);
+    if (dueCheckpoints.length === 0) return false;
+
+    const scheduledDue = dueCheckpoints.filter((cp) => !isConditionBased(cp));
+    const conditionDue = dueCheckpoints.filter((cp) => isConditionBased(cp));
+    const requiredScheduled = scheduledDue.filter((cp) => cp.is_required ?? true);
+    const allRequiredScheduledDone = requiredScheduled.every((cp) => hasCheckpointResponse(responses, cp));
+    const hasConditionResponse = conditionDue.some((cp) => hasCheckpointResponse(responses, cp));
+
+    if (scheduledDue.length > 0 && allRequiredScheduledDone) return true;
+    return hasConditionResponse;
+  };
 
   const handleSubmitChecklist = async () => {
     if (!selectedAssignment || submitting) return;
     const cid = String(selectedAssignment.checklist_id ?? selectedAssignment.checklist?.id ?? '');
+    const responses = pendingResponses[cid] ?? {};
+    const remarks = pendingRemarks[cid] ?? {};
     const dueCheckpoints = getSubmittableItems(selectedAssignment);
+
     if (dueCheckpoints.length === 0) {
       message.info('No checkpoints to submit for this checklist.');
       return;
     }
 
-    const responses = pendingResponses[cid] ?? {};
-    const requiredItems = dueCheckpoints.filter((cp) => cp.is_required ?? true);
-    const allRequiredDone = requiredItems.every(
-      (cp) => responses[String(cp.id)] !== undefined && responses[String(cp.id)] !== ''
-    );
-    if (!allRequiredDone) {
-      message.warning('Fill all required checkpoints before submitting.');
+    if (!canSubmitChecklist(selectedAssignment, responses)) {
+      const scheduledDue = dueCheckpoints.filter((cp) => !isConditionBased(cp));
+      const requiredScheduled = scheduledDue.filter((cp) => cp.is_required ?? true);
+      const allRequiredScheduledDone = requiredScheduled.every((cp) => hasCheckpointResponse(responses, cp));
+      if (scheduledDue.length > 0 && !allRequiredScheduledDone) {
+        message.warning('Fill all required scheduled checkpoints, or submit condition-based checkpoints when a condition occurs.');
+      } else {
+        message.warning('Fill at least one condition-based checkpoint before submitting.');
+      }
       return;
     }
+
+    const itemsToSubmit = getItemsToSubmit(selectedAssignment, responses);
+    if (itemsToSubmit.length === 0) {
+      message.warning('Fill at least one checkpoint before submitting.');
+      return;
+    }
+
     if (!operatorId) {
       message.error('Operator not found in session. Please log in again.');
       return;
@@ -347,7 +446,7 @@ const PokaYokeChecklist = ({
 
     setSubmitting(true);
     try {
-      const submissions = dueCheckpoints
+      const submissions = itemsToSubmit
         .map((cp) => {
           const val = responses[String(cp.id)];
           if (val === undefined || val === null || val === '') return null;
@@ -358,7 +457,7 @@ const PokaYokeChecklist = ({
             schedule_id: cp.schedule_id,
             assignment_item_id: cp.assignment_item_id,
             response_value: String(val).toLowerCase(),
-            operator_comments: '',
+            operator_comments: remarks[String(cp.id)]?.trim() || '',
           };
         })
         .filter(Boolean);
@@ -381,7 +480,7 @@ const PokaYokeChecklist = ({
       }
 
       const newTodayMap = { ...submittedTodayMap };
-      for (const cp of dueCheckpoints) {
+      for (const cp of itemsToSubmit) {
         const val = responses[String(cp.id)];
         if (val !== undefined) {
           newTodayMap[String(cp.id)] = { response_value: String(val), approval_status: 'pending' };
@@ -389,7 +488,20 @@ const PokaYokeChecklist = ({
       }
       setSubmittedTodayMap(newTodayMap);
       setApprovalByChecklist((prev) => ({ ...prev, [cid]: 'pending' }));
-      setPendingResponses((prev) => ({ ...prev, [cid]: {} }));
+      setPendingResponses((prev) => {
+        const next = { ...prev, [cid]: { ...(prev[cid] ?? {}) } };
+        for (const cp of itemsToSubmit) {
+          delete next[cid][String(cp.id)];
+        }
+        return next;
+      });
+      setPendingRemarks((prev) => {
+        const next = { ...prev, [cid]: { ...(prev[cid] ?? {}) } };
+        for (const cp of itemsToSubmit) {
+          delete next[cid][String(cp.id)];
+        }
+        return next;
+      });
       submittedRef.current = true;
       message.success('Checklist submitted successfully!');
     } catch (e) {
@@ -416,7 +528,28 @@ const PokaYokeChecklist = ({
     const cid = String(checklistId);
     const submittedToday = submittedTodayMap[iid];
     const val = (pendingResponses[cid] ?? {})[iid];
+    const remarkVal = (pendingRemarks[cid] ?? {})[iid] ?? '';
     const type = (cp.item_type ?? '').toLowerCase();
+
+    const renderInlineRemark = () => {
+      if (!editable) return null;
+      return (
+        <textarea
+          className="pm-remark-field"
+          value={remarkVal}
+          onChange={(e) => setCheckpointRemark(cid, cp.id, e.target.value)}
+          placeholder="Remarks"
+          rows={1}
+        />
+      );
+    };
+
+    const responseRowStyle = {
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 6,
+      width: '100%',
+    };
 
     if (submittedToday && !editable) {
       const isRejected = submittedToday.approval_status === 'rejected';
@@ -425,17 +558,30 @@ const PokaYokeChecklist = ({
         submittedToday.response_value ?? cp.latest_response_value ?? cp.response_value
       );
       const color = isRejected ? '#dc2626' : isPending ? '#d97706' : '#15803d';
+      const submittedRemark = cp.operator_comments ?? cp.latest_operator_comments ?? '';
+      const fallbackLabel = isRejected
+        ? 'Non conforming'
+        : isPending
+          ? 'Response sent'
+          : 'Conforming';
 
       return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          {isRejected
-            ? <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
-            : isPending
-              ? <ClockCircleOutlined style={{ color: '#d97706', fontSize: 16 }} />
-              : <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />}
-          <span style={{ fontSize: 12, color, fontWeight: 600 }}>
-            {responseLabel ?? (isPending ? 'Pending' : '—')}
-          </span>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            {isRejected
+              ? <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
+              : isPending
+                ? <ClockCircleOutlined style={{ color: '#d97706', fontSize: 16 }} />
+                : <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />}
+            <span style={{ fontSize: 12, color, fontWeight: 600 }}>
+              {responseLabel ?? fallbackLabel}
+            </span>
+          </div>
+          {submittedRemark && (
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, textAlign: 'left' }}>
+              Remark: {submittedRemark}
+            </div>
+          )}
         </div>
       );
     }
@@ -443,12 +589,20 @@ const PokaYokeChecklist = ({
     const apiStatus = String(cp.latest_submission_status ?? '').toLowerCase();
     if (!editable && apiStatus === 'approved') {
       const responseLabel = formatResponseLabel(cp.latest_response_value ?? cp.response_value);
+      const submittedRemark = cp.operator_comments ?? cp.latest_operator_comments ?? '';
       return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
-          <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
-            {responseLabel ?? '—'}
-          </span>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
+            <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+              {responseLabel ?? 'Conforming'}
+            </span>
+          </div>
+          {submittedRemark && (
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, textAlign: 'left' }}>
+              Remark: {submittedRemark}
+            </div>
+          )}
         </div>
       );
     }
@@ -459,43 +613,49 @@ const PokaYokeChecklist = ({
 
     if (type.includes('num')) {
       return (
-        <input
-          type="number"
-          value={val ?? ''}
-          onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
-          placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Value'}
-          style={{
-            width: '100%', maxWidth: 120, padding: '6px 8px', borderRadius: 6, fontSize: 12,
-            border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
-          }}
-        />
+        <div style={responseRowStyle}>
+          <input
+            type="number"
+            value={val ?? ''}
+            onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
+            placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Value'}
+            style={{
+              width: 100, flexShrink: 0, padding: '6px 8px', borderRadius: 6, fontSize: 12,
+              border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          {renderInlineRemark()}
+        </div>
       );
     }
 
     if (type.includes('text')) {
       return (
-        <input
-          type="text"
-          value={val ?? ''}
-          onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
-          placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Enter value'}
-          style={{
-            width: '100%', maxWidth: 140, padding: '6px 8px', borderRadius: 6, fontSize: 12,
-            border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
-          }}
-        />
+        <div style={responseRowStyle}>
+          <input
+            type="text"
+            value={val ?? ''}
+            onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
+            placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Enter value'}
+            style={{
+              width: 120, flexShrink: 0, padding: '6px 8px', borderRadius: 6, fontSize: 12,
+              border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          {renderInlineRemark()}
+        </div>
       );
     }
 
     return (
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+      <div style={responseRowStyle}>
         {['yes', 'no'].map((opt) => (
           <button
             key={opt}
             type="button"
             onClick={() => setCheckpointResponse(cid, cp.id, opt)}
             style={{
-              minWidth: 52, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+              minWidth: 48, flexShrink: 0, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
               fontSize: 12, fontWeight: 600, border: '1.5px solid',
               borderColor: val === opt ? '#1677ff' : '#d1d5db',
               background: val === opt ? '#e6f4ff' : '#fff',
@@ -506,6 +666,7 @@ const PokaYokeChecklist = ({
             {opt}
           </button>
         ))}
+        {renderInlineRemark()}
       </div>
     );
   };
@@ -518,10 +679,9 @@ const PokaYokeChecklist = ({
   const submittableItems = selectedAssignment ? getSubmittableItems(selectedAssignment) : [];
   const submittableIds = new Set(submittableItems.map((cp) => String(cp.id)));
   const selectedResponses = pendingResponses[selectedCid] ?? {};
-  const requiredSubmittable = submittableItems.filter((cp) => cp.is_required ?? true);
-  const canSubmitSelected = requiredSubmittable.every(
-    (cp) => selectedResponses[String(cp.id)] !== undefined && selectedResponses[String(cp.id)] !== ''
-  );
+  const canSubmitSelected = selectedAssignment
+    ? canSubmitChecklist(selectedAssignment, selectedResponses)
+    : false;
   const showSubmitBtn = submittableItems.length > 0;
   const needsRedo = submittableItems.some(isRejectedCheckpoint);
 
@@ -535,11 +695,18 @@ const PokaYokeChecklist = ({
     setCheckpointPageSize(pageSize);
   };
 
+  const tableScrollY = usePmTableScrollY(
+    pmTitleRowRef,
+    pmTableFooterRef,
+    isPage ? 72 : 96,
+    `${selectedChecklistId}-${checkpointPageSize}-${checkpointPage}-${showSubmitBtn}-${selectedItems.length}`,
+  );
+
   /* ── Split-pane preventive maintenance panel ── */
   const pmPanel = (
     <div style={{
       display: 'flex',
-      height: '100%',
+      flex: 1,
       minHeight: 0,
       minWidth: 0,
       background: '#f5f6fa',
@@ -625,7 +792,9 @@ const PokaYokeChecklist = ({
       </div>
 
       {/* Right — selected checklist detail */}
-      <div style={{
+      <div
+        className="pm-checklist-right-card"
+        style={{
         flex: 1,
         background: '#fff',
         borderRadius: 10,
@@ -646,7 +815,9 @@ const PokaYokeChecklist = ({
           </div>
         ) : (
           <>
-            <div style={{
+            <div
+              ref={pmTitleRowRef}
+              style={{
               padding: '12px 20px 8px',
               borderBottom: '1px solid #f0f0f0',
               display: 'flex',
@@ -680,15 +851,18 @@ const PokaYokeChecklist = ({
             </div>
 
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <div
+                className="pm-checklist-table-scroll"
+                style={{ maxHeight: tableScrollY, minHeight: 120 }}
+              >
+                <table className="pm-checklist-table" style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                  <thead>
                     <tr>
                       <th style={{ ...TH, width: 56, textAlign: 'center' }}>SL No</th>
                       <th style={{ ...TH, width: '32%' }}>Checkpoint Name</th>
                       <th style={{ ...TH, width: '20%' }}>Frequency</th>
                       <th style={{ ...TH, width: '12%', textAlign: 'center' }}>Expected</th>
-                      <th style={{ ...TH, width: '26%', textAlign: 'center' }}>Response</th>
+                      <th style={{ ...TH, width: '26%', textAlign: 'center' }}>Response / Remarks</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -715,7 +889,7 @@ const PokaYokeChecklist = ({
                             </td>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                {required && editable && (
+                                {required && editable && !isConditionBased(cp) && (
                                   <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span>
                                 )}
                                 <span style={{ color: '#111827', fontWeight: 500 }}>{cp.item_text ?? cp.name}</span>
@@ -736,7 +910,7 @@ const PokaYokeChecklist = ({
                             <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', color: '#374151', fontWeight: 600 }}>
                               {cp.expected_value ?? '—'}
                             </td>
-                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top', overflow: 'visible' }}>
                               {renderResponseCell(cp, selectedCid, editable)}
                             </td>
                           </tr>
@@ -747,6 +921,7 @@ const PokaYokeChecklist = ({
                 </table>
               </div>
 
+              <div ref={pmTableFooterRef} style={{ flexShrink: 0 }}>
               {showSubmitBtn && (
                 <div style={{
                   padding: '12px 20px',
@@ -789,6 +964,7 @@ const PokaYokeChecklist = ({
                   }}
                 />
               )}
+              </div>
             </div>
           </>
         )}
@@ -800,8 +976,9 @@ const PokaYokeChecklist = ({
   const legend = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0 12px', flexWrap: 'wrap', flexShrink: 0 }}>
       {[
-        { icon: <CheckCircleFilled style={{ color: '#22c55e', fontSize: 13 }} />,     label: 'Submitted today' },
-        { icon: <CloseCircleFilled  style={{ color: '#ef4444', fontSize: 13 }} />,     label: 'Rejected' },
+        { icon: <CheckCircleFilled style={{ color: '#22c55e', fontSize: 13 }} />,     label: 'Response sent' },
+        { icon: <CheckCircleFilled style={{ color: '#15803d', fontSize: 13 }} />,     label: 'Conforming' },
+        { icon: <CloseCircleFilled  style={{ color: '#ef4444', fontSize: 13 }} />,     label: 'Non conforming' },
         { icon: <CalendarOutlined   style={{ fontSize: 13, color: '#0284c7' }} />,     label: 'Time based' },
         { icon: <ThunderboltOutlined style={{ fontSize: 13, color: '#7c3aed' }} />,    label: 'Usage based' },
         { icon: <ClockCircleOutlined style={{ fontSize: 13, color: '#059669' }} />,    label: 'Condition based' },
@@ -823,6 +1000,43 @@ const PokaYokeChecklist = ({
         .pm-checklist-tabs .ant-tabs-content-holder { flex: 1; min-height: 0; overflow: hidden; }
         .pm-checklist-tabs .ant-tabs-content { height: 100%; }
         .pm-checklist-tabs .ant-tabs-tabpane { height: 100%; overflow: hidden; }
+        .pm-remark-field {
+          flex: 1 1 160px;
+          min-width: 120px;
+          max-width: 100%;
+          min-height: 30px;
+          max-height: 120px;
+          font-size: 12px;
+          resize: horizontal;
+          border-radius: 16px;
+          padding: 5px 14px;
+          border: 1.5px solid #d1d5db;
+          outline: none;
+          box-sizing: border-box;
+          line-height: 18px;
+          font-family: inherit;
+          overflow: auto;
+          background: #f8fafc;
+          color: #111827;
+          margin-top: 1px;
+        }
+        .pm-remark-field:focus {
+          border-color: #1677ff;
+          background: #fff;
+          box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+        }
+        .pm-remark-field::placeholder { color: #9ca3af; }
+        .pm-checklist-table-scroll {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: auto;
+        }
+        .pm-checklist-table thead th {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+        }
       `}</style>
       {!isPage && (
         <div style={{ background: '#1e3a5f', padding: '11px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
@@ -871,7 +1085,7 @@ const PokaYokeChecklist = ({
                 children: (
                   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
                     {legend}
-                    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                       {pmPanel}
                     </div>
                   </div>
