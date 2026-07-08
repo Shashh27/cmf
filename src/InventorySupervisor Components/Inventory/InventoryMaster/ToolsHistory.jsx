@@ -5,6 +5,7 @@ import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
 import moment from 'moment';
 import { pdf } from '@react-pdf/renderer';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { disableFutureDates, normalizeDateRange } from '../OverviewData/inventoryDateUtils.js';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -616,9 +617,10 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
           <Col xs={24} lg={18}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
               <RangePicker
-                onChange={(range) => setHistoryDateRange(range || [])}
+                value={historyDateRange}
+                onChange={(range) => setHistoryDateRange(normalizeDateRange(range) || [])}
                 style={{ minWidth: 200, flex: 1 }}
-                disabledDate={(current) => current && current > moment().endOf('day')}
+                disabledDate={disableFutureDates}
                 inputReadOnly
               />
               <Select

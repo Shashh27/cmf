@@ -1,4 +1,10 @@
+import dayjs from 'dayjs';
+import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 import { API_BASE_URL } from '../../Config/auth';
+
+dayjs.extend(isSameOrAfter);
+dayjs.extend(isSameOrBefore);
 
 export const PM_API = `${API_BASE_URL}/pm`;
 
@@ -43,6 +49,70 @@ export const FREQUENCY_TYPES = [
 
 export const INTERVAL_UNITS = ['Day', 'Week', 'Month', 'Year'];
 
+export const PM_FIELD_LIMITS = {
+  checklistName: 50,
+  description: 50,
+  checkpointText: 50,
+  expectedValue: 50,
+  remarks: 100,
+  intervalMax: 9999,
+  triggerHoursMax: 99999,
+};
+
+const MAX_MSG = 'Maximum character limit exceeded';
+
+export const checklistNameRules = [
+  { required: true, whitespace: true, message: 'Checklist name is required' },
+  { max: PM_FIELD_LIMITS.checklistName, message: MAX_MSG },
+];
+
+export const descriptionRules = [
+  { max: PM_FIELD_LIMITS.description, message: MAX_MSG },
+  {
+    validator: (_, value) => {
+      if (value && !String(value).trim()) return Promise.reject(new Error('Description cannot be only spaces'));
+      return Promise.resolve();
+    },
+  },
+];
+
+export const checkpointTextRules = [
+  { required: true, whitespace: true, message: 'Checkpoint text is required' },
+  { max: PM_FIELD_LIMITS.checkpointText, message: MAX_MSG },
+];
+
+export const expectedValueRules = [
+  { max: PM_FIELD_LIMITS.expectedValue, message: MAX_MSG },
+  {
+    validator: (_, value) => {
+      if (value && !String(value).trim()) return Promise.reject(new Error('Expected value cannot be only spaces'));
+      return Promise.resolve();
+    },
+  },
+];
+
+export const remarksRules = [
+  { max: PM_FIELD_LIMITS.remarks, message: MAX_MSG },
+  {
+    validator: (_, value) => {
+      if (value && !String(value).trim()) return Promise.reject(new Error('Remarks cannot be only spaces'));
+      return Promise.resolve();
+    },
+  },
+];
+
+export function clampInt(value, min = 1, max = PM_FIELD_LIMITS.intervalMax) {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = parseInt(String(value), 10);
+  if (Number.isNaN(n)) return null;
+  return Math.min(max, Math.max(min, n));
+}
+
+export function clampText(value, maxLen) {
+  if (value == null) return '';
+  return String(value).slice(0, maxLen);
+}
+
 export const STATUS_COLORS = {
   Submitted: 'processing',
   Approved: 'success',
@@ -82,6 +152,28 @@ export function formatDate(dateString) {
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Returns true if isoDate falls within dayjs range [start, end] (inclusive). */
+export function isDateInRange(isoDate, range) {
+  if (!range?.[0] || !range?.[1] || !isoDate) return true;
+  const d = dayjs(isoDate);
+  return d.isSameOrAfter(range[0].startOf('day')) && d.isSameOrBefore(range[1].endOf('day'));
+}
+
+/** Prevent selecting dates after today in range pickers. */
+export function disableFutureDates(current) {
+  return current && current > dayjs().endOf('day');
+}
+
+/** Cap range end at today; default end to today when only start is chosen. */
+export function normalizeDateRange(range) {
+  if (!range?.[0]) return null;
+  const start = range[0].startOf('day');
+  let end = (range[1] || dayjs()).endOf('day');
+  const today = dayjs().endOf('day');
+  if (end.isAfter(today)) end = today;
+  return [start, end];
 }
 
 export function itemTypeShort(type) {
@@ -164,15 +256,40 @@ export function emptyCheckpoint(seq = 1) {
 
 export function validateCheckpoint(item) {
   if (!item.item_text?.trim()) return 'Checkpoint text is required';
+  if (item.item_text.trim().length > PM_FIELD_LIMITS.checkpointText) {
+    return 'Maximum character limit exceeded';
+  }
   if (!item.item_type) return 'Checkpoint type is required';
   if (!item.frequency_type) return 'Frequency type is required';
-  if (['Time Based', 'Condition Based'].includes(item.frequency_type)) {
+  if (item.expected_value && String(item.expected_value).length > PM_FIELD_LIMITS.expectedValue) {
+    return `Expected value must be at most ${PM_FIELD_LIMITS.expectedValue} characters`;
+  }
+  if (item.item_type === 'Numeric' && item.expected_value && Number.isNaN(Number(item.expected_value))) {
+    return 'Expected value must be a valid number for numeric checkpoints';
+  }
+  if (item.remarks && String(item.remarks).length > PM_FIELD_LIMITS.remarks) {
+    return `Remarks must be at most ${PM_FIELD_LIMITS.remarks} characters`;
+  }
+  if (item.frequency_type === 'Time Based') {
     if (!item.interval_value || !item.interval_unit) {
-      return 'Interval value and unit are required for Time/Condition based checkpoints';
+      return 'Interval value and unit are required for time-based checkpoints';
+    }
+  }
+  if (item.frequency_type === 'Condition Based') {
+    const hasValue = item.interval_value != null && item.interval_value !== '';
+    const hasUnit = !!item.interval_unit;
+    if (hasValue !== hasUnit) {
+      return 'Provide both interval value and unit, or leave both empty for condition-based checkpoints';
     }
   }
   if (item.frequency_type === 'Usage Based' && !item.trigger_hours) {
-    return 'Trigger hours are required for Usage based checkpoints';
+    return 'Trigger hours are required for usage-based checkpoints';
+  }
+  if (item.interval_value != null && (item.interval_value < 1 || item.interval_value > PM_FIELD_LIMITS.intervalMax)) {
+    return `Interval value must be between 1 and ${PM_FIELD_LIMITS.intervalMax}`;
+  }
+  if (item.trigger_hours != null && (item.trigger_hours < 1 || item.trigger_hours > PM_FIELD_LIMITS.triggerHoursMax)) {
+    return `Trigger hours must be between 1 and ${PM_FIELD_LIMITS.triggerHoursMax}`;
   }
   return null;
 }

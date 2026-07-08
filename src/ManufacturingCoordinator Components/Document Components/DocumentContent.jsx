@@ -14,7 +14,7 @@ import {
 import config from '../../Config/config.js';
 import {
   getInventoryOverviewTableProps,
-  InventoryOverviewTableStyles,
+  ModernTableStyles,
 } from '../../InventorySupervisor Components/Inventory/OverviewData/inventoryOverviewTable.jsx';
 
 const { Title, Text } = Typography;
@@ -1035,15 +1035,15 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px' }}>
-        <InventoryOverviewTableStyles />
+      <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px', width: '100%' }}>
+        <ModernTableStyles />
         <Table
           {...getInventoryOverviewTableProps({
             columns,
             dataSource: groupedDocuments,
             rowKey: 'id',
             loading,
-            scrollX: 900,
+            scrollX: 1200,
             pagination: {
               pageSize: 10,
               showSizeChanger: true,

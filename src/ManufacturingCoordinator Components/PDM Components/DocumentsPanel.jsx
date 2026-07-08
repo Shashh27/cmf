@@ -456,7 +456,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     message.success(type === 'operation' ? `Operation "${newItem.operation_name}" created successfully!` : `Document "${newItem.document_name}" created successfully!`);
     await fetchDocuments(); setImportOperations([]);
   };
-   
+
 
   const onOperationDragEnd = async ({ active, over }) => {
     if (active.id !== over?.id) {

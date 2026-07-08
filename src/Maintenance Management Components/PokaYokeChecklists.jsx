@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Typography, Divider, Tooltip, Card, Select, InputNumber,
+  Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Typography, Divider, Tooltip, Card, Select, InputNumber, Row, Col, DatePicker,
 } from 'antd';
 import {
   PlusOutlined, EyeOutlined, DeleteOutlined, EditOutlined, ReloadOutlined, CheckCircleOutlined,
@@ -8,8 +8,12 @@ import {
 import {
   PM_T, btnSharp, nativeSelectStyle, pmFetch, fetchAllChecklistsWithItems, fetchChecklistDetails,
   getCurrentUserId, formatDateTime, emptyCheckpoint, buildCheckpointPayload, validateCheckpoint,
-  itemTypeShort, FREQ_TAG_COLORS,
+  itemTypeShort, FREQ_TAG_COLORS, PM_FIELD_LIMITS, checklistNameRules, descriptionRules,
+  checkpointTextRules, expectedValueRules, remarksRules, clampInt, clampText, isDateInRange,
+  disableFutureDates, normalizeDateRange,
 } from './pmUtils';
+import PmDownloadButton from './PmDownloadButton';
+import { buildChecklistsReportConfig } from './pmReportDownload';
 
 const { Title, Text } = Typography;
 
@@ -34,15 +38,15 @@ const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
         background: index % 2 === 0 ? '#fff' : '#fafafa',
       }}>
         <div style={{ fontSize: 11, color: '#8c8c8c' }}>{index + 1}</div>
-        <Input size="small" value={item.item_text} placeholder="Checkpoint"
-          onChange={(e) => onChange(item.id, { item_text: e.target.value })} style={{ fontSize: 11, borderRadius: 0 }} />
+        <Input size="small" value={item.item_text} placeholder="Checkpoint" maxLength={PM_FIELD_LIMITS.checkpointText}
+          onChange={(e) => onChange(item.id, { item_text: clampText(e.target.value, PM_FIELD_LIMITS.checkpointText) })} style={{ fontSize: 11, borderRadius: 0 }} />
         <select value={item.item_type} onChange={(e) => onChange(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
           <option value="Boolean">Yes/No</option>
           <option value="Numeric">Num</option>
           <option value="Text">Text</option>
         </select>
-        <Input size="small" value={item.expected_value} placeholder="Expected"
-          onChange={(e) => onChange(item.id, { expected_value: e.target.value })} style={{ fontSize: 11, borderRadius: 0 }} />
+        <Input size="small" value={item.expected_value} placeholder="Expected" maxLength={PM_FIELD_LIMITS.expectedValue}
+          onChange={(e) => onChange(item.id, { expected_value: clampText(e.target.value, PM_FIELD_LIMITS.expectedValue) })} style={{ fontSize: 11, borderRadius: 0 }} />
         <select value={item.frequency_type} onChange={(e) => onChange(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
           <option value="Time Based">Time</option>
           <option value="Usage Based">Usage</option>
@@ -55,16 +59,16 @@ const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
           </select>
         ) : <div />}
         {item.frequency_type === 'Usage Based' ? (
-          <Input size="small" type="number" placeholder="Hours" value={item.trigger_hours || ''}
-            onChange={(e) => onChange(item.id, { trigger_hours: e.target.value ? parseInt(e.target.value, 10) : null })}
+          <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.triggerHoursMax} placeholder="Hours" value={item.trigger_hours || ''}
+            onChange={(e) => onChange(item.id, { trigger_hours: clampInt(e.target.value, 1, PM_FIELD_LIMITS.triggerHoursMax) })}
             style={{ fontSize: 10, borderRadius: 0 }} />
         ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-          <Input size="small" type="number" placeholder="Value" value={item.interval_value || ''}
-            onChange={(e) => onChange(item.id, { interval_value: e.target.value ? parseInt(e.target.value, 10) : null })}
+          <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.intervalMax} placeholder="Value" value={item.interval_value || ''}
+            onChange={(e) => onChange(item.id, { interval_value: clampInt(e.target.value, 1, PM_FIELD_LIMITS.intervalMax) })}
             style={{ fontSize: 10, borderRadius: 0 }} />
         ) : <div />}
-        <Input size="small" value={item.remarks || ''} placeholder="Remarks"
-          onChange={(e) => onChange(item.id, { remarks: e.target.value })} style={{ fontSize: 10, borderRadius: 0 }} />
+        <Input size="small" value={item.remarks || ''} placeholder="Remarks" maxLength={PM_FIELD_LIMITS.remarks}
+          onChange={(e) => onChange(item.id, { remarks: clampText(e.target.value, PM_FIELD_LIMITS.remarks) })} style={{ fontSize: 10, borderRadius: 0 }} />
         <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
           disabled={items.length <= 1}
           onClick={() => onRemove(item.id)} />
@@ -156,6 +160,7 @@ const PokaYokeChecklists = () => {
   const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [dateRange, setDateRange] = useState(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
 
@@ -386,6 +391,10 @@ const PokaYokeChecklists = () => {
     (item.description || '').toLowerCase().includes(searchText.toLowerCase())
   );
 
+  const dateFilteredChecklists = filteredChecklists.filter((item) =>
+    isDateInRange(item.created_at, normalizeDateRange(dateRange))
+  );
+
   const columns = [
     { title: 'SL NO', key: 'sl', width: 55, align: 'center', className: 'table-header-styled',
       render: (_, __, i) => (pagination.current - 1) * pagination.pageSize + i + 1 },
@@ -423,11 +432,13 @@ const PokaYokeChecklists = () => {
       return (
         <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
           <div style={{ fontSize: 10, color: '#8c8c8c' }}>{index + 1}</div>
-          <Input size="small" value={item.item_text} onChange={(e) => patchEditItem(item.id, { item_text: e.target.value })} style={{ borderRadius: 0 }} />
+          <Input size="small" value={item.item_text} maxLength={PM_FIELD_LIMITS.checkpointText}
+            onChange={(e) => patchEditItem(item.id, { item_text: clampText(e.target.value, PM_FIELD_LIMITS.checkpointText) })} style={{ borderRadius: 0 }} />
           <select value={item.item_type} onChange={(e) => patchEditItem(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
             <option value="Boolean">Yes/No</option><option value="Numeric">Num</option><option value="Text">Text</option>
           </select>
-          <Input size="small" value={item.expected_value || ''} onChange={(e) => patchEditItem(item.id, { expected_value: e.target.value })} style={{ borderRadius: 0 }} />
+          <Input size="small" value={item.expected_value || ''} maxLength={PM_FIELD_LIMITS.expectedValue}
+            onChange={(e) => patchEditItem(item.id, { expected_value: clampText(e.target.value, PM_FIELD_LIMITS.expectedValue) })} style={{ borderRadius: 0 }} />
           <select value={item.frequency_type} onChange={(e) => patchEditItem(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
             <option value="Time Based">Time</option><option value="Usage Based">Usage</option><option value="Condition Based">Condition</option>
           </select>
@@ -437,16 +448,21 @@ const PokaYokeChecklists = () => {
             </select>
           ) : <div />}
           {item.frequency_type === 'Usage Based' ? (
-            <Input size="small" type="number" value={item.trigger_hours || ''} onChange={(e) => patchEditItem(item.id, { trigger_hours: e.target.value ? parseInt(e.target.value, 10) : null })} style={{ borderRadius: 0 }} />
+            <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.triggerHoursMax} value={item.trigger_hours || ''}
+              onChange={(e) => patchEditItem(item.id, { trigger_hours: clampInt(e.target.value, 1, PM_FIELD_LIMITS.triggerHoursMax) })} style={{ borderRadius: 0 }} />
           ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-            <Input size="small" type="number" value={item.interval_value || ''} onChange={(e) => patchEditItem(item.id, { interval_value: e.target.value ? parseInt(e.target.value, 10) : null })} style={{ borderRadius: 0 }} />
+            <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.intervalMax} value={item.interval_value || ''}
+              onChange={(e) => patchEditItem(item.id, { interval_value: clampInt(e.target.value, 1, PM_FIELD_LIMITS.intervalMax) })} style={{ borderRadius: 0 }} />
           ) : <div />}
-          <Input size="small" value={item.remarks || ''} onChange={(e) => patchEditItem(item.id, { remarks: e.target.value })} style={{ borderRadius: 0 }} />
+          <Input size="small" value={item.remarks || ''} maxLength={PM_FIELD_LIMITS.remarks}
+            onChange={(e) => patchEditItem(item.id, { remarks: clampText(e.target.value, PM_FIELD_LIMITS.remarks) })} style={{ borderRadius: 0 }} />
           <Space size={4}>
             <Button type="text" icon={<CheckCircleOutlined />} onClick={() => setEditingCheckpointId(null)} style={{ color: '#52c41a', padding: 2 }} />
             {!String(item.id).startsWith('tmp-') && (
-              <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
-                onClick={() => handleDeleteCheckpoint(editingChecklist.id, item.id)} />
+              <Popconfirm title="Delete this checkpoint?" okText="Yes" cancelText="No"
+                onConfirm={() => handleDeleteCheckpoint(editingChecklist.id, item.id)}>
+                <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }} />
+              </Popconfirm>
             )}
           </Space>
         </div>
@@ -464,23 +480,48 @@ const PokaYokeChecklists = () => {
         <div style={{ fontSize: 10 }}>{item.remarks || '-'}</div>
         <Space size={4}>
           <Button type="text" icon={<EditOutlined />} onClick={() => setEditingCheckpointId(item.id)} style={{ color: '#1890ff', padding: 2 }} />
-          <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
-            onClick={() => {
+          <Popconfirm
+            title="Delete this checkpoint?"
+            okText="Yes"
+            cancelText="No"
+            onConfirm={() => {
               if (editCheckpoints.length <= 1) message.warning('At least one checkpoint is required');
               else if (!String(item.id).startsWith('tmp-')) handleDeleteCheckpoint(editingChecklist.id, item.id);
               else setEditCheckpoints((p) => p.filter((x) => x.id !== item.id));
-            }} />
+            }}
+          >
+            <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }} />
+          </Popconfirm>
         </Space>
       </div>
     );
   };
 
   return (
-    <div style={{ padding: 0, background: PM_T.bg }}>
+    <div style={{ padding: 0, background: PM_T.bg, width: '100%', overflowX: 'auto' }}>
       <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
-        <Input.Search placeholder="Search by name or description..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
-          onChange={(e) => setSearchText(e.target.value)} />
+        <Space wrap>
+          <Input.Search placeholder="Search by name or description..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
+            onChange={(e) => setSearchText(e.target.value)} />
+          <DatePicker.RangePicker
+            allowClear
+            placeholder={['Created from', 'Created to']}
+            value={dateRange}
+            disabledDate={disableFutureDates}
+            onChange={(v) => setDateRange(normalizeDateRange(v))}
+            style={{ width: 260, borderRadius: 0 }}
+          />
+        </Space>
         <Space>
+          <PmDownloadButton
+            getReportConfig={() => buildChecklistsReportConfig(dateFilteredChecklists, [
+              ...(searchText.trim() ? [`Search: ${searchText.trim()}`] : []),
+              ...(dateRange?.[0] && dateRange?.[1]
+                ? [`Date range: ${dateRange[0].format('DD MMM YYYY')} – ${dateRange[1].format('DD MMM YYYY')}`]
+                : []),
+            ])}
+            disabled={!dateFilteredChecklists.length}
+          />
           <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading} style={btnSharp}>Refresh</Button>
           <Button type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary, fontWeight: 600 }}
             onClick={() => { setInitialItems([emptyCheckpoint()]); setCreateModalVisible(true); }}>
@@ -491,11 +532,11 @@ const PokaYokeChecklists = () => {
 
       <Table
         columns={columns}
-        dataSource={filteredChecklists}
+        dataSource={dateFilteredChecklists}
         loading={loading}
         rowKey="id"
         size="small"
-        scroll={{ x: 900 }}
+        scroll={{ x: 'max-content' }}
         bordered
         tableLayout="fixed"
         pagination={{
@@ -513,6 +554,7 @@ const PokaYokeChecklists = () => {
           style: { cursor: 'pointer' },
         })}
         expandable={{
+          showExpandColumn: false,
           expandedRowKeys,
           onExpand: (expanded, record) => {
             setExpandedRowKeys(expanded
@@ -531,11 +573,11 @@ const PokaYokeChecklists = () => {
         footer={null} width={1000}>
         <Form form={form} layout="vertical" onFinish={handleCreateChecklist} style={{ marginTop: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-            <Form.Item name="name" label="Checklist Name" rules={[{ required: true, message: 'Please enter checklist name' }]} style={{ marginBottom: 0 }}>
-              <Input placeholder="Enter checklist name" style={{ borderRadius: 0 }} />
+            <Form.Item name="name" label="Checklist Name" rules={checklistNameRules} style={{ marginBottom: 0 }}>
+              <Input placeholder="Enter checklist name" maxLength={PM_FIELD_LIMITS.checklistName} style={{ borderRadius: 0 }} />
             </Form.Item>
-            <Form.Item name="description" label="Description" style={{ marginBottom: 0 }}>
-              <Input placeholder="Enter description (optional)" style={{ borderRadius: 0 }} />
+            <Form.Item name="description" label="Description" rules={descriptionRules} style={{ marginBottom: 0 }}>
+              <Input placeholder="Enter description (optional)" maxLength={PM_FIELD_LIMITS.description} style={{ borderRadius: 0 }} />
             </Form.Item>
           </div>
           <Divider />
@@ -566,23 +608,29 @@ const PokaYokeChecklists = () => {
         onCancel={() => setPreviewModalVisible(false)} width={1200}
         footer={[
           <Button key="close" onClick={() => setPreviewModalVisible(false)} style={btnSharp}>Close</Button>,
-          <Button key="add" type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
-            onClick={() => { setPreviewModalVisible(false); setAddItemModalVisible(true); }}>Add New Checkpoint</Button>,
+         
         ]}>
         {selectedChecklist && (
-          <div style={{ display: 'flex', gap: 20 }}>
-            <div style={{ flex: '0 0 300px' }}>
-              <Card size="small" style={{ backgroundColor: '#f8f9fa', borderRadius: 0 }}>
-                <div style={{ marginBottom: 12 }}><Text strong style={{ fontSize: 13, display: 'block' }}>Checklist Name</Text><Text style={{ fontSize: 12 }}>{selectedChecklist.name}</Text></div>
-                <div style={{ marginBottom: 12 }}><Text strong style={{ fontSize: 13, display: 'block' }}>Description</Text><Text style={{ fontSize: 12 }}>{selectedChecklist.description || '-'}</Text></div>
-                <div><Text strong style={{ fontSize: 13, display: 'block' }}>Created</Text><Text style={{ fontSize: 12 }}>{formatDateTime(selectedChecklist.created_at)}</Text></div>
-              </Card>
-            </div>
-            <div style={{ flex: 1 }}>
-              <Text strong style={{ fontSize: 13 }}>Checkpoints ({selectedChecklist.items?.length || 0})</Text>
-              <div style={{ marginTop: 6, maxHeight: 500, overflowY: 'auto' }}>
-                <ExpandedCheckpoints items={selectedChecklist.items} compact />
-              </div>
+          <div>
+            <Card size="small" style={{ backgroundColor: '#f8f9fa', borderRadius: 0, marginBottom: 16 }}>
+              <Row gutter={[24, 12]}>
+                <Col xs={24} md={8}>
+                  <Text strong style={{ fontSize: 12, display: 'block', color: '#6B7280' }}>Checklist Name</Text>
+                  <Text style={{ fontSize: 13 }}>{selectedChecklist.name}</Text>
+                </Col>
+                <Col xs={24} md={10}>
+                  <Text strong style={{ fontSize: 12, display: 'block', color: '#6B7280' }}>Description</Text>
+                  <Text style={{ fontSize: 13 }}>{selectedChecklist.description || '-'}</Text>
+                </Col>
+                <Col xs={24} md={6}>
+                  <Text strong style={{ fontSize: 12, display: 'block', color: '#6B7280' }}>Created</Text>
+                  <Text style={{ fontSize: 13 }}>{formatDateTime(selectedChecklist.created_at)}</Text>
+                </Col>
+              </Row>
+            </Card>
+            <Text strong style={{ fontSize: 13 }}>Checkpoints ({selectedChecklist.items?.length || 0})</Text>
+            <div style={{ marginTop: 8, maxHeight: 480, overflowY: 'auto' }}>
+              <ExpandedCheckpoints items={selectedChecklist.items} compact />
             </div>
           </div>
         )}
@@ -591,42 +639,53 @@ const PokaYokeChecklists = () => {
       {/* Edit Modal — checklist + checkpoints */}
       <Modal title={<><EditOutlined style={{ color: '#faad14' }} /> Edit Checklist</>} open={editModalVisible}
         onCancel={() => { setEditModalVisible(false); setEditingChecklist(null); editForm.resetFields(); setEditCheckpoints([]); }}
-        footer={null} width={1200}>
-        <div style={{ display: 'flex', gap: 20 }}>
-          <div style={{ flex: '0 0 300px' }}>
-            <Form form={editForm} layout="vertical" onFinish={handleUpdateChecklist}>
-              <Form.Item name="name" label="Checklist Name" rules={[{ required: true }]}><Input style={{ borderRadius: 0 }} /></Form.Item>
-              <Form.Item name="description" label="Description"><Input.TextArea rows={4} style={{ borderRadius: 0 }} /></Form.Item>
-              <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-                <Space>
-                  <Button onClick={() => setEditModalVisible(false)} style={btnSharp}>Cancel</Button>
-                  <Button type="primary" htmlType="submit" style={{ ...btnSharp, background: '#F59E0B', borderColor: '#F59E0B', fontWeight: 600 }}>Update Checklist</Button>
-                </Space>
-              </Form.Item>
-            </Form>
+        footer={null} width={1100}>
+        <Form form={editForm} layout="vertical" onFinish={handleUpdateChecklist}>
+          <Card size="small" style={{ backgroundColor: '#f8f9fa', borderRadius: 0, marginBottom: 16 }}>
+            <Row gutter={[16, 0]}>
+              <Col xs={24} md={10}>
+                <Form.Item name="name" label="Checklist Name" rules={checklistNameRules} style={{ marginBottom: 0 }}>
+                  <Input maxLength={PM_FIELD_LIMITS.checklistName} style={{ borderRadius: 0 }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={14}>
+                <Form.Item name="description" label="Description" rules={descriptionRules} style={{ marginBottom: 0 }}>
+                  <Input maxLength={PM_FIELD_LIMITS.description} style={{ borderRadius: 0 }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+          <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
-              <Button type="primary" size="small" icon={<PlusOutlined />} style={btnSharp}
-                onClick={() => setEditCheckpoints((p) => [...p, { ...emptyCheckpoint(p.length + 1), _original: {} }])}>Add Checkpoint</Button>
+          <div style={{ border: '1px solid #d9d9d9', maxHeight: 420, overflowY: 'auto', marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '30px 200px 60px 70px 85px 70px 70px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
+              <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div>Actions</div>
             </div>
-            <div style={{ border: '1px solid #d9d9d9', maxHeight: 500, overflowY: 'auto' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '30px 200px 60px 70px 85px 70px 70px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
-                <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div>Actions</div>
-              </div>
-              {editCheckpoints.map((item, i) => renderEditCheckpointRow(item, i))}
-            </div>
+            {editCheckpoints.map((item, i) => renderEditCheckpointRow(item, i))}
           </div>
-        </div>
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setEditModalVisible(false)} style={btnSharp}>Cancel</Button>
+              <Button type="primary" htmlType="submit" style={{ ...btnSharp, background: '#F59E0B', borderColor: '#F59E0B', fontWeight: 600 }}>Update Checklist</Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
 
       {/* Add Checkpoint Modal */}
       <Modal title={<><PlusOutlined style={{ color: '#1890ff' }} /> Add New Checkpoint</>} open={addItemModalVisible}
-        onCancel={() => { setAddItemModalVisible(false); itemForm.resetFields(); }} footer={null} width={600}>
-        <Form form={itemForm} layout="vertical" onFinish={handleAddItem} style={{ marginTop: 20 }}
+        onCancel={() => { setAddItemModalVisible(false); itemForm.resetFields(); }} footer={null} width={640}>
+        {selectedChecklist && (
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+            Adding to: <Text style={{ fontSize: 12 }}>{selectedChecklist.name}</Text>
+          </Text>
+        )}
+        <Form form={itemForm} layout="vertical" onFinish={handleAddItem}
           initialValues={{ item_type: 'Boolean', frequency_type: 'Time Based', interval_value: 1, interval_unit: 'Week' }}>
-          <Form.Item name="item_text" label="Checkpoint" rules={[{ required: true }]}><Input style={{ borderRadius: 0 }} /></Form.Item>
+          <Form.Item name="item_text" label="Checkpoint" rules={checkpointTextRules}>
+            <Input maxLength={PM_FIELD_LIMITS.checkpointText} style={{ borderRadius: 0 }} />
+          </Form.Item>
           <Form.Item name="item_type" label="Type" rules={[{ required: true }]}>
             <Select style={{ borderRadius: 0 }} options={[
               { value: 'Boolean', label: 'Yes/No' },
@@ -634,7 +693,9 @@ const PokaYokeChecklists = () => {
               { value: 'Text', label: 'Text' },
             ]} />
           </Form.Item>
-          <Form.Item name="expected_value" label="Expected Value"><Input style={{ borderRadius: 0 }} /></Form.Item>
+          <Form.Item name="expected_value" label="Expected Value" rules={expectedValueRules}>
+            <Input maxLength={PM_FIELD_LIMITS.expectedValue} style={{ borderRadius: 0 }} />
+          </Form.Item>
           <Form.Item name="frequency_type" label="Frequency Type" rules={[{ required: true }]}>
             <Select style={{ borderRadius: 0 }} options={[
               { value: 'Time Based', label: 'Time Based' },
@@ -647,19 +708,31 @@ const PokaYokeChecklists = () => {
               const ft = getFieldValue('frequency_type');
               if (ft === 'Usage Based') {
                 return (
-                  <Form.Item name="trigger_hours" label="Trigger Hours" rules={[{ required: true }]}>
-                    <InputNumber min={1} style={{ width: '100%', borderRadius: 0 }} />
+                  <Form.Item name="trigger_hours" label="Trigger Hours" rules={[{ required: true, message: 'Trigger hours are required' }]}>
+                    <InputNumber min={1} max={PM_FIELD_LIMITS.triggerHoursMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
                   </Form.Item>
                 );
               }
-              if (['Time Based', 'Condition Based'].includes(ft)) {
+              if (ft === 'Time Based') {
                 return (
                   <>
-                    <Form.Item name="interval_unit" label="Unit" rules={[{ required: true }]}>
+                    <Form.Item name="interval_unit" label="Unit" rules={[{ required: true, message: 'Unit is required' }]}>
                       <Select style={{ borderRadius: 0 }} options={['Day', 'Week', 'Month', 'Year'].map((u) => ({ value: u, label: u }))} />
                     </Form.Item>
-                    <Form.Item name="interval_value" label="Value" rules={[{ required: true }]}>
-                      <InputNumber min={1} style={{ width: '100%', borderRadius: 0 }} />
+                    <Form.Item name="interval_value" label="Value" rules={[{ required: true, message: 'Value is required' }]}>
+                      <InputNumber min={1} max={PM_FIELD_LIMITS.intervalMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
+                    </Form.Item>
+                  </>
+                );
+              }
+              if (ft === 'Condition Based') {
+                return (
+                  <>
+                    <Form.Item name="interval_unit" label="Unit (optional)">
+                      <Select allowClear placeholder="Optional" style={{ borderRadius: 0 }} options={['Day', 'Week', 'Month', 'Year'].map((u) => ({ value: u, label: u }))} />
+                    </Form.Item>
+                    <Form.Item name="interval_value" label="Value (optional)">
+                      <InputNumber min={1} max={PM_FIELD_LIMITS.intervalMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
                     </Form.Item>
                   </>
                 );
@@ -667,7 +740,9 @@ const PokaYokeChecklists = () => {
               return null;
             }}
           </Form.Item>
-          <Form.Item name="remarks" label="Remarks"><Input style={{ borderRadius: 0 }} /></Form.Item>
+          <Form.Item name="remarks" label="Remarks" rules={remarksRules}>
+            <Input maxLength={PM_FIELD_LIMITS.remarks} style={{ borderRadius: 0 }} />
+          </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setAddItemModalVisible(false)} style={btnSharp}>Cancel</Button>

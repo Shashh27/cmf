@@ -14,6 +14,10 @@ import ToolsHistory from './ToolsHistory';
 import ToolsBulkUpload from './ToolsBulkUpload';
 import CategorySubCategoryModal from './CategorySubCategoryModal';
 import CustomColumnModal from './CustomColumnModal';
+import {
+  ModernTableStyles,
+  MODERN_TABLE_CLASS,
+} from '../OverviewData/inventoryOverviewTable.jsx';
 import * as XLSX from 'xlsx';
 
 const { Search: AntSearch } = Input;
@@ -1073,6 +1077,8 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     return baseColumns;
   }, [selected?.category, pagination.current, pagination.pageSize, onEdit, onDelete, customColumns]);
 
+  const tableScrollX = Math.max(2200, columns.length * 130);
+
   const breadcrumbItems = [
     { title: 'Inventory' },
     selected?.category     ? { title: selected.category }     : null,
@@ -1381,28 +1387,35 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
                 transition={{ duration: 0.3, delay: 0.1 }}
                 className="bg-white border border-slate-200 overflow-hidden flex-1 flex flex-col shadow-sm"
               >
-                <Table
-                  columns={columns}
-                  dataSource={filteredData}
-                  rowKey="id"
-                  loading={tableLoading}
-                  size="middle"
-                  scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-                  pagination={{
-                    current: pagination.current,
-                    pageSize: pagination.pageSize,
-                    showSizeChanger: true,
-                    pageSizeOptions: ['10', '20', '50', '100'],
-                    showTotal: (total, range) => (
-                      <span className="text-xs sm:text-sm text-slate-500">
-                        Showing <b className="text-slate-700">{range[0]}-{range[1]}</b> of <b className="text-slate-700">{total}</b> items
-                      </span>
-                    ),
-                    className: 'px-4 sm:px-6 py-3 sm:py-4 m-0 border-t border-slate-200',
-                    onChange: (page, size) => setPagination({ current: page, pageSize: size }),
-                  }}
-                  className="ag-grid-style"
-                />
+                <ModernTableStyles />
+                <div style={{ width: '100%', overflowX: 'auto' }}>
+                  <Table
+                    columns={columns}
+                    dataSource={filteredData}
+                    rowKey="id"
+                    loading={tableLoading}
+                    size="small"
+                    bordered
+                    className={MODERN_TABLE_CLASS}
+                    scroll={{ x: tableScrollX, y: 'calc(100vh - 400px)' }}
+                    pagination={{
+                      current: pagination.current,
+                      pageSize: pagination.pageSize,
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      pageSizeOptions: ['10', '20', '50', '100'],
+                      showTotal: (total, range) => (
+                        <span className="text-xs sm:text-sm text-slate-500">
+                          Showing <b className="text-slate-700">{range[0]}-{range[1]}</b> of <b className="text-slate-700">{total}</b> items
+                        </span>
+                      ),
+                      className: 'px-4 sm:px-6 py-3 sm:py-4 m-0 border-t border-slate-200',
+                      placement: 'bottom',
+                      responsive: true,
+                      onChange: (page, size) => setPagination({ current: page, pageSize: size }),
+                    }}
+                  />
+                </div>
               </motion.div>
             </div>
           )}
@@ -1529,53 +1542,6 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         />
       </Dropdown>
       <style>{`
-        /* AgGrid style table */
-        .ag-grid-style .ant-table {
-          border: 1px solid #d1d5db;
-          border-radius: 0;
-          border-collapse: collapse !important;
-        }
-        .ag-grid-style .ant-table-thead {
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-        .ag-grid-style .ant-table-tbody {
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-        .ag-grid-style .ant-table-tbody > tr:first-child > td {
-          border-top: 0 !important;
-        }
-        .ag-grid-style .ant-table-thead > tr > th { 
-          background: #f3f4f6 !important; 
-          color: #1f2937 !important; 
-          font-weight: 600 !important;
-          font-size: 12px !important;
-          border-bottom: 1px solid #d1d5db !important;
-          border-right: 1px solid #d1d5db !important;
-          padding: 8px 8px !important;
-          border-radius: 0 !important;
-        }
-        .ag-grid-style .ant-table-tbody > tr:first-child > td {
-          border-top: 0 !important;
-        }
-        .ag-grid-style .ant-table-tbody > tr > td {
-          padding: 4px 8px !important;
-          border-bottom: 1px solid #e5e7eb !important;
-          border-right: 1px solid #e5e7eb !important;
-          color: #374151 !important;
-          font-size: 12px !important;
-          border-radius: 0 !important;
-        }
-        .ag-grid-style .ant-table-tbody > tr:hover > td {
-          background: #f9fafb !important;
-        }
-        .ag-grid-style .ant-table-thead > tr > th::before { display: none !important; }
-        .ag-grid-style .ant-table-placeholder .ant-empty-normal { margin: 60px 0 !important; }
-        .ag-grid-style .ant-table-cell { border-radius: 0 !important; }
-        .ag-grid-style .ant-table-thead > tr > th:last-child { border-right: 1px solid #d1d5db !important; }
-        .ag-grid-style .ant-table-tbody > tr > td:last-child { border-right: 1px solid #e5e7eb !important; }
-        
         /* Custom scrollbar */
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
