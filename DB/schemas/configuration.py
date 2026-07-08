@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text, TYPE_CHECKING, Literal
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time, date
 from typing_extensions import Self
 from .access_control import AccessUserResponse
@@ -302,9 +302,6 @@ class SubmissionWithDetails(Submission):
 PM_ITEM_TYPES = ("Boolean", "Numeric", "Text")
 PM_FREQUENCY_TYPES = ("Time Based", "Usage Based", "Condition Based")
 PM_INTERVAL_UNITS = ("Day", "Week", "Month", "Year")
-PM_SUBMISSION_STATUSES = ("Submitted", "Approved", "Rejected")
-
-
 class PMChecklistItemBase(BaseModel):
     item_text: str
     sequence_number: int
@@ -335,6 +332,20 @@ class PMChecklistItemBase(BaseModel):
     def validate_interval_unit(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in PM_INTERVAL_UNITS:
             raise ValueError(f"interval_unit must be one of {PM_INTERVAL_UNITS}")
+        return v
+
+    @field_validator("interval_value")
+    @classmethod
+    def validate_interval_value(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("interval_value must be greater than 0")
+        return v
+
+    @field_validator("trigger_hours")
+    @classmethod
+    def validate_trigger_hours(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v <= 0:
+            raise ValueError("trigger_hours must be greater than 0")
         return v
 
 
@@ -487,11 +498,8 @@ class PMOperatorCheckpoint(BaseModel):
     last_completed_date: Optional[date] = None
     next_due_date: date
     is_due: bool
-    has_pending_submission: bool = False
-    latest_submission_status: Optional[str] = None
-    needs_resubmit: bool = False
     latest_submission_id: Optional[int] = None
-    rejection_comments: Optional[str] = None
+    last_submitted_at: Optional[datetime] = None
 
 
 class PMOperatorAssignmentView(BaseModel):
@@ -524,11 +532,11 @@ class DueCheckpointResponse(BaseModel):
     is_required: bool
     last_completed_date: Optional[date] = None
     next_due_date: date
-    has_pending_submission: bool = False
-    latest_submission_status: Optional[str] = None
-    needs_resubmit: bool = False
     latest_submission_id: Optional[int] = None
-    rejection_comments: Optional[str] = None
+    last_submitted_at: Optional[datetime] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
 
 
 class PMCheckpointSubmissionCreate(BaseModel):
@@ -558,21 +566,13 @@ class PMCheckpointSubmission(BaseModel):
     response_value: str
     operator_comments: Optional[str] = None
     submitted_at: datetime
-    status: str
-    supervisor_id: Optional[int] = None
-    reviewed_at: Optional[datetime] = None
-    supervisor_comments: Optional[str] = None
-    supervisor_acknowledged: bool
-    supervisor_acknowledged_at: Optional[datetime] = None
-    operator_acknowledged: bool
-    operator_acknowledged_at: Optional[datetime] = None
-    created_at: datetime
 
     class Config:
         from_attributes = True
 
 
 class PMCheckpointSubmissionWithDetails(PMCheckpointSubmission):
+    operator_name: Optional[str] = None
     checklist_item: Optional[PMChecklistItem] = None
     checklist_id: Optional[int] = None
     checklist_name: Optional[str] = None
@@ -580,11 +580,9 @@ class PMCheckpointSubmissionWithDetails(PMCheckpointSubmission):
     machine_label: Optional[str] = None
 
 
-class PMSupervisorReviewRequest(BaseModel):
-    supervisor_id: int
-    decision: Literal["Approved", "Rejected"]
-    supervisor_comments: Optional[str] = None
-
-
-class PMAcknowledgementRequest(BaseModel):
-    user_id: int
+class PMSupervisorSubmissionFilters(BaseModel):
+    machine_id: Optional[int] = None
+    operator_id: Optional[int] = None
+    checklist_id: Optional[int] = None
+    month: Optional[int] = None
+    year: Optional[int] = None

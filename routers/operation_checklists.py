@@ -76,27 +76,58 @@ def create_operation_checklist_assignment(assignment: OperationChecklistAssignCr
     return db_assignment
 
 
+def _format_assignment(assignment: OperationChecklistAssign, is_default: bool = False) -> dict:
+    return {
+        "id": assignment.id,
+        "operation_id": assignment.operation_id,
+        "checklist_id": assignment.checklist_id,
+        "checklist_name": assignment.checklist.name if assignment.checklist else None,
+        "checklist_type": assignment.checklist.type if assignment.checklist else None,
+        "assigned_by": assignment.assigned_by,
+        "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
+        "is_default": is_default,
+    }
+
+
+def _format_default_general_checklist(operation_id: int, checklist: OperationChecklist) -> dict:
+    return {
+        "id": None,
+        "operation_id": operation_id,
+        "checklist_id": checklist.id,
+        "checklist_name": checklist.name,
+        "checklist_type": checklist.type,
+        "assigned_by": None,
+        "created_at": None,
+        "is_default": True,
+    }
+
+
 @router.get("/assignments")
 def get_operation_checklist_assignments(
     operation_id: Optional[int] = None,
+    fallback_to_general: bool = False,
     db: Session = Depends(get_db)
 ):
-    """Get all operation checklist assignments, optionally filtered by operation_id"""
+    """Get operation checklist assignments. When fallback_to_general is true and no
+    assignments exist for the operation, return all general checklists as defaults."""
     query = db.query(OperationChecklistAssign)
     if operation_id is not None:
         query = query.filter(OperationChecklistAssign.operation_id == operation_id)
     assignments = query.all()
-    return [
-        {
-            "id": a.id,
-            "operation_id": a.operation_id,
-            "checklist_id": a.checklist_id,
-            "checklist_name": a.checklist.name if a.checklist else None,
-            "assigned_by": a.assigned_by,
-            "created_at": a.created_at.isoformat() if a.created_at else None
-        }
-        for a in assignments
-    ]
+
+    if operation_id is not None and fallback_to_general and len(assignments) == 0:
+        general_checklists = (
+            db.query(OperationChecklist)
+            .filter(OperationChecklist.type == "general")
+            .order_by(OperationChecklist.id)
+            .all()
+        )
+        return [
+            _format_default_general_checklist(operation_id, checklist)
+            for checklist in general_checklists
+        ]
+
+    return [_format_assignment(assignment) for assignment in assignments]
 
 
 @router.get("/assignments/{assignment_id}", response_model=OperationChecklistAssignWithChecklist)
