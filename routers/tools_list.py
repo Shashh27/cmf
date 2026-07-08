@@ -777,8 +777,18 @@ def delete_category(category_name: str, db: Session = Depends(get_db)):
         tools_sub = db.query(ToolsListModel).filter(ToolsListModel.sub_category_id.in_(sub_category_ids)).all()
         for tool in tools_sub:
             db.delete(tool)
+
+        # Delete custom columns for all sub-categories
+        db.query(CustomColumnModel).filter(
+            CustomColumnModel.sub_category_id.in_(sub_category_ids)
+        ).delete(synchronize_session=False)
+
+    # Delete custom columns tied directly to this category
+    db.query(CustomColumnModel).filter(
+        CustomColumnModel.category_id == category.id
+    ).delete(synchronize_session=False)
     
-    # Flush to ensure tools are deleted before deleting categories
+    # Flush to ensure tools and custom columns are deleted before deleting categories
     db.flush()
     
     # Delete all sub-categories
@@ -816,8 +826,13 @@ def delete_sub_category(category_name: str, sub_category_name: str, db: Session 
     tools = db.query(ToolsListModel).filter(ToolsListModel.sub_category_id == sub_category.id).all()
     for tool in tools:
         db.delete(tool)
-    
-    # Flush to ensure tools are deleted before deleting the sub-category
+
+    # Delete custom columns tied to this sub-category
+    db.query(CustomColumnModel).filter(
+        CustomColumnModel.sub_category_id == sub_category.id
+    ).delete(synchronize_session=False)
+
+    # Flush to ensure tools and custom columns are deleted before deleting the sub-category
     db.flush()
     
     # Delete the sub-category
@@ -1150,6 +1165,71 @@ def create_custom_column(column: CustomColumnCreate, db: Session = Depends(get_d
     db.commit()
     db.refresh(new_column)
     return new_column
+
+
+@router.put("/custom-columns/{column_id}", response_model=CustomColumn)
+def update_custom_column(
+    column_id: int,
+    column_update: CustomColumnUpdate,
+    db: Session = Depends(get_db),
+):
+    """Update a custom column definition."""
+    db_column = db.query(CustomColumnModel).filter(CustomColumnModel.id == column_id).first()
+    if not db_column:
+        raise HTTPException(status_code=404, detail=f"Custom column id {column_id} not found")
+
+    update_data = column_update.model_dump(exclude_unset=True)
+    if "column_name" in update_data and update_data["column_name"]:
+        name_lower = update_data["column_name"].lower().strip()
+        dup_query = db.query(CustomColumnModel).filter(
+            CustomColumnModel.id != column_id,
+            func.lower(CustomColumnModel.column_name) == name_lower,
+        )
+        if db_column.sub_category_id:
+            dup_query = dup_query.filter(CustomColumnModel.sub_category_id == db_column.sub_category_id)
+        elif db_column.category_id:
+            dup_query = dup_query.filter(
+                CustomColumnModel.category_id == db_column.category_id,
+                CustomColumnModel.sub_category_id.is_(None),
+            )
+        if dup_query.first():
+            raise HTTPException(
+                status_code=400,
+                detail=f"A custom column with the name '{update_data['column_name']}' already exists in this scope",
+            )
+
+    for field, value in update_data.items():
+        setattr(db_column, field, value)
+
+    db.commit()
+    db.refresh(db_column)
+    return db_column
+
+
+@router.delete("/custom-columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_custom_column(column_id: int, db: Session = Depends(get_db)):
+    """Delete a custom column and remove its key from tools in the same category/sub-category scope."""
+    db_column = db.query(CustomColumnModel).filter(CustomColumnModel.id == column_id).first()
+    if not db_column:
+        raise HTTPException(status_code=404, detail=f"Custom column id {column_id} not found")
+
+    column_key = db_column.column_key
+    tools_query = db.query(ToolsListModel)
+    if db_column.sub_category_id:
+        tools_query = tools_query.filter(ToolsListModel.sub_category_id == db_column.sub_category_id)
+    elif db_column.category_id:
+        tools_query = tools_query.filter(ToolsListModel.category_id == db_column.category_id)
+
+    if column_key:
+        for tool in tools_query.all():
+            if tool.custom_fields and column_key in tool.custom_fields:
+                cf = dict(tool.custom_fields)
+                del cf[column_key]
+                tool.custom_fields = cf
+                db.add(tool)
+
+    db.delete(db_column)
+    db.commit()
 
 
 @router.get("/{tool_id}", response_model=ToolsList)

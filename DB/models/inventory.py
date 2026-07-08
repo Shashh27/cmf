@@ -303,9 +303,9 @@ class CustomColumn(Base):
 
     data_type = Column(String(50), nullable=False)  # "text", "number", "date", "boolean"
 
-    category_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)  # If set, applies to this category
+    category_id = Column(Integer, ForeignKey('inventory.categories.id', ondelete='CASCADE'), nullable=True)  # If set, applies to this category
 
-    sub_category_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)  # If set, applies to this sub-category
+    sub_category_id = Column(Integer, ForeignKey('inventory.categories.id', ondelete='CASCADE'), nullable=True)  # If set, applies to this sub-category
 
     is_required = Column(Boolean, default=False)  # Whether the field is mandatory
 

@@ -1,11 +1,12 @@
 """
 Preventive Maintenance (PM) business logic and schedule calculations.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from DB.models.configuration import (
@@ -31,15 +32,28 @@ def validate_checklist_item_frequency(item: PMChecklistItemCreate | PMChecklistI
     if frequency_type is None and partial:
         return
 
-    if frequency_type in ("Time Based", "Condition Based"):
+    if frequency_type == "Time Based":
         interval_value = data.get("interval_value")
         interval_unit = data.get("interval_unit")
         if interval_value is None or interval_unit is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{frequency_type} checkpoints require interval_value and interval_unit",
+                detail="Time Based checkpoints require interval_value and interval_unit",
             )
         if interval_value <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="interval_value must be greater than 0",
+            )
+    elif frequency_type == "Condition Based":
+        interval_value = data.get("interval_value")
+        interval_unit = data.get("interval_unit")
+        if (interval_value is None) ^ (interval_unit is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Condition Based checkpoints must provide both interval_value and interval_unit together, or neither",
+            )
+        if interval_value is not None and interval_value <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="interval_value must be greater than 0",
@@ -66,9 +80,9 @@ def calculate_next_due_date(
 ) -> date:
     """
     Calculate next due date from a base date and checkpoint frequency.
-    Usage Based: uses interval if present; otherwise returns from_date (runtime TBD).
+    Usage Based / Condition Based without interval: returns from_date.
     """
-    if frequency_type == "Usage Based" and (interval_value is None or interval_unit is None):
+    if frequency_type in ("Usage Based", "Condition Based") and (interval_value is None or interval_unit is None):
         return from_date
 
     if interval_value is None or interval_unit is None:
@@ -109,15 +123,15 @@ def create_initial_schedule(
     return schedule
 
 
-def update_schedule_on_approval(
+def update_schedule_on_completion(
     db: Session,
     schedule: PMSchedule,
     checklist_item: PMChecklistItem,
     completion_date: Optional[date] = None,
 ) -> PMSchedule:
     """
-    Automatically update schedule when supervisor approves a submission.
-    Sets last_completed_date = approval day and recalculates next_due_date from frequency.
+    Automatically update schedule when operator completes a submission.
+    Sets last_completed_date = submission day and recalculates next_due_date from frequency.
     Never creates a new schedule row.
     """
     completed = completion_date or date.today()
@@ -132,54 +146,11 @@ def update_schedule_on_approval(
     return schedule
 
 
-def review_submission(
-    db: Session,
-    submission: PMCheckpointSubmission,
-    supervisor_id: int,
-    decision: str,
-    supervisor_comments: Optional[str] = None,
-) -> PMCheckpointSubmission:
-    """Approve or reject a submitted checkpoint. Schedule updates only on approval."""
-    if submission.status != "Submitted":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot review submission with status '{submission.status}'",
-        )
-
-    submission.status = decision
-    submission.supervisor_id = supervisor_id
-    submission.supervisor_comments = supervisor_comments
-    submission.reviewed_at = datetime.now(timezone.utc)
-
-    if decision == "Approved":
-        assignment_item = submission.assignment_item
-        checklist_item = assignment_item.checklist_item if assignment_item else None
-        if not checklist_item or not submission.schedule:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot approve submission without schedule/checkpoint data",
-            )
-        completion_date = submission.reviewed_at.date() if submission.reviewed_at else date.today()
-        update_schedule_on_approval(
-            db,
-            submission.schedule,
-            checklist_item,
-            completion_date=completion_date,
-        )
-
-    db.flush()
-    return submission
-
-
-def has_pending_submission(db: Session, assignment_item_id: int) -> bool:
+def is_condition_on_demand(checklist_item: PMChecklistItem) -> bool:
+    """Condition-based checkpoint with no interval — submit anytime from the full assignment view."""
     return (
-        db.query(PMCheckpointSubmission)
-        .filter(
-            PMCheckpointSubmission.assignment_item_id == assignment_item_id,
-            PMCheckpointSubmission.status == "Submitted",
-        )
-        .first()
-        is not None
+        checklist_item.frequency_type == "Condition Based"
+        and (checklist_item.interval_value is None or checklist_item.interval_unit is None)
     )
 
 
@@ -192,22 +163,14 @@ def get_latest_submission(db: Session, assignment_item_id: int) -> Optional[PMCh
     )
 
 
-def get_submission_cycle_flags(
+def get_latest_submission_info(
     db: Session,
     assignment_item_id: int,
-) -> Tuple[Optional[str], bool, bool, Optional[int], Optional[str]]:
-    """Latest status, pending review, needs resubmit, latest submission id, rejection comments."""
-    pending = has_pending_submission(db, assignment_item_id)
+) -> Tuple[Optional[int], Optional[datetime]]:
     latest = get_latest_submission(db, assignment_item_id)
-    latest_status = latest.status if latest else None
-    needs_resubmit = (
-        not pending
-        and latest is not None
-        and latest.status == "Rejected"
-    )
-    rejection_comments = latest.supervisor_comments if needs_resubmit else None
-    latest_submission_id = latest.id if latest else None
-    return latest_status, pending, needs_resubmit, latest_submission_id, rejection_comments
+    if not latest:
+        return None, None
+    return latest.id, latest.submitted_at
 
 
 def build_operator_checkpoint_fields(
@@ -218,10 +181,9 @@ def build_operator_checkpoint_fields(
     today: Optional[date] = None,
 ) -> dict:
     today = today or date.today()
-    latest_status, pending, needs_resubmit, latest_submission_id, rejection_comments = (
-        get_submission_cycle_flags(db, assignment_item.id)
-    )
+    latest_submission_id, last_submitted_at = get_latest_submission_info(db, assignment_item.id)
     due_by_schedule = is_checkpoint_due(checklist_item, schedule, today)
+    on_demand = is_condition_on_demand(checklist_item)
     return {
         "assignment_item_id": assignment_item.id,
         "schedule_id": schedule.id,
@@ -238,12 +200,9 @@ def build_operator_checkpoint_fields(
         "is_required": assignment_item.is_required,
         "last_completed_date": schedule.last_completed_date,
         "next_due_date": schedule.next_due_date,
-        "is_due": due_by_schedule or needs_resubmit,
-        "has_pending_submission": pending,
-        "latest_submission_status": latest_status,
-        "needs_resubmit": needs_resubmit,
+        "is_due": due_by_schedule or on_demand,
         "latest_submission_id": latest_submission_id,
-        "rejection_comments": rejection_comments,
+        "last_submitted_at": last_submitted_at,
     }
 
 
@@ -253,13 +212,14 @@ def is_checkpoint_due(
     today: Optional[date] = None,
 ) -> bool:
     """
-    Condition Based: always due (shown daily, optional via is_required).
-    Time Based / Usage Based: due when next_due_date <= today (never completed yet
-    if last_completed_date is NULL — first due is on next_due_date).
+    Condition Based without interval: not shown in due list, but available from the
+    full assignment view at any time. Condition Based with interval behaves like a
+    date-based checkpoint in the due list.
     """
     today = today or date.today()
     if checklist_item.frequency_type == "Condition Based":
-        return True
+        if checklist_item.interval_value is None or checklist_item.interval_unit is None:
+            return False
     return schedule.next_due_date <= today
 
 
@@ -286,17 +246,15 @@ def get_due_checkpoints_for_machine(db: Session, machine_id: int) -> List[dict]:
     due_items: List[dict] = []
     for assignment in assignments:
         for assignment_item in assignment.assignment_items:
+            if not assignment_item.is_required:
+                continue
             checklist_item = assignment_item.checklist_item
             schedule = assignment_item.schedule
             if not checklist_item or not schedule:
                 continue
 
-            latest_status, pending, needs_resubmit, latest_submission_id, rejection_comments = (
-                get_submission_cycle_flags(db, assignment_item.id)
-            )
-            if pending:
-                continue
-            if not is_checkpoint_due(checklist_item, schedule, today) and not needs_resubmit:
+            latest_submission_id, last_submitted_at = get_latest_submission_info(db, assignment_item.id)
+            if not is_checkpoint_due(checklist_item, schedule, today):
                 continue
 
             due_items.append(
@@ -312,14 +270,14 @@ def get_due_checkpoints_for_machine(db: Session, machine_id: int) -> List[dict]:
                     "item_type": checklist_item.item_type,
                     "expected_value": checklist_item.expected_value,
                     "frequency_type": checklist_item.frequency_type,
+                    "interval_value": checklist_item.interval_value,
+                    "interval_unit": checklist_item.interval_unit,
+                    "trigger_hours": checklist_item.trigger_hours,
                     "is_required": assignment_item.is_required,
                     "last_completed_date": schedule.last_completed_date,
                     "next_due_date": schedule.next_due_date,
-                    "has_pending_submission": False,
-                    "latest_submission_status": latest_status,
-                    "needs_resubmit": needs_resubmit,
                     "latest_submission_id": latest_submission_id,
-                    "rejection_comments": rejection_comments,
+                    "last_submitted_at": last_submitted_at,
                 }
             )
 
@@ -401,6 +359,8 @@ def get_operator_assignments_for_machine(db: Session, machine_id: int) -> List[d
             key=lambda ai: ai.checklist_item.sequence_number if ai.checklist_item else 0,
         )
         for ai in sorted_items:
+            if not ai.is_required:
+                continue
             ci = ai.checklist_item
             schedule = ai.schedule
             if not ci or not schedule:
@@ -439,6 +399,30 @@ def validate_response_value(item_type: str, response_value: str) -> None:
             )
 
 
+def apply_submission_date_filters(
+    query,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+):
+    """Filter submissions by date range (preferred) or month/year."""
+    today = date.today()
+    if end_date is not None and end_date > today:
+        end_date = today
+    if start_date is not None:
+        query = query.filter(func.date(PMCheckpointSubmission.submitted_at) >= start_date)
+    if end_date is not None:
+        query = query.filter(func.date(PMCheckpointSubmission.submitted_at) <= end_date)
+    if start_date is None and end_date is None:
+        if month is not None:
+            query = query.filter(func.extract("month", PMCheckpointSubmission.submitted_at) == month)
+        if year is not None:
+            query = query.filter(func.extract("year", PMCheckpointSubmission.submitted_at) == year)
+    return query
+
+
 def get_machine_label(machine: Optional[Machine]) -> Optional[str]:
     if not machine:
         return None
@@ -459,18 +443,10 @@ def enrich_submission(submission: PMCheckpointSubmission) -> dict:
         "schedule_id": submission.schedule_id,
         "assignment_item_id": submission.assignment_item_id,
         "operator_id": submission.operator_id,
+        "operator_name": submission.operator.user_name if submission.operator else None,
         "response_value": submission.response_value,
         "operator_comments": submission.operator_comments,
         "submitted_at": submission.submitted_at,
-        "status": submission.status,
-        "supervisor_id": submission.supervisor_id,
-        "reviewed_at": submission.reviewed_at,
-        "supervisor_comments": submission.supervisor_comments,
-        "supervisor_acknowledged": submission.supervisor_acknowledged,
-        "supervisor_acknowledged_at": submission.supervisor_acknowledged_at,
-        "operator_acknowledged": submission.operator_acknowledged,
-        "operator_acknowledged_at": submission.operator_acknowledged_at,
-        "created_at": submission.created_at,
         "checklist_item": checklist_item,
         "checklist_id": assignment.checklist_id if assignment else None,
         "checklist_name": checklist.name if checklist else None,

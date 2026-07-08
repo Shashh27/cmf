@@ -262,9 +262,9 @@ class PMSchedule(Base):
 
 
 class PMCheckpointSubmission(Base):
+    """Operator PM completion record — row existence means checkpoint was completed."""
     __tablename__ = "pm_checkpoint_submissions"
     __table_args__ = (
-        Index('ix_pm_submissions_status', 'status'),
         Index('ix_pm_submissions_schedule_id', 'schedule_id'),
         {'schema': 'configuration'},
     )
@@ -276,17 +276,7 @@ class PMCheckpointSubmission(Base):
     response_value = Column(String, nullable=False)
     operator_comments = Column(Text, nullable=True)
     submitted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
-    status = Column(String, nullable=False, default='Submitted')  # Submitted, Approved, Rejected
-    supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-    reviewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    supervisor_comments = Column(Text, nullable=True)
-    supervisor_acknowledged = Column(Boolean, nullable=False, default=False)
-    supervisor_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    operator_acknowledged = Column(Boolean, nullable=False, default=False)
-    operator_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     schedule = relationship("PMSchedule", back_populates="submissions")
     assignment_item = relationship("PMAssignmentItem", back_populates="submissions")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])

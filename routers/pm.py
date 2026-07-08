@@ -1,7 +1,8 @@
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from DB.database import get_db
@@ -33,24 +34,23 @@ from DB.schemas.configuration import (
     PMOperatorSubmitRequest,
     PMCheckpointSubmission as PMCheckpointSubmissionSchema,
     PMCheckpointSubmissionWithDetails,
-    PMSupervisorReviewRequest,
-    PMAcknowledgementRequest,
 )
 from services.pm_service import (
     validate_checklist_item_frequency,
     create_initial_schedule,
-    review_submission,
+    update_schedule_on_completion,
     get_due_checkpoints_for_machine,
     get_operator_assignments_for_machine,
     delete_assignment_item,
     validate_response_value,
     enrich_submission,
-    has_pending_submission,
+    apply_submission_date_filters,
 )
 
 router = APIRouter(prefix="/pm", tags=["Preventive Maintenance"])
 
 SUBMISSION_DETAIL_LOAD = (
+    joinedload(PMCheckpointSubmission.operator),
     joinedload(PMCheckpointSubmission.assignment_item).options(
         joinedload(PMAssignmentItem.checklist_item),
         joinedload(PMAssignmentItem.assignment).options(
@@ -244,9 +244,9 @@ def delete_checkpoint(item_id: int, db: Session = Depends(get_db)):
 )
 def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session = Depends(get_db)):
     """
-    Assign a checklist to a machine (one-time, no reassignment).
-    Only checkpoints marked is_required=true are added to pm_assignment_items;
-    optional (is_required=false) checkpoints are skipped and not assigned.
+    Assign a checklist to a machine.
+    Only checkpoints marked is_required=true are stored in pm_assignment_items and shown to operators.
+    The assigner may include optional checkpoints in the payload; those are ignored unless required.
     """
     machine = db.query(Machine).filter(Machine.id == payload.machine_id).first()
     if not machine:
@@ -293,7 +293,7 @@ def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session 
     if not items_to_assign:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one checkpoint must be assigned to the machine",
+            detail="At least one required checkpoint must be assigned to the machine",
         )
 
     assignment = PMMachineAssignment(
@@ -430,7 +430,7 @@ def get_schedule_details(schedule_id: int, db: Session = Depends(get_db)):
 
 @router.post("/operator/submissions", response_model=List[PMCheckpointSubmissionSchema], status_code=status.HTTP_201_CREATED)
 def submit_pm_responses(payload: PMOperatorSubmitRequest, db: Session = Depends(get_db)):
-    """Submit PM checkpoint responses. Always creates new execution history rows."""
+    """Submit PM checkpoint responses. Each row is a completion record for supervisor/history views."""
     created: List[PMCheckpointSubmission] = []
 
     for item in payload.submissions:
@@ -456,21 +456,21 @@ def submit_pm_responses(payload: PMOperatorSubmitRequest, db: Session = Depends(
 
         validate_response_value(checklist_item.item_type, item.response_value)
 
-        if has_pending_submission(db, assignment_item.id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Checkpoint {assignment_item.id} already has a pending submission",
-            )
-
         submission = PMCheckpointSubmission(
             schedule_id=schedule.id,
             assignment_item_id=assignment_item.id,
             operator_id=payload.operator_id,
             response_value=item.response_value,
             operator_comments=item.operator_comments,
-            status="Submitted",
         )
         db.add(submission)
+        completion_date = date.today()
+        update_schedule_on_completion(
+            db,
+            schedule,
+            checklist_item,
+            completion_date=completion_date,
+        )
         created.append(submission)
 
     db.commit()
@@ -482,25 +482,34 @@ def submit_pm_responses(payload: PMOperatorSubmitRequest, db: Session = Depends(
 @router.get("/submissions", response_model=List[PMCheckpointSubmissionWithDetails])
 def get_all_submissions(
     machine_id: Optional[int] = None,
-    status_filter: Optional[str] = None,
+    operator_id: Optional[int] = None,
+    checklist_id: Optional[int] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
-    """Admin view: all checkpoint submission history."""
+    """Admin view: all operator PM completion records with optional filters."""
     query = (
         db.query(PMCheckpointSubmission)
         .options(*SUBMISSION_DETAIL_LOAD)
     )
-    if status_filter:
-        query = query.filter(PMCheckpointSubmission.status == status_filter)
+    if operator_id is not None:
+        query = query.filter(PMCheckpointSubmission.operator_id == operator_id)
+    query = apply_submission_date_filters(
+        query, start_date=start_date, end_date=end_date, month=month, year=year,
+    )
 
     submissions = query.order_by(PMCheckpointSubmission.submitted_at.desc()).all()
 
-    if machine_id is not None:
+    if machine_id is not None or checklist_id is not None:
         submissions = [
             s for s in submissions
             if s.assignment_item
             and s.assignment_item.assignment
-            and s.assignment_item.assignment.machine_id == machine_id
+            and (machine_id is None or s.assignment_item.assignment.machine_id == machine_id)
+            and (checklist_id is None or s.assignment_item.assignment.checklist_id == checklist_id)
         ]
 
     return [enrich_submission(s) for s in submissions]
@@ -509,7 +518,12 @@ def get_all_submissions(
 @router.get("/machines/{machine_id}/submissions", response_model=List[PMCheckpointSubmissionWithDetails])
 def get_submissions_by_machine(
     machine_id: int,
-    status_filter: Optional[str] = None,
+    operator_id: Optional[int] = None,
+    checklist_id: Optional[int] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
     """All checkpoint submissions for a specific machine."""
@@ -524,17 +538,32 @@ def get_submissions_by_machine(
         .filter(PMMachineAssignment.machine_id == machine_id)
         .options(*SUBMISSION_DETAIL_LOAD)
     )
-    if status_filter:
-        query = query.filter(PMCheckpointSubmission.status == status_filter)
+    if operator_id is not None:
+        query = query.filter(PMCheckpointSubmission.operator_id == operator_id)
+    query = apply_submission_date_filters(
+        query, start_date=start_date, end_date=end_date, month=month, year=year,
+    )
 
     submissions = query.order_by(PMCheckpointSubmission.submitted_at.desc()).all()
+    if checklist_id is not None:
+        submissions = [
+            s for s in submissions
+            if s.assignment_item
+            and s.assignment_item.assignment
+            and s.assignment_item.assignment.checklist_id == checklist_id
+        ]
     return [enrich_submission(s) for s in submissions]
 
 
 @router.get("/operator/submissions", response_model=List[PMCheckpointSubmissionWithDetails])
 def get_operator_submission_history(
     operator_id: int,
-    status_filter: Optional[str] = None,
+    machine_id: Optional[int] = None,
+    checklist_id: Optional[int] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
     query = (
@@ -542,10 +571,19 @@ def get_operator_submission_history(
         .options(*SUBMISSION_DETAIL_LOAD)
         .filter(PMCheckpointSubmission.operator_id == operator_id)
     )
-    if status_filter:
-        query = query.filter(PMCheckpointSubmission.status == status_filter)
+    query = apply_submission_date_filters(
+        query, start_date=start_date, end_date=end_date, month=month, year=year,
+    )
 
     submissions = query.order_by(PMCheckpointSubmission.submitted_at.desc()).all()
+    if machine_id is not None or checklist_id is not None:
+        submissions = [
+            s for s in submissions
+            if s.assignment_item
+            and s.assignment_item.assignment
+            and (machine_id is None or s.assignment_item.assignment.machine_id == machine_id)
+            and (checklist_id is None or s.assignment_item.assignment.checklist_id == checklist_id)
+        ]
     return [enrich_submission(s) for s in submissions]
 
 
@@ -553,114 +591,36 @@ def get_operator_submission_history(
 # Supervisor APIs
 # =======================
 
-@router.get("/supervisor/submissions/pending", response_model=List[PMCheckpointSubmissionWithDetails])
-def get_pending_submissions(
+@router.get("/supervisor/submissions", response_model=List[PMCheckpointSubmissionWithDetails])
+def get_supervisor_submissions(
     machine_id: Optional[int] = None,
+    operator_id: Optional[int] = None,
+    checklist_id: Optional[int] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
+    """Supervisor dashboard: view operator PM completion records with optional filters."""
     query = (
         db.query(PMCheckpointSubmission)
         .options(*SUBMISSION_DETAIL_LOAD)
-        .filter(PMCheckpointSubmission.status == "Submitted")
+    )
+    if operator_id is not None:
+        query = query.filter(PMCheckpointSubmission.operator_id == operator_id)
+    query = apply_submission_date_filters(
+        query, start_date=start_date, end_date=end_date, month=month, year=year,
     )
     submissions = query.order_by(PMCheckpointSubmission.submitted_at.asc()).all()
 
-    if machine_id is not None:
+    if machine_id is not None or checklist_id is not None:
         submissions = [
             s for s in submissions
             if s.assignment_item
             and s.assignment_item.assignment
-            and s.assignment_item.assignment.machine_id == machine_id
+            and (machine_id is None or s.assignment_item.assignment.machine_id == machine_id)
+            and (checklist_id is None or s.assignment_item.assignment.checklist_id == checklist_id)
         ]
 
     return [enrich_submission(s) for s in submissions]
-
-
-@router.post("/supervisor/submissions/{submission_id}/review", response_model=PMCheckpointSubmissionSchema)
-def review_checkpoint_submission(
-    submission_id: int,
-    payload: PMSupervisorReviewRequest,
-    db: Session = Depends(get_db),
-):
-    """Supervisor approves or rejects a submitted checkpoint in one call."""
-    submission = (
-        db.query(PMCheckpointSubmission)
-        .options(
-            joinedload(PMCheckpointSubmission.schedule),
-            joinedload(PMCheckpointSubmission.assignment_item).joinedload(PMAssignmentItem.checklist_item),
-        )
-        .filter(PMCheckpointSubmission.id == submission_id)
-        .first()
-    )
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-
-    review_submission(
-        db,
-        submission,
-        supervisor_id=payload.supervisor_id,
-        decision=payload.decision,
-        supervisor_comments=payload.supervisor_comments,
-    )
-
-    db.commit()
-    db.refresh(submission)
-    return submission
-
-
-# =======================
-# Acknowledgement APIs
-# =======================
-
-@router.post("/acknowledgements/supervisor/{submission_id}", response_model=PMCheckpointSubmissionSchema)
-def supervisor_acknowledge_submission(
-    submission_id: int,
-    payload: PMAcknowledgementRequest,
-    db: Session = Depends(get_db),
-):
-    submission = db.query(PMCheckpointSubmission).filter(PMCheckpointSubmission.id == submission_id).first()
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    if submission.status not in ("Approved", "Rejected"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Supervisor acknowledgement is only allowed after review",
-        )
-    if submission.supervisor_id and submission.supervisor_id != payload.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the reviewing supervisor can acknowledge",
-        )
-
-    submission.supervisor_acknowledged = True
-    submission.supervisor_acknowledged_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(submission)
-    return submission
-
-
-@router.post("/acknowledgements/operator/{submission_id}", response_model=PMCheckpointSubmissionSchema)
-def operator_acknowledge_review(
-    submission_id: int,
-    payload: PMAcknowledgementRequest,
-    db: Session = Depends(get_db),
-):
-    submission = db.query(PMCheckpointSubmission).filter(PMCheckpointSubmission.id == submission_id).first()
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    if submission.status != "Rejected":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Operator acknowledgement applies to rejected submissions",
-        )
-    if submission.operator_id != payload.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the submitting operator can acknowledge",
-        )
-
-    submission.operator_acknowledged = True
-    submission.operator_acknowledged_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(submission)
-    return submission
