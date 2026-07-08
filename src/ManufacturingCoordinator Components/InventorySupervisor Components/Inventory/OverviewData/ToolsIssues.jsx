@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DatePicker, Select } from 'antd';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { disableFutureDates, normalizeDateRange } from '../../../../InventorySupervisor Components/Inventory/OverviewData/inventoryDateUtils.js';
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -350,7 +351,8 @@ const ToolsIssues = () => {
               <RangePicker
                 style={{ width: '100%' }}
                 value={dateRange}
-                onChange={(vals) => setDateRange(vals)}
+                onChange={(vals) => setDateRange(normalizeDateRange(vals))}
+                disabledDate={disableFutureDates}
                 allowClear
                 inputReadOnly
               />

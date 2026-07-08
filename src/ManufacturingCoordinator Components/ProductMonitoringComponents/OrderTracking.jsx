@@ -206,42 +206,45 @@ const OrderTracking = () => {
   );
 
   return (
-    <div style={{ 
+    <div className="order-tracking-root" style={{ 
       padding: '12px', 
       background: '#f0f2f5', 
-      height: '100vh',
+      minHeight: '100vh',
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
       gap: '12px',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      boxSizing: 'border-box',
     }}>
       {/* Top Header / Stats Row */}
-      <Card styles={{ body: { padding: '12px 24px' } }} style={{ borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flexShrink: 0 }}>
-        <Row align="middle" justify="space-between">
-          <Col>
-            <Space size="middle">
+      <Card styles={{ body: { padding: '12px 16px' } }} style={{ borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flexShrink: 0 }}>
+        <Row align="middle" justify="space-between" gutter={[12, 12]} wrap>
+          <Col xs={24} sm={24} md={12} lg={10} xl={8}>
+            <Space size="middle" wrap>
               <ShoppingCartOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
               <Title level={4} style={{ margin: 0 }}>Order Tracking Dashboard</Title>
             </Space>
           </Col>
           {selectedOrderId && (
-            <Col>
-              <Space size="large">
+            <Col xs={24} sm={24} md={12} lg={14} xl={16}>
+              <div className="order-tracking-stats">
                 <Statistic title="Total Parts" value={totalParts} styles={{ content: { fontSize: '20px' } }} />
                 <Statistic title="Completed" value={completedParts} styles={{ content: { color: '#52c41a', fontSize: '20px' } }} />
                 <Statistic title="In Progress" value={inProgressParts} styles={{ content: { color: '#1890ff', fontSize: '20px' } }} />
                 <Statistic title="Pending" value={pendingParts} styles={{ content: { color: '#faad14', fontSize: '20px' } }} />
-              </Space>
+              </div>
             </Col>
           )}
         </Row>
       </Card>
 
-      <div style={{ display: 'flex', flex: 1, gap: '12px', overflow: 'hidden', minHeight: 0 }}>
+      <div className="order-tracking-columns" style={{ display: 'flex', flex: 1, gap: '12px', overflow: 'hidden', minHeight: 0 }}>
         {/* Left Column: Orders */}
         <Card 
           title={<Space><DatabaseOutlined /> Orders</Space>}
-          style={{ width: '280px', display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
+          className="order-tracking-panel order-tracking-orders"
+          style={{ display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%', minHeight: 0 }}
           styles={{ body: { padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }, header: { padding: '0 16px', flexShrink: 0 } }}
         >
           <div style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
@@ -293,9 +296,9 @@ const OrderTracking = () => {
         {/* Middle Column: Parts */}
         <Card 
           title={<Space><ToolOutlined /> Parts ({filteredParts.length})</Space>}
-          style={{ flex: 1.2, display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
-          bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          headStyle={{ padding: '0 16px', flexShrink: 0 }}
+          className="order-tracking-panel order-tracking-parts"
+          style={{ display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%', minHeight: 0 }}
+          styles={{ body: { padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }, header: { padding: '0 16px', flexShrink: 0 } }}
         >
           <div style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
             <Select
@@ -321,6 +324,7 @@ const OrderTracking = () => {
               size="small"
               rowKey="part_id"
               loading={loading}
+              scroll={{ x: 'max-content' }}
               columns={[
                 {
                   title: 'Sl No',
@@ -410,9 +414,9 @@ const OrderTracking = () => {
         {/* Right Column: Operations */}
         <Card 
           title={<Space><SyncOutlined /> Operations {selectedPart ? `- ${selectedPart.part_number}` : ''}</Space>}
-          style={{ flex: 1.5, display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
-          bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          headStyle={{ padding: '0 16px', flexShrink: 0 }}
+          className="order-tracking-panel order-tracking-operations"
+          style={{ display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%', minHeight: 0 }}
+          styles={{ body: { padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }, header: { padding: '0 16px', flexShrink: 0 } }}
         >
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {!selectedPartId ? (
@@ -426,6 +430,7 @@ const OrderTracking = () => {
                   pagination={false}
                   size="small"
                   rowKey="id"
+                  scroll={{ x: 'max-content' }}
                   expandable={{
                     expandRowByClick: true,
                     expandIconColumnWidth: 24,
@@ -472,7 +477,7 @@ const OrderTracking = () => {
                                   {log.status}
                                 </Tag>
                               </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                              <div className="order-tracking-log-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', fontSize: '12px' }}>
                                 <div>
                                   <span style={{ color: '#666' }}>Produced: </span>
                                   <span style={{ color: '#1677ff', fontWeight: 'bold' }}>{log.produced_quantity || 0}</span>
@@ -633,6 +638,70 @@ const OrderTracking = () => {
       </div>
 
       <style>{`
+        .order-tracking-stats {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 16px 24px;
+          justify-content: flex-end;
+        }
+        .order-tracking-columns {
+          flex-direction: row;
+        }
+        .order-tracking-panel {
+          min-width: 0;
+        }
+        .order-tracking-orders {
+          flex: 0 0 260px;
+          width: 260px;
+          max-width: 30%;
+        }
+        .order-tracking-parts {
+          flex: 1.1 1 0;
+        }
+        .order-tracking-operations {
+          flex: 1.4 1 0;
+        }
+        @media (max-width: 1200px) {
+          .order-tracking-orders {
+            flex: 0 0 220px;
+            width: 220px;
+          }
+        }
+        @media (max-width: 992px) {
+          .order-tracking-root {
+            height: auto !important;
+            min-height: 100vh;
+            overflow: auto !important;
+          }
+          .order-tracking-columns {
+            flex-direction: column;
+            overflow: visible !important;
+            flex: none;
+          }
+          .order-tracking-panel {
+            width: 100% !important;
+            max-width: 100% !important;
+            flex: none !important;
+            min-height: 280px;
+            max-height: none;
+            height: auto !important;
+          }
+          .order-tracking-orders {
+            min-height: 220px;
+            max-height: 35vh;
+          }
+          .order-tracking-stats {
+            justify-content: flex-start;
+          }
+        }
+        @media (max-width: 576px) {
+          .order-tracking-root {
+            padding: 8px !important;
+          }
+          .order-tracking-stats .ant-statistic {
+            min-width: calc(50% - 12px);
+          }
+        }
         .truncate {
           white-space: nowrap;
           overflow: hidden;

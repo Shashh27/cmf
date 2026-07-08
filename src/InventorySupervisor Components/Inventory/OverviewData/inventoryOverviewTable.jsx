@@ -1,18 +1,9 @@
 import React from 'react';
 
-export const INVENTORY_OVERVIEW_TABLE_CLASS = 'inventory-overview-table';
-
-/** Colors matched to OMS table — light blue header, white rows */
-export const INVENTORY_TABLE_COLORS = {
-  headerBg: '#e6f0ff',
-  headerText: '#374151',
-  headerBorder: '#91caff',
-  rowBg: '#ffffff',
-  rowHoverBg: '#f5f5f5',
-  rowText: '#1f2937',
-  cellBorder: '#c5cdd8',
-  outerBorder: '#b8c4d9',
-};
+/** Same class name as OMS tables */
+export const MODERN_TABLE_CLASS = 'modern-table';
+export const COMPACT_TABLE_CLASS = 'inventory-compact-table';
+export const INVENTORY_OVERVIEW_TABLE_CLASS = MODERN_TABLE_CLASS;
 
 const textCompare = (a, b) =>
   String(a ?? '')
@@ -44,6 +35,34 @@ const DATE_KEYS = new Set([
   'return_updated_at',
 ]);
 
+const COMPACT_WIDTHS = {
+  sl_no: 40,
+  tool_name: 86,
+  tool_range: 68,
+  identification_code: 68,
+  project: 96,
+  part: 88,
+  operation: 88,
+  quantity: 48,
+  requested_qty: 52,
+  returned_qty: 52,
+  status: 76,
+  request_status: 76,
+  return_status: 84,
+  requested_by: 76,
+  approved_by: 76,
+  collected_by: 76,
+  request_created_at: 104,
+  return_created_at: 104,
+  approved_at: 104,
+  collected_at: 104,
+  action: 88,
+  actions: 88,
+  document: 72,
+  default: 68,
+  date: 104,
+};
+
 const dateCompare = (a, b) => {
   const ta = a ? new Date(a).getTime() : 0;
   const tb = b ? new Date(b).getTime() : 0;
@@ -62,99 +81,65 @@ const getCellValue = (record, column) => {
   return record[dataIndex];
 };
 
-export const inventoryTableComponents = {
-  header: {
-    cell: (props) => (
-      <th
-        {...props}
-        style={{
-          ...(props.style || {}),
-          background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)',
-          color: INVENTORY_TABLE_COLORS.headerText,
-          fontWeight: 600,
-          fontSize: 13,
-          border: `1px solid ${INVENTORY_TABLE_COLORS.headerBorder}`,
-          borderBottom: '2px solid #1890ff',
-          borderRadius: 0,
-          padding: '6px 10px',
-          whiteSpace: 'nowrap',
-          textAlign: 'center',
-        }}
-      />
-    ),
-  },
-  body: {
-    cell: (props) => (
-      <td
-        {...props}
-        style={{
-          ...(props.style || {}),
-          background: INVENTORY_TABLE_COLORS.rowBg,
-          color: INVENTORY_TABLE_COLORS.rowText,
-          fontSize: 12,
-          border: `1px solid ${INVENTORY_TABLE_COLORS.cellBorder}`,
-          padding: '4px 10px',
-          lineHeight: 1.35,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          verticalAlign: 'middle',
-        }}
-      />
-    ),
-    row: (props) => (
-      <tr
-        {...props}
-        onMouseEnter={(e) => {
-          props.onMouseEnter?.(e);
-          e.currentTarget.querySelectorAll('td').forEach((td) => {
-            td.style.background = INVENTORY_TABLE_COLORS.rowHoverBg;
-          });
-        }}
-        onMouseLeave={(e) => {
-          props.onMouseLeave?.(e);
-          e.currentTarget.querySelectorAll('td').forEach((td) => {
-            td.style.background = INVENTORY_TABLE_COLORS.rowBg;
-          });
-        }}
-      />
-    ),
-  },
-};
-
-/** Scoped styles for sorter icons + sharp table shell */
-export const InventoryOverviewTableStyles = () => (
+/** OMS header + raw-materials density for overview tabs */
+export const ModernTableStyles = () => (
   <style>{`
-    .${INVENTORY_OVERVIEW_TABLE_CLASS}.ant-table-wrapper .ant-table,
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-container,
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-content table {
-      border-radius: 0 !important;
+    .${MODERN_TABLE_CLASS} .ant-table-thead > tr > th {
+      background: linear-gradient(to bottom, #f0f5ff, #e6f0ff) !important;
+      font-weight: 600;
+      border-bottom: 2px solid #1890ff !important;
+      color: #374151;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table {
-      border: 1px solid ${INVENTORY_TABLE_COLORS.outerBorder};
+    .${MODERN_TABLE_CLASS} .ant-table-tbody > tr:hover > td {
+      background: #f0f8ff !important;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-thead > tr > th::before {
+    .${MODERN_TABLE_CLASS} .ant-table-tbody > tr > td {
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .${MODERN_TABLE_CLASS} .ant-table-thead > tr > th::before {
       display: none !important;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-column-sorter {
+    .${MODERN_TABLE_CLASS} .ant-table-column-sorter {
       color: rgba(0, 0, 0, 0.35);
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-column-sorter-up.active,
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-column-sorter-down.active {
+    .${MODERN_TABLE_CLASS} .ant-table-column-sorter-up.active,
+    .${MODERN_TABLE_CLASS} .ant-table-column-sorter-down.active {
       color: #1890ff;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-pagination {
-      margin-top: 12px;
+    .${MODERN_TABLE_CLASS}.${COMPACT_TABLE_CLASS} .ant-table-thead > tr > th {
+      font-size: 11px !important;
+      padding: 4px 5px !important;
+      white-space: nowrap;
+      text-align: center;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-tbody > tr > td {
-      height: 32px;
-      background-color: #ffffff !important;
+    .${MODERN_TABLE_CLASS}.${COMPACT_TABLE_CLASS} .ant-table-tbody > tr > td {
+      font-size: 11px !important;
+      padding: 3px 5px !important;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+      vertical-align: middle;
     }
-    .${INVENTORY_OVERVIEW_TABLE_CLASS} .ant-table-tbody > tr:hover > td {
-      background-color: #f5f5f5 !important;
+    .${MODERN_TABLE_CLASS}.${COMPACT_TABLE_CLASS} .ant-table-tbody > tr > td .ant-tag {
+      font-size: 10px !important;
+      line-height: 16px;
+      padding: 0 4px;
+      margin: 0;
+    }
+    .${MODERN_TABLE_CLASS}.${COMPACT_TABLE_CLASS} .ant-table {
+      width: 100% !important;
+    }
+    @media (max-width: 768px) {
+      .${MODERN_TABLE_CLASS}.ant-table-wrapper .ant-table {
+        font-size: 11px;
+      }
     }
   `}</style>
 );
+
+export const InventoryOverviewTableStyles = ModernTableStyles;
 
 const DEFAULT_MIN_WIDTHS = {
   sl_no: 52,
@@ -165,18 +150,22 @@ const DEFAULT_MIN_WIDTHS = {
   default: 108,
 };
 
-export const applyInventoryOverviewColumns = (columns) =>
+export const applyInventoryOverviewColumns = (columns, { compact = false } = {}) =>
   columns.map((column) => {
     const next = { ...column };
     delete next.className;
-    delete next.width;
-    delete next.fixed;
 
     const isDateCol =
       (typeof column.dataIndex === 'string' && DATE_KEYS.has(column.dataIndex))
       || ['approved_at', 'collected_at', 'returned_at', 'issue_raised_at', 'created_at'].includes(column.key);
 
-    if (!next.minWidth) {
+    if (compact) {
+      const w = COMPACT_WIDTHS[column.key]
+        || (column.dataIndex && COMPACT_WIDTHS[column.dataIndex])
+        || (isDateCol ? COMPACT_WIDTHS.date : COMPACT_WIDTHS.default);
+      next.width = w;
+      next.ellipsis = true;
+    } else if (!next.minWidth && !next.width) {
       if (column.key === 'sl_no') next.minWidth = DEFAULT_MIN_WIDTHS.sl_no;
       else if (NO_SORT_KEYS.has(column.key)) next.minWidth = DEFAULT_MIN_WIDTHS[column.key] || DEFAULT_MIN_WIDTHS.action;
       else if (isDateCol) next.minWidth = DEFAULT_MIN_WIDTHS.date;
@@ -216,22 +205,34 @@ export const applyInventoryOverviewColumns = (columns) =>
   });
 
 export const getInventoryOverviewTableProps = ({
+  compact = true,
   scrollX = 1200,
+  scrollY,
   pagination,
   loading = false,
   rowKey = 'id',
   dataSource,
   columns,
-}) => ({
-  bordered: true,
-  size: 'small',
-  className: INVENTORY_OVERVIEW_TABLE_CLASS,
-  tableLayout: 'auto',
-  rowKey,
-  dataSource,
-  columns: applyInventoryOverviewColumns(columns),
-  loading,
-  pagination,
-  scroll: { x: scrollX },
-  components: inventoryTableComponents,
-});
+}) => {
+  const tableClass = compact
+    ? `${MODERN_TABLE_CLASS} ${COMPACT_TABLE_CLASS}`
+    : MODERN_TABLE_CLASS;
+
+  const scroll = compact
+    ? (scrollY ? { y: scrollY } : undefined)
+    : (scrollY ? { x: scrollX, y: scrollY } : { x: scrollX });
+
+  return {
+    bordered: true,
+    size: 'small',
+    className: tableClass,
+    tableLayout: compact ? 'fixed' : 'auto',
+    rowKey,
+    dataSource,
+    columns: applyInventoryOverviewColumns(columns, { compact }),
+    loading,
+    pagination: pagination ? { placement: 'bottom', responsive: true, ...pagination } : pagination,
+    scroll,
+    style: compact ? { width: '100%' } : undefined,
+  };
+};

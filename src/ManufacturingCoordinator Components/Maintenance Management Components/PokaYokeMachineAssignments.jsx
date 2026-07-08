@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Button, Modal, Form, Select, message, Typography, Space, Table, Tag, Switch, Popconfirm, Spin, Badge, Tooltip,
+  Button, Modal, Form, Select, message, Typography, Space, Table, Tag, Switch, Popconfirm, Spin, Badge, Tooltip, Collapse, DatePicker,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, CalendarOutlined, RightOutlined } from '@ant-design/icons';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
 import CheckpointDetailModal from './CheckpointDetailModal';
+import PmDownloadButton from './PmDownloadButton';
+import { buildAssignmentsReportConfig } from './pmReportDownload';
 import {
   PM_T, btnSharp, pmFetch, fetchChecklistDetails, getCurrentUserId, formatDate, formatDateTime,
-  machineLabel, frequencySummary, itemTypeShort, STATUS_COLORS,
+  machineLabel, frequencySummary, itemTypeShort, STATUS_COLORS, isDateInRange,
+  disableFutureDates, normalizeDateRange,
 } from './pmUtils';
 
 const { Text } = Typography;
@@ -285,12 +288,7 @@ export function getCheckpointsForDate(assignments, submissions, date) {
       );
       const allItemSubs = (submissions || []).filter((s) => s.assignment_item_id === ai.id);
       const latestSub = daySubs[daySubs.length - 1];
-      let submissionStatus = null;
-      if (latestSub) {
-        if (latestSub.status === 'Approved') submissionStatus = 'completed';
-        else if (latestSub.status === 'Submitted') submissionStatus = 'submitted';
-        else if (latestSub.status === 'Rejected') submissionStatus = 'rejected';
-      }
+      const submissionStatus = latestSub ? 'completed' : null;
 
       items.push({
         key: `${indication}-${assignment.id}-${ai.id}-${dateKey}`,
@@ -319,20 +317,22 @@ export function getCheckpointsForDate(assignments, submissions, date) {
   return items;
 }
 
-const CheckpointListCard = ({ item, onClick, onDelete, active }) => {
+const CheckpointListCard = ({ item, onClick, onDelete, active, hideAssignedTag = false }) => {
   const meta = INDICATION_META[item.indication] || INDICATION_META.scheduled;
   const latestSub = item.submissions[item.submissions.length - 1];
+  const showIndicationTag = !(hideAssignedTag && item.indication === 'assigned');
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    if (item.hasSubmissions) {
+      message.error('This checkpoint cannot be removed because an operator has already submitted a response for it.');
+      return;
+    }
+  };
 
   const statusTag = (() => {
     if (!latestSub) return null;
-    if (latestSub.status === 'Approved') {
-      return <Tag color="success" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 0 }}>Completed</Tag>;
-    }
-    return (
-      <Tag color={STATUS_COLORS[latestSub.status] || 'default'} style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 0 }}>
-        {latestSub.status}
-      </Tag>
-    );
+    return <Tag color="success" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 0 }}>Completed</Tag>;
   })();
 
   return (
@@ -356,19 +356,45 @@ const CheckpointListCard = ({ item, onClick, onDelete, active }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
           <Text strong style={{ fontSize: 12, lineHeight: 1.2 }} ellipsis>{item.checkpointName}</Text>
-          <Tag style={{
-            margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 8,
-            border: `1px solid ${meta.color}40`, background: meta.bg, color: meta.color,
-          }}>
-            {meta.label}
-          </Tag>
+          {showIndicationTag && (
+            <Tag style={{
+              margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 8,
+              border: `1px solid ${meta.color}40`, background: meta.bg, color: meta.color,
+            }}>
+              {meta.label}
+            </Tag>
+          )}
           {statusTag}
         </div>
         <Space size={2} onClick={(e) => e.stopPropagation()}>
-          {onDelete && !item.hasSubmissions && (
-            <Popconfirm title="Remove from machine?" onConfirm={() => onDelete(item)}>
-              <Button type="text" size="small" danger icon={<DeleteOutlined />} style={{ ...btnSharp, padding: 0, width: 22, height: 22 }} />
-            </Popconfirm>
+          {onDelete && (
+            item.hasSubmissions ? (
+              <Tooltip title="Cannot remove — operator has submitted">
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  style={{ ...btnSharp, padding: 0, width: 22, height: 22, opacity: 0.45 }}
+                  onClick={handleDeleteClick}
+                />
+              </Tooltip>
+            ) : (
+              <Popconfirm
+                title="Remove checkpoint from this machine?"
+                description="This will unassign the checkpoint from the machine."
+                onConfirm={() => onDelete(item)}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  style={{ ...btnSharp, padding: 0, width: 22, height: 22 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Popconfirm>
+            )
           )}
           <RightOutlined style={{ color: PM_T.textMuted, fontSize: 10 }} />
         </Space>
@@ -387,6 +413,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const [loading, setLoading] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [selectedChecklistFilter, setSelectedChecklistFilter] = useState(null);
+  const [assignDateRange, setAssignDateRange] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [viewYear, setViewYear] = useState(dayjs().year());
@@ -397,34 +424,55 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
 
   const assignedChecklists = useMemo(() => {
     const map = new Map();
-    assignments.forEach((a) => {
+    const source = selectedMachine
+      ? assignments.filter((a) => a.machine_id === selectedMachine)
+      : assignments;
+    source.forEach((a) => {
       const id = a.checklist_id || a.checklist?.id;
       const name = a.checklist?.name || a.checklistName;
       if (id) map.set(id, name);
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [assignments]);
+  }, [assignments, selectedMachine]);
 
-  const filteredAssignments = useMemo(() => {
-    if (!selectedChecklistFilter) return assignments;
-    return assignments.filter(
-      (a) => (a.checklist_id || a.checklist?.id) === selectedChecklistFilter
-    );
-  }, [assignments, selectedChecklistFilter]);
+  const activeAssignments = useMemo(() => {
+    let list = assignments;
+    if (selectedMachine) list = list.filter((a) => a.machine_id === selectedMachine);
+    if (selectedChecklistFilter) {
+      list = list.filter((a) => (a.checklist_id || a.checklist?.id) === selectedChecklistFilter);
+    }
+    if (assignDateRange?.[0] && assignDateRange?.[1]) {
+      list = list.filter((a) => isDateInRange(a.assigned_at, normalizeDateRange(assignDateRange)));
+    }
+    return list;
+  }, [assignments, selectedMachine, selectedChecklistFilter, assignDateRange]);
 
-  const filteredSubmissions = useMemo(() => {
-    if (!selectedChecklistFilter) return submissions;
+  const activeSubmissions = useMemo(() => {
+    if (!selectedMachine && !selectedChecklistFilter) return submissions;
     const itemIds = new Set();
-    filteredAssignments.forEach((a) => {
+    activeAssignments.forEach((a) => {
       (a.assignment_items || []).forEach((ai) => itemIds.add(ai.id));
     });
     return submissions.filter((s) => itemIds.has(s.assignment_item_id));
-  }, [submissions, selectedChecklistFilter, filteredAssignments]);
+  }, [submissions, activeAssignments, selectedMachine, selectedChecklistFilter]);
 
   const selectedDayItems = useMemo(
-    () => getCheckpointsForDate(filteredAssignments, filteredSubmissions, selectedDate),
-    [filteredAssignments, filteredSubmissions, selectedDate]
+    () => getCheckpointsForDate(activeAssignments, activeSubmissions, selectedDate),
+    [activeAssignments, activeSubmissions, selectedDate]
   );
+
+  const machinesGroupedForDate = useMemo(() => {
+    const map = new Map();
+    selectedDayItems.forEach((item) => {
+      const mid = item.assignment?.machine_id;
+      if (!mid) return;
+      const m = machines.find((x) => x.id === mid);
+      const label = machineLabel(m) || `Machine ${mid}`;
+      if (!map.has(mid)) map.set(mid, { id: mid, label, items: [] });
+      map.get(mid).items.push(item);
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [selectedDayItems, machines]);
 
   const dateLabel = useMemo(() => {
     if (selectedDate.isSame(dayjs(), 'day')) return 'Today';
@@ -437,8 +485,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const getDaySummary = (year, month, day, cur) => {
     if (!cur) return null;
     const items = getCheckpointsForDate(
-      filteredAssignments,
-      filteredSubmissions,
+      activeAssignments,
+      activeSubmissions,
       dayjs(new Date(year, month, day))
     );
     return summarizeDayItems(items);
@@ -451,29 +499,26 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   };
 
   useEffect(() => {
-    if (selectedMachine) loadAssignments(selectedMachine);
-    else {
-      setAssignments([]);
-      setSubmissions([]);
-    }
-    setSelectedChecklistFilter(null);
-  }, [selectedMachine]);
+    fetchMachines?.();
+    loadAllAssignments();
+  }, []);
 
-  const loadChecklists = async () => {
-    try {
-      setChecklists(await pmFetch('/checklists'));
-    } catch (e) {
-      message.error(e.message);
-    }
-  };
+  useEffect(() => {
+    setSelectedDate((prev) => {
+      if (prev.year() === viewYear && prev.month() === viewMonth) return prev;
+      const maxDay = dayjs(new Date(viewYear, viewMonth + 1, 0)).date();
+      const day = Math.min(prev.date(), maxDay);
+      return dayjs(new Date(viewYear, viewMonth, day));
+    });
+    setDetailItem(null);
+  }, [viewYear, viewMonth]);
 
-  const loadAssignments = async (machineId) => {
-    if (!machineId) return;
+  const loadAllAssignments = async () => {
     setLoading(true);
     try {
       const [data, submissionData] = await Promise.all([
-        pmFetch(`/assignments?machine_id=${machineId}`),
-        pmFetch(`/machines/${machineId}/submissions`),
+        pmFetch('/assignments'),
+        pmFetch('/submissions'),
       ]);
       const enriched = await Promise.all(
         data.map(async (a) => {
@@ -494,27 +539,34 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     }
   };
 
+  const loadChecklists = async () => {
+    try {
+      setChecklists(await pmFetch('/checklists'));
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+
   const handleDeleteCheckpoint = async (item) => {
     const assignmentId = item.assignment?.id;
     const assignmentItemId = item.assignmentItem?.id;
     if (!assignmentId || !assignmentItemId) return;
     if (item.hasSubmissions) {
-      message.warning('Cannot remove checkpoint after operator has submitted a response');
+      message.error('This checkpoint cannot be removed because an operator has already submitted a response for it.');
       return;
     }
 
     try {
       await pmFetch(`/assignments/${assignmentId}/items/${assignmentItemId}`, { method: 'DELETE' });
       message.success('Checkpoint removed from machine');
-      if (selectedMachine) loadAssignments(selectedMachine);
+      await loadAllAssignments();
     } catch (e) {
       message.error(e.message);
     }
   };
 
   const handleRefresh = async () => {
-    if (!selectedMachine) return;
-    await loadAssignments(selectedMachine);
+    await loadAllAssignments();
     message.success('Refreshed');
   };
 
@@ -565,7 +617,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     setAssignOpen(false);
     form.resetFields();
     setCheckpointConfig([]);
-    if (selectedMachine) loadAssignments(selectedMachine);
+    if (selectedMachine) await loadAllAssignments();
     else if (machineIds.length === 1) setSelectedMachine(machineIds[0]);
   };
 
@@ -650,17 +702,43 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
         <Space wrap>
           <Text strong>Machine:</Text>
-          <Select showSearch placeholder="Select machine" style={{ width: 240 }} loading={machinesLoading}
-            value={selectedMachine} onFocus={fetchMachines} onChange={setSelectedMachine} optionFilterProp="children">
+          <Select allowClear showSearch placeholder="Filter by machine (optional)" style={{ width: 240 }} loading={machinesLoading}
+            value={selectedMachine} onFocus={fetchMachines} onChange={(v) => { setSelectedMachine(v || null); setSelectedChecklistFilter(null); }} optionFilterProp="children">
             {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
           </Select>
           <Select allowClear showSearch placeholder="Filter by checklist" style={{ width: 220 }}
             value={selectedChecklistFilter} onChange={setSelectedChecklistFilter} optionFilterProp="children"
-            disabled={!selectedMachine || assignedChecklists.length === 0}>
+            disabled={assignedChecklists.length === 0}>
             {assignedChecklists.map((c) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
           </Select>
+          <DatePicker.RangePicker
+            allowClear
+            placeholder={['Assigned from', 'Assigned to']}
+            value={assignDateRange}
+            disabledDate={disableFutureDates}
+            onChange={(v) => setAssignDateRange(normalizeDateRange(v))}
+            style={{ width: 260, borderRadius: 0 }}
+          />
         </Space>
         <Space>
+          <PmDownloadButton
+            getReportConfig={() => {
+              const meta = [];
+              if (selectedMachine) {
+                const m = machines.find((x) => x.id === selectedMachine);
+                meta.push(`Machine filter: ${machineLabel(m) || selectedMachine}`);
+              }
+              if (selectedChecklistFilter) {
+                const c = assignedChecklists.find((x) => x.id === selectedChecklistFilter);
+                meta.push(`Checklist filter: ${c?.name || selectedChecklistFilter}`);
+              }
+              if (assignDateRange?.[0] && assignDateRange?.[1]) {
+                meta.push(`Assigned date range: ${assignDateRange[0].format('DD MMM YYYY')} – ${assignDateRange[1].format('DD MMM YYYY')}`);
+              }
+              return buildAssignmentsReportConfig(activeAssignments, machines, meta);
+            }}
+            disabled={!activeAssignments.length}
+          />
           <Button icon={<ReloadOutlined />} loading={loading} onClick={handleRefresh} style={btnSharp}>Refresh</Button>
           <Button type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
             onClick={() => { loadChecklists(); fetchMachines(); form.setFieldsValue({ machine_ids: selectedMachine ? [selectedMachine] : [] }); setAssignOpen(true); }}>
@@ -669,7 +747,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         </Space>
       </Space>
 
-      <div className="pm-assignments-layout" style={{ display: 'grid', gap: 10, alignItems: 'stretch', minHeight: 540 }}>
+      <div className="pm-assignments-layout" style={{ display: 'grid', gap: 10, alignItems: 'stretch', minHeight: 420, width: '100%' }}>
         <div style={{
           background: PM_T.bg,
           border: `1px solid ${PM_T.border}`,
@@ -704,29 +782,17 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 <Select size="small" value={viewMonth} onChange={setViewMonth} style={{ width: 110 }}>
                   {MONTHS.map((m, i) => <Option key={m} value={i}>{m}</Option>)}
                 </Select>
-                <Button
-                  size="small"
-                  style={btnSharp}
-                  onClick={() => {
-                    const t = dayjs();
-                    setViewYear(t.year());
-                    setViewMonth(t.month());
-                    setSelectedDate(t);
-                  }}
-                >
-                  Today
-                </Button>
               </Space>
             </div>
 
-          {selectedMachine && loading ? (
+          {loading ? (
             <div style={{ padding: 48, textAlign: 'center', flex: 1 }}><Spin /></div>
           ) : (
               <>
                 <style>{`
-                  .pm-assignments-layout { grid-template-columns: 1fr; }
+                  .pm-assignments-layout { grid-template-columns: 1fr; width: 100%; }
                   @media (min-width: 992px) {
-                    .pm-assignments-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); }
+                    .pm-assignments-layout { grid-template-columns: minmax(0, 1fr) minmax(260px, 380px); }
                   }
                 `}</style>
                 {/* Day headers */}
@@ -785,30 +851,43 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <div style={{ padding: '6px 10px', borderBottom: `1px solid ${PM_T.border}`, background: '#fff', flexShrink: 0 }}>
             <Text strong style={{ fontSize: 12 }}>Assigned Checkpoints — {dateLabel}</Text>
             <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
-              {!selectedMachine
-                ? 'Select a machine to view checkpoints'
-                : selectedDayItems.length > 0
-                  ? `${selectedDayItems.length} checkpoint(s) — click to view details`
-                  : 'No checkpoints on this date'}
+              {machinesGroupedForDate.length === 0
+                ? 'No machines with assignments on this date'
+                : `${machinesGroupedForDate.length} machine(s) — expand to view checkpoints`}
             </Text>
           </div>
           <div style={{ padding: 6, flex: 1, overflowY: 'auto', maxHeight: '58vh' }}>
-            {!selectedMachine ? (
-              <Text type="secondary" style={{ fontSize: 10, padding: 4 }}>Choose a machine from the toolbar above.</Text>
-            ) : selectedDayItems.length === 0 ? (
-              <Text type="secondary" style={{ fontSize: 10, padding: 4 }}>
-                Nothing on this date.
-              </Text>
+            {machinesGroupedForDate.length === 0 ? (
+              <Text type="secondary" style={{ fontSize: 10, padding: 4 }}>Nothing on this date.</Text>
             ) : (
-                selectedDayItems.map((item) => (
-                  <CheckpointListCard
-                    key={item.key}
-                    item={item}
-                    active={detailItem?.key === item.key}
-                    onClick={() => setDetailItem(item)}
-                    onDelete={handleDeleteCheckpoint}
-                  />
-                ))
+              <Collapse
+                size="small"
+                bordered={false}
+                style={{ background: 'transparent' }}
+                items={machinesGroupedForDate.map((m) => ({
+                  key: String(m.id),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', gap: 8, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 11 }} ellipsis>{m.label}</Text>
+                      <Tag color="blue" style={{ margin: 0, fontSize: 10, borderRadius: 0 }}>{m.items.length}</Tag>
+                    </div>
+                  ),
+                  children: (
+                    <div style={{ paddingTop: 2 }}>
+                      {m.items.map((item) => (
+                        <CheckpointListCard
+                          key={item.key}
+                          item={item}
+                          active={detailItem?.key === item.key}
+                          hideAssignedTag
+                          onClick={() => setDetailItem(item)}
+                          onDelete={handleDeleteCheckpoint}
+                        />
+                      ))}
+                    </div>
+                  ),
+                }))}
+              />
             )}
           </div>
         </div>
@@ -816,7 +895,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
 
       <CheckpointDetailModal
         item={detailItem}
-        allSubmissions={filteredSubmissions}
+        allSubmissions={activeSubmissions}
         open={!!detailItem}
         onClose={() => setDetailItem(null)}
         onDelete={handleDeleteCheckpoint}

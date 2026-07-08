@@ -3,6 +3,7 @@ import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Inpu
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
 import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
+import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -417,7 +418,8 @@ const InventoryRequestsTable = () => {
               <RangePicker
                 style={{ width: '100%' }}
                 value={dateRange}
-                onChange={(vals) => setDateRange(vals)}
+                onChange={(vals) => setDateRange(normalizeDateRange(vals))}
+                disabledDate={disableFutureDates}
                 allowClear
                 inputReadOnly
               />
@@ -463,13 +465,14 @@ const InventoryRequestsTable = () => {
         </Row>
       </div>
       <InventoryOverviewTableStyles />
+      <div style={{ width: '100%', overflow: 'hidden' }}>
       <Table
         {...getInventoryOverviewTableProps({
           columns,
           dataSource: filteredRequests,
           rowKey: 'id',
           loading,
-          scrollX: 1400,
+          compact: true,
           pagination: {
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -492,6 +495,7 @@ const InventoryRequestsTable = () => {
           },
         })}
       />
+      </div>
     </div>
   );
 };
