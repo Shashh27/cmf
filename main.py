@@ -72,6 +72,7 @@ from routers import (
     order_tracking_router,
     monitoring_router,
     production_analytics_router,
+    order_additional_costs_router,
     pm_router,
     operation_checklists_router,
 )
@@ -79,8 +80,8 @@ from routers import (
 # Import planned raw materials router
 from routers.planned_raw_materials import router as planned_raw_materials_router
 
-# Import raw material summary router
-from routers.raw_material_summary import router as raw_material_summary_router
+# Import stock quality documents router
+from routers.stock_quality_documents import router as stock_quality_documents_router
 
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
@@ -114,7 +115,6 @@ from notification_routers import (
     admin_document_notifications_router,
 
 )
-
 
 
 
@@ -338,11 +338,13 @@ app.include_router(monitoring_router, prefix="/api/v1")
 
 app.include_router(production_analytics_router, prefix="/api/v1")
 
+app.include_router(order_additional_costs_router, prefix="/api/v1")
+
+app.include_router(stock_quality_documents_router, prefix="/api/v1")
+
 app.include_router(pm_router, prefix="/api/v1")
 
 app.include_router(operation_checklists_router, prefix="/api/v1")
-
-app.include_router(raw_material_summary_router, prefix="/api/v1")
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
 

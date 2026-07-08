@@ -53,12 +53,9 @@ from .out_source_parts_status import router as out_source_parts_status_router
 from .order_tracking import router as order_tracking_router
 from .monitoring import router as monitoring_router
 from .production_analytics import router as production_analytics_router
-<<<<<<< HEAD
 from .order_additional_costs import router as order_additional_costs_router
-=======
 from .pm import router as pm_router
 from .operation_checklists import router as operation_checklists_router
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 
 
 __all__ = [
@@ -117,11 +114,8 @@ __all__ = [
     "order_tracking_router",
     "monitoring_router",
     "production_analytics_router",
-<<<<<<< HEAD
     "order_additional_costs_router",
-=======
     "pm_router",
     "operation_checklists_router",
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 ]
 
