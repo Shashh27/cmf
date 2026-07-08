@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Space, Tag, Alert,Spin,Empty,Input,Button,Row,Col,DatePicker,Select } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
+import { disableFutureDates, normalizeDateRange } from '../../../../InventorySupervisor Components/Inventory/OverviewData/inventoryDateUtils.js';
 const { RangePicker } = DatePicker;
 const TransactionHistory = () => {
 const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
@@ -286,7 +287,8 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
                   <RangePicker
                     style={{ width: '100%' }}
                     value={dateRange}
-                    onChange={(vals) => setDateRange(vals)}
+                    onChange={(vals) => setDateRange(normalizeDateRange(vals))}
+                    disabledDate={disableFutureDates}
                     allowClear
                     inputReadOnly
                   />

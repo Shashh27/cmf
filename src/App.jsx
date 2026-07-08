@@ -411,6 +411,8 @@ function App() {
           <Route path="/manufacturing_coordinator/product-monitoring/oee-overview" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/planned-vs-actual" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/order-tracking" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/production-log" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/production-log" element={<Navigate to="/manufacturing_coordinator/production-log" replace />} />
           <Route path="/manufacturing_coordinator/shop-floor" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/maintenance-management" element={<Navigate to="/manufacturing_coordinator/maintenance-management/maintenance" replace />} />
           <Route path="/manufacturing_coordinator/maintenance-management/maintenance" element={<ManufacturingCoordinator />} />

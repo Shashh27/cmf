@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Table, Typography, Tag, message, Button, Space,
-  Tooltip, Empty, Modal, Input, Select, DatePicker,
+  Tooltip, Empty, Input, Select, DatePicker, Modal,
 } from 'antd';
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
-  SyncOutlined, ReloadOutlined, EditOutlined, CheckSquareOutlined,
-  DownloadOutlined, ClearOutlined,
+  SyncOutlined, ReloadOutlined, DownloadOutlined, EditOutlined,
+  CheckSquareOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import dayjs from 'dayjs';
-import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
-import { API_BASE_URL } from '../Config/auth.js';
-import cmtisLogo from '../assets/cmtis.png';
+import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
+import { API_BASE_URL } from '../../Config/auth.js';
+import cmtisLogo from '../../assets/cmtis.png';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -21,27 +21,6 @@ const { RangePicker } = DatePicker;
 
 const clearButtonStyle = { color: '#ff4d4f', borderColor: '#ff4d4f' };
 
-// ── Highlight helper ──────────────────────────────────────────────────────────
-const highlightText = (text, query) => {
-  if (!query || !text) return text ?? '-';
-  const str = String(text);
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const parts = str.split(new RegExp(`(${escaped})`, 'gi'));
-  if (parts.length === 1) return str;
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} style={{ backgroundColor: '#bae0ff', color: 'inherit', padding: '0 1px', borderRadius: 2 }}>
-            {part}
-          </mark>
-        ) : part
-      )}
-    </>
-  );
-};
-
-// ── Reusable quantity input ───────────────────────────────────────────────────
 const QuantityInput = ({ label, value, onChange }) => (
   <div style={{ marginBottom: 16 }}>
     <Text strong style={{ display: 'block', marginBottom: 6 }}>{label}</Text>
@@ -62,6 +41,25 @@ const QuantityInput = ({ label, value, onChange }) => (
   </div>
 );
 
+const highlightText = (text, query) => {
+  if (!query || !text) return text ?? '-';
+  const str = String(text);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = str.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length === 1) return str;
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} style={{ backgroundColor: '#bae0ff', color: 'inherit', padding: '0 1px', borderRadius: 2 }}>
+            {part}
+          </mark>
+        ) : part
+      )}
+    </>
+  );
+};
+
 const getApprovedByName = (log) =>
   log?.supervisor?.user_name ||
   log?.reviewer?.user_name ||
@@ -69,7 +67,7 @@ const getApprovedByName = (log) =>
   (log?.user_id ? `User #${log.user_id}` : null) ||
   '-';
 
-const ProductionCompletion = () => {
+const ProductionLog = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,22 +89,7 @@ const ProductionCompletion = () => {
     visible: false, log: null, approvedQty: 0, reworkQty: 0, rejectedQty: 0, remark: '',
   });
 
-  const getSupervisorId = () => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try { return JSON.parse(storedUser).id; }
-      catch (e) { console.error('Error parsing user from localStorage', e); }
-    }
-    return null;
-  };
-
-  const supervisorId = getSupervisorId();
-
   const fetchLogs = useCallback(async () => {
-    if (!supervisorId) {
-      message.error('Supervisor ID not found in session. Please log in again.');
-      return;
-    }
     setLoading(true);
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`);
@@ -117,16 +100,20 @@ const ProductionCompletion = () => {
         (log) => log.operator_status?.toLowerCase() !== 'inprogress'
       );
 
-      if (visibleLogs.length === 0) { setLogs([]); return; }
+      if (visibleLogs.length === 0) {
+        setLogs([]);
+        return;
+      }
 
       const enrichedLogs = visibleLogs.map((log) => ({
         ...log,
         planned_schedule_item: {
+          ...log.planned_schedule_item,
           machine_name: log.machine?.make && log.machine?.model
             ? `(${log.machine.make}) ${log.machine.model}`
-            : log.machine?.make || log.machine?.model || 'N/A',
-          operation_name: log.operation?.operation_name || 'N/A',
-          operation_number: log.operation?.operation_number || 'N/A',
+            : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A',
+          operation_name: log.operation?.operation_name || log.operation?.name || 'N/A',
+          operation_number: log.operation?.operation_number || log.operation?.number || 'N/A',
         },
         operator_name: log.operator?.user_name || `Operator #${log.operator_id}`,
       }));
@@ -144,7 +131,7 @@ const ProductionCompletion = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [supervisorId]);
+  }, []);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
@@ -163,7 +150,7 @@ const ProductionCompletion = () => {
     fetchOrders();
   }, []);
 
-  const supervisorMeta = useMemo(() => {
+  const mcMeta = useMemo(() => {
     try {
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
@@ -176,6 +163,8 @@ const ProductionCompletion = () => {
     } catch { /* ignore */ }
     return { name: 'N/A', id: null };
   }, []);
+
+  const mcId = mcMeta.id;
 
   const hasActiveFilters = useMemo(() => (
     selectedMachines.length > 0 ||
@@ -360,7 +349,7 @@ const ProductionCompletion = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'inprogress',
-          supervisor_id: supervisorId,
+          supervisor_id: mcId,
           remarks: remark || null,
           approved_quantity: totalApproved,
           rework_quantity: totalRework,
@@ -394,7 +383,7 @@ const ProductionCompletion = () => {
     const payload = {
       operation_id: log.operation_id,
       operator_id: log.operator_id,
-      supervisor_id: supervisorId,
+      supervisor_id: mcId,
       notes: log.notes,
       remarks: remark || null,
       from_date: log.from_date,
@@ -509,14 +498,14 @@ const ProductionCompletion = () => {
           [
             { content: '', styles: { minCellHeight: 16 } },
             {
-              content: 'PRODUCTION COMPLETION',
+              content: 'PRODUCTION LOG',
               colSpan: 2,
               styles: { fontStyle: 'bold', fontSize: 13, halign: 'center', valign: 'middle', minCellHeight: 16 },
             },
           ],
           [
-            { content: 'Supervisor :', styles: metaLabel },
-            { content: supervisorMeta.name, styles: metaValue },
+            { content: 'MC :', styles: metaLabel },
+            { content: mcMeta.name, styles: metaValue },
             { content: `Date : ${dayjs().format('DD/MM/YYYY')}`, styles: metaValue },
           ],
           [
@@ -550,7 +539,7 @@ const ProductionCompletion = () => {
       if (exportLogs.length === 0) {
         doc.setFontSize(11);
         doc.text('No production logs found.', pageWidth / 2, startY + 10, { align: 'center' });
-        doc.save('production_completion.pdf');
+        doc.save('production_log.pdf');
         message.success('PDF downloaded successfully');
         return;
       }
@@ -628,7 +617,7 @@ const ProductionCompletion = () => {
         columnStyles: pdfColumnStyles,
       });
 
-      doc.save('production_completion.pdf');
+      doc.save('production_log.pdf');
       message.success('PDF downloaded successfully');
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -830,11 +819,11 @@ const ProductionCompletion = () => {
       title: 'Actions',
       key: 'actions',
       fixed: 'right',
+      width: 90,
       render: (_, record) => <ActionButtons record={record} />,
     },
   ];
 
-  // ── Remark modal derived values ───────────────────────────────────────────
   const isComplete = remarkModal.newStatus === 'completed';
 
   return (
@@ -857,8 +846,8 @@ const ProductionCompletion = () => {
       `}</style>
 
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <Space wrap>
-            <Select
+        <Space wrap>
+          <Select
               mode="multiple"
               allowClear
               showSearch
@@ -963,7 +952,6 @@ const ProductionCompletion = () => {
           />
         </div>
 
-      {/* ── Remark / Status Modal ─────────────────────────────────────────── */}
       <Modal
         open={remarkModal.visible}
         onCancel={closeRemarkModal}
@@ -1025,7 +1013,6 @@ const ProductionCompletion = () => {
         />
       </Modal>
 
-      {/* ── Update Quantities Modal ───────────────────────────────────────── */}
       <Modal
         open={updateModal.visible}
         onCancel={closeUpdateModal}
@@ -1079,7 +1066,7 @@ const ProductionCompletion = () => {
             </div>
 
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Total of approved + rework + rejected must not exceed produced quantity
+              Total of approved + rework + rejected must equal produced quantity
             </Text>
           </>
         )}
@@ -1088,4 +1075,4 @@ const ProductionCompletion = () => {
   );
 };
 
-export default ProductionCompletion;
+export default ProductionLog;

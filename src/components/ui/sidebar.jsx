@@ -178,22 +178,32 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
+      const [productionResponse, pokayokeChecklistResponse, otResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
         fetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
+        fetch(`${SCHEDULING_API_BASE_URL}/notifications/operator/${operatorId}?unread_only=true&limit=50`),
       ]);
 
       let productionCount = 0;
       let pokayokeChecklistCount = 0;
+      let otCount = 0;
 
       if (productionResponse.ok) {
         const data = await productionResponse.json();
-        productionCount = (data || []).filter(
-          log => (log.supervisor_id !== null && log.supervisor_id !== undefined) &&
-                 (log.produced_quantity || 0) > 0 &&
-                 !log.operator_acknowledged_at &&
-                 !log.acknowledged
-        ).length;
+        productionCount = (data || []).filter((log) => {
+          const hasReviewer =
+            (log.supervisor_id !== null && log.supervisor_id !== undefined) ||
+            (log.user_id !== null && log.user_id !== undefined) ||
+            Boolean(log.supervisor) ||
+            Boolean(log.reviewer);
+          return (
+            hasReviewer &&
+            (log.produced_quantity || 0) > 0 &&
+            !log.operator_acknowledged_at &&
+            !log.operator_acknowledged &&
+            !log.acknowledged
+          );
+        }).length;
       }
 
       if (pokayokeChecklistResponse.ok) {
@@ -201,7 +211,17 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         pokayokeChecklistCount = (data || []).filter((log) => !log.operator_ack_by).length;
       }
 
-      setNotificationCount(productionCount + pokayokeChecklistCount);
+      if (otResponse.ok) {
+        const data = await otResponse.json();
+        const list = Array.isArray(data)
+          ? data
+          : (data.items || data.notifications || data.data || []);
+        otCount = (list || []).filter(
+          (n) => !(n.is_read === true || n.read === true || n.read_at || n.acknowledged_at)
+        ).length;
+      }
+
+      setNotificationCount(productionCount + pokayokeChecklistCount + otCount);
 
     } catch (error) {
 
@@ -762,6 +782,16 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
 
         icon: <SettingOutlined />,
+
+      },
+
+      {
+
+        key: `${prefix}/production-log`,
+
+        label: <Link to={`${prefix}/production-log`} onClick={() => setMobileDrawerOpen(false)}>Production Log</Link>,
+
+        icon: <HistoryOutlined />,
 
       },
 

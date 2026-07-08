@@ -19,6 +19,9 @@ const isRejectedCheckpoint = (item) =>
   item?.needs_resubmit === true
   || String(item?.latest_submission_status ?? '').toLowerCase() === 'rejected';
 
+const isConditionBased = (item) =>
+  (item?.frequency_type ?? item?.frequency ?? '').toLowerCase() === 'condition based';
+
 const normalizeDueCheckpoint = (cp) => ({
   id: cp.checklist_item_id ?? cp.assignment_item_id ?? cp.id,
   checklist_item_id: cp.checklist_item_id,
@@ -41,7 +44,9 @@ const normalizeDueCheckpoint = (cp) => ({
 });
 
 const normalizeDueAssignment = (raw) => {
-  const checkpoints = (raw.checkpoints ?? raw.due_items ?? raw.items ?? []).map(normalizeDueCheckpoint);
+  const checkpoints = (raw.checkpoints ?? raw.due_items ?? raw.items ?? [])
+    .map(normalizeDueCheckpoint)
+    .filter((cp) => !isConditionBased(cp));
   return {
     assignment_id: raw.assignment_id ?? raw.id,
     checklist_id: raw.checklist_id,
@@ -85,6 +90,9 @@ const parseDueSchedulesResponse = (data) => {
 
   rawList.forEach((item) => {
     const checklistItem = item.checklist_item ?? {};
+    const frequencyType = item.frequency_type ?? item.frequency ?? checklistItem.frequency_type;
+    if (isConditionBased({ frequency_type: frequencyType })) return;
+
     const checklistId = item.checklist_id ?? checklistItem.checklist_id ?? item.checklist?.id ?? 'unknown';
     const checklistName = item.checklist_name ?? item.checklist?.name ?? `Checklist #${checklistId}`;
     const checkpointName = item.item_text ?? item.checkpoint_name ?? checklistItem.item_text ?? item.name;
@@ -386,6 +394,7 @@ const Dashboard = () => {
   const [pmSubmitModalOpen, setPmSubmitModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [checkpointResponses, setCheckpointResponses] = useState({});
+  const [checkpointRemarks, setCheckpointRemarks] = useState({});
 
   const allPmDueItems = cachedAssignments.flatMap((assignment) =>
     (assignment.checklist?.items ?? []).map((item) => ({
@@ -444,7 +453,7 @@ const Dashboard = () => {
             schedule_id: item.schedule_id,
             assignment_item_id: item.assignment_item_id,
             response_value: String(response).toLowerCase(),
-            operator_comments: '',
+            operator_comments: checkpointRemarks[item.id]?.trim() || '',
           };
         })
         .filter(Boolean);
@@ -470,6 +479,7 @@ const Dashboard = () => {
       checklistStatusFetchedRef.current = false;
       setPmSubmitModalOpen(false);
       setCheckpointResponses({});
+      setCheckpointRemarks({});
       
       // Refresh data
       const { assignments, pmDueToday } = await fetchDueSchedules(machineId);
@@ -486,16 +496,22 @@ const Dashboard = () => {
 
   const handleOpenPmSubmit = () => {
     setCheckpointResponses({});
+    setCheckpointRemarks({});
     setPmSubmitModalOpen(true);
   };
 
   const handleClosePmSubmit = () => {
     setPmSubmitModalOpen(false);
     setCheckpointResponses({});
+    setCheckpointRemarks({});
   };
 
   const handlePmResponse = (itemId, value) => {
     setCheckpointResponses((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const handlePmRemark = (itemId, value) => {
+    setCheckpointRemarks((prev) => ({ ...prev, [itemId]: value }));
   };
 
   useEffect(() => {
@@ -778,6 +794,7 @@ const Dashboard = () => {
       <SelectJob
         open={showSelectJob}
         onClose={() => setShowSelectJob(false)}
+        currentSelectedJob={selectedJob}
         jobStatsMap={jobStatsMap}
         onJobsLoaded={fetchJobStatsMap}
         onSelectJob={(job) => {
@@ -839,10 +856,37 @@ const Dashboard = () => {
           .pm-submit-table tbody > tr > td {
             border-bottom: 1px solid #f0f0f0;
             padding: 10px 12px;
-            vertical-align: middle;
+            vertical-align: top;
             background: #fff;
+            overflow: visible;
           }
           .pm-submit-table tbody > tr:hover > td { background: #f0f8ff !important; }
+          .pm-remark-field {
+            flex: 1 1 160px;
+            min-width: 120px;
+            max-width: 100%;
+            min-height: 30px;
+            max-height: 120px;
+            font-size: 12px;
+            resize: horizontal;
+            border-radius: 16px;
+            padding: 5px 14px;
+            border: 1.5px solid #d1d5db;
+            outline: none;
+            box-sizing: border-box;
+            line-height: 18px;
+            font-family: inherit;
+            overflow: auto;
+            background: #f8fafc;
+            color: #111827;
+            margin-top: 1px;
+          }
+          .pm-remark-field:focus {
+            border-color: #1677ff;
+            background: #fff;
+            box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+          }
+          .pm-remark-field::placeholder { color: #9ca3af; }
         `}</style>
         <div style={{
           maxHeight: 492,
@@ -876,7 +920,7 @@ const Dashboard = () => {
                       <th style={{ textAlign: 'left', width: '38%' }}>Checkpoint</th>
                       <th style={{ textAlign: 'left', width: '22%' }}>Frequency</th>
                       <th style={{ textAlign: 'left', width: '15%' }}>Expected</th>
-                      <th style={{ textAlign: 'center', width: '25%' }}>Response</th>
+                      <th style={{ textAlign: 'left', width: '32%' }}>Response / Remarks</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -895,18 +939,18 @@ const Dashboard = () => {
                           </td>
                           <td style={{ color: '#374151' }}>{formatFrequency(item)}</td>
                           <td style={{ color: '#374151' }}>{item.expected_value ?? '—'}</td>
-                          <td style={{ textAlign: 'center' }}>
+                          <td>
                             {isBool ? (
-                              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, width: '100%' }}>
                                 {['yes', 'no'].map((opt) => (
                                   val === opt ? (
                                     <Tag
                                       key={opt}
                                       color={opt === 'yes' ? 'success' : 'error'}
-                                      style={{ margin: 0, borderRadius: 12, padding: '2px 12px', cursor: 'pointer' }}
+                                      style={{ margin: 0, borderRadius: 6, padding: '2px 10px', cursor: 'pointer', flexShrink: 0 }}
                                       onClick={() => handlePmResponse(item.id, opt)}
                                     >
-                                      {opt === 'yes' ? 'Yes' : 'No'}
+                                      {opt}
                                     </Tag>
                                   ) : (
                                     <button
@@ -914,29 +958,47 @@ const Dashboard = () => {
                                       type="button"
                                       onClick={() => handlePmResponse(item.id, opt)}
                                       style={{
-                                        minWidth: 56,
-                                        padding: '4px 12px',
-                                        borderRadius: 12,
+                                        minWidth: 44,
+                                        flexShrink: 0,
+                                        padding: '4px 10px',
+                                        borderRadius: 6,
                                         cursor: 'pointer',
                                         fontSize: 12,
-                                        fontWeight: 500,
-                                        border: '1px solid #d9d9d9',
+                                        fontWeight: 600,
+                                        border: '1.5px solid #d9d9d9',
                                         background: '#fff',
                                         color: '#8c8c8c',
                                       }}
                                     >
-                                      {opt === 'yes' ? 'Yes' : 'No'}
+                                      {opt}
                                     </button>
                                   )
                                 ))}
+                                <textarea
+                                  className="pm-remark-field"
+                                  placeholder="Remarks"
+                                  value={checkpointRemarks[item.id] || ''}
+                                  onChange={(e) => handlePmRemark(item.id, e.target.value)}
+                                  rows={1}
+                                />
                               </div>
                             ) : (
-                              <Input
-                                size="small"
-                                placeholder={item.expected_value || 'Enter value'}
-                                value={checkpointResponses[item.id] || ''}
-                                onChange={(e) => handlePmResponse(item.id, e.target.value)}
-                              />
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, width: '100%' }}>
+                                <Input
+                                  size="small"
+                                  placeholder={item.expected_value || 'Enter value'}
+                                  value={checkpointResponses[item.id] || ''}
+                                  onChange={(e) => handlePmResponse(item.id, e.target.value)}
+                                  style={{ width: 120, flexShrink: 0, fontSize: 12, marginTop: 1 }}
+                                />
+                                <textarea
+                                  className="pm-remark-field"
+                                  placeholder="Remarks"
+                                  value={checkpointRemarks[item.id] || ''}
+                                  onChange={(e) => handlePmRemark(item.id, e.target.value)}
+                                  rows={1}
+                                />
+                              </div>
                             )}
                           </td>
                         </tr>

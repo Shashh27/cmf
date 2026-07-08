@@ -570,8 +570,7 @@ const PokaYokeChecklists = () => {
           <div style={{ flex: 1 }}>
             <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
-              <Button type="primary" size="small" icon={<PlusOutlined />} style={btnSharp}
-                onClick={() => setEditCheckpoints((p) => [...p, { ...emptyCheckpoint(p.length + 1), _original: {} }])}>Add Checkpoint</Button>
+            
             </div>
             <div style={{ border: '1px solid #d9d9d9', maxHeight: 500, overflowY: 'auto' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '30px 200px 60px 70px 85px 70px 70px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>

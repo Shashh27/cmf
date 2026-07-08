@@ -7,7 +7,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 const { Text, Title } = Typography;
 const { Option } = Select;
 
-const SelectJob = ({ open, onClose, onSelectJob }) => {
+const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -15,7 +15,6 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   const [orderFilter, setOrderFilter] = useState(null);
   const [machineName, setMachineName] = useState('');
   const [machineId, setMachineId] = useState(null);
-  const [selectedJob, setSelectedJob] = useState(null);
   const [jobStatsMap, setJobStatsMap] = useState({});
 
   useEffect(() => {
@@ -36,10 +35,39 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   useEffect(() => {
     if (open) {
       fetchJobs();
-      setSelectedJob(null);
-      setJobStatsMap({});
     }
   }, [open, machineId]);
+
+  const isSameJob = (job, selected) => {
+    if (!job || !selected) return false;
+    if (job.schedule_id != null && selected.schedule_id != null) {
+      return job.schedule_id === selected.schedule_id;
+    }
+    const jobId = job.id || job.operation_id || job.job_id;
+    const selectedId = selected.id || selected.operation_id || selected.job_id;
+    return jobId != null && jobId === selectedId;
+  };
+
+  const getCardHighlightStyle = (isCompleted, isSelected) => {
+    if (isCompleted) {
+      return {
+        border: '1px solid #f0f0f0',
+        borderLeft: '4px solid #52c41a',
+        background: '#f6ffed',
+      };
+    }
+    if (isSelected) {
+      return {
+        border: '1px solid #f0f0f0',
+        borderLeft: '4px solid #1677FF',
+        background: '#F0F7FF',
+      };
+    }
+    return {
+      border: '1px solid #f0f0f0',
+      background: '#fff',
+    };
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -130,13 +158,11 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   const firstAvailableJob = allJobsSorted.find(job => !isJobCompleted(job, jobStatsMap));
   const firstAvailableScheduleId = firstAvailableJob?.schedule_id ?? null;
 
-  // A job is enabled only if it is THE first non-completed job in the full list AND not blocked by prior operations.
-  // Filters never change this — they only hide/show cards.
+  // Cards stay selectable so operators can still open a job and view its documents.
+  // Activation is controlled separately inside the job details panel.
   const isJobCardEnabled = (job) => {
     if (isJobCompleted(job, jobStatsMap)) return false;
     if (firstAvailableScheduleId == null) return false;
-    // Check if job is blocked by prior operations
-    if (job.blocked_by && job.blocked_by.length > 0) return false;
     return job.schedule_id === firstAvailableScheduleId;
   };
 
@@ -255,39 +281,32 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
         {filteredJobs.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
             {filteredJobs.map((job) => {
-              const isSelected  = selectedJob?.schedule_id === job.schedule_id;
+              const isSelected  = isSameJob(job, currentSelectedJob);
               const isEnabled   = isJobCardEnabled(job);
               const isCompleted = isJobCompleted(job, jobStatsMap);
               const isBlocked   = !isCompleted && !isEnabled;
               const hasBlockReason = job.blocked_by && job.blocked_by.length > 0;
+              const cardHighlightStyle = getCardHighlightStyle(isCompleted, isSelected);
 
               return (
                 <Card
                   key={job.schedule_id}
-                  hoverable={isEnabled}
+                  hoverable
                   style={{
                     borderRadius: 12,
-                    border: isSelected ? '1px solid #f0f0f0' : '1px solid #f0f0f0',
-                    borderLeft: isSelected ? '4px solid #1677FF' : (isEnabled ? '1px solid #f0f0f0' : '1px solid #f0f0f0'),
-                    background: isSelected ? '#F0F7FF' : (isEnabled ? '#fff' : '#f5f5f5'),
                     transition: 'all 0.2s ease',
-                    opacity: isEnabled ? 1 : 0.6,
-                    cursor: isEnabled ? 'pointer' : 'not-allowed',
+                    cursor: 'pointer',
+                    ...cardHighlightStyle,
                   }}
                   bodyStyle={{ padding: 16 }}
-                  onClick={() => {
-                    if (isEnabled) {
-                      setSelectedJob(job);
-                      onSelectJob(job);
-                    }
-                  }}
+                  onClick={() => onSelectJob(job)}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div>
-                      <Title level={4} style={{ margin: 0, color: isEnabled ? 'inherit' : '#8c8c8c' }}>
+                      <Title level={4} style={{ margin: 0 }}>
                         {job.part_number || 'N/A'}
                       </Title>
-                      <Text type="secondary" style={{ fontSize: 12, color: isEnabled ? 'inherit' : '#8c8c8c' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
                         {job.operation_name || 'No description'}
                       </Text>
                     </div>
@@ -300,7 +319,7 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                       </Tag>
                       {isBlocked && (
                         <Tag color="orange" style={{ borderRadius: 4, margin: 0, fontSize: 11 }}>
-                          Blocked
+                          Cannot activate
                         </Tag>
                       )}
                     </div>
@@ -348,10 +367,10 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                       marginBottom: 12 
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <Text strong style={{ color: '#fa8c16', fontSize: 13 }}>🚫 Blocked</Text>
+                        <Text strong style={{ color: '#fa8c16', fontSize: 13 }}>Cannot activate</Text>
                       </div>
                       <Text style={{ color: '#8c4a00', fontSize: 12, lineHeight: 1.4 }}>
-                        {job.block_reason || 'Job is blocked by prior operations'}
+                        {job.block_reason || 'Prior operation(s) must be completed first.'}
                       </Text>
                     </div>
                   )}

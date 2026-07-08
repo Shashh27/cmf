@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Space, Tag, Alert, Input, Button, Row, Col, DatePicker, Select } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
 import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
+import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
+import InventoryDownloadButton from './InventoryDownloadButton.jsx';
+import { buildTransactionHistoryReportConfig } from './inventoryReportDownload.js';
 
 const { RangePicker } = DatePicker;
 
@@ -334,6 +337,12 @@ const TransactionHistory = () => {
     return allRows;
   };
 
+  const tableData = useMemo(
+    () => getCombinedTableData(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allTransactionsData, searchProjectNumber, dateRange, typeFilter],
+  );
+
   return (
     <div>
       <div style={{ marginBottom: 12 }}>
@@ -344,7 +353,8 @@ const TransactionHistory = () => {
               <RangePicker
                 style={{ width: '100%' }}
                 value={dateRange}
-                onChange={(vals) => setDateRange(vals)}
+                onChange={(vals) => setDateRange(normalizeDateRange(vals))}
+                disabledDate={disableFutureDates}
                 allowClear
                 inputReadOnly
               />
@@ -382,6 +392,18 @@ const TransactionHistory = () => {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>&nbsp;</span>
               <Space>
+                <InventoryDownloadButton
+                  getReportConfig={() => {
+                    const meta = [];
+                    if (dateRange?.[0] && dateRange?.[1]) {
+                      meta.push(`Date range: ${dateRange[0].format('DD/MM/YYYY')} – ${dateRange[1].format('DD/MM/YYYY')}`);
+                    }
+                    if (typeFilter !== 'all') meta.push(`Type filter: ${typeFilter}`);
+                    if (searchProjectNumber.trim()) meta.push(`Search: ${searchProjectNumber.trim()}`);
+                    return buildTransactionHistoryReportConfig(tableData, meta);
+                  }}
+                  disabled={!tableData.length}
+                />
                 <Button onClick={handleRefresh}>Refresh</Button>
                 <Button onClick={handleClear}>Clear</Button>
               </Space>
@@ -401,13 +423,14 @@ const TransactionHistory = () => {
       )}
 
       <InventoryOverviewTableStyles />
+      <div style={{ width: '100%', overflow: 'hidden' }}>
       <Table
         {...getInventoryOverviewTableProps({
           columns: combinedTransactionColumns,
-          dataSource: getCombinedTableData(),
+          dataSource: tableData,
           rowKey: 'key',
           loading: allTransactionsLoading,
-          scrollX: 2000,
+          compact: true,
           pagination: {
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -430,6 +453,7 @@ const TransactionHistory = () => {
           },
         })}
       />
+      </div>
     </div>
   );
 };

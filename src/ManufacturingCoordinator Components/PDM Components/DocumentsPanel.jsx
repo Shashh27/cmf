@@ -457,6 +457,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     await fetchDocuments(); setImportOperations([]);
   };
 
+
   const onOperationDragEnd = async ({ active, over }) => {
     if (active.id !== over?.id) {
       const activeIndex = operations.findIndex((i) => i.id === active.id);

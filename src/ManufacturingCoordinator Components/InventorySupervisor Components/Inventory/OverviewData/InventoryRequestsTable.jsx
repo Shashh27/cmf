@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { disableFutureDates, normalizeDateRange } from '../../../../InventorySupervisor Components/Inventory/OverviewData/inventoryDateUtils.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -375,7 +376,8 @@ const InventoryRequestsTable = () => {
               <RangePicker
                 style={{ width: '100%' }}
                 value={dateRange}
-                onChange={(vals) => setDateRange(vals)}
+                onChange={(vals) => setDateRange(normalizeDateRange(vals))}
+                disabledDate={disableFutureDates}
                 allowClear
                 inputReadOnly
               />

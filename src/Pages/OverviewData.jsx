@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Tabs, Card, Typography, Badge } from 'antd';
-import { HistoryOutlined } from '@ant-design/icons';
+import { Tabs, Badge } from 'antd';
 import { InventoryRequestsTable, ReturnRequestsTable, InventoryAnalytics, TransactionHistory, ToolsIssues } from '../InventorySupervisor Components/Inventory/OverviewData';
 import { API_BASE_URL } from '../Config/auth';
-
-const { Title, Text } = Typography;
 
 const OverviewData = () => {
   const [counts, setCounts] = useState({
@@ -66,20 +63,7 @@ const OverviewData = () => {
 
   return (
     <div style={{ padding: '16px' }}>
-      {/* Header Card */}
-      <Card 
-        bordered={false} 
-        style={{ 
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
-          marginBottom: '16px'
-        }}
-        styles={{ body: { padding: '16px 24px' } }}
-      >
-       
-      </Card>
-      
-      <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: '#fff', padding: '16px 20px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
         <Tabs 
           defaultActiveKey="inventory-requests" 
           size="small" 

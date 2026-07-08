@@ -99,6 +99,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       const up = s?.toString().toUpperCase();
       return up === 'INPROGRESS' || up === 'IN-PROGRESS' || up === 'IN PROGRESS';
     });
+  const isActivationBlocked = Array.isArray(selectedJob?.blocked_by) && selectedJob.blocked_by.length > 0;
+  const activationBlockReason = selectedJob?.block_reason || 'This operation cannot be activated until prior operations are completed.';
 
 
 
@@ -432,7 +434,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           (record.number && record.number.toString() === selectedJob?.operation_number?.toString())
         );
 
-        const isDisabled = effectivelyActivated || activating || isCompleted;
+        const isDisabled = effectivelyActivated || activating || isCompleted || isActivationBlocked;
 
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
@@ -456,21 +458,28 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             >
               Poka-Yoke
             </Button>
-            <Button
-              type="primary"
-              size="small"
-              block
-              disabled={isDisabled || (checklistAssigned[record.id] && (!submissionStatuses[record.id] || submissionStatuses[record.id] !== 'approved'))}
-              loading={activating}
-              onClick={(e) => { e.stopPropagation(); handleShowActivateModal(record); }}
-              style={effectivelyActivated ? {
-                background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
-              } : isCompleted ? {
-                background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
-              } : {}}
+            <Tooltip
+              title={isActivationBlocked ? activationBlockReason : null}
+              placement="top"
             >
-              {isCompleted ? 'Completed' : effectivelyActivated ? 'In Progress' : 'Activate'}
-            </Button>
+              <span style={{ display: 'block' }}>
+                <Button
+                  type="primary"
+                  size="small"
+                  block
+                  disabled={isDisabled || (checklistAssigned[record.id] && (!submissionStatuses[record.id] || submissionStatuses[record.id] !== 'approved'))}
+                  loading={activating}
+                  onClick={(e) => { e.stopPropagation(); handleShowActivateModal(record); }}
+                  style={effectivelyActivated ? {
+                    background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
+                  } : isCompleted ? {
+                    background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
+                  } : {}}
+                >
+                  {isCompleted ? 'Completed' : effectivelyActivated ? 'In Progress' : 'Activate'}
+                </Button>
+              </span>
+            </Tooltip>
             
             <Button
               type="default"
@@ -587,16 +596,16 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       const checklistAssigned = {};
 
       for (const op of allOperations) {
-        // Check if checklist is assigned to this operation
+        // Check if operation has checklists (MC-assigned or default general checklists)
         try {
           const assignmentResponse = await axios.get(
-            `${API_BASE_URL}/operation-checklists/assignments?operation_id=${op.id}`
+            `${API_BASE_URL}/operation-checklists/assignments?operation_id=${op.id}&fallback_to_general=true`
           );
-          if (assignmentResponse.status === 200 && assignmentResponse.data && assignmentResponse.data.length > 0) {
-            checklistAssigned[op.id] = true;
-          } else {
-            checklistAssigned[op.id] = false;
-          }
+          checklistAssigned[op.id] = (
+            assignmentResponse.status === 200 &&
+            Array.isArray(assignmentResponse.data) &&
+            assignmentResponse.data.length > 0
+          );
         } catch (error) {
           checklistAssigned[op.id] = false;
         }
@@ -1106,6 +1115,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         visible={isChecklistVisible}
         onClose={() => setIsChecklistVisible(false)}
         operationId={checklistOperationId}
+        onSubmitted={fetchSubmissionStatuses}
       />
 
       {/* Complete Operation Modal */}

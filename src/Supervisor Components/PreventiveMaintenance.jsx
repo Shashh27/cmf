@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Tabs, message, Card } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
-import PokaYokeReviewHistory from './PokaYokeReviewHistory';
+import PokaYokeHistoryCalendar from './PokaYokeHistoryCalendar';
 import { API_BASE_URL } from '../Config/auth';
 
 const PreventiveMaintenance = () => {
-  const [activeTab, setActiveTab] = useState('review-history');
+  const [activeTab, setActiveTab] = useState('history');
   const [machines, setMachines] = useState([]);
   const [machinesLoading, setMachinesLoading] = useState(false);
 
@@ -42,10 +42,10 @@ const PreventiveMaintenance = () => {
       ),
     },
     {
-      key: 'review-history',
-      label: 'Review & History',
+      key: 'history',
+      label: 'History',
       children: (
-        <PokaYokeReviewHistory
+        <PokaYokeHistoryCalendar
           machines={machines}
           fetchMachines={fetchMachines}
           machinesLoading={machinesLoading}
