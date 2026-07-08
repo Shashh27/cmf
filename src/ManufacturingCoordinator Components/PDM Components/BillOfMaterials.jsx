@@ -421,18 +421,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const handleDeleteAllParts = async (product) => {
     modal.confirm({
       title: "Delete All Parts",
-      content: `Delete all parts for product "${product.product_name}"? This cannot be undone.`,
-      okText: 'Yes, Delete',
+      content: `Move all parts for product "${product.product_name}" to the recycle bin?`,
+      okText: 'Yes, Move to Recycle Bin',
       okType: 'danger',
       cancelText: 'No',
       onOk: async () => {
         try {
-          const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-product/${product.id}`);
+          const response = await axios.post(`${API_BASE_URL}/recycle-bin/products/${product.id}/soft-delete-parts`);
           
           if (response.data?.deleted_count) {
-            message.success(`Successfully deleted ${response.data.deleted_count} parts from product "${product.product_name}".`);
+            message.success(`${response.data.deleted_count} part(s) moved to recycle bin for product "${product.product_name}".`);
           } else {
-            message.success(`All parts deleted successfully from product "${product.product_name}".`);
+            message.info(`No parts found to move to recycle bin for product "${product.product_name}".`);
           }
           
           // Refresh the product hierarchy

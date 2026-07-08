@@ -10,10 +10,60 @@ import { SchedulingAnalytics } from './SchedulingAnalytics';
 
 const { Title, Text } = Typography;
 
+const getMonitoringWsUrl = () => {
+  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+};
+
+const normalizeMachineStatus = (value) => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return 'off';
+  if (raw === 'ON') return 'idle';
+  return raw.toLowerCase();
+};
+
+const mapLiveMachinesFor2D = (liveMachines) => {
+  return (Array.isArray(liveMachines) ? liveMachines : []).map(machine => ({
+    machine_id: machine.machine_id,
+    machine_make: machine.machine_name || `Machine ${machine.machine_id}`,
+    machine_model: '',
+    machine_type: machine.machine_type || 'N/A',
+    work_center: machine.machine_type || 'N/A',
+    total_orders: machine.sale_order_number ? 1 : 0,
+    total_operations: machine.operation_name ? 1 : 0,
+    machine_status: {
+      status: normalizeMachineStatus(machine.status),
+      raw_status: machine.status || 'OFF',
+      last_updated: machine.last_updated || null,
+    },
+    orders: machine.sale_order_number ? [{
+      order_id: machine.sale_order_number,
+      sale_order_number: machine.sale_order_number,
+      product_name: machine.part_number || 'N/A',
+      quantity: machine.target_qty || 0,
+      status: machine.status || 'OFF',
+    }] : [],
+    parts_operations: machine.part_number ? [{
+      part_id: `${machine.machine_id}-${machine.part_number}`,
+      part_name: machine.part_number,
+      part_number: machine.part_number,
+      part_status: { status: machine.status || 'OFF' },
+      sale_order_number: machine.sale_order_number,
+      order_id: machine.sale_order_number,
+      operation_id: machine.operation_number || machine.machine_id,
+      operation_name: machine.operation_name || 'N/A',
+      operation_number: machine.operation_number || 'N/A',
+      operation_status: { status: machine.status || 'OFF' },
+    }] : [],
+  }));
+};
+
 // Main ShopFloorDashboard Component
 const ShopFloorDashboard = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
+  const [liveMachines, setLiveMachines] = useState([]);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState('2d'); // '2d' or 'analytics'
   const [analyticsViewMode, setAnalyticsViewMode] = useState('table'); // 'table' or 'heatmap'
@@ -81,11 +131,48 @@ const ShopFloorDashboard = ({ onBack }) => {
     }
   };
 
+  const handleViewModeChange = async (value) => {
+    const nextMode = value;
+    if (nextMode === 'analytics' && !data) {
+      await fetchShopFloorData();
+    }
+    setViewMode(nextMode);
+  };
+
   useEffect(() => {
-    fetchShopFloorData();
+    let socket;
+    let reconnectTimer;
+    let closed = false;
+
+    const connectSocket = () => {
+      socket = new WebSocket(getMonitoringWsUrl());
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          setLiveMachines(mapLiveMachinesFor2D(payload));
+        } catch (err) {
+          console.error('Failed to parse monitoring websocket payload:', err);
+        }
+      };
+
+      socket.onclose = () => {
+        if (!closed) {
+          reconnectTimer = window.setTimeout(connectSocket, 5000);
+        }
+      };
+    };
+
+    connectSocket();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+    };
   }, []);
 
-  if (loading) {
+  if (loading && viewMode === 'analytics') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f5f5f5' }}>
         <Spin size="large" />
@@ -94,7 +181,7 @@ const ShopFloorDashboard = ({ onBack }) => {
     );
   }
 
-  if (error) {
+  if (error && viewMode === 'analytics') {
     return (
       <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
         <Alert
@@ -112,8 +199,13 @@ const ShopFloorDashboard = ({ onBack }) => {
     );
   }
 
-  if (!data) {
-    return null;
+  if (viewMode === 'analytics' && !data) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f5f5f5' }}>
+        <Spin size="large" />
+        <Text style={{ marginTop: 16, color: '#666' }}>Loading analytics...</Text>
+      </div>
+    );
   }
 
   return (
@@ -167,7 +259,7 @@ const ShopFloorDashboard = ({ onBack }) => {
               <Col>
                 <Segmented
                   value={viewMode}
-                  onChange={(value) => setViewMode(value)}
+                  onChange={handleViewModeChange}
                   options={[
                     {
                       label: (
@@ -256,7 +348,7 @@ const ShopFloorDashboard = ({ onBack }) => {
       {/* Machines Grid Section */}
       <div style={{ marginTop: 0 }}>
         {viewMode === '2d' ? (
-          <MachineGrid machines={data.machines} onBack={onBack} />
+          <MachineGrid machines={liveMachines} onBack={onBack} />
         ) : (
           <SchedulingAnalytics machines={data.machines} viewMode={analyticsViewMode} />
         )}

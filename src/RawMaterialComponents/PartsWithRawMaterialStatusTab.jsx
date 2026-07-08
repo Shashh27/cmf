@@ -1060,26 +1060,46 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       });
 
       // Step 3: flatten into rows with spans.
-      // For grouped sub-groups (merge_group_id set):
-      //   materialRowSpan and orderRowSpan both span the full sub-group size.
-      // For unlinked sub-groups (__unlinked__ key, no vendor):
-      //   materialRowSpan spans all items (EN8 shown once for the whole unlinked set),
-      //   but orderRowSpan = 1 per item so each row shows its own Project Number separately.
-      // For vendor-linked individual rows:
-      //   both spans = 1 (single row each).
+      // - Material Name: rowspan for grouped / unlinked material sets
+      // - Project Number: rowspan consecutive same-order rows within a merge group
+      //   (sort by project first so "89" appears once for all its parts, not split)
+      // - Final Cost / Vendor / Status / Actions: rowspan once per merge group
 
       subGroupMap.forEach((subItems, subKey) => {
 
-        const isUnlinkedGroup = subKey === '__unlinked__';
+        const isMergeGroup = subKey.startsWith('__grouped__');
 
-        // groupOrderNumbers only relevant for grouped sub-groups (merge_group_id set)
-        // where one spanned cell must show all distinct orders.
-        // For unlinked items each row shows its own order number — no groupOrderNumbers needed.
-        const groupOrderNumbers = isUnlinkedGroup
-          ? null
-          : [...new Set(subItems.map(it => it.source_order_number).filter(Boolean))];
+        // Within a merge group, keep same project numbers together
+        const orderedItems = isMergeGroup
+          ? [...subItems].sort((a, b) => {
+              const oa = String(a.source_order_number || '');
+              const ob = String(b.source_order_number || '');
+              if (oa !== ob) return oa.localeCompare(ob, undefined, { numeric: true });
+              return (a.id || 0) - (b.id || 0);
+            })
+          : subItems;
 
-        subItems.forEach((item, i) => {
+        // Pre-compute project rowspan for consecutive same-order blocks
+        const projectSpans = orderedItems.map(() => 1);
+        if (isMergeGroup) {
+          let start = 0;
+          while (start < orderedItems.length) {
+            let end = start + 1;
+            const orderKey = String(orderedItems[start].source_order_number || '');
+            while (
+              end < orderedItems.length
+              && String(orderedItems[end].source_order_number || '') === orderKey
+            ) {
+              end += 1;
+            }
+            const span = end - start;
+            projectSpans[start] = span;
+            for (let k = start + 1; k < end; k += 1) projectSpans[k] = 0;
+            start = end;
+          }
+        }
+
+        orderedItems.forEach((item, i) => {
 
           rows.push({
 
@@ -1087,11 +1107,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
             key: item.id,
 
-            materialRowSpan: i === 0 ? subItems.length : 0,
+            materialRowSpan: i === 0 ? orderedItems.length : 0,
 
-            orderRowSpan: isUnlinkedGroup ? 1 : (i === 0 ? subItems.length : 0),
+            // Same project numbers within group → one cell spanning those rows
+            orderRowSpan: isMergeGroup ? projectSpans[i] : 1,
 
-            groupOrderNumbers,
+            // Shared columns (final cost / vendor / status / actions) span once for merge group
+            sharedRowSpan: isMergeGroup ? (i === 0 ? orderedItems.length : 0) : 1,
+
+            groupOrderNumbers: null,
 
             index: globalIndex + 1
 
@@ -1213,12 +1237,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                 {filteredDataWithRowSpans.map((row, index) => {
 
-                  // For grouped rows: isFirstOfGroup = first item in the sub-group (orderRowSpan > 0).
-                  // groupRowSpan reuses orderRowSpan which already holds the exact sub-group size.
+                  // sharedRowSpan: merge-group Final Cost / Vendor / Status / Actions once
+                  const isFirstOfGroup = row.merge_group_id && row.sharedRowSpan > 0;
 
-                  const isFirstOfGroup = row.merge_group_id && row.orderRowSpan > 0;
-
-                  const groupRowSpan = isFirstOfGroup ? row.orderRowSpan : 0;
+                  const groupRowSpan = isFirstOfGroup ? row.sharedRowSpan : 0;
 
                   
 
@@ -1280,21 +1302,35 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                     </td>
 
-                    {row.materialRowSpan > 0 && <td rowSpan={row.materialRowSpan} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>{row.material_name}</td>}
+                    {row.materialRowSpan > 0 && (
+                      <td rowSpan={row.materialRowSpan} style={{ border: '1px solid #000', padding: '6px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>
+                        <div style={{ fontWeight: 700, fontSize: 12, marginBottom: row.merge_group_id ? 6 : 0 }}>
+                          {row.material_name}
+                        </div>
+                        {row.merge_group_id && (
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: '#1677ff',
+                              color: '#fff',
+                              borderRadius: 4,
+                              padding: '2px 8px',
+                              fontSize: 10,
+                              fontWeight: 600,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            {row.merge_group_id}
+                          </div>
+                        )}
+                      </td>
+                    )}
 
                     {row.orderRowSpan > 0 && (
                       <td rowSpan={row.orderRowSpan} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>
-                        {row.groupOrderNumbers && row.groupOrderNumbers.length > 1
-                          ? row.groupOrderNumbers.map((on, idx) => (
-                              <div key={idx}>
-                                <div style={{ fontWeight: 500, paddingBottom: idx < row.groupOrderNumbers.length - 1 ? 4 : 0 }}>{on}</div>
-                                {idx < row.groupOrderNumbers.length - 1 && (
-                                  <div style={{ borderBottom: '1px solid #000', margin: '0 -8px' }} />
-                                )}
-                              </div>
-                            ))
-                          : (row.source_order_number || '-')}
-                        {row.merge_group_id && <Tag color="blue" style={{ marginTop: 4, fontSize: 9 }}>{row.merge_group_id}</Tag>}
+                        <div style={{ fontWeight: 500 }}>{row.source_order_number || '-'}</div>
                       </td>
                     )}
 

@@ -116,7 +116,6 @@ const OMS = () => {
   const getStatusBadge = (status) => {
     const statusConfig = {
       'Pending': { color: "orange", text: "Pending" },
-      'Scheduled': { color: "purple", text: "Scheduled" },
       'In Progress': { color: "blue", text: "In Progress" },
       'Completed': { color: "green", text: "Completed" },
     };

@@ -19,7 +19,14 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
   useEffect(() => {
     if (open) {
       if (editingUser) {
-        form.setFieldsValue(editingUser);
+        form.setFieldsValue({
+          username: editingUser.username || editingUser.user_name,
+          gmail: editingUser.gmail,
+          role: editingUser.role,
+          center: editingUser.center,
+          group: editingUser.group,
+          password: editingUser.password || '',
+        });
       } else {
         form.resetFields();
       }
@@ -27,10 +34,14 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
   }, [open, editingUser, form]);
 
   const handleFormSubmit = async (values) => {
+    const { username, password, ...rest } = values;
     const payload = {
-      ...values,
-      user_name: values.username,
+      ...rest,
+      user_name: username,
     };
+    if (password?.trim()) {
+      payload.password = password.trim();
+    }
 
     try {
       let response;

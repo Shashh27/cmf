@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip } from "antd";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip, Spin } from "antd";
 import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined, SyncOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 
 // Shared utility: normalise a revision string as the user types
@@ -27,6 +27,9 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   const [documents, setDocuments] = useState([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerDoc, setViewerDoc] = useState(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
+  const [viewerError, setViewerError] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const [parentId, setParentId] = useState(null);
   const [updatingDocName, setUpdatingDocName] = useState("");
 
@@ -158,6 +161,28 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     }
     setViewerDoc(doc);
     setViewerOpen(true);
+    setViewerLoading(true);
+    setViewerError(false);
+    setPdfBlobUrl(null);
+
+    // Fetch PDF as blob for better iframe compatibility
+    const fetchPdfBlob = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/order-documents/${documentId}/preview`, {
+          responseType: 'blob'
+        });
+        const blob = new Blob([response.data], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(blobUrl);
+      } catch (error) {
+        console.error("Error fetching PDF blob:", error);
+        setViewerError(true);
+      } finally {
+        setViewerLoading(false);
+      }
+    };
+
+    fetchPdfBlob();
   };
 
   const handleDelete = async (documentId) => {
@@ -526,7 +551,15 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
       <Modal
         open={viewerOpen}
-        onCancel={() => { setViewerOpen(false); setViewerDoc(null); }}
+        onCancel={() => { 
+          setViewerOpen(false); 
+          setViewerDoc(null); 
+          setViewerError(false);
+          if (pdfBlobUrl) {
+            URL.revokeObjectURL(pdfBlobUrl);
+            setPdfBlobUrl(null);
+          }
+        }}
         footer={[
           <Button 
             key="dl" 
@@ -537,11 +570,24 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
               } 
               setViewerOpen(false); 
               setViewerDoc(null); 
+              setViewerError(false);
+              if (pdfBlobUrl) {
+                URL.revokeObjectURL(pdfBlobUrl);
+                setPdfBlobUrl(null);
+              }
             }}
           >
             Download
           </Button>,
-          <Button key="cl" type="primary" onClick={() => { setViewerOpen(false); setViewerDoc(null); }}>Close</Button>
+          <Button key="cl" type="primary" onClick={() => { 
+            setViewerOpen(false); 
+            setViewerDoc(null); 
+            setViewerError(false);
+            if (pdfBlobUrl) {
+              URL.revokeObjectURL(pdfBlobUrl);
+              setPdfBlobUrl(null);
+            }
+          }}>Close</Button>
         ]}
         width="95%"
         style={{ maxWidth: 1000 }}
@@ -563,18 +609,42 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
             if (type === "image") {
               return (
                 <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-                  <img src={previewUrl} alt={displayName} style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain" }} />
+                  <img 
+                    src={previewUrl} 
+                    alt={displayName} 
+                    style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain" }}
+                    onLoad={() => setViewerLoading(false)}
+                    onError={() => { setViewerLoading(false); setViewerError(true); }}
+                  />
                 </div>
               );
             }
             
             if (type === "pdf") {
               return (
-                <iframe
-                  src={previewUrl}
-                  title="Document Preview"
-                  style={{ width: '100%', height: '75vh', border: 'none' }}
-                />
+                <div style={{ position: 'relative', width: '100%', height: '75vh' }}>
+                  {viewerLoading && (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <Spin size="large" />
+                    </div>
+                  )}
+                  {viewerError && (
+                    <div className="flex flex-col items-center justify-center h-full bg-gray-50 p-8 text-center">
+                      <ExclamationCircleOutlined className="text-5xl text-red-400 mb-4" />
+                      <p className="text-gray-700 font-medium mb-2">Failed to load PDF document</p>
+                      <p className="text-gray-500 mb-4">Please click the Reload button to try again</p>
+                    </div>
+                  )}
+                  {pdfBlobUrl && (
+                    <iframe
+                      key={viewerError ? `reload-${Date.now()}` : viewerDoc.id}
+                      src={pdfBlobUrl}
+                      title="Document Preview"
+                      style={{ width: '100%', height: '75vh', border: 'none' }}
+                      allowFullScreen
+                    />
+                  )}
+                </div>
               );
             }
             

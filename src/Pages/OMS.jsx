@@ -121,7 +121,6 @@ const OMS = () => {
   const getStatusBadge = (status) => {
     const statusConfig = {
       'Pending': { color: "orange", text: "Pending" },
-      'Scheduled': { color: "purple", text: "Scheduled" },
       'In Progress': { color: "blue", text: "In Progress" },
       'Completed': { color: "green", text: "Completed" },
     };
@@ -396,19 +395,16 @@ const OMS = () => {
 
   const kpiStats = useMemo(() => {
     let pending = 0;
-    let scheduled = 0;
     let inProgress = 0;
     let completed = 0;
     orders.forEach((o) => {
       if (o.status === "Pending") pending += 1;
-      else if (o.status === "Scheduled") scheduled += 1;
       else if (o.status === "In Progress") inProgress += 1;
       else if (o.status === "Completed") completed += 1;
     });
     return {
       total: orders.length,
       pending,
-      scheduled,
       inProgress,
       completed,
     };
@@ -537,7 +533,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: "status",
       key: "status",
-      filters: ['Pending', 'Scheduled', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
+      filters: ['Pending', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
       onFilter: (value, record) => record.status === value,
       render: (status) => getStatusBadge(status),
     },

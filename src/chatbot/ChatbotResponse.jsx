@@ -1,183 +1,129 @@
-import { useState } from 'react';
-import { ChevronDown, ChevronUp, Database, Lightbulb, Copy, Check } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Table, Tag } from 'antd';
+import { Copy, Check, ChevronDown } from 'lucide-react';
 
-const THEME = {
-  headerFrom: '#1e293b',
-  headerTo: '#134e4a',
-  accent: '#f59e0b',
-  userFrom: '#0f766e',
-  userTo: '#0d9488',
-  border: '#e5e7eb',
-  textDark: '#1f2937',
-  textMuted: '#6b7280',
-  sqlBg: '#1e293b',
-  sqlText: '#fbbf24',
-  bgHover: '#f9fafb',
+const HIDDEN_COLS = new Set(['id', 'created_at', 'updated_at', 'user_id']);
+
+const STATUS_COLORS = {
+  completed: 'success',
+  approved: 'success',
+  active: 'success',
+  available: 'success',
+  acknowledged: 'success',
+  inprogress: 'processing',
+  'in progress': 'processing',
+  pending: 'warning',
+  scheduled: 'processing',
+  not_scheduled: 'default',
+  inactive: 'default',
+  rejected: 'error',
+  cancelled: 'error',
+  exhausted: 'error',
 };
 
-// ── SQL Block (collapsible, ChatGPT style) ───────────────────────────────────
-export const SqlBlock = ({ sql }) => {
-  const [open, setOpen] = useState(false);
-  if (!sql) return null;
+function formatLabel(key) {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-  return (
-    <div style={{ marginTop: 12, marginBottom: 8 }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 12px', background: '#f3f4f6',
-          border: '1px solid #e5e7eb', borderRadius: 8,
-          cursor: 'pointer', fontSize: 12, fontWeight: 500,
-          color: THEME.textMuted, transition: 'all 0.15s',
-        }}
-        onMouseEnter={e => e.currentTarget.style.background = '#e5e7eb'}
-        onMouseLeave={e => e.currentTarget.style.background = '#f3f4f6'}
-      >
-        <Database size={14} />
-        <span>View SQL Query</span>
-        <span style={{ marginLeft: 'auto' }}>
-          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          marginTop: 8, padding: '12px 14px',
-          background: THEME.sqlBg, borderRadius: 8,
-          overflowX: 'auto', fontSize: 11.5,
-        }}>
-          <pre style={{ margin: 0, color: THEME.sqlText, whiteSpace: 'pre-wrap', fontFamily: 'Monaco, Consolas, monospace' }}>
-            {sql}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-};
+function pickColumns(rows) {
+  if (!rows?.length) return [];
+  const keys = Object.keys(rows[0]);
+  const visible = keys.filter((k) => {
+    if (HIDDEN_COLS.has(k)) return false;
+    if (k.endsWith('_id') && k !== 'id') {
+      const base = k.replace(/_id$/, '');
+      return !keys.some((x) => x.includes(base) && x !== k);
+    }
+    return true;
+  });
+  return (visible.length ? visible : keys).slice(0, 7);
+}
 
-// ── Data Table (ChatGPT style - clean, minimal) ───────────────────────────────
+function formatCell(value, key) {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+  }
+  if (key.toLowerCase().includes('status') && typeof value === 'string') {
+    const color = STATUS_COLORS[value.toLowerCase()] || 'default';
+    return <Tag color={color} style={{ margin: 0, fontSize: 11 }}>{value}</Tag>;
+  }
+  return String(value);
+}
+
 export const DataTable = ({ data }) => {
   const [copied, setCopied] = useState(false);
+  const cols = useMemo(() => pickColumns(data), [data]);
+
   if (!data?.length) return null;
 
-  const cols = Object.keys(data[0]);
+  const columns = cols.map((key) => ({
+    title: formatLabel(key),
+    dataIndex: key,
+    key,
+    ellipsis: true,
+    render: (val) => formatCell(val, key),
+  }));
+
   const handleCopy = async () => {
-    const text = cols.join('\t') + '\n' + data.map(row => cols.map(c => row[c] ?? '').join('\t')).join('\n');
+    const text = cols.join('\t') + '\n' + data.map((row) => cols.map((c) => row[c] ?? '').join('\t')).join('\n');
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div style={{ marginTop: 12, marginBottom: 8 }}>
-      {/* Table */}
-      <div style={{
-        border: '1px solid #e5e7eb', borderRadius: 8,
-        overflow: 'hidden', background: '#fff',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '8px 12px', background: '#f9fafb',
-          borderBottom: '1px solid #e5e7eb',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 500, color: THEME.textMuted }}>
-            {data.length} {data.length === 1 ? 'result' : 'results'}
-          </span>
-          <button
-            onClick={handleCopy}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '4px 8px', border: '1px solid #e5e7eb',
-              borderRadius: 6, background: '#fff', cursor: 'pointer',
-              fontSize: 11, color: THEME.textMuted, transition: 'all 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = '#f3f4f6'}
-            onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-          >
+    <div className="cmf-result-card">
+      <div className="cmf-result-header">
+        <span className="cmf-result-title">{data.length} {data.length === 1 ? 'row' : 'rows'}</span>
+        <div className="cmf-result-actions">
+          <button type="button" className="cmf-result-action-btn" onClick={handleCopy}>
             {copied ? <Check size={12} /> : <Copy size={12} />}
             {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: '#f9fafb' }}>
-                {cols.map(c => (
-                  <th key={c} style={{
-                    padding: '10px 12px', textAlign: 'left',
-                    color: THEME.textDark, fontWeight: 600, fontSize: 11,
-                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                    borderBottom: '1px solid #e5e7eb',
-                  }}>
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((row, i) => (
-                <tr key={i} style={{
-                  borderBottom: i < data.length - 1 ? '1px solid #f3f4f6' : 'none',
-                  background: i % 2 ? '#fafafa' : '#fff',
-                }}>
-                  {cols.map(c => (
-                    <td key={c} style={{
-                      padding: '10px 12px', color: '#374151',
-                      whiteSpace: 'nowrap', maxWidth: 300,
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {row[c] != null && row[c] !== '' ? String(row[c]) : <span style={{ color: '#9ca3af' }}>—</span>}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      </div>
+      <div className="cmf-chat-table">
+        <Table
+          size="small"
+          columns={columns}
+          dataSource={data.map((row, i) => ({ ...row, key: row.id ?? i }))}
+          pagination={data.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
+          scroll={{ x: 'max-content' }}
+        />
       </div>
     </div>
   );
 };
 
-// ── Follow-up Suggestions (ChatGPT style) ───────────────────────────────────
 export const FollowUpSuggestions = ({ suggestions, onSelect }) => {
+  const [open, setOpen] = useState(false);
   if (!suggestions?.length) return null;
 
   return (
-    <div style={{ marginTop: 12, marginBottom: 8 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 12, fontWeight: 500, color: THEME.textMuted,
-        marginBottom: 8,
-      }}>
-        <Lightbulb size={14} />
-        <span>Suggested follow-up questions</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {suggestions.map((s, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(s)}
-            style={{
-              textAlign: 'left', padding: '10px 14px',
-              background: '#f9fafb', border: '1px solid #e5e7eb',
-              borderRadius: 8, cursor: 'pointer',
-              fontSize: 12, color: THEME.textDark,
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = '#f3f4f6';
-              e.currentTarget.style.borderColor = '#d1d5db';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = '#f9fafb';
-              e.currentTarget.style.borderColor = '#e5e7eb';
-            }}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
+    <div className="cmf-followups-wrap">
+      <button
+        type="button"
+        className="cmf-followups-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        Related questions
+        <ChevronDown size={14} className={open ? 'open' : ''} />
+      </button>
+      {open && (
+        <div className="cmf-followups">
+          {suggestions.map((s) => (
+            <button key={s} type="button" className="cmf-followup" onClick={() => onSelect(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

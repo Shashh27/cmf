@@ -21,8 +21,112 @@ const Recyclebin = ({ orderId }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [allParts, setAllParts] = useState([]);
   const [allAssemblies, setAllAssemblies] = useState([]);
+  const [flatAssemblies, setFlatAssemblies] = useState([]);
   const [selectedItems, setSelectedItems] = useState([]);
   const [checkedKeys, setCheckedKeys] = useState([]);
+
+  const flattenAssemblies = (assemblies = []) => {
+    const result = [];
+    const walk = (items) => {
+      items.forEach((assembly) => {
+        result.push(assembly);
+        if (assembly.child_assemblies?.length) {
+          walk(assembly.child_assemblies);
+        }
+      });
+    };
+    walk(assemblies);
+    return result;
+  };
+
+  const findAssemblyById = (assemblyId, assemblies = allAssemblies) => {
+    for (const assembly of assemblies) {
+      if (assembly.id === assemblyId) return assembly;
+      if (assembly.child_assemblies?.length) {
+        const found = findAssemblyById(assemblyId, assembly.child_assemblies);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const isPartRestoreBlocked = (part) => {
+    if (!part?.assembly_id) return false;
+
+    let assemblyId = part.assembly_id;
+    while (assemblyId) {
+      const assembly = flatAssemblies.find((item) => item.id === assemblyId);
+      if (!assembly) break;
+      if (assembly.recycle_bin) return true;
+      assemblyId = assembly.parent_id;
+    }
+    return false;
+  };
+
+  const buildSelectedItems = (keys) => {
+    const items = [];
+    keys.forEach((key) => {
+      if (key.startsWith("part-")) {
+        const partId = parseInt(key.replace("part-", ""), 10);
+        const part = allParts.find((item) => item.id === partId);
+        if (part) items.push({ id: partId, type: "part", ...part });
+      } else if (key.startsWith("assembly-")) {
+        const assemblyId = parseInt(key.replace("assembly-", ""), 10);
+        const assembly = flatAssemblies.find((item) => item.id === assemblyId);
+        if (assembly) items.push({ id: assemblyId, type: "assembly", ...assembly });
+      }
+    });
+    return items;
+  };
+
+  const collectAssemblyChildrenKeys = (assembly) => {
+    const keys = [`assembly-${assembly.id}`];
+
+    if (assembly.parts?.length) {
+      assembly.parts.forEach((part) => {
+        if (part.recycle_bin) keys.push(`part-${part.id}`);
+      });
+    }
+
+    if (assembly.child_assemblies?.length) {
+      assembly.child_assemblies.forEach((child) => {
+        keys.push(...collectAssemblyChildrenKeys(child));
+      });
+    }
+
+    return keys;
+  };
+
+  const getTopLevelAssemblies = (items) => {
+    const assemblyItems = items.filter((item) => item.type === "assembly" && item.recycle_bin);
+    const assemblyIds = new Set(assemblyItems.map((item) => item.id));
+
+    return assemblyItems.filter((item) => {
+      let parentId = item.parent_id;
+      while (parentId) {
+        if (assemblyIds.has(parentId)) return false;
+        const parent = flatAssemblies.find((assembly) => assembly.id === parentId);
+        parentId = parent?.parent_id;
+      }
+      return true;
+    });
+  };
+
+  const getStandaloneParts = (items, assemblyIds) => {
+    return items.filter((item) => {
+      if (item.type !== "part") return false;
+      if (!item.assembly_id) return true;
+      if (assemblyIds.has(item.assembly_id)) return false;
+
+      let assemblyId = item.assembly_id;
+      while (assemblyId) {
+        if (assemblyIds.has(assemblyId)) return false;
+        const assembly = flatAssemblies.find((entry) => entry.id === assemblyId);
+        assemblyId = assembly?.parent_id;
+      }
+      return true;
+    });
+  };
 
   const getCurrentUser = () => {
     try {
@@ -71,8 +175,8 @@ const Recyclebin = ({ orderId }) => {
       
       setAllParts(allParts);
       setAllAssemblies(allAssemblies);
+      setFlatAssemblies(flattenAssemblies(allAssemblies));
       
-      // If order_info is provided and no parts/assemblies, display order info
       if (orderInfo && allParts.length === 0 && allAssemblies.length === 0) {
         setProjects([{
           product_id: orderInfo.product_id,
@@ -85,7 +189,6 @@ const Recyclebin = ({ orderId }) => {
         return { allParts, allAssemblies, orderInfo };
       }
       
-      // Group by product
       const projectMap = {};
       allParts.forEach(part => {
         if (part.product_id) {
@@ -121,7 +224,6 @@ const Recyclebin = ({ orderId }) => {
       
       setProjects(Object.values(projectMap));
       
-      // Return the data for immediate use
       return { allParts, allAssemblies, orderInfo };
     } catch (error) {
       console.error("Error fetching projects:", error);
@@ -134,17 +236,12 @@ const Recyclebin = ({ orderId }) => {
   const fetchProductBOM = async (productId, partsData = null, assembliesData = null) => {
     setLoading(true);
     try {
-      // Filter parts and assemblies by product_id from the provided data or state
       const sourceParts = partsData || allParts;
       const sourceAssemblies = assembliesData || allAssemblies;
       const productParts = sourceParts.filter(part => part.product_id === productId);
       const productAssemblies = sourceAssemblies.filter(assembly => assembly.product_id === productId);
-
-      // Use the hierarchical structure directly from the backend
-      // The backend already returns assemblies with child_assemblies
       const directParts = productParts.filter(part => !part.assembly_id);
 
-      // Build the final BOM structure
       const bomData = {
         product: {
           id: productId,
@@ -164,28 +261,11 @@ const Recyclebin = ({ orderId }) => {
     }
   };
 
-  // Expand all tree keys when filteredBomData changes
   useEffect(() => {
     if (filteredBomData) {
       setTreeRefreshKey(prev => prev + 1);
     }
   }, [filteredBomData]);
-
-  const collectAllTreeKeys = (treeData) => {
-    const keys = [];
-    const traverse = (nodes) => {
-      nodes.forEach(node => {
-        if (node.key) {
-          keys.push(node.key);
-        }
-        if (node.children) {
-          traverse(node.children);
-        }
-      });
-    };
-    traverse(treeData);
-    return keys;
-  };
 
   const handleProjectClick = (project) => {
     setSelectedProject(project);
@@ -193,6 +273,11 @@ const Recyclebin = ({ orderId }) => {
   };
 
   const handleRestore = async (item, type) => {
+    if (type === "part" && isPartRestoreBlocked(item)) {
+      antMessage.error("Restore the parent assembly first before restoring this part.");
+      return;
+    }
+
     modal.confirm({
       title: `Restore ${type === 'part' ? 'Part' : 'Assembly'}`,
       content: `Are you sure you want to restore ${type === 'part' ? 'part' : 'assembly'} "${type === 'part' ? item.part_name : item.assembly_name}"?`,
@@ -208,7 +293,6 @@ const Recyclebin = ({ orderId }) => {
             await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
             antMessage.success(`Assembly "${item.assembly_name}" and all its parts restored successfully`);
           }
-          // Clear selection
           setCheckedKeys([]);
           setSelectedItems([]);
           const data = await fetchProjects();
@@ -263,7 +347,6 @@ const Recyclebin = ({ orderId }) => {
             await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
             antMessage.success(`Assembly "${item.assembly_name}" permanently deleted`);
           }
-          // Clear selection
           setCheckedKeys([]);
           setSelectedItems([]);
           const data = await fetchProjects();
@@ -297,28 +380,42 @@ const Recyclebin = ({ orderId }) => {
       cancelText: "No",
       onOk: async () => {
         try {
+          const topAssemblies = getTopLevelAssemblies(selectedItems);
+          const assemblyIds = new Set(topAssemblies.map((item) => item.id));
+          const standaloneParts = getStandaloneParts(selectedItems, assemblyIds).filter(
+            (item) => !isPartRestoreBlocked(item)
+          );
+          const blockedCount = getStandaloneParts(selectedItems, assemblyIds).length - standaloneParts.length;
+
           let successCount = 0;
           let errorCount = 0;
 
-          for (const item of selectedItems) {
+          for (const item of topAssemblies) {
             try {
-              if (item.type === 'part') {
-                await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/restore`);
-                successCount++;
-              } else if (item.type === 'assembly') {
-                await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
-                successCount++;
-              }
+              await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
+              successCount++;
             } catch (error) {
               errorCount++;
-              console.error(`Error restoring ${item.type}:`, error);
+              console.error("Error restoring assembly:", error);
+            }
+          }
+
+          for (const item of standaloneParts) {
+            try {
+              await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/restore`);
+              successCount++;
+            } catch (error) {
+              errorCount++;
+              console.error("Error restoring part:", error);
             }
           }
 
           setCheckedKeys([]);
           setSelectedItems([]);
-          
-          if (errorCount > 0) {
+
+          if (blockedCount > 0 && successCount === 0 && errorCount === 0) {
+            antMessage.error("Selected parts cannot be restored until their parent assembly is restored.");
+          } else if (errorCount > 0) {
             antMessage.warning(`${successCount} items restored, ${errorCount} failed`);
           } else {
             antMessage.success(`${successCount} items restored successfully`);
@@ -358,21 +455,30 @@ const Recyclebin = ({ orderId }) => {
       cancelText: "Cancel",
       onOk: async () => {
         try {
+          const topAssemblies = getTopLevelAssemblies(selectedItems);
+          const assemblyIds = new Set(topAssemblies.map((item) => item.id));
+          const standaloneParts = getStandaloneParts(selectedItems, assemblyIds);
+
           let successCount = 0;
           let errorCount = 0;
 
-          for (const item of selectedItems) {
+          for (const item of topAssemblies) {
             try {
-              if (item.type === 'part') {
-                await axios.delete(`${API_BASE_URL}/recycle-bin/parts/${item.id}/permanent-delete`);
-                successCount++;
-              } else if (item.type === 'assembly') {
-                await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
-                successCount++;
-              }
+              await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
+              successCount++;
             } catch (error) {
               errorCount++;
-              console.error(`Error deleting ${item.type}:`, error);
+              console.error("Error deleting assembly:", error);
+            }
+          }
+
+          for (const item of standaloneParts) {
+            try {
+              await axios.delete(`${API_BASE_URL}/recycle-bin/parts/${item.id}/permanent-delete`);
+              successCount++;
+            } catch (error) {
+              errorCount++;
+              console.error("Error deleting part:", error);
             }
           }
 
@@ -397,79 +503,24 @@ const Recyclebin = ({ orderId }) => {
     });
   };
 
-  const onCheck = (checkedKeys, info) => {
-    // If an assembly is checked, auto-select all its parts and child assemblies
-    if (info.node && info.node.key && info.node.key.startsWith('assembly-')) {
-      const assemblyId = parseInt(info.node.key.replace('assembly-', ''));
-      const assembly = allAssemblies.find(a => a.id === assemblyId);
+  const onCheck = (checkedKeysValue, info) => {
+    const keys = Array.isArray(checkedKeysValue)
+      ? checkedKeysValue
+      : checkedKeysValue.checked;
 
-      if (assembly && info.checked) {
-        // Collect all parts and child assemblies for this assembly
-        const keysToAdd = collectAssemblyChildrenKeys(assembly);
-        const newCheckedKeys = Array.from(new Set([...checkedKeys, ...keysToAdd]));
-        setCheckedKeys(newCheckedKeys);
-
-        const items = [];
-        newCheckedKeys.forEach(key => {
-          if (key.startsWith('part-')) {
-            const partId = parseInt(key.replace('part-', ''));
-            const part = allParts.find(p => p.id === partId);
-            if (part) {
-              items.push({ id: partId, type: 'part', ...part });
-            }
-          } else if (key.startsWith('assembly-')) {
-            const asmId = parseInt(key.replace('assembly-', ''));
-            const asm = allAssemblies.find(a => a.id === asmId);
-            if (asm) {
-              items.push({ id: asmId, type: 'assembly', ...asm });
-            }
-          }
-        });
-        setSelectedItems(items);
+    if (info?.node?.key?.startsWith("assembly-") && info.checked) {
+      const assemblyId = parseInt(info.node.key.replace("assembly-", ""), 10);
+      const assembly = findAssemblyById(assemblyId);
+      if (assembly) {
+        const mergedKeys = Array.from(new Set([...keys, ...collectAssemblyChildrenKeys(assembly)]));
+        setCheckedKeys(mergedKeys);
+        setSelectedItems(buildSelectedItems(mergedKeys));
         return;
       }
     }
 
-    setCheckedKeys(checkedKeys);
-
-    const items = [];
-    checkedKeys.forEach(key => {
-      if (key.startsWith('part-')) {
-        const partId = parseInt(key.replace('part-', ''));
-        const part = allParts.find(p => p.id === partId);
-        if (part) {
-          items.push({ id: partId, type: 'part', ...part });
-        }
-      } else if (key.startsWith('assembly-')) {
-        const assemblyId = parseInt(key.replace('assembly-', ''));
-        const assembly = allAssemblies.find(a => a.id === assemblyId);
-        if (assembly) {
-          items.push({ id: assemblyId, type: 'assembly', ...assembly });
-        }
-      }
-    });
-    setSelectedItems(items);
-  };
-
-  const collectAssemblyChildrenKeys = (assembly) => {
-    const keys = [];
-    keys.push(`assembly-${assembly.id}`);
-
-    // Add parts
-    if (assembly.parts && assembly.parts.length > 0) {
-      assembly.parts.forEach(part => {
-        keys.push(`part-${part.id}`);
-      });
-    }
-
-    // Add child assemblies recursively
-    if (assembly.child_assemblies && assembly.child_assemblies.length > 0) {
-      assembly.child_assemblies.forEach(child => {
-        keys.push(...collectAssemblyChildrenKeys(child));
-      });
-    }
-
-    return keys;
+    setCheckedKeys(keys);
+    setSelectedItems(buildSelectedItems(keys));
   };
 
   const buildBOMTreeData = (data) => {
@@ -480,11 +531,8 @@ const Recyclebin = ({ orderId }) => {
     const parts = data.parts || [];
     
     const treeData = [];
-    
-    // Product node
     const productChildren = [];
     
-    // Add assemblies (only if in recycle bin or have children in recycle bin)
     assemblies.forEach(assembly => {
       const assemblyNode = buildAssemblyTreeNode(assembly);
       if (assemblyNode) {
@@ -492,9 +540,9 @@ const Recyclebin = ({ orderId }) => {
       }
     });
     
-    // Add direct parts (parts without assembly)
     parts.forEach(part => {
-      if (!part.assembly_id) {
+      if (!part.assembly_id && part.recycle_bin) {
+        const restoreBlocked = isPartRestoreBlocked(part);
         productChildren.push({
           title: (
             <div className="flex items-center justify-between w-full pr-2">
@@ -507,6 +555,7 @@ const Recyclebin = ({ orderId }) => {
                   type="text"
                   size="small"
                   icon={<UndoOutlined />}
+                  disabled={restoreBlocked}
                   onClick={(e) => { e.stopPropagation(); handleRestore(part, 'part'); }}
                   className="text-green-600"
                 />
@@ -522,11 +571,11 @@ const Recyclebin = ({ orderId }) => {
           ),
           key: `part-${part.id}`,
           isLeaf: true,
+          disableCheckbox: restoreBlocked,
         });
       }
     });
     
-    // Only return product node if it has children in recycle bin
     if (treeData.length > 0 || productChildren.length > 0) {
       return [{
         title: (
@@ -548,21 +597,26 @@ const Recyclebin = ({ orderId }) => {
     
     const children = [];
     
-    // Add parts in this assembly
     if (assembly.parts && assembly.parts.length > 0) {
       assembly.parts.forEach(part => {
+        if (!part.recycle_bin) return;
+        const restoreBlocked = isPartRestoreBlocked(part);
         children.push({
           title: (
             <div className="flex items-center justify-between w-full pr-2">
               <span className="flex items-center gap-2">
                 <span>{part.part_name}</span>
                 <Tag color="blue" className="text-xs">{part.part_number}</Tag>
+                {restoreBlocked && (
+                  <Tag color="default" className="text-xs">Restore parent assembly first</Tag>
+                )}
               </span>
               <div className="flex gap-1 items-center">
                 <Button
                   type="text"
                   size="small"
                   icon={<UndoOutlined />}
+                  disabled={restoreBlocked}
                   onClick={(e) => { e.stopPropagation(); handleRestore(part, 'part'); }}
                   className="text-green-600"
                 />
@@ -578,11 +632,11 @@ const Recyclebin = ({ orderId }) => {
           ),
           key: `part-${part.id}`,
           isLeaf: true,
+          disableCheckbox: restoreBlocked,
         });
       });
     }
     
-    // Add child assemblies recursively
     if (assembly.child_assemblies && assembly.child_assemblies.length > 0) {
       assembly.child_assemblies.forEach(child => {
         const childNode = buildAssemblyTreeNode(child);
@@ -592,7 +646,6 @@ const Recyclebin = ({ orderId }) => {
       });
     }
     
-    // Only return assembly node if it's in recycle bin or has children
     if (assembly.recycle_bin || children.length > 0) {
       return {
         title: (
@@ -635,7 +688,6 @@ const Recyclebin = ({ orderId }) => {
   useEffect(() => {
     fetchProjects();
     
-    // Handle responsive layout
     const handleResize = () => {
       setIsMobile(window.innerWidth < 1024);
     };
@@ -652,7 +704,6 @@ const Recyclebin = ({ orderId }) => {
         setFilteredBomData(bomData);
         setExpandedKeys(['product-' + bomData.product.id]);
       } else {
-        // Filter the BOM tree based on search text and collect keys to expand
         const searchLower = searchText.toLowerCase();
         const keysToExpand = new Set(['product-' + bomData.product.id]);
         
@@ -887,7 +938,6 @@ const Recyclebin = ({ orderId }) => {
                   defaultExpandAll
                   showLine
                   checkable
-                  checkStrictly
                   checkedKeys={checkedKeys}
                   onCheck={onCheck}
                   switcherIcon={({ expanded }) => expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}

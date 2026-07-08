@@ -72,7 +72,7 @@ const RawMaterialInventoryView = ({
   searchText = "", refreshKey = 0,
   fMaterial = [], fSource = [], fOrder = [],
   fPart = [], fStockStatus = [], fUnitStatus = [],
-  onFilterOptionsReady, onRowsReady,
+  onFilterOptionsReady, onRowsReady, onInventoryDataReady,
 }) => {
   const [inventoryData, setInventoryData] = useState([]);
   const [allStock, setAllStock] = useState({});
@@ -80,6 +80,18 @@ const RawMaterialInventoryView = ({
   const [loading, setLoading] = useState(false);
   const [addStockModal, setAddStockModal] = useState({ open: false, material: null });
   const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null });
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
   // ── Column header filters ──────────────────────────────────────────────────
   const [colProcess, setColProcess] = useState([]);
   const [colForm, setColForm] = useState([]);
@@ -90,7 +102,10 @@ const RawMaterialInventoryView = ({
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`);
+      const uid = getCurrentUserId();
+      const r = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, {
+        params: uid != null ? { admin_id: uid } : undefined,
+      });
       const data = r.data || [];
       // Build stock and unit maps from the nested response
       const stockMap = {};
@@ -104,6 +119,7 @@ const RawMaterialInventoryView = ({
       setAllStock(stockMap);
       setAllUnits(unitMap);
       setInventoryData(data);
+      if (onInventoryDataReady) onInventoryDataReady(data);
     } finally {
       setLoading(false);
     }
@@ -201,6 +217,7 @@ const RawMaterialInventoryView = ({
       const matchesMaterial = !searchText || material.material_name?.toLowerCase().includes(searchLow);
 
       const matchingStocks = stocks.filter((s) => {
+        if (s.status === "not_available") return false;
         if (srcArr.length > 0 && !srcArr.includes(s.source_type)) return false;
         if (ssArr.length > 0 && !ssArr.includes(s.status)) return false;
         if (colProcess.length > 0 && !colProcess.includes(s.process_type)) return false;
@@ -242,13 +259,13 @@ const RawMaterialInventoryView = ({
 
       let matTotalRows = 0;
       matchingStocks.forEach((s) => {
-        const units = (allUnits[s.id] || []).filter(u => (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
+        const units = (allUnits[s.id] || []).filter(u => u.status !== "exhausted" && (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
         matTotalRows += units.length > 0 ? units.length : 1;
       });
 
       let matFirstRow = true;
       matchingStocks.forEach((stock) => {
-        const units = (allUnits[stock.id] || []).filter(u => (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
+        const units = (allUnits[stock.id] || []).filter(u => u.status !== "exhausted" && (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
         const stockRowSpan = units.length > 0 ? units.length : 1;
 
         if (units.length === 0) {

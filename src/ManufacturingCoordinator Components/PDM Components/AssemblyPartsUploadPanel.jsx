@@ -378,11 +378,11 @@ const AssemblyPartsUploadPanel = ({
     
     setDeletingParts(true);
     try {
-      const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-assembly/${selectedItem.id}`);
+      const response = await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${selectedItem.id}/soft-delete-parts`);
       const { deleted_count, part_ids } = response.data;
       
       if (deleted_count > 0) {
-        message.success(`${deleted_count} part(s) deleted successfully`);
+        message.success(`${deleted_count} part(s) moved to recycle bin`);
         onPartsCreated?.(); // Refresh parts list if callback exists
       } else {
         message.info("No parts found to delete for this assembly");

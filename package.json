@@ -80,8 +80,6 @@
     "zustand": "^4.5.5",
     "highcharts": "^11.4.8",
     "highcharts-react-official": "^3.2.1",
-    "echarts": "^5.5.1",
-    "echarts-for-react": "^3.0.2",
     "react-qr-code": "^2.0.15",
     "html2canvas": "^1.4.1",
     "styled-components": "^6.1.13",

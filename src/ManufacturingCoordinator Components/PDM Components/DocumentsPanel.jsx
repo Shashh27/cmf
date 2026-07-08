@@ -456,32 +456,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     message.success(type === 'operation' ? `Operation "${newItem.operation_name}" created successfully!` : `Document "${newItem.document_name}" created successfully!`);
     await fetchDocuments(); setImportOperations([]);
   };
-   
-
-  const handleDownloadTemplate = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/operations/template/download`, {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'Operations_Template.docx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      message.success('Template downloaded successfully');
-    } catch (e) {
-      console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to download template';
-      message.error(detail);
-    }
-  };
-
 
   const onOperationDragEnd = async ({ active, over }) => {
     if (active.id !== over?.id) {

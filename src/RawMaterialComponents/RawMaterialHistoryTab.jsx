@@ -535,8 +535,10 @@ const RawMaterialHistoryTab = () => {
               <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Date Range:</Text>
               <RangePicker
                 size="small"
-                style={{ width: 200 }}
+                style={{ width: 240 }}
                 value={[startDate, endDate]}
+                format="YYYY-MM-DD"
+                placeholder={['Start Date', 'End Date']}
                 onChange={(dates) => {
                   setStartDate(dates ? dates[0] : null);
                   setEndDate(dates ? dates[1] : null);

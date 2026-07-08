@@ -196,8 +196,8 @@ const AccessControl = () => {
         const password = text || '';
         const isVisible = visiblePasswords[record.id];
         const displayText = isVisible
-          ? (password || 'Not Returned by API')
-          : (password ? '••••••••' : 'Not Returned by API');
+          ? (password || 'Not set')
+          : (password ? '••••••••' : 'Not set');
         return (
           <Space>
             <span>{displayText}</span>

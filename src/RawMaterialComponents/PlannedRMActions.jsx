@@ -3,10 +3,15 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Button, Modal, Select, App, Spin, Tag, Typography, Space } from "antd";
 import { LinkOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, DisconnectOutlined, ShoppingCartOutlined } from "@ant-design/icons";
+import {
+  filterUnitsForPlanned,
+  getEligibleGeneralStocks,
+  stockMeetsPlannedCrossSection,
+} from "./stockPlanningUtils";
 
 const { Text } = Typography;
 
-const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSaved, materialExists, linkedStock, isProcured, updateLinkedStock, onRefresh }) => {
+const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSaved, materialExists, linkedStock, isProcured, updateLinkedStock, onRefresh, onRefreshRecommendations }) => {
   const { message } = App.useApp();
   const [generalStock, setGeneralStock] = useState([]);
   const [loadingStock, setLoadingStock] = useState(false);
@@ -29,6 +34,25 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
 
   // Get planned length from planningData
   const plannedLength = planningData?.[row.key]?.dimensions?.length || null;
+  const plannedDims = planningData?.[row.key]?.dimensions || {};
+  const plannedFormType = planningData?.[row.key]?.formType;
+
+  const eligibleRecommendations = useMemo(
+    () => (recommendations || []).filter((rec) => rec.status !== 'unavailable'),
+    [recommendations],
+  );
+
+  const eligibleGeneralStock = useMemo(
+    () => getEligibleGeneralStocks(
+      generalStock,
+      stockUnits,
+      plannedDims,
+      plannedFormType,
+      plannedLength,
+      linkedStock?.unitId,
+    ),
+    [generalStock, stockUnits, plannedDims, plannedFormType, plannedLength, linkedStock?.unitId],
+  );
 
   // Check if raw material is planned and saved
   const isMaterialPlanned = isSaved;
@@ -100,6 +124,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           fetchGeneralStock();
           dispatchRMChanged();
           if (onRefresh) onRefresh();
+          if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
           message.error('Failed to unlink stock');
         } finally {
@@ -166,6 +191,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           fetchGeneralStock();
           dispatchRMChanged();
           if (onRefresh) onRefresh();
+          if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
           message.error('Failed to link stock');
         } finally {
@@ -320,19 +346,21 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       ) : null}
 
       {/* Recommended Stocks - show if not already assigned and recommendations exist with available units */}
-      {!linkedStock && recommendations && recommendations.length > 0 && recommendations.some(rec => rec.status === 'available') && (
+      {!linkedStock && eligibleRecommendations.length > 0 && (
         <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
           <Text style={{ color: '#1890ff', fontSize: isMobile ? 9 : 10, fontWeight: 600, display: 'block', marginBottom: 2 }}>
-            Recommended Stocks:
+            Recommended Stocks (nearest fit):
           </Text>
-          {recommendations.filter(rec => rec.status === 'available').slice(0, 3).map((rec, idx) => (
+          {eligibleRecommendations.slice(0, 3).map((rec, idx) => (
             <div key={idx} style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
-              {rec.stock_size} (Score: {Math.round(rec.match_score * 100)}%)
+              {rec.stock_size}
+              {rec.nearest_fit != null ? ` (+${rec.nearest_fit} mm)` : ''}
+              {rec.best_remaining_length != null ? `, best remaining: ${rec.best_remaining_length} mm` : ''}
             </div>
           ))}
-          {recommendations.filter(rec => rec.status === 'available').length > 3 && (
+          {eligibleRecommendations.length > 3 && (
             <Text style={{ fontSize: isMobile ? 8 : 9, color: '#999' }}>
-              +{recommendations.filter(rec => rec.status === 'available').length - 3} more
+              +{eligibleRecommendations.length - 3} more
             </Text>
           )}
         </div>
@@ -404,26 +432,28 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         </div>
         
         {/* Recommended Stocks Section - show if not already assigned and recommendations exist with available units */}
-        {!linkedStock && recommendations && recommendations.length > 0 && recommendations.some(rec => rec.status === 'available') && (
+        {!linkedStock && eligibleRecommendations.length > 0 && (
           <div style={{ marginBottom: 24, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
-            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks :</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (nearest fit, ≥ planned size):</Text>
             <div style={{ marginTop: 8, maxHeight: '300px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, border: '1px solid #b3d9ff' }}>
                 <thead style={{ backgroundColor: '#e6f7ff' }}>
                   <tr>
                     <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Stock ID</th>
                     <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Stock Size</th>
-                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Match Score</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Excess (mm)</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Best Remaining (mm)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {recommendations.filter(rec => rec.status === 'available').map((rec, idx) => (
+                  {eligibleRecommendations.map((rec, idx) => (
                     <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? 'white' : '#f9f9f9' }}>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_id}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_size}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>
-                        <Tag color="green" style={{ margin: 0 }}>{Math.round(rec.match_score * 100)}%</Tag>
+                        <Tag color="green" style={{ margin: 0 }}>{rec.nearest_fit ?? 0}</Tag>
                       </td>
+                      <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.best_remaining_length ?? rec.max_remaining_length ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -439,6 +469,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
             <Spin style={{ marginLeft: 16 }} />
           ) : generalStock.length === 0 ? (
             <Text style={{ marginLeft: 16, color: '#999' }}>No general stock available</Text>
+          ) : eligibleGeneralStock.length === 0 ? (
+            <Text style={{ marginLeft: 16, color: '#999' }}>
+              No stock meets planned dimensions and required length ({plannedLength ? `${plannedLength} mm` : 'not set'})
+            </Text>
           ) : (
             <div style={{ marginTop: 8, maxHeight: '400px', overflowY: 'auto' }}>
               <table style={{ 
@@ -466,33 +500,18 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                   </tr>
                 </thead>
                 <tbody>
-                  {generalStock.map((stock) => {
+                  {eligibleGeneralStock.map((stock) => {
                     const units = stockUnits[stock.id] || [];
-                    const plannedDims = planningData?.[row.key]?.dimensions || {};
-                    const plannedFormType = planningData?.[row.key]?.formType;
+                    if (!stockMeetsPlannedCrossSection(stock, plannedDims, plannedFormType)) return null;
 
-                    // Skip stocks whose cross-section is smaller than planned dimensions
-                    if (plannedFormType === 'Round' && plannedDims.diameter) {
-                      if ((stock.diameter || 0) < plannedDims.diameter) return null;
-                    } else if (plannedFormType === 'Square' && (plannedDims.breadth || plannedDims.height)) {
-                      if ((stock.breadth || 0) < (plannedDims.breadth || 0)) return null;
-                      if ((stock.height || 0) < (plannedDims.height || 0)) return null;
-                    } else if (plannedFormType === 'Pipe' && plannedDims.outer_diameter) {
-                      if ((stock.outer_diameter || 0) < plannedDims.outer_diameter) return null;
-                    }
-
-                    // Filter units: exclude exhausted units and units with insufficient remaining length
-                    const filteredUnits = units.filter(unit => {
-                      if (linkedStock && linkedStock.unitId === unit.id) return true; // always show currently linked unit
-                      if (unit.status === 'exhausted') return false;
-                      if (plannedLength && unit.remaining_length < plannedLength) return false;
-                      return true;
-                    });
+                    const filteredUnits = filterUnitsForPlanned(
+                      units,
+                      plannedLength,
+                      linkedStock?.unitId,
+                    );
                     const hasFilteredUnits = filteredUnits.length > 0;
-                    
-                    // Skip stocks that have no available units
                     if (!hasFilteredUnits) return null;
-                    
+
                     return (
                       <React.Fragment key={stock.id}>
                         {hasFilteredUnits ? (

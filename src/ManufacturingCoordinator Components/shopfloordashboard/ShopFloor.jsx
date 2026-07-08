@@ -4,7 +4,6 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Button, Modal, Tag, Descriptions } from 'antd'
 import * as THREE from 'three'
-import axios from 'axios'
 import FactoryScene from './FactoryScene'
 import MachineGrid from './MachineGrid'
 import { API_BASE_URL } from '../../Config/auth'
@@ -44,6 +43,12 @@ const FLOOR_MAX_H = 22        // below roof, above machines
 const CAM_MIN_Y = 1.5
 const CAM_MIN_DIST = 3          // close-up on a single machine
 const CAM_MAX_DIST = 95         // full hall overview (FW=80, FD=64, fov=50)
+
+function getMachinesWsUrl() {
+  const url = new URL(`${API_BASE_URL}/machines/ws`)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
 
 function BoundedOrbitControls({ controlsRef }) {
   const clampCamera = useCallback(() => {
@@ -330,23 +335,45 @@ export default function ShopFloor() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  useEffect(() => { fetchMachines() }, [])
+  useEffect(() => {
+    let socket
+    let reconnectTimer
+    let closed = false
 
-  const fetchMachines = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/machines/`)
-      const data = response.data || []
-      setAllMachines(data)
-      const { machines: laidOut, workCenters: wcMap, zones } = buildLayout(data, selectedWorkCenter)
-      setWorkCenters(wcMap)
-      setWorkCenterZones(zones)
-      setMachines(laidOut)
-    } catch (error) {
-      console.error('Failed to fetch machines:', error)
-    } finally {
-      setLoading(false)
+    const connectSocket = () => {
+      socket = new WebSocket(getMachinesWsUrl())
+
+      socket.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data)
+          const normalized = Array.isArray(data) ? data : []
+          setAllMachines(normalized)
+          setLoading(false)
+        } catch (error) {
+          console.error('Failed to parse machines websocket payload:', error)
+          setLoading(false)
+        }
+      }
+
+      socket.onerror = () => {
+        setLoading(false)
+      }
+
+      socket.onclose = () => {
+        if (!closed) {
+          reconnectTimer = window.setTimeout(connectSocket, 5000)
+        }
+      }
     }
-  }
+
+    connectSocket()
+
+    return () => {
+      closed = true
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close()
+    }
+  }, [])
 
   useEffect(() => {
     if (!allMachines.length) return

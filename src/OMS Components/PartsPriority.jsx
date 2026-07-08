@@ -15,6 +15,7 @@ import axios from "axios";
 import Lottie from "lottie-react";
 import { API_BASE_URL } from "../Config/auth";
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig";
+import { filterLiveInHouseParts } from "./partPriorityUtils";
 import { PartWisePriorityPdfDownload } from "../DownloadReports/PartsPriorityPdfDownload";
 
 // small, hand-built local Lottie animations (no external network calls) —
@@ -54,6 +55,84 @@ const Row = (props) => {
   return <tr {...props} ref={setNodeRef} style={style} {...attributes} {...listeners} />;
 };
 
+// ─── priority swap auth (self-contained — no extra files needed) ─────────────
+
+const SESSION_CHANGER_KEY = "priority_changer_user_id";
+
+function parseSwapUserId(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const id = obj.id ?? obj.user_id ?? obj.userId ?? obj.access_user_id ?? null;
+  if (id == null || id === "") return null;
+  const numeric = Number(id);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function getPriorityChangerUserId() {
+  try {
+    const cached = sessionStorage.getItem(SESSION_CHANGER_KEY);
+    if (cached) {
+      const n = Number(cached);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    const fromLogin = parseSwapUserId(user);
+    if (fromLogin) return fromLogin;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolvePriorityChangerUserId() {
+  const existing = getPriorityChangerUserId();
+  if (existing) return existing;
+  const entered = window.prompt(
+    "Priority swap needs your user ID (admin or manufacturing coordinator).\n" +
+      "Enter your access-control user ID (e.g. 16):"
+  );
+  if (!entered) return null;
+  const numeric = Number(String(entered).trim());
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  sessionStorage.setItem(SESSION_CHANGER_KEY, String(numeric));
+  return numeric;
+}
+
+function formatPriorityChangerRole(role) {
+  if (role === "manufacturing_coordinator") return "Manufacturing Coordinator";
+  if (role === "admin") return "Admin";
+  return role || "User";
+}
+
+function getPriorityChangeAuditText(data) {
+  if (!data?.name) return null;
+  const role = formatPriorityChangerRole(data.priority_changed_by);
+  const at = data.priority_changed_at
+    ? new Date(data.priority_changed_at).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : null;
+  return at
+    ? `Priority changed by ${data.name} (${role}) on ${at}`
+    : `Priority changed by ${data.name} (${role})`;
+}
+
+async function buildPrioritySwapPayload(id1, id2) {
+  const priority_changed_by_id = await resolvePriorityChangerUserId();
+  if (!priority_changed_by_id) {
+    return {
+      error:
+        "User ID is required for priority swap. Enter a valid admin / manufacturing coordinator user ID.",
+    };
+  }
+  return { payload: { id1, id2, priority_changed_by_id } };
+}
+
 // ─── component ───────────────────────────────────────────────────────────────
 
 const PartsPriority = () => {
@@ -82,13 +161,15 @@ const PartsPriority = () => {
     if (swapModal.phase === "result") setSimActiveTab("overview");
   }, [swapModal.phase]);
 
-  const getCurrentUserId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const u = JSON.parse(stored);
-      return u?.id ?? null;
-    } catch { return null; }
+  const getCurrentUserId = () => getPriorityChangerUserId();
+
+  const requirePriorityChangerId = () => {
+    const id = getCurrentUserId();
+    if (!id) {
+      messageApi.error("User session not found. Please log in again.");
+      return null;
+    }
+    return id;
   };
 
   const formatApiDetail = (detail) => {
@@ -105,10 +186,7 @@ const PartsPriority = () => {
       const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/all`, {
         params: uid != null ? { admin_id: uid } : undefined,
       });
-      const filtered = (response.data || []).filter(
-        (item) => item.part_type_name?.toLowerCase() === "in-house"
-      );
-      setPartData(filtered);
+      setPartData(filterLiveInHouseParts(response.data));
     } catch (error) {
       console.error("Error fetching data:", error);
       messageApi.error("Error connecting to server");
@@ -261,6 +339,11 @@ const PartsPriority = () => {
               </ul>
             </div>
           )}
+          {getPriorityChangeAuditText(data) && (
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 12, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+              {getPriorityChangeAuditText(data)}
+            </div>
+          )}
         </div>
       ),
     });
@@ -268,11 +351,23 @@ const PartsPriority = () => {
 
   const commitSwap = async () => {
     const { sourcePart, targetPartId, pendingDragContext } = swapModal;
+    const built = await buildPrioritySwapPayload(sourcePart.id, targetPartId);
+    if (built.error) {
+      messageApi.error(built.error);
+      setSwapModal(s => ({ ...s, phase: "result" }));
+      return;
+    }
+    const { id1, id2, priority_changed_by_id } = built.payload;
+    if (!priority_changed_by_id) {
+      messageApi.error("User ID is required for priority swap. Log in again or enter a valid user ID.");
+      setSwapModal(s => ({ ...s, phase: "result" }));
+      return;
+    }
     setSwapModal(s => ({ ...s, phase: "committing" }));
-    try { 
+    try {
       const res = await axios.put(
         `${SCHEDULING_API_BASE_URL}/scheduling/part-priorities/swap`,
-        { id1: sourcePart.id, id2: targetPartId },
+        { id1, id2, priority_changed_by_id },
         { headers: { "Content-Type": "application/json" } }
       );
 

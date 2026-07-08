@@ -106,7 +106,7 @@ const ProductionCompletion = () => {
 
       const supervisorLogs = allLogs.filter(
         (log) =>
-          (log.supervisor_id === null || String(log.supervisor_id) === String(supervisorId)) &&
+          (log.user_id === supervisorId || log.reviewer?.id === supervisorId) &&
           log.operator_status?.toLowerCase() !== 'inprogress'
       );
 
@@ -115,12 +115,11 @@ const ProductionCompletion = () => {
       const enrichedLogs = supervisorLogs.map((log) => ({
         ...log,
         planned_schedule_item: {
-          ...log.planned_schedule_item,
           machine_name: log.machine?.make && log.machine?.model
             ? `(${log.machine.make}) ${log.machine.model}`
-            : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A',
-          operation_name: log.operation?.operation_name || log.operation?.name || 'N/A',
-          operation_number: log.operation?.operation_number || log.operation?.number || 'N/A',
+            : log.machine?.make || log.machine?.model || 'N/A',
+          operation_name: log.operation?.operation_name || 'N/A',
+          operation_number: log.operation?.operation_number || 'N/A',
         },
         operator_name: log.operator?.user_name || `Operator #${log.operator_id}`,
       }));

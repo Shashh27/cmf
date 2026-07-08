@@ -30,7 +30,10 @@ const MachineCard = ({ machine }) => {
   const [activeKeys, setActiveKeys] = useState([]);
 
   // Group operations by parts
-  const partsWithOperations = machine.parts_operations.reduce((acc, op) => {
+  const partsOperations = Array.isArray(machine.parts_operations) ? machine.parts_operations : [];
+  const machineOrders = Array.isArray(machine.orders) ? machine.orders : [];
+
+  const partsWithOperations = partsOperations.reduce((acc, op) => {
     if (!acc[op.part_id]) {
       acc[op.part_id] = {
         part_id: op.part_id,
@@ -54,7 +57,7 @@ const MachineCard = ({ machine }) => {
   const partsList = Object.values(partsWithOperations);
 
   // Group parts by order
-  const ordersWithParts = machine.orders.reduce((acc, order) => {
+  const ordersWithParts = machineOrders.reduce((acc, order) => {
     const orderParts = partsList.filter(part => part.order_id === order.order_id);
     if (orderParts.length > 0) {
       acc.push({
@@ -86,15 +89,16 @@ const MachineCard = ({ machine }) => {
 
   const getMachineStatusColor = (status) => {
     const statusColors = {
-      'off': '#ff4d4f',
-      'on': '#52c41a', 
-      'idle': '#faad14',
-      'production': '#1890ff',
-      'Running': '#52c41a',
-      'In Operation': '#1890ff',
-      'Idle': '#faad14',
-      'Stopped': '#ff4d4f',
-      'Maintenance': '#fa8c16'
+      'off': '#6b7c8f',
+      'on': '#f59e0b',
+      'idle': '#f59e0b',
+      'production': '#22c55e',
+      'Running': '#22c55e',
+      'In Operation': '#22c55e',
+      'Idle': '#f59e0b',
+      'Stopped': '#6b7c8f',
+      'Maintenance': '#ef4444',
+      'maintenance': '#ef4444'
     };
     return statusColors[status] || '#d9d9d9';
   };
@@ -105,7 +109,7 @@ const MachineCard = ({ machine }) => {
       'on': <PlayCircleOutlined />,
       'idle': <PauseCircleOutlined />,
       'production': <RocketOutlined />,
-      
+      'maintenance': <ToolOutlined />,
     };
     return statusIcons[status] || <InfoCircleOutlined />;
   };
@@ -113,10 +117,10 @@ const MachineCard = ({ machine }) => {
   const getMachineStatusText = (status) => {
     const statusTexts = {
       'off': 'OFF',
-      'on': 'ON',
+      'on': 'IDLE',
       'idle': 'IDLE',
       'production': 'PRODUCTION',
-     
+      'maintenance': 'MAINTENANCE',
     };
     return statusTexts[status] || 'UNKNOWN';
   };
@@ -251,7 +255,7 @@ const MachineCard = ({ machine }) => {
             <div style={{ marginBottom: 6, height: '40px', overflow: 'hidden' }}>
               <Space style={{ width: '100%' }}>
                 <SettingOutlined style={{ fontSize: '12px', color: '#1890ff', flexShrink: 0 }} />
-                <Tooltip title={`${machine.machine_make} ${machine.machine_model}`}>
+                <Tooltip title={`${machine.machine_make || ''} ${machine.machine_model || ''}`.trim()}>
                   <span style={{ 
                     fontSize: '12px', 
                     fontWeight: 600, 
@@ -263,7 +267,7 @@ const MachineCard = ({ machine }) => {
                     textOverflow: 'ellipsis',
                     maxWidth: 'calc(100% - 20px)'
                   }}>
-                    {machine.machine_make} {machine.machine_model}
+                    {[machine.machine_make, machine.machine_model].filter(Boolean).join(' ') || 'Unknown Machine'}
                   </span>
                 </Tooltip>
               </Space>
@@ -295,7 +299,7 @@ const MachineCard = ({ machine }) => {
                 textAlign: 'center'
               }}>
                 <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
-                  {machine.total_orders}
+                  {machine.total_orders || 0}
                 </div>
                 <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Orders</div>
               </div>
@@ -319,7 +323,7 @@ const MachineCard = ({ machine }) => {
                 textAlign: 'center'
               }}>
                 <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
-                  {machine.total_operations}
+                  {machine.total_operations || 0}
                 </div>
                 <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Operations</div>
               </div>
@@ -344,15 +348,14 @@ const MachineCard = ({ machine }) => {
         </Card>
 
         <Modal
-          title={
-            <span style={{ fontWeight: 600, fontSize: 16 }}>{machine.machine_make} {machine.machine_model}</span>
-          }
+          title={<span style={{ fontWeight: 600, fontSize: 16 }}>{[machine.machine_make, machine.machine_model].filter(Boolean).join(' ') || 'Machine Details'}</span>}
           open={drawerVisible}
           onCancel={() => setDrawerVisible(false)}
           footer={null}
           width={{ xs: '95%', sm: '80%', md: '70%', lg: '60%', xl: '50%' }}
           style={{ top: 10 }}
         >
+          {ordersWithParts.length > 0 ? (
           <Tabs
             defaultActiveKey="0"
             size="small"
@@ -457,28 +460,23 @@ const MachineCard = ({ machine }) => {
               )
             }))}
           />
+          ) : (
+            <div style={{ padding: '8px 0 0' }}>
+              <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12 }}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <div><strong>Status:</strong> {getMachineStatusText(machine.machine_status?.status || 'off')}</div>
+                  <div><strong>Work Center:</strong> {machine.work_center || 'N/A'}</div>
+                  <div><strong>Type:</strong> {machine.machine_type || 'N/A'}</div>
+                  <div><strong>Order:</strong> {machine.orders?.[0]?.sale_order_number || 'N/A'}</div>
+                  <div><strong>Part:</strong> {partsOperations[0]?.part_number || 'N/A'}</div>
+                  <div><strong>Operation:</strong> {partsOperations[0]?.operation_name || 'N/A'}</div>
+                </Space>
+              </div>
+            </div>
+          )}
         </Modal>
     </>
   );
-};
-
-// Function to assign random status to machines for demonstration
-const assignRandomMachineStatus = (machine) => {
-  const statuses = ['off', 'on', 'idle', 'production'];
-  const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-  
-  // If machine already has a status, use it, otherwise assign random
-  if (machine.machine_status && machine.machine_status.status) {
-    return machine;
-  }
-  
-  return {
-    ...machine,
-    machine_status: {
-      ...machine.machine_status,
-      status: randomStatus
-    }
-  };
 };
 
 // MachineGrid Component
@@ -486,8 +484,13 @@ const MachineGrid = ({ machines, onBack }) => {
   const [searchText, setSearchText] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('all');
 
-  // Assign random statuses to machines for demo
-  const machinesWithStatus = machines.map(assignRandomMachineStatus);
+  const machinesWithStatus = machines.map(machine => ({
+    ...machine,
+    machine_status: {
+      ...machine.machine_status,
+      status: machine.machine_status?.status || 'off'
+    }
+  }));
 
   const filteredMachines = machinesWithStatus.filter(machine => {
     const matchesSearch = 
@@ -504,10 +507,10 @@ const MachineGrid = ({ machines, onBack }) => {
 
   const statusOptions = [
     { label: 'All', value: 'all' },
-    { label: 'ON', value: 'on' },
-    { label: 'OFF', value: 'off' },
     { label: 'IDLE', value: 'idle' },
+    { label: 'OFF', value: 'off' },
     { label: 'PRODUCTION', value: 'production' },
+    { label: 'MAINTENANCE', value: 'maintenance' },
   
   ];
 

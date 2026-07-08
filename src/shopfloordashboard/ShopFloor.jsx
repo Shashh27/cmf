@@ -4,7 +4,6 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Button, Modal, Tag, Descriptions } from 'antd'
 import * as THREE from 'three'
-import axios from 'axios'
 import FactoryScene from './FactoryScene'
 import MachineGrid from './MachineGrid'
 import { API_BASE_URL } from '../Config/auth'
@@ -44,6 +43,12 @@ const FLOOR_MAX_H = 22        // below roof, above machines
 const CAM_MIN_Y = 1.5
 const CAM_MIN_DIST = 3          // close-up on a single machine
 const CAM_MAX_DIST = 95         // full hall overview (FW=80, FD=64, fov=50)
+
+function getMonitoringWsUrl() {
+  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
 
 function BoundedOrbitControls({ controlsRef }) {
   const clampCamera = useCallback(() => {
@@ -150,7 +155,10 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
 
   const stateCfg = STATUS_CONFIG[machine.status] || { color: '#64748b', label: machine.status || 'Unknown' }
   const wcCfg = workCenters[machine.workCenter] || { color: '#64748b', label: machine.workCenter }
-  const displayName = [machine.make, machine.model].filter(Boolean).join(' ').trim() || 'Machine details'
+  const displayName = [machine.make, machine.model].filter(Boolean).join(' ').trim() || 'Live Order Details'
+  const hasOrderInfo = Boolean(
+    machine.saleOrderNumber || machine.partNumber || machine.operationName || machine.operationNumber
+  )
 
   return (
     <Modal
@@ -173,22 +181,28 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
         <Descriptions.Item label="Status">
           <Tag color={stateCfg.color} style={{ margin: 0 }}>{stateCfg.label}</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="Type">{machine.type || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Make">{machine.make || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Model">{machine.model || '—'}</Descriptions.Item>
-        <Descriptions.Item label="CNC controller">{machine.cncController || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Year installed">{machine.yearOfInstallation || '—'}</Descriptions.Item>
-        {machine.mhr != null && machine.mhr !== '' && (
-          <Descriptions.Item label="MHR">{machine.mhr}</Descriptions.Item>
-        )}
+        <Descriptions.Item label="Last updated">
+          {machine.lastUpdated
+            ? new Date(machine.lastUpdated).toLocaleString('en-IN')
+            : '—'}
+        </Descriptions.Item>
       </Descriptions>
-      {machine.remarks && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Remarks</div>
-          <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-            {machine.remarks}
-          </div>
-        </div>
+      {hasOrderInfo && (
+        <Descriptions
+          bordered
+          size="small"
+          column={1}
+          style={{ marginTop: 12 }}
+          title="Live Order Details"
+          styles={{ label: { width: 140, background: '#fafafa' } }}
+        >
+          <Descriptions.Item label="Sale order">{machine.saleOrderNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Part number">{machine.partNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Operation">{machine.operationName || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Operation no.">{machine.operationNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Completed qty">{machine.completedQty ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="Target qty">{machine.targetQty ?? 0}</Descriptions.Item>
+        </Descriptions>
       )}
     </Modal>
   )
@@ -285,18 +299,24 @@ function buildLayout(apiMachines, filterWorkCenter = 'ALL') {
           const z = startZ + row * ROW_SPACING
 
           machines.push({
-            id: machine.id.toString(),
-            type: (machine.type || '').trim().toUpperCase(),
+            id: machine.machine_id.toString(),
+            type: (machine.machine_type || '').trim().toUpperCase(),
             workCenter: bay.name,
-            workCenterId: machine.work_center_id,
             position: { x, y: 0, z },
-            status: machine.machine_state || 'OFF',
+            status: machine.status || 'OFF',
             make: machine.make,
             model: machine.model,
             cncController: machine.cnc_controller,
             yearOfInstallation: machine.year_of_installation,
             mhr: machine.mhr,
             remarks: machine.remarks,
+            lastUpdated: machine.last_updated,
+            saleOrderNumber: machine.sale_order_number,
+            partNumber: machine.part_number,
+            operationName: machine.operation_name,
+            operationNumber: machine.operation_number,
+            completedQty: machine.completed_qty,
+            targetQty: machine.target_qty,
           })
         })
 
@@ -330,23 +350,45 @@ export default function ShopFloor() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  useEffect(() => { fetchMachines() }, [])
+  useEffect(() => {
+    let socket
+    let reconnectTimer
+    let closed = false
 
-  const fetchMachines = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/machines/`)
-      const data = response.data || []
-      setAllMachines(data)
-      const { machines: laidOut, workCenters: wcMap, zones } = buildLayout(data, selectedWorkCenter)
-      setWorkCenters(wcMap)
-      setWorkCenterZones(zones)
-      setMachines(laidOut)
-    } catch (error) {
-      console.error('Failed to fetch machines:', error)
-    } finally {
-      setLoading(false)
+    const connectSocket = () => {
+      socket = new WebSocket(getMonitoringWsUrl())
+
+      socket.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data)
+          const normalized = Array.isArray(data) ? data : []
+          setAllMachines(normalized)
+          setLoading(false)
+        } catch (error) {
+          console.error('Failed to parse monitoring websocket payload:', error)
+          setLoading(false)
+        }
+      }
+
+      socket.onerror = () => {
+        setLoading(false)
+      }
+
+      socket.onclose = () => {
+        if (!closed) {
+          reconnectTimer = window.setTimeout(connectSocket, 5000)
+        }
+      }
     }
-  }
+
+    connectSocket()
+
+    return () => {
+      closed = true
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close()
+    }
+  }, [])
 
   useEffect(() => {
     if (!allMachines.length) return

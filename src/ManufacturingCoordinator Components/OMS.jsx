@@ -98,7 +98,6 @@ const OMS = () => {
   const getStatusBadge = (status) => {
     const statusConfig = {
       'Pending': { color: "orange", text: "Pending" },
-      'Scheduled': { color: "purple", text: "Scheduled" },
       'In Progress': { color: "blue", text: "In Progress" },
       'Completed': { color: "green", text: "Completed" },
     };
@@ -431,7 +430,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: "status",
       key: "status",
-      filters: ['Pending', 'Scheduled', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
+      filters: ['Pending', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
       onFilter: (value, record) => record.status === value,
       render: (status) => getStatusBadge(status),
     },
@@ -509,7 +508,6 @@ const OMS = () => {
   // KPI stats (calculated from all orders, not filtered)
   const totalOrders = orders.length;
   const pendingCount = orders.filter(o => o.status === 'Pending').length;
-  const scheduledCount = orders.filter(o => o.status === 'Scheduled').length;
   const inProgressCount = orders.filter(o => o.status === 'In Progress').length;
   const completedCount = orders.filter(o => o.status === 'Completed').length;
 

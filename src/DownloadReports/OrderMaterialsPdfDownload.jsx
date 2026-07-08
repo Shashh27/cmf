@@ -10,49 +10,211 @@ import ExcelJS from "exceljs";
 // ---------------------------------------------------------------------------
 
 const fmt = (val) => (val == null || val === "" ? "—" : String(val));
-const fmtCost = (val) => (val != null ? `Rs.${Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—");
+const fmtCost = (val) =>
+  val != null
+    ? `Rs.${Number(val).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : "—";
 const fmtNum = (val, dec = 3) => (val != null ? parseFloat(val).toFixed(dec) : "—");
 
-const buildExportRows = (rows) =>
-  rows.map((row) => ({
-    "Material Name": fmt(row.material_name),
-    "Project Number": row.groupOrderNumbers?.length > 1
-      ? row.groupOrderNumbers.join(", ")
-      : fmt(row.source_order_number),
-    "Part Numbers": row.part_numbers?.length > 0
-      ? [...new Set(row.part_numbers)].join(", ")
-      : "—",
-    "Stock Dimensions": fmt(row.stock_dimensions),
-    "Process Type": fmt(row.process_type),
-    "Form Type": fmt(row.form_type),
-    "Quantity": fmt(row.quantity),
-    "Volume (m³)": fmt(row.volume),
-    "Mass (kg)": fmtNum(row.mass),
-    "Weight (N)": fmtNum(row.weight),
-    "Est. Cost (Rs.)": fmtCost(row.estimated_cost),
-    "Final Cost (Rs.)": fmtCost(row.final_cost),
-    "Vendor": fmt(row.received_vendor_name || row.vendor_name),
-    "Order Status": fmt(row.order_status),
-  }));
+const getMergeGroupId = (row) => {
+  const groupId = row.merge_group_id?.trim?.() || row.merge_group_id;
+  if (!groupId || groupId === "Group") return null;
+  return groupId;
+};
+
+const uniqueJoin = (values, separator = ", ") =>
+  [...new Set((values || []).filter(Boolean).map((v) => String(v).trim()).filter(Boolean))].join(separator) || "—";
+
+const COLUMNS = [
+  "Material Name",
+  "Project Number",
+  "Part Numbers",
+  "Stock Dimensions",
+  "Process Type",
+  "Form Type",
+  "Quantity",
+  "Volume (m³)",
+  "Mass (kg)",
+  "Weight (N)",
+  "Est. Cost (Rs.)",
+  "Final Cost (Rs.)",
+  "Vendor",
+  "Order Status",
+];
+
+/**
+ * Build export rows like the UI:
+ * - Sort merge-group stocks by project so same order sits together
+ * - Project Number rowspan for consecutive same-order rows (89 once for its parts)
+ * - Material / Final Cost / Vendor / Status rowspan once per merge group
+ */
+const buildGroupedExportModel = (rows) => {
+  const model = [];
+  const seenGroups = new Set();
+  let i = 0;
+
+  while (i < rows.length) {
+    const row = rows[i];
+    const groupId = getMergeGroupId(row);
+
+    if (!groupId) {
+      model.push({
+        material: fmt(row.material_name),
+        project: fmt(row.source_order_number),
+        parts: uniqueJoin(row.part_numbers),
+        dimensions: fmt(row.stock_dimensions),
+        process: fmt(row.process_type),
+        form: fmt(row.form_type),
+        quantity: fmt(row.quantity),
+        volume: fmt(row.volume),
+        mass: fmtNum(row.mass),
+        weight: fmtNum(row.weight),
+        estimated: fmtCost(row.estimated_cost),
+        final: fmtCost(row.final_cost),
+        vendor: fmt(row.received_vendor_name || row.vendor_name),
+        status: fmt(row.order_status),
+        materialSpan: 1,
+        projectSpan: 1,
+        sharedSpan: 1,
+        estimated_cost_num: parseFloat(row.estimated_cost) || 0,
+        final_cost_num: parseFloat(row.final_cost) || 0,
+        mass_num: parseFloat(row.mass) || 0,
+        includeFinalInTotal: true,
+      });
+      i += 1;
+      continue;
+    }
+
+    if (seenGroups.has(groupId)) {
+      i += 1;
+      continue;
+    }
+    seenGroups.add(groupId);
+
+    const groupItems = [];
+    for (let j = i; j < rows.length; j += 1) {
+      if (getMergeGroupId(rows[j]) === groupId) groupItems.push(rows[j]);
+    }
+
+    const orderedItems = [...groupItems].sort((a, b) => {
+      const oa = String(a.source_order_number || "");
+      const ob = String(b.source_order_number || "");
+      if (oa !== ob) return oa.localeCompare(ob, undefined, { numeric: true });
+      return (a.id || 0) - (b.id || 0);
+    });
+
+    const span = orderedItems.length;
+    const sharedFinal = orderedItems.find((item) => item.final_cost != null)?.final_cost ?? orderedItems[0].final_cost;
+    const sharedVendor = orderedItems[0].received_vendor_name || orderedItems[0].vendor_name;
+    const sharedStatus = orderedItems[0].order_status;
+    const materialWithGroup = `${fmt(orderedItems[0].material_name)}\n(${groupId})`;
+
+    // Project rowspan for consecutive same-order blocks
+    const projectSpans = orderedItems.map(() => 1);
+    let start = 0;
+    while (start < orderedItems.length) {
+      let end = start + 1;
+      const orderKey = String(orderedItems[start].source_order_number || "");
+      while (
+        end < orderedItems.length
+        && String(orderedItems[end].source_order_number || "") === orderKey
+      ) {
+        end += 1;
+      }
+      projectSpans[start] = end - start;
+      for (let k = start + 1; k < end; k += 1) projectSpans[k] = 0;
+      start = end;
+    }
+
+    orderedItems.forEach((item, idx) => {
+      const isFirst = idx === 0;
+      const projectSpan = projectSpans[idx];
+      model.push({
+        material: isFirst ? materialWithGroup : "",
+        project: projectSpan > 0 ? fmt(item.source_order_number) : "",
+        parts: uniqueJoin(item.part_numbers),
+        dimensions: fmt(item.stock_dimensions),
+        process: fmt(item.process_type),
+        form: fmt(item.form_type),
+        quantity: fmt(item.quantity),
+        volume: fmt(item.volume),
+        mass: fmtNum(item.mass),
+        weight: fmtNum(item.weight),
+        estimated: fmtCost(item.estimated_cost),
+        final: isFirst ? fmtCost(sharedFinal) : "",
+        vendor: isFirst ? fmt(sharedVendor) : "",
+        status: isFirst ? fmt(sharedStatus) : "",
+        materialSpan: isFirst ? span : 0,
+        projectSpan,
+        sharedSpan: isFirst ? span : 0,
+        estimated_cost_num: parseFloat(item.estimated_cost) || 0,
+        final_cost_num: isFirst ? parseFloat(sharedFinal) || 0 : 0,
+        mass_num: parseFloat(item.mass) || 0,
+        includeFinalInTotal: isFirst,
+      });
+    });
+
+    i += groupItems.length;
+  }
+
+  return model;
+};
+
+const computeExportTotals = (model) =>
+  model.reduce(
+    (acc, row) => {
+      acc.totalMass += row.mass_num || 0;
+      acc.totalEst += row.estimated_cost_num || 0;
+      if (row.includeFinalInTotal) acc.totalFinal += row.final_cost_num || 0;
+      return acc;
+    },
+    { totalEst: 0, totalFinal: 0, totalMass: 0 },
+  );
+
+const cellOrSpan = (value, span) => {
+  if (!span || span <= 0) return null;
+  if (span === 1) return value;
+  return { content: value, rowSpan: span, styles: { valign: "middle" } };
+};
+
+const modelToPdfBody = (model) =>
+  model.map((row) => {
+    const cells = [
+      cellOrSpan(row.material, row.materialSpan),
+      cellOrSpan(row.project, row.projectSpan),
+      row.parts,
+      row.dimensions,
+      row.process,
+      row.form,
+      row.quantity,
+      row.volume,
+      row.mass,
+      row.weight,
+      row.estimated,
+      cellOrSpan(row.final, row.sharedSpan),
+      cellOrSpan(row.vendor, row.sharedSpan),
+      cellOrSpan(row.status, row.sharedSpan),
+    ];
+    return cells.filter((c) => c !== null);
+  });
 
 // ---------------------------------------------------------------------------
 // PDF Export
 // ---------------------------------------------------------------------------
 
 const exportPDF = (rows, label) => {
-  const data = buildExportRows(rows);
-  if (!data.length) { message.warning("No data to export"); return; }
+  const model = buildGroupedExportModel(rows);
+  if (!model.length) {
+    message.warning("No data to export");
+    return;
+  }
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 10;
   const generatedAt = new Date().toLocaleString();
-
-  // Totals
-  const totalEst = rows.reduce((s, r) => s + (parseFloat(r.estimated_cost) || 0), 0);
-  const totalFinal = rows.reduce((s, r) => s + (parseFloat(r.final_cost) || 0), 0);
-  const totalMass = rows.reduce((s, r) => s + (parseFloat(r.mass) || 0), 0);
+  const { totalEst, totalFinal, totalMass } = computeExportTotals(model);
 
   const drawHeader = () => {
     doc.setFillColor(30, 64, 175);
@@ -66,7 +228,7 @@ const exportPDF = (rows, label) => {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 100, 100);
     doc.text(`Generated: ${generatedAt}`, margin, 22);
-    doc.text(`Total Records: ${rows.length}  |  ${label}`, pageW / 2, 22, { align: "center" });
+    doc.text(`Total Records: ${model.length}  |  ${label}`, pageW / 2, 22, { align: "center" });
     doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
 
     doc.setDrawColor(30, 64, 175);
@@ -76,17 +238,14 @@ const exportPDF = (rows, label) => {
 
   drawHeader();
 
-  const columns = Object.keys(data[0]);
-  const body = data.map((r) => columns.map((c) => r[c]));
-
-  // Col widths sum = 275mm, fits A4 landscape (277mm usable)
-  const colW = [22, 20, 20, 26, 18, 14, 12, 16, 16, 16, 20, 20, 20, 18];
+  const body = modelToPdfBody(model);
+  const colW = [22, 22, 18, 26, 16, 14, 12, 14, 14, 14, 20, 20, 24, 18];
   const totalW = colW.reduce((a, b) => a + b, 0);
   const leftMargin = (pageW - totalW) / 2;
 
   autoTable(doc, {
     startY: 27,
-    head: [columns],
+    head: [COLUMNS],
     body,
     styles: {
       fontSize: 6.5,
@@ -110,18 +269,28 @@ const exportPDF = (rows, label) => {
     alternateRowStyles: { fillColor: [239, 246, 255] },
     bodyStyles: { halign: "left" },
     columnStyles: Object.fromEntries(
-      colW.map((w, i) => [i, {
-        cellWidth: w,
-        halign: [0, 1, 2, 3, 4, 5, 12, 13].includes(i) ? "left" : "center",
-      }])
+      colW.map((w, idx) => [
+        idx,
+        {
+          cellWidth: w,
+          halign: [0, 1, 2, 3, 4, 5, 12, 13].includes(idx) ? "left" : "center",
+        },
+      ]),
     ),
     didParseCell: (d) => {
       if (d.section !== "body") return;
       const v = d.cell.raw;
-      if (v === "received") { d.cell.styles.textColor = [22, 163, 74]; d.cell.styles.fontStyle = "bold"; }
-      else if (v === "purchase_order") { d.cell.styles.textColor = [37, 99, 235]; }
-      else if (v === "purchase_request" || v === "Purchase Request") { d.cell.styles.textColor = [234, 88, 12]; }
-      else if (v === "enquiry") { d.cell.styles.textColor = [8, 145, 178]; }
+      const text = typeof v === "object" && v !== null ? v.content : v;
+      if (text === "received") {
+        d.cell.styles.textColor = [22, 163, 74];
+        d.cell.styles.fontStyle = "bold";
+      } else if (text === "purchase_order") {
+        d.cell.styles.textColor = [37, 99, 235];
+      } else if (text === "purchase_request" || text === "Purchase Request") {
+        d.cell.styles.textColor = [234, 88, 12];
+      } else if (text === "enquiry") {
+        d.cell.styles.textColor = [8, 145, 178];
+      }
     },
     margin: { left: leftMargin, right: leftMargin, top: 27, bottom: 18 },
     didDrawPage: (d) => {
@@ -137,7 +306,6 @@ const exportPDF = (rows, label) => {
     },
   });
 
-  // Totals summary box after table
   const finalY = doc.lastAutoTable.finalY + 6;
   doc.setFillColor(239, 246, 255);
   doc.setDrawColor(30, 64, 175);
@@ -152,11 +320,15 @@ const exportPDF = (rows, label) => {
   doc.setTextColor(30, 30, 30);
   doc.setFont("helvetica", "normal");
   doc.text(`Total Mass: ${totalMass.toFixed(3)} kg`, leftMargin + 4, finalY + 11);
-  doc.text(`Total Estimated Cost: Rs.${Number(totalEst).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, leftMargin + 4, finalY + 16);
   doc.text(
-    `Total Final Cost: Rs.${Number(totalFinal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `Total Estimated Cost: Rs.${Number(totalEst).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    leftMargin + 4,
+    finalY + 16,
+  );
+  doc.text(
+    `Total Final Cost: Rs.${Number(totalFinal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     leftMargin + totalW / 2,
-    finalY + 16
+    finalY + 16,
   );
 
   doc.save(`Procure_RM_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -167,22 +339,19 @@ const exportPDF = (rows, label) => {
 // ---------------------------------------------------------------------------
 
 const exportExcel = async (rows, label) => {
-  const data = buildExportRows(rows);
-  if (!data.length) { message.warning("No data to export"); return; }
+  const model = buildGroupedExportModel(rows);
+  if (!model.length) {
+    message.warning("No data to export");
+    return;
+  }
 
-  const totalEst = rows.reduce((s, r) => s + (parseFloat(r.estimated_cost) || 0), 0);
-  const totalFinal = rows.reduce((s, r) => s + (parseFloat(r.final_cost) || 0), 0);
-  const totalMass = rows.reduce((s, r) => s + (parseFloat(r.mass) || 0), 0);
-
+  const { totalEst, totalFinal, totalMass } = computeExportTotals(model);
   const wb = new ExcelJS.Workbook();
   wb.creator = "CMF Digitization";
   wb.created = new Date();
   const ws = wb.addWorksheet("Procure RM", { pageSetup: { orientation: "landscape" } });
 
-  const columns = Object.keys(data[0]);
-
-  // Row 1: Title
-  ws.mergeCells(1, 1, 1, columns.length);
+  ws.mergeCells(1, 1, 1, COLUMNS.length);
   const t = ws.getCell("A1");
   t.value = "PROCURE RAW MATERIALS REPORT";
   t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
@@ -190,18 +359,16 @@ const exportExcel = async (rows, label) => {
   t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
   ws.getRow(1).height = 28;
 
-  // Row 2: Subtitle
-  ws.mergeCells(2, 1, 2, columns.length);
+  ws.mergeCells(2, 1, 2, COLUMNS.length);
   const s = ws.getCell("A2");
-  s.value = `Generated: ${new Date().toLocaleString()}   |   ${label}   |   Records: ${rows.length}`;
+  s.value = `Generated: ${new Date().toLocaleString()}   |   ${label}   |   Records: ${model.length}`;
   s.font = { size: 9, italic: true, color: { argb: "FF6B7280" } };
   s.alignment = { horizontal: "center" };
   ws.getRow(2).height = 16;
 
-  ws.addRow([]); // blank row
+  ws.addRow([]);
 
-  // Row 4: Header
-  const hdr = ws.addRow(columns);
+  const hdr = ws.addRow(COLUMNS);
   hdr.height = 20;
   hdr.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
@@ -215,10 +382,26 @@ const exportExcel = async (rows, label) => {
     };
   });
 
-  // Data rows
-  data.forEach((r, idx) => {
-    const dr = ws.addRow(columns.map((c) => r[c]));
-    dr.height = 15;
+  const dataStartRow = 5;
+  model.forEach((row, idx) => {
+    const values = [
+      row.material,
+      row.project,
+      row.parts,
+      row.dimensions,
+      row.process,
+      row.form,
+      row.quantity,
+      row.volume,
+      row.mass,
+      row.weight,
+      row.estimated,
+      row.final,
+      row.vendor,
+      row.status,
+    ];
+    const dr = ws.addRow(values);
+    dr.height = Math.max(15, (row.project?.split("\n").length || 1) * 12);
     const isAlt = idx % 2 === 1;
     dr.eachCell((cell, colNum) => {
       cell.alignment = { vertical: "middle", wrapText: true };
@@ -229,7 +412,7 @@ const exportExcel = async (rows, label) => {
         left: { style: "hair", color: { argb: "FFD1D5DB" } },
         right: { style: "hair", color: { argb: "FFD1D5DB" } },
       };
-      const colName = columns[colNum - 1];
+      const colName = COLUMNS[colNum - 1];
       const val = cell.value;
       if (colName === "Order Status") {
         if (val === "received") cell.font = { color: { argb: "FF16A34A" }, bold: true };
@@ -243,18 +426,45 @@ const exportExcel = async (rows, label) => {
     });
   });
 
-  // Blank row before totals
+  // Merge rowspan-style cells for grouped rows in Excel:
+  // - Material / Final Cost / Vendor / Status: once per merge group
+  // - Project Number: only consecutive same-order blocks (89 once for its parts)
+  model.forEach((row, idx) => {
+    const excelRow = dataStartRow + idx;
+
+    if (row.sharedSpan > 1) {
+      const end = excelRow + row.sharedSpan - 1;
+      ws.mergeCells(excelRow, 1, end, 1); // Material
+      ws.mergeCells(excelRow, 12, end, 12); // Final Cost
+      ws.mergeCells(excelRow, 13, end, 13); // Vendor
+      ws.mergeCells(excelRow, 14, end, 14); // Status
+      [1, 12, 13, 14].forEach((col) => {
+        const cell = ws.getCell(excelRow, col);
+        cell.alignment = { vertical: "middle", wrapText: true, horizontal: col === 1 || col >= 13 ? "left" : "center" };
+      });
+    }
+
+    if (row.projectSpan > 1) {
+      const end = excelRow + row.projectSpan - 1;
+      ws.mergeCells(excelRow, 2, end, 2); // Project Number
+      ws.getCell(excelRow, 2).alignment = { vertical: "middle", wrapText: true, horizontal: "left" };
+    }
+  });
+
   ws.addRow([]);
 
-  // Totals row
   const totalsRow = ws.addRow(
-    columns.map((c) => {
+    COLUMNS.map((c) => {
       if (c === "Material Name") return "OVERALL TOTALS";
       if (c === "Mass (kg)") return `${totalMass.toFixed(3)} kg`;
-      if (c === "Est. Cost (Rs.)") return `Rs.${Number(totalEst).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      if (c === "Final Cost (Rs.)") return `Rs.${Number(totalFinal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      if (c === "Est. Cost (Rs.)") {
+        return `Rs.${Number(totalEst).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+      if (c === "Final Cost (Rs.)") {
+        return `Rs.${Number(totalFinal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
       return "";
-    })
+    }),
   );
   totalsRow.height = 20;
   totalsRow.eachCell((cell) => {
@@ -269,12 +479,13 @@ const exportExcel = async (rows, label) => {
     };
   });
 
-  // Column widths
-  const colWidths = [22, 18, 22, 26, 16, 12, 10, 14, 14, 14, 18, 18, 20, 16];
-  columns.forEach((_, i) => { ws.getColumn(i + 1).width = colWidths[i] || 14; });
+  const colWidths = [18, 20, 16, 24, 14, 12, 10, 12, 12, 12, 16, 16, 22, 16];
+  COLUMNS.forEach((_, i) => {
+    ws.getColumn(i + 1).width = colWidths[i] || 14;
+  });
 
   ws.views = [{ state: "frozen", ySplit: 4 }];
-  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: columns.length } };
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: COLUMNS.length } };
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/octet-stream" });
@@ -294,19 +505,33 @@ const OrderMaterialsPdfDownload = ({ rows, label = "All Records" }) => {
   const [loading, setLoading] = useState("");
 
   const handlePDF = async () => {
-    if (!rows?.length) { message.warning("No data to export"); return; }
+    if (!rows?.length) {
+      message.warning("No data to export");
+      return;
+    }
     setLoading("pdf");
-    try { exportPDF(rows, label); }
-    catch (e) { message.error("PDF export failed"); }
-    finally { setLoading(""); }
+    try {
+      exportPDF(rows, label);
+    } catch (e) {
+      message.error("PDF export failed");
+    } finally {
+      setLoading("");
+    }
   };
 
   const handleExcel = async () => {
-    if (!rows?.length) { message.warning("No data to export"); return; }
+    if (!rows?.length) {
+      message.warning("No data to export");
+      return;
+    }
     setLoading("excel");
-    try { await exportExcel(rows, label); }
-    catch (e) { message.error("Excel export failed"); }
-    finally { setLoading(""); }
+    try {
+      await exportExcel(rows, label);
+    } catch (e) {
+      message.error("Excel export failed");
+    } finally {
+      setLoading("");
+    }
   };
 
   const menuItems = [

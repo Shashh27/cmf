@@ -3,7 +3,7 @@ import { Button, Select, Modal } from 'antd';
 import { SettingOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import machineSvg from '/assets/shopfloor/mch.svg';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const CONFIG = {

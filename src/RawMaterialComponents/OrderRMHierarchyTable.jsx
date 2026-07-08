@@ -458,7 +458,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         material_name: materialName,
         dimensions_str: dimensionsStr,
         min_score: 0.3,
-        max_recommendations: 5
+        max_recommendations: 5,
+        required_length: planningData[key]?.dimensions?.length || null,
       });
       setStockRecommendations(prev => ({
         ...prev,
@@ -477,7 +478,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           material_name: row.rmName,
           dimensions_str: row.dimension,
           min_score: 0.3,
-          max_recommendations: 5
+          max_recommendations: 5,
+          required_length: planningData[row.key]?.dimensions?.length || null,
         }));
 
       if (requests.length === 0) return;
@@ -559,7 +561,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           material_name: row.rmName,
           dimensions_str: dimensionStr,
           min_score: 0.3,
-          max_recommendations: 5
+          max_recommendations: 5,
+          required_length: dimensions.length || null,
         }]
       });
       
@@ -612,6 +615,20 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       setPlannedBasedRecommendations(prev => ({ ...prev, ...recommendationsMap }));
     } catch (err) {
       console.error('Failed to fetch existing planned RM:', err);
+    }
+  };
+
+  const refreshRowRecommendations = async (row) => {
+    const planning = planningData[row.key];
+    if (planning) {
+      await fetchPlannedBasedRecommendations(row, planning);
+    }
+  };
+
+  const refreshMaterialRecommendations = async (row) => {
+    const relatedRows = tableData.filter((entry) => entry.rmName === row.rmName && savedRows[entry.key]);
+    for (const relatedRow of relatedRows) {
+      await refreshRowRecommendations(relatedRow);
     }
   };
 
@@ -966,6 +983,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                       isProcured={procuredMap[row.partId] || false}
                       updateLinkedStock={updateLinkedStockStatus}
                       onRefresh={fetchAllOrdersHierarchy}
+                      onRefreshRecommendations={() => refreshMaterialRecommendations(row)}
                     />
                   </td>
                   <td style={tdStyle}>{row.linkedMaterial || '-'}</td>

@@ -1,506 +1,531 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Button, Input, Tag, Spin, Tooltip } from 'antd';
+import { Button, Input, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  Bot, Send, Trash2, X, Maximize2, Minimize2, Sparkles,
-} from 'lucide-react';
+import { Send, Trash2, X, Maximize2, Minimize2, Lightbulb, Square } from 'lucide-react';
 import { CHATBOT_CONFIG } from '../Config/chatbot';
-import { SqlBlock, DataTable, FollowUpSuggestions } from './ChatbotResponse';
+import {
+  DataTable,
+  FollowUpSuggestions,
+} from './ChatbotResponse';
+import { getAnswerSummary } from './chatbotUtils';
+import './chatbot.css';
 
 const { TextArea } = Input;
+const CHATBOT_ICON = '/chatbot.png';
 
-// ── Theme tokens ─────────────────────────────────────────────────────────────
-// Industrial slate + amber palette — distinct from the previous indigo/purple look.
-const THEME = {
-  headerFrom: '#1e293b',   // slate-800
-  headerTo:   '#134e4a',   // teal-900
-  accent:     '#f59e0b',   // amber-500
-  accentSoft: '#fde68a',   // amber-200
-  userFrom:   '#0f766e',   // teal-700
-  userTo:     '#0d9488',   // teal-600
-  panelBg:    '#f4f6f5',   // soft warm-grey
-  botBubble:  '#ffffff',
-  border:     '#dbe4e2',
-  textDark:   '#1f2937',
-  textMuted:  '#64748b',
-  sqlBg:      '#0f172a',
-  sqlText:    '#fbbf24',
-};
-
-// ── Store ────────────────────────────────────────────────────────────────────
 const useChatStore = create((set) => ({
   messages: [],
   loading: false,
   sessionId: uuidv4(),
 
-  addUser: (content, question) =>
-    set((s) => ({ messages: [...s.messages, { role: 'user', content, question }] })),
+  addUser: (content) =>
+    set((s) => ({ messages: [...s.messages, { role: 'user', content }] })),
 
   startBot: () =>
     set((s) => ({
       messages: [...s.messages, { role: 'bot', content: '', sql: '', data: [], streaming: true }],
     })),
 
-  appendToken: (token) =>
+  finalise: (answer, sql, data, suggestions) =>
     set((s) => {
       const msgs = [...s.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.streaming) msgs[msgs.length - 1] = { ...last, content: last.content + token };
-      return { messages: msgs };
-    }),
-
-  finalise: (answer, sql, data, question, suggestions) =>
-    set((s) => {
-      const msgs = [...s.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.streaming) msgs[msgs.length - 1] = { role: 'bot', content: answer, sql, data, question, suggestions, streaming: false };
+      if (last?.streaming) {
+        msgs[msgs.length - 1] = {
+          role: 'bot',
+          content: answer,
+          sql,
+          data,
+          suggestions,
+          streaming: false,
+        };
+      }
       return { messages: msgs, loading: false };
     }),
 
-  setError: (msg, question) =>
+  setError: (msg) =>
     set((s) => {
       const msgs = [...s.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.streaming) msgs[msgs.length - 1] = { role: 'bot', content: msg, sql: '', data: [], question, streaming: false };
+      if (last?.streaming) {
+        msgs[msgs.length - 1] = {
+          role: 'bot',
+          content: msg,
+          sql: '',
+          data: [],
+          streaming: false,
+        };
+      }
       return { messages: msgs, loading: false };
     }),
 
   setLoading: (v) => set({ loading: v }),
+
+  cancelBot: () =>
+    set((s) => {
+      const msgs = [...s.messages];
+      if (msgs[msgs.length - 1]?.streaming) {
+        msgs.pop();
+      }
+      return { messages: msgs, loading: false };
+    }),
+
   clear: () => set({ messages: [], sessionId: uuidv4(), loading: false }),
 }));
 
-// ── Chips ────────────────────────────────────────────────────────────────────
-const CHIPS = [
+const FALLBACK_PROMPTS = [
   'Show all orders',
-  'Show overdue orders',
-  'List all products',
-  'Show all customers',
-  'Show work centers',
-  'List all machines',
+  'Show all raw material stock',
   'Pending operations',
-  'In-progress operations',
-  'Machine breakdowns',
-  'Tool issues',
-  'List operators',
-  'Operator leaves',
-  'Raw materials',
-  'Vendors',
+  'Machine live status',
 ];
 
-// ── Custom FAB bot icon (distinct, friendly "scanning" robot face) ─────────────
-const BotFaceIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect x="6" y="14" width="36" height="26" rx="9" fill="#fff" fillOpacity="0.16" />
-    <rect x="6" y="14" width="36" height="26" rx="9" stroke="#fff" strokeWidth="2" />
-    <circle cx="17" cy="27" r="3.4" fill="#fff" />
-    <circle cx="31" cy="27" r="3.4" fill={THEME.accent} />
-    <path d="M18 35h12" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" />
-    <path d="M24 14V7" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" />
-    <circle cx="24" cy="5" r="2.6" fill={THEME.accent} />
-  </svg>
-);
-
-// ── Markdown rendering — ChatGPT style ────────────────────────────────────────
-const markdownComponents = {
-  p:     ({ children }) => <p style={{ margin: '0 0 10px', lineHeight: 1.7, fontSize: 13.5 }}>{children}</p>,
-  h1:    ({ children }) => <h1 style={{ fontSize: 18, fontWeight: 700, margin: '8px 0 12px', color: THEME.textDark }}>{children}</h1>,
-  h2:    ({ children }) => <h2 style={{ fontSize: 16, fontWeight: 600, margin: '6px 0 10px', color: THEME.textDark }}>{children}</h2>,
-  h3:    ({ children }) => <h3 style={{ fontSize: 14, fontWeight: 600, margin: '4px 0 8px', color: THEME.textDark }}>{children}</h3>,
-  ul:    ({ children }) => <ul style={{ margin: '4px 0 12px', paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</ul>,
-  ol:    ({ children }) => <ol style={{ margin: '4px 0 12px', paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</ol>,
-  li:    ({ children }) => <li style={{ lineHeight: 1.7 }}>{children}</li>,
-  strong: ({ children }) => <strong style={{ color: THEME.textDark, fontWeight: 600 }}>{children}</strong>,
-  a:     ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" style={{ color: THEME.userFrom, textDecoration: 'underline' }}>{children}</a>,
-  code:  ({ inline, children }) =>
-    inline
-      ? <code style={{ background: '#f3f4f6', color: '#ef4444', padding: '2px 6px', borderRadius: 4, fontSize: 12 }}>{children}</code>
-      : <code style={{ display: 'block', background: THEME.sqlBg, color: THEME.sqlText, padding: '12px 14px', borderRadius: 8, fontSize: 12, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>{children}</code>,
-  pre:   ({ children }) => <pre style={{ margin: '8px 0 12px', overflowX: 'auto' }}>{children}</pre>,
-  hr:    () => <hr style={{ border: 'none', borderTop: `1px solid ${THEME.border}`, margin: '12px 0' }} />,
-  table: ({ children }) => (
-    <div style={{ overflowX: 'auto', margin: '8px 0 12px', borderRadius: 8, border: `1px solid ${THEME.border}` }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead style={{ background: '#f9fafb' }}>{children}</thead>,
-  th:    ({ children }) => <th style={{ padding: '10px 12px', textAlign: 'left', color: THEME.textDark, fontWeight: 600, fontSize: 12, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{children}</th>,
-  td:    ({ children }) => <td style={{ padding: '10px 12px', borderTop: '1px solid #f3f4f6', color: '#374151' }}>{children}</td>,
+const mdComponents = {
+  p: ({ children }) => <p>{children}</p>,
+  strong: ({ children }) => <strong>{children}</strong>,
+  ul: ({ children }) => <ul style={{ margin: '6px 0', paddingLeft: 18 }}>{children}</ul>,
+  li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
 };
 
-// ── Message bubble (ChatGPT style) ───────────────────────────────────────────
-const Bubble = ({ msg, expanded, onSuggestionClick }) => {
-  const isUser = msg.role === 'user';
-  const suggestions = msg.suggestions || [];
-  
+function BotMessage({ msg, onSuggestionClick, showFollowUps }) {
+  const hasData = msg.data?.length > 0;
+  const summary = getAnswerSummary(msg.content, msg.data?.length || 0);
+
+  if (msg.streaming && !msg.content) {
+    return (
+      <div className="cmf-msg-bot-text">
+        <div className="cmf-typing">
+          <span /><span /><span />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 20, gap: 12, alignItems: 'flex-start' }}>
-      {!isUser && (
-        <div style={{
-          width: 32, height: 32, borderRadius: '50%', flexShrink: 0, marginTop: 2,
-          background: THEME.userFrom, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Bot size={16} color="#fff" />
+    <div className="cmf-msg-bot">
+      {summary && (
+        <div className="cmf-msg-bot-text">
+          <ReactMarkdown components={mdComponents}>{summary}</ReactMarkdown>
         </div>
       )}
-      <div style={{
-        maxWidth: expanded ? '72%' : '85%',
-        padding: '14px 16px',
-        borderRadius: isUser ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
-        background: isUser ? `linear-gradient(135deg, ${THEME.userFrom}, ${THEME.userTo})` : '#ffffff',
-        color: isUser ? '#fff' : THEME.textDark,
-        border: isUser ? 'none' : `1px solid ${THEME.border}`,
-        boxShadow: isUser ? '0 2px 12px rgba(15,118,110,0.25)' : '0 1px 8px rgba(0,0,0,0.06)',
-        fontSize: 14, lineHeight: 1.7,
-      }}>
-        {msg.streaming && !msg.content
-          ? <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
-              {[0,1,2].map(i => (
-                <span key={i} style={{
-                  width: 8, height: 8, borderRadius: '50%', background: THEME.accent, display: 'inline-block',
-                  animation: `dotBounce 1.2s ${i * 0.2}s ease-in-out infinite`,
-                }} />
-              ))}
-              <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}`}</style>
-            </div>
-          : <><ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown></>
-        }
-        {!msg.streaming && (
-          <>
-            <SqlBlock sql={msg.sql} />
-            <DataTable data={msg.data} />
-            <FollowUpSuggestions suggestions={suggestions} onSelect={onSuggestionClick} />
-          </>
-        )}
-      </div>
+      {!msg.streaming && hasData && <DataTable data={msg.data} />}
+      {!msg.streaming && showFollowUps && (
+        <FollowUpSuggestions
+          suggestions={msg.suggestions}
+          onSelect={onSuggestionClick}
+        />
+      )}
     </div>
   );
-};
+}
 
-// ── ChatPanel ────────────────────────────────────────────────────────────────
+const FAB_SIZE = 58;
+const FAB_MARGIN = 20;
+
+function useViewport() {
+  const [viewport, setViewport] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    isMobile: window.innerWidth < 768,
+    isTablet: window.innerWidth >= 768 && window.innerWidth < 1024,
+  }));
+
+  useEffect(() => {
+    const update = () => {
+      const w = window.innerWidth;
+      setViewport({
+        width: w,
+        height: window.innerHeight,
+        isMobile: w < 768,
+        isTablet: w >= 768 && w < 1024,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+
+  return viewport;
+}
+
+function flattenPrompts(categories, dbPrompts) {
+  const seen = new Set();
+  const out = [];
+  for (const cat of categories || []) {
+    for (const p of cat.prompts || []) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+  }
+  for (const p of dbPrompts || []) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out.length ? out.slice(0, 6) : FALLBACK_PROMPTS;
+}
+
 export default function ChatPanel() {
   const store = useChatStore();
   const { messages, loading, sessionId } = store;
-  const [open, setOpen]       = useState(false);  // panel open/closed
-  const [expanded, setExpanded] = useState(false); // big / fullscreen-ish view
-  const [input, setInput]     = useState('');
+  const { isMobile, isTablet } = useViewport();
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [input, setInput] = useState('');
   const bottomRef = useRef(null);
-  const abortRef  = useRef(null);
-  
-  // Drag state for FAB
-  const [position, setPosition] = useState({ x: window.innerWidth - 88, y: window.innerHeight - 88 });
+  const abortRef = useRef(null);
+  const userStoppedRef = useRef(false);
+
+  const [fabOffset, setFabOffset] = useState({ x: 0, y: 0 });
+  const fabOffsetRef = useRef(fabOffset);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [hasDragged, setHasDragged] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const dragStartOffset = useRef({ x: 0, y: 0 });
 
-  // Handle window resize for responsive behavior
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      
-      // Reset position on resize if it's out of bounds
-      setPosition(prev => {
-        const maxX = window.innerWidth - 60;
-        const maxY = window.innerHeight - 60;
-        return {
-          x: Math.max(0, Math.min(prev.x, maxX)),
-          y: Math.max(0, Math.min(prev.y, maxY)),
-        };
-      });
-    };
+    fabOffsetRef.current = fabOffset;
+  }, [fabOffset]);
+  const [promptCategories, setPromptCategories] = useState([]);
+  const [dbPrompts, setDbPrompts] = useState([]);
+  const [showIdeas, setShowIdeas] = useState(false);
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+  const quickPrompts = flattenPrompts(promptCategories, dbPrompts);
+  const lastBotIndex = messages.reduce((idx, m, i) => (m.role === 'bot' ? i : idx), -1);
+
+  // Reset FAB to bottom-right corner on resize, rotate, or refresh
+  useEffect(() => {
+    const resetFab = () => setFabOffset({ x: 0, y: 0 });
+    resetFab();
+    window.addEventListener('resize', resetFab);
+    window.addEventListener('orientationchange', resetFab);
+    return () => {
+      window.removeEventListener('resize', resetFab);
+      window.removeEventListener('orientationchange', resetFab);
+    };
   }, []);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch(`${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setPromptCategories(data.categories || []);
+      setDbPrompts(data.from_database || []);
+    } catch { /* use fallbacks */ }
+  }, []);
+
+  useEffect(() => {
+    if (open) loadSuggestions();
+  }, [open, loadSuggestions]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Drag handlers
-  const handleMouseDown = (e) => {
-    e.preventDefault();
+  const clampFabOffset = useCallback((x, y) => {
+    const maxLeft = -(window.innerWidth - FAB_SIZE - FAB_MARGIN * 2);
+    const maxUp = -(window.innerHeight - FAB_SIZE - FAB_MARGIN * 2);
+    return {
+      x: Math.max(maxLeft, Math.min(0, x)),
+      y: Math.max(maxUp, Math.min(0, y)),
+    };
+  }, []);
+
+  const startDrag = useCallback((clientX, clientY) => {
     setIsDragging(true);
     setHasDragged(false);
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
-    setDragOffset({
-      x: e.clientX - position.x,
-      y: e.clientY - position.y,
-    });
+    dragStartPos.current = { x: clientX, y: clientY };
+    dragStartOffset.current = { ...fabOffsetRef.current };
+  }, []);
+
+  const handlePointerDown = (e) => {
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
+  };
+
+  const handleTouchStart = (e) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    startDrag(touch.clientX, touch.clientY);
   };
 
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const onMove = (clientX, clientY) => {
       if (!isDragging) return;
-      
-      // Check if user has dragged significantly (more than 5 pixels)
-      const dragDistance = Math.sqrt(
-        Math.pow(e.clientX - dragStartPos.current.x, 2) +
-        Math.pow(e.clientY - dragStartPos.current.y, 2)
+      const dist = Math.hypot(
+        clientX - dragStartPos.current.x,
+        clientY - dragStartPos.current.y,
       );
-      if (dragDistance > 5) {
-        setHasDragged(true);
-      }
-      
-      const newX = e.clientX - dragOffset.x;
-      const newY = e.clientY - dragOffset.y;
-      
-      // Keep within viewport bounds
-      const maxX = window.innerWidth - 60;
-      const maxY = window.innerHeight - 60;
-      
-      setPosition({
-        x: Math.max(0, Math.min(newX, maxX)),
-        y: Math.max(0, Math.min(newY, maxY)),
-      });
+      if (dist > 5) setHasDragged(true);
+      const dx = clientX - dragStartPos.current.x;
+      const dy = clientY - dragStartPos.current.y;
+      setFabOffset(clampFabOffset(
+        dragStartOffset.current.x + dx,
+        dragStartOffset.current.y + dy,
+      ));
     };
 
-    const handleMouseUp = () => {
-      setIsDragging(false);
+    const onMouseMove = (e) => onMove(e.clientX, e.clientY);
+    const onTouchMove = (e) => {
+      const touch = e.touches[0];
+      if (touch) onMove(touch.clientX, touch.clientY);
     };
+    const onEnd = () => setIsDragging(false);
 
     if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onEnd);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', onEnd);
     }
-
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onEnd);
     };
-  }, [isDragging, dragOffset]);
+  }, [isDragging, clampFabOffset]);
 
-  const send = useCallback(async (q, isSuggestion = false) => {
+  const stopRequest = useCallback(() => {
+    userStoppedRef.current = true;
+    abortRef.current?.abort();
+    store.cancelBot();
+  }, [store]);
+
+  const send = useCallback(async (q) => {
     if (!q?.trim() || loading) return;
+    userStoppedRef.current = false;
     setInput('');
-    store.addUser(q, q);
+    store.addUser(q);
     store.setLoading(true);
     store.startBot();
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const timer = setTimeout(() => ctrl.abort(), 12000);
 
     try {
-      const res = await fetch(`${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.STREAM_ENDPOINT}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, session_id: sessionId }),
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(res.status);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      let finalAnswer = '';
-      let finalSql = '';
-      let finalData = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n'); buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (raw === '[DONE]') break;
-          try {
-            const p = JSON.parse(raw);
-            if (p.type === 'token') {
-              store.appendToken(p.content);
-              finalAnswer += p.content;
-            }
-            else if (p.type === 'final') {
-              finalSql = p.sql;
-              finalData = p.data;
-              store.finalise(p.answer, p.sql, p.data, q, p.suggestions);
-            }
-            else if (p.type === 'error') store.setError(`⚠️ ${p.message}`);
-          } catch { /* ignore partial */ }
-        }
+      const res = await fetch(
+        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.CHAT_ENDPOINT}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: q, session_id: sessionId }),
+          signal: ctrl.signal,
+        },
+      );
+      if (!res.ok) {
+        let message = `Request failed (${res.status})`;
+        try {
+          const payload = await res.json();
+          if (payload?.detail) message = payload.detail;
+        } catch { /* ignore */ }
+        throw new Error(message);
       }
+
+      const p = await res.json();
+      store.finalise(p.answer, p.sql, p.data, p.suggestions);
     } catch (e) {
-      if (e.name !== 'AbortError') store.setError('Something went wrong. Please try again.');
+      if (e.name === 'AbortError') {
+        if (userStoppedRef.current) {
+          store.cancelBot();
+        } else {
+          store.setError('Request timed out. Try again or use the stop button.');
+        }
+      } else {
+        const msg = e.message === 'Failed to fetch'
+          ? 'Backend server is not reachable. Start uvicorn on port 3000:\n\npython -m uvicorn main:app --reload --host 172.18.7.86 --port 3000'
+          : (e.message || 'Something went wrong. Please try again.');
+        store.setError(msg);
+      }
     } finally {
+      clearTimeout(timer);
       store.setLoading(false);
     }
   }, [loading, sessionId, store]);
 
   const handleClear = useCallback(async () => {
     abortRef.current?.abort();
-    try { await fetch(`${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.HISTORY_ENDPOINT}/${sessionId}`, { method: 'DELETE' }); } catch { }
+    try {
+      await fetch(
+        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.HISTORY_ENDPOINT}/${sessionId}`,
+        { method: 'DELETE' },
+      );
+    } catch { /* ignore */ }
     store.clear();
   }, [sessionId, store]);
 
-  // ── 1. FAB (closed state) ─────────────────────────────────────────────────
-  if (!open) return (
-    <div style={{ position: 'fixed', left: position.x, top: position.y, zIndex: 9999 }}>
-      {/* Online status dot */}
-      <span style={{
-        position: 'absolute', top: 2, right: 2, zIndex: 1,
-        width: 12, height: 12, borderRadius: '50%',
-        background: '#22c55e', border: '2px solid #fff',
-      }} />
-      <Tooltip title="CMF AI Assistant (drag to move)" placement="left">
-        <button
-          onMouseDown={handleMouseDown}
-          onClick={() => !hasDragged && setOpen(true)}
-          style={{
-            width: 60, height: 60, borderRadius: '50%',
-            background: `linear-gradient(135deg, ${THEME.headerFrom}, ${THEME.headerTo})`,
-            border: `3px solid ${THEME.accent}`,
-            boxShadow: isDragging ? '0 10px 30px rgba(15,118,110,0.6)' : '0 6px 24px rgba(15,118,110,0.45)',
-            color: '#fff', cursor: isDragging ? 'grabbing' : 'grab',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: isDragging ? 'none' : 'transform 0.2s, box-shadow 0.2s',
-            transform: isDragging ? 'scale(1.08)' : 'scale(1)',
-          }}
-        >
-          <BotFaceIcon />
-        </button>
-      </Tooltip>
-    </div>
-  );
+  if (!open) {
+    return (
+      <div
+        className="cmf-chat-fab-wrap"
+        style={{
+          transform: `translate(${fabOffset.x}px, ${fabOffset.y}px)`,
+        }}
+      >
+        <Tooltip title="CMF Assistant" placement="left">
+          <button
+            type="button"
+            className={`cmf-chat-fab${isDragging ? ' is-dragging' : ''}`}
+            onMouseDown={handlePointerDown}
+            onTouchStart={handleTouchStart}
+            onClick={() => !hasDragged && setOpen(true)}
+          >
+            <img src={CHATBOT_ICON} alt="CMF Assistant" className="cmf-chat-fab-img" />
+          </button>
+        </Tooltip>
+      </div>
+    );
+  }
 
-  // ── 2. Full panel ─────────────────────────────────────────────────────────
-  const panelStyle = expanded
-    ? {
-        position: 'fixed', bottom: 16, right: 16, top: 16, left: 16,
-        width: 'auto', height: 'auto',
-      }
-    : isMobile
-    ? {
-        position: 'fixed', bottom: 0, right: 0, left: 0, top: 0,
-        width: '100%', height: '100%',
-      }
-    : {
-        position: 'fixed', bottom: 24, right: 24,
-        width: 480, height: 'min(760px, calc(100vh - 48px))',
-      };
+  const panelClass = [
+    'cmf-chat-panel',
+    isMobile ? 'mobile' : isTablet ? 'tablet' : expanded ? 'expanded' : 'default',
+  ].join(' ');
 
   return (
-    <div style={{
-      ...panelStyle,
-      zIndex: 9999,
-      display: 'flex', flexDirection: 'column',
-      borderRadius: isMobile ? 0 : 20,
-      overflow: 'hidden',
-      boxShadow: isMobile ? 'none' : '0 20px 60px rgba(0,0,0,0.22), 0 4px 20px rgba(15,118,110,0.18)',
-      border: isMobile ? 'none' : `1.5px solid ${THEME.border}`,
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      background: '#fff',
-      transition: 'all 0.2s ease',
-    }}>
-
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '10px 12px' : '12px 14px',
-        background: `linear-gradient(135deg, ${THEME.headerFrom}, ${THEME.headerTo})`, flexShrink: 0,
-      }}>
-        <div style={{ position: 'relative' }}>
-          <div style={{
-            width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: '50%',
-            background: 'rgba(255,255,255,0.14)', border: `2px solid ${THEME.accent}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Bot size={isMobile ? 18 : 20} color="#fff" />
-          </div>
-          <span style={{
-            position: 'absolute', bottom: 0, right: 0,
-            width: 10, height: 10, borderRadius: '50%',
-            background: loading ? THEME.accent : '#22c55e',
-            border: `2px solid ${THEME.headerFrom}`,
-          }} />
+    <div className={panelClass}>
+      <header className="cmf-chat-header">
+        <div className="cmf-chat-header-icon">
+          <img src={CHATBOT_ICON} alt="" className="cmf-chat-header-img" />
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: isMobile ? 13 : 14, color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
-            CMF AI Assistant
-            <Sparkles size={isMobile ? 12 : 13} color={THEME.accent} />
-          </div>
-          <div style={{ fontSize: isMobile ? 10 : 11, color: 'rgba(255,255,255,0.65)' }}>
-            {loading ? 'Thinking…' : 'Ask about your manufacturing data'}
+        <div className="cmf-chat-header-text">
+          <div className="cmf-chat-header-title">CMF Assistant</div>
+          <div className="cmf-chat-header-sub">
+            {loading ? 'Fetching data…' : 'Orders · Parts · Machines · Inventory'}
           </div>
         </div>
         <Tooltip title="Clear chat">
-          <Button type="text" icon={<Trash2 size={16} />} onClick={handleClear}
-            style={{ color: 'rgba(255,255,255,0.85)' }} />
+          <Button type="text" size="small" icon={<Trash2 size={15} />} onClick={handleClear} />
         </Tooltip>
-        <Tooltip title={expanded ? 'Restore size' : 'Expand view'}>
-          <Button type="text" icon={expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-            onClick={() => setExpanded(e => !e)}
-            style={{ color: 'rgba(255,255,255,0.85)' }} />
-        </Tooltip>
+        {!isMobile && (
+          <Tooltip title={expanded ? 'Restore' : 'Expand'}>
+            <Button
+              type="text"
+              size="small"
+              icon={expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              onClick={() => setExpanded((v) => !v)}
+            />
+          </Tooltip>
+        )}
         <Tooltip title="Close">
-          <Button type="text" icon={<X size={16} />}
-            onClick={() => { abortRef.current?.abort(); setOpen(false); setExpanded(false); }}
-            style={{ color: 'rgba(255,255,255,0.85)' }} />
+          <Button
+            type="text"
+            size="small"
+            icon={<X size={15} />}
+            onClick={() => {
+              abortRef.current?.abort();
+              setOpen(false);
+              setExpanded(false);
+              setShowIdeas(false);
+              setFabOffset({ x: 0, y: 0 });
+            }}
+          />
         </Tooltip>
-      </div>
+      </header>
 
-      {/* Messages area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '12px 10px' : '14px 12px', background: THEME.panelBg }}>
+      <div className="cmf-chat-messages">
         {messages.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', gap: 10 }}>
-            <div style={{
-              width: isMobile ? 56 : 68, height: isMobile ? 56 : 68, borderRadius: '50%',
-              background: '#e3f0ed', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Bot size={isMobile ? 28 : 32} color={THEME.userFrom} />
-            </div>
-            <div style={{ fontSize: isMobile ? 14 : 15, fontWeight: 600, color: THEME.textDark }}>How can I help you?</div>
-            <div style={{ fontSize: isMobile ? 11 : 12, color: THEME.textMuted, maxWidth: isMobile ? 280 : 300, lineHeight: 1.6 }}>
-              Ask about orders (by sale order number or ID), parts, operations,
-              machines, work centers, inventory, quality, or operators.
-              Try a chip below to get started!
+          <div className="cmf-chat-empty">
+            <img src={CHATBOT_ICON} alt="" className="cmf-chat-empty-img" />
+            <h3>Ask about your shop floor data</h3>
+            <p>
+              Search orders, parts, operations, machines, stock, and operators using plain language.
+            </p>
+            <div className="cmf-empty-prompts">
+              {quickPrompts.slice(0, 4).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className="cmf-empty-prompt"
+                  disabled={loading}
+                  onClick={() => send(c)}
+                >
+                  {c}
+                </button>
+              ))}
             </div>
           </div>
         ) : (
-          <div style={{ maxWidth: expanded ? 900 : '100%', margin: '0 auto' }}>
-            {messages.map((msg, i) => <Bubble key={i} msg={msg} expanded={expanded} onSuggestionClick={send} />)}
-          </div>
+          messages.map((msg, i) => (
+            <div key={i} className={`cmf-msg-row ${msg.role}`}>
+              {msg.role === 'user' ? (
+                <div className="cmf-msg-user">{msg.content}</div>
+              ) : (
+                <BotMessage
+                  msg={msg}
+                  onSuggestionClick={send}
+                  showFollowUps={i === lastBotIndex && !loading}
+                />
+              )}
+            </div>
+          ))
         )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Suggestion chips */}
-      <div style={{ padding: isMobile ? '6px 10px 4px' : '8px 12px 4px', background: '#fff', borderTop: `1px solid ${THEME.border}`, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-        {CHIPS.map(c => (
-          <Tag
-            key={c}
-            style={{
-              cursor: loading ? 'not-allowed' : 'pointer', fontSize: isMobile ? 10 : 11, borderRadius: 20,
-              padding: isMobile ? '2px 8px' : '2px 10px', opacity: loading ? 0.5 : 1, marginBottom: 3,
-              color: THEME.userFrom, background: '#eef6f4', border: `1px solid ${THEME.border}`,
-            }}
-            onClick={() => !loading && send(c)}
-          >
-            {c}
-          </Tag>
-        ))}
-      </div>
+      {showIdeas && (
+        <div className="cmf-ideas-panel">
+          {quickPrompts.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className="cmf-ideas-item"
+              disabled={loading}
+              onClick={() => {
+                send(c);
+                setShowIdeas(false);
+              }}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Input row */}
-      <div style={{ padding: isMobile ? '8px 10px 12px' : '8px 12px 12px', background: '#fff', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+      <div className="cmf-chat-input-row">
+        <Tooltip title={showIdeas ? 'Hide examples' : 'Example questions'}>
+          <Button
+            type="text"
+            size="small"
+            className={`cmf-ideas-toggle${showIdeas ? ' active' : ''}`}
+            icon={<Lightbulb size={16} />}
+            onClick={() => setShowIdeas((v) => !v)}
+          />
+        </Tooltip>
         <TextArea
           autoSize={{ minRows: 1, maxRows: 4 }}
           value={input}
-          onChange={e => setInput(e.target.value)}
-          onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); send(input); } }}
-          placeholder="Ask about your manufacturing data…"
+          onChange={(e) => setInput(e.target.value)}
+          onPressEnter={(e) => {
+            if (!e.shiftKey) {
+              e.preventDefault();
+              send(input);
+            }
+          }}
+          placeholder="e.g. parts for SO-001, stock for EN8…"
           disabled={loading}
-          style={{ borderRadius: isMobile ? 10 : 12, fontSize: isMobile ? 12 : 13, flex: 1 }}
+          style={{ flex: 1, borderRadius: 8 }}
         />
         <Button
-          type="primary" shape="circle"
-          icon={loading ? <Spin size="small" /> : <Send size={isMobile ? 14 : 16} />}
-          disabled={loading || !input.trim()}
-          onClick={() => send(input)}
-          style={{
-            width: isMobile ? 36 : 38, height: isMobile ? 36 : 38, border: 'none', flexShrink: 0,
-            background: `linear-gradient(135deg, ${THEME.userFrom}, ${THEME.userTo})`,
-          }}
+          type={loading ? 'default' : 'primary'}
+          shape="circle"
+          danger={loading}
+          icon={loading ? <Square size={14} fill="currentColor" /> : <Send size={15} />}
+          disabled={!loading && !input.trim()}
+          onClick={loading ? stopRequest : () => send(input)}
         />
       </div>
     </div>

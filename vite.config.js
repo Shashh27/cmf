@@ -10,8 +10,14 @@ export default defineConfig({
     },
   },
   server: {
-    host: true,   
-    port: 5175,        
-    strictPort: true,  
+    host: true,
+    port: 5175,
+    strictPort: true,
+    proxy: {
+      '/api/chatbot': {
+        target: 'http://172.18.7.86:3000',
+        changeOrigin: true,
+      },
+    },
   },
 })

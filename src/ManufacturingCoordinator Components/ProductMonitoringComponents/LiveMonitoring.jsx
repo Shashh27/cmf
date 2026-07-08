@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Button, Empty, Input, Modal, Select, Spin, Tooltip } from 'antd';
-import { Activity, Cpu, Filter, PauseCircle, RefreshCw, WifiOff } from 'lucide-react';
+import { Activity, Cpu, Filter, LayoutGrid, Map, PauseCircle, RefreshCw, WifiOff } from 'lucide-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
+import IsometricMachineView from './IsometricMachineView';
 
 dayjs.extend(relativeTime);
 const { Search: SearchInput } = Input;
@@ -54,6 +54,13 @@ const STATUS = {
 };
 const getS = (s) => STATUS[s] || STATUS.OFFLINE;
 
+const normalizeDisplayStatus = (value) => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return 'OFF';
+  if (raw === 'ON') return 'IDLE';
+  return raw;
+};
+
 /* ─── Filter key → matching statuses ───────────────────────── */
 const FILTER_MATCH = {
   ALL:        () => true,
@@ -73,6 +80,12 @@ const safeGet = (obj, key, fallback = null) => {
   if (obj?.[key] != null) return obj[key];
   if (obj?.production_details?.[key] != null) return obj.production_details[key];
   return fallback;
+};
+
+const getMonitoringWsUrl = () => {
+  const httpUrl = new URL(`${API_BASE_URL}/monitoring/live/ws`);
+  httpUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  return httpUrl.toString();
 };
 
 /* ─── Status Pill ───────────────────────────────────────────── */
@@ -262,33 +275,82 @@ const MachineDashboard = () => {
   const [refreshing, setRefreshing]           = useState(false);
   const [showFilters, setShowFilters]         = useState(false);
   const [sortOrder, setSortOrder]             = useState('status');
+  const [viewMode, setViewMode]               = useState('iso');
+  const [selectedMachineIds, setSelectedMachineIds] = useState([]);
+  const socketRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const allowReconnectRef = useRef(true);
 
-  const fetchMachines = async () => {
-    setIsLoading(true);
-    try {
-      const res = await axios.get(`${API_BASE_URL}/monitoring/live`);
-      setMachines(res.data.map(m => ({
-        ...m,
-        status: (m.status || 'OFF').toUpperCase(),
-        production_order: m.sale_order_number,
-        operation_description: m.operation_name,
-        part_count: m.completed_qty,
-        launched_quantity: m.target_qty,
-      })));
-    } catch (e) {
-      console.error('Fetch failed:', e);
-    } finally {
-      setIsLoading(false);
-    }
+  const applyMachines = (raw) => {
+    const list = Array.isArray(raw) ? raw : [];
+    setMachines(list.map(m => ({
+      ...m,
+      status: normalizeDisplayStatus(m.status),
+      production_order: m.sale_order_number,
+      operation_description: m.operation_name,
+      part_count: m.completed_qty,
+      launched_quantity: m.target_qty,
+    })));
   };
 
-  useEffect(() => {
-    fetchMachines();
-    const t = setInterval(fetchMachines, 5 * 60 * 1000);
-    return () => clearInterval(t);
+  const connectSocket = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState < WebSocket.CLOSING) {
+      socketRef.current.close();
+    }
+
+    setIsLoading(true);
+    const socket = new WebSocket(getMonitoringWsUrl());
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        applyMachines(JSON.parse(event.data));
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Failed to parse monitoring websocket payload:', err);
+      }
+    };
+
+    socket.onerror = () => {
+      setIsLoading(false);
+    };
+
+    socket.onclose = () => {
+      if (allowReconnectRef.current && reconnectTimerRef.current == null) {
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          connectSocket();
+        }, 5000);
+      }
+    };
   }, []);
 
-  const handleRefresh = () => { setRefreshing(true); fetchMachines(); setTimeout(() => setRefreshing(false), 1500); };
+  useEffect(() => {
+    allowReconnectRef.current = true;
+    connectSocket();
+
+    return () => {
+      allowReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (socketRef.current && socketRef.current.readyState < WebSocket.CLOSING) {
+        socketRef.current.close();
+      }
+    };
+  }, [connectSocket]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    allowReconnectRef.current = true;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    connectSocket();
+    window.setTimeout(() => setRefreshing(false), 800);
+  };
 
   const handleKpiClick = (key) => {
     // Toggle off if already active
@@ -328,104 +390,168 @@ const MachineDashboard = () => {
             <span style={{ fontSize: 14, color: '#0f172a' }}>Live · {dayjs().format('HH:mm:ss')}</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="small" onClick={handleRefresh} icon={<RefreshCw size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-            Refresh
-          </Button>
-          <Button size="small" type={showFilters ? 'primary' : 'default'} onClick={() => setShowFilters(v => !v)} icon={<Filter size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-            Filters
-          </Button>
-        </div>
-      </div>
-
-      {/* KPI row — clickable tiles filter the grid */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KpiTile
-          label="Total Machines"  value={stats.total}
-          icon={Cpu}         bg="#2563eb"
-          filterKey="ALL"    activeFilter={filterStatus}
-          onClick={() => handleKpiClick('ALL')}
-        />
-        <KpiTile
-          label="In Production"   value={stats.production}
-          icon={Activity}    bg="#16a34a"
-          filterKey="PRODUCTION"  activeFilter={filterStatus}
-          onClick={() => handleKpiClick('PRODUCTION')}
-        />
-        <KpiTile
-          label="Idle"            value={stats.idle}
-          icon={PauseCircle} bg="#d97706"
-          filterKey="IDLE"   activeFilter={filterStatus}
-          onClick={() => handleKpiClick('IDLE')}
-        />
-        <KpiTile
-          label="Offline"         value={stats.offline}
-          icon={WifiOff}     bg="#475569"
-          filterKey="OFFLINE" activeFilter={filterStatus}
-          onClick={() => handleKpiClick('OFFLINE')}
-        />
-      </div>
-
-      {/* Filters panel */}
-      {showFilters && (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '13px 16px', marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Status</div>
-            <Select value={filterStatus} onChange={setFilterStatus} size="small" style={{ width: 140 }}>
-              <Select.Option value="ALL">All</Select.Option>
-              <Select.Option value="PRODUCTION">Production</Select.Option>
-              <Select.Option value="IDLE">Idle</Select.Option>
-              <Select.Option value="OFFLINE">Offline</Select.Option>
-            </Select>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Select
+            mode="multiple"
+            placeholder="Select Machines"
+            style={{ width: 200, fontSize: 11 }}
+            size="small"
+            allowClear
+            value={selectedMachineIds}
+            onChange={(values) => setSelectedMachineIds(values || [])}
+            options={[
+              { label: 'ALL', value: 'ALL' },
+              ...machines.map(m => ({ label: m.machine_name, value: m.machine_id }))
+            ]}
+          />
+          {/* View toggle */}
+          <div style={{
+            display: 'flex', background: '#e2e8f0', borderRadius: 7, padding: 3, gap: 2,
+          }}>
+            <button
+              onClick={() => setViewMode('iso')}
+              title="Isometric View"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', border: 'none', borderRadius: 5, cursor: 'pointer',
+                fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                background: viewMode === 'iso' ? '#fff' : 'transparent',
+                color: viewMode === 'iso' ? '#2563eb' : '#64748b',
+                boxShadow: viewMode === 'iso' ? '0 1px 4px rgba(0,0,0,0.10)' : 'none',
+              }}
+            >
+              <Map size={13} />
+              ISO
+            </button>
+            <button
+              onClick={() => setViewMode('card')}
+              title="Card View"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', border: 'none', borderRadius: 5, cursor: 'pointer',
+                fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                background: viewMode === 'card' ? '#fff' : 'transparent',
+                color: viewMode === 'card' ? '#2563eb' : '#64748b',
+                boxShadow: viewMode === 'card' ? '0 1px 4px rgba(0,0,0,0.10)' : 'none',
+              }}
+            >
+              <LayoutGrid size={13} />
+              Cards
+            </button>
           </div>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Sort</div>
-            <Select value={sortOrder} onChange={setSortOrder} size="small" style={{ width: 130 }}>
-              <Select.Option value="status">By Status</Select.Option>
-              <Select.Option value="name">By Name</Select.Option>
-            </Select>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Search</div>
-            <SearchInput placeholder="Search machines…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} size="small" style={{ width: 200 }} allowClear />
-          </div>
-          {(filterStatus !== 'ALL' || searchQuery) && (
-            <Button size="small" type="link" style={{ fontSize: 12, padding: 0 }} onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear all</Button>
+          {viewMode === 'card' && (
+            <>
+              <Button size="small" onClick={handleRefresh} icon={<RefreshCw size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                Refresh
+              </Button>
+              <Button size="small" type={showFilters ? 'primary' : 'default'} onClick={() => setShowFilters(v => !v)} icon={<Filter size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                Filters
+              </Button>
+            </>
           )}
         </div>
-      )}
-
-      {/* Grid label */}
-      <div style={{ marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
-          {sorted.length} machine{sorted.length !== 1 ? 's' : ''}{filterStatus !== 'ALL' || searchQuery ? ' · filtered' : ''}
-        </span>
       </div>
 
-      {/* Machine grid */}
-      {isLoading ? (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0', textAlign: 'center' }}>
-          <Spin size="large" />
-          <div style={{ marginTop: 12, fontSize: 13, color: '#94a3b8' }}>Loading machine data…</div>
-        </div>
-      ) : sorted.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: 12 }}>
-          {sorted.map(machine => (
-            <MachineCard key={machine.machine_id} machine={machine} onClick={() => setSelectedMachine(machine)} />
-          ))}
-        </div>
-      ) : (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0' }}>
-          <Empty description={
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13, color: '#94a3b8' }}>No machines match your filters</span>
-              <Button size="small" onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear filters</Button>
-            </div>
-          } />
+      {/* Isometric view */}
+      {viewMode === 'iso' && (
+        <div style={{ borderRadius: 10, overflow: 'hidden', height: 'calc(100vh - 120px)', border: '1px solid #e2e8f0' }}>
+          <IsometricMachineView embedded={true} selectedMachineIds={selectedMachineIds} liveMachines={machines} />
         </div>
       )}
 
-      <MachineModal machine={selectedMachine} onClose={() => setSelectedMachine(null)} />
+      {/* Card view — KPI, filters, grid */}
+      {viewMode === 'card' && (
+        <>
+          {/* KPI row — clickable tiles filter the grid */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+            <KpiTile
+              label="Total Machines"  value={stats.total}
+              icon={Cpu}         bg="#2563eb"
+              filterKey="ALL"    activeFilter={filterStatus}
+              onClick={() => handleKpiClick('ALL')}
+            />
+            <KpiTile
+              label="In Production"   value={stats.production}
+              icon={Activity}    bg="#16a34a"
+              filterKey="PRODUCTION"  activeFilter={filterStatus}
+              onClick={() => handleKpiClick('PRODUCTION')}
+            />
+            <KpiTile
+              label="Idle"            value={stats.idle}
+              icon={PauseCircle} bg="#d97706"
+              filterKey="IDLE"   activeFilter={filterStatus}
+              onClick={() => handleKpiClick('IDLE')}
+            />
+            <KpiTile
+              label="Offline"         value={stats.offline}
+              icon={WifiOff}     bg="#475569"
+              filterKey="OFFLINE" activeFilter={filterStatus}
+              onClick={() => handleKpiClick('OFFLINE')}
+            />
+          </div>
+
+          {/* Filters panel */}
+          {showFilters && (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '13px 16px', marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Status</div>
+                <Select value={filterStatus} onChange={setFilterStatus} size="small" style={{ width: 140 }}>
+                  <Select.Option value="ALL">All</Select.Option>
+                  <Select.Option value="PRODUCTION">Production</Select.Option>
+                  <Select.Option value="IDLE">Idle</Select.Option>
+                  <Select.Option value="OFFLINE">Offline</Select.Option>
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Sort</div>
+                <Select value={sortOrder} onChange={setSortOrder} size="small" style={{ width: 130 }}>
+                  <Select.Option value="status">By Status</Select.Option>
+                  <Select.Option value="name">By Name</Select.Option>
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Search</div>
+                <SearchInput placeholder="Search machines…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} size="small" style={{ width: 200 }} allowClear />
+              </div>
+              {(filterStatus !== 'ALL' || searchQuery) && (
+                <Button size="small" type="link" style={{ fontSize: 12, padding: 0 }} onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear all</Button>
+              )}
+            </div>
+          )}
+
+          {/* Grid label */}
+          <div style={{ marginBottom: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
+              {sorted.length} machine{sorted.length !== 1 ? 's' : ''}{filterStatus !== 'ALL' || searchQuery ? ' · filtered' : ''}
+            </span>
+          </div>
+
+          {/* Machine grid */}
+          {isLoading ? (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0', textAlign: 'center' }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 12, fontSize: 13, color: '#94a3b8' }}>Loading machine data…</div>
+            </div>
+          ) : sorted.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: 12 }}>
+              {sorted.map(machine => (
+                <MachineCard key={machine.machine_id} machine={machine} onClick={() => setSelectedMachine(machine)} />
+              ))}
+            </div>
+          ) : (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0' }}>
+              <Empty description={
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: '#94a3b8' }}>No machines match your filters</span>
+                  <Button size="small" onClick={() => { setFilterStatus('ALL'); setSearchQuery(''); }}>Clear filters</Button>
+                </div>
+              } />
+            </div>
+          )}
+
+          <MachineModal machine={selectedMachine} onClose={() => setSelectedMachine(null)} />
+        </>
+      )}
     </div>
   );
 };

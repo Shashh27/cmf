@@ -1,9 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Button, Empty, Input, Modal, Select, Spin, Tooltip } from 'antd';
 import { Activity, Cpu, Filter, LayoutGrid, Map, PauseCircle, RefreshCw, WifiOff } from 'lucide-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
 import IsometricMachineView from './IsometricMachineView';
 
@@ -55,6 +54,13 @@ const STATUS = {
 };
 const getS = (s) => STATUS[s] || STATUS.OFFLINE;
 
+const normalizeDisplayStatus = (value) => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return 'OFF';
+  if (raw === 'ON') return 'IDLE';
+  return raw;
+};
+
 /* ─── Filter key → matching statuses ───────────────────────── */
 const FILTER_MATCH = {
   ALL:        () => true,
@@ -74,6 +80,12 @@ const safeGet = (obj, key, fallback = null) => {
   if (obj?.[key] != null) return obj[key];
   if (obj?.production_details?.[key] != null) return obj.production_details[key];
   return fallback;
+};
+
+const getMonitoringWsUrl = () => {
+  const httpUrl = new URL(`${API_BASE_URL}/monitoring/live/ws`);
+  httpUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  return httpUrl.toString();
 };
 
 /* ─── Status Pill ───────────────────────────────────────────── */
@@ -265,33 +277,80 @@ const MachineDashboard = () => {
   const [sortOrder, setSortOrder]             = useState('status');
   const [viewMode, setViewMode]               = useState('iso');
   const [selectedMachineIds, setSelectedMachineIds] = useState([]);
+  const socketRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const allowReconnectRef = useRef(true);
 
-  const fetchMachines = async () => {
-    setIsLoading(true);
-    try {
-      const res = await axios.get(`${API_BASE_URL}/monitoring/live`);
-      setMachines(res.data.map(m => ({
-        ...m,
-        status: (m.status || 'OFF').toUpperCase(),
-        production_order: m.sale_order_number,
-        operation_description: m.operation_name,
-        part_count: m.completed_qty,
-        launched_quantity: m.target_qty,
-      })));
-    } catch (e) {
-      console.error('Fetch failed:', e);
-    } finally {
-      setIsLoading(false);
-    }
+  const applyMachines = (raw) => {
+    const list = Array.isArray(raw) ? raw : [];
+    setMachines(list.map(m => ({
+      ...m,
+      status: normalizeDisplayStatus(m.status),
+      production_order: m.sale_order_number,
+      operation_description: m.operation_name,
+      part_count: m.completed_qty,
+      launched_quantity: m.target_qty,
+    })));
   };
 
-  useEffect(() => {
-    fetchMachines();
-    const t = setInterval(fetchMachines, 5 * 60 * 1000);
-    return () => clearInterval(t);
+  const connectSocket = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState < WebSocket.CLOSING) {
+      socketRef.current.close();
+    }
+
+    setIsLoading(true);
+    const socket = new WebSocket(getMonitoringWsUrl());
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        applyMachines(JSON.parse(event.data));
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Failed to parse monitoring websocket payload:', err);
+      }
+    };
+
+    socket.onerror = () => {
+      setIsLoading(false);
+    };
+
+    socket.onclose = () => {
+      if (allowReconnectRef.current && reconnectTimerRef.current == null) {
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          connectSocket();
+        }, 5000);
+      }
+    };
   }, []);
 
-  const handleRefresh = () => { setRefreshing(true); fetchMachines(); setTimeout(() => setRefreshing(false), 1500); };
+  useEffect(() => {
+    allowReconnectRef.current = true;
+    connectSocket();
+
+    return () => {
+      allowReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (socketRef.current && socketRef.current.readyState < WebSocket.CLOSING) {
+        socketRef.current.close();
+      }
+    };
+  }, [connectSocket]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    allowReconnectRef.current = true;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    connectSocket();
+    window.setTimeout(() => setRefreshing(false), 800);
+  };
 
   const handleKpiClick = (key) => {
     // Toggle off if already active
@@ -396,7 +455,7 @@ const MachineDashboard = () => {
       {/* Isometric view */}
       {viewMode === 'iso' && (
         <div style={{ borderRadius: 10, overflow: 'hidden', height: 'calc(100vh - 120px)', border: '1px solid #e2e8f0' }}>
-          <IsometricMachineView embedded={true} selectedMachineIds={selectedMachineIds} />
+          <IsometricMachineView embedded={true} selectedMachineIds={selectedMachineIds} liveMachines={machines} />
         </div>
       )}
 
