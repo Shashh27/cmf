@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import datetime
 
 
+
 class MachineLiveHistoryBase(BaseModel):
     machine_id: int
     status: str
