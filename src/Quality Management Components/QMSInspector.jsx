@@ -38,6 +38,8 @@ function overlapRatio(a, b) {
 }
 import {
   buildBalloonOverlaysFromBocRows,
+  fmtTolMinus,
+  fmtTolPlus,
   mapDbMasterBocRowsToTable,
   parseMasterBocBboxToPdfRect,
   parseMasterBocIdFromStageBbox,
@@ -521,6 +523,55 @@ const QMSInspector = () => {
         console.error(err);
         const detail = err.response?.data?.detail;
         message.error(typeof detail === 'string' ? detail : err.message || 'Failed to update instrument');
+        throw err;
+      }
+    },
+    [bocEditLocked, inspectorMode, handleMeasurePatch, message, isOperatorView],
+  );
+
+  const handleEditCharacteristic = useCallback(
+    async (record, values) => {
+      if (isOperatorView) return;
+      if (bocEditLocked && inspectorMode !== 'MEASURE') {
+        message.warning('Plan is confirmed. Characteristics cannot be edited.');
+        return;
+      }
+      if (!record?.id) return;
+      const payload = {
+        nominal: String(values.nominal ?? '').trim(),
+        uppertol: Number(values.uppertol) || 0,
+        lowertol: Number(values.lowertol) || 0,
+        zone: String(values.zone ?? '').trim() || 'A1',
+        dimension_type: String(values.dimension_type ?? '').trim() || 'Linear',
+        measured_instrument: (values.measured_instrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT,
+      };
+      try {
+        await axios.patch(`${QUALITY_API_BASE_URL}/quality/master-boc/${record.id}`, payload);
+        setBocRowsRaw((prev) =>
+          prev.map((r) => {
+            if (r.id !== record.id) return r;
+            return {
+              ...r,
+              nominal: payload.nominal,
+              tolPlus: fmtTolPlus(payload.uppertol),
+              tolMinus: fmtTolMinus(payload.lowertol),
+              uppertolNum: payload.uppertol,
+              lowertolNum: payload.lowertol,
+              dimType: payload.dimension_type,
+              zone: payload.zone,
+              instrument: payload.measured_instrument,
+            };
+          }),
+        );
+        if (inspectorMode === 'MEASURE' && record.stageInspectionId && payload.measured_instrument) {
+          await handleMeasurePatch(record.stageInspectionId, {
+            measured_instrument: payload.measured_instrument,
+          });
+        }
+      } catch (err) {
+        console.error(err);
+        const detail = err.response?.data?.detail;
+        message.error(typeof detail === 'string' ? detail : err.message || 'Failed to update characteristic');
         throw err;
       }
     },
@@ -1432,10 +1483,10 @@ const QMSInspector = () => {
             />
           )}
           {fileUrl && (
-            <div ref={viewerWrapRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div ref={viewerWrapRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', width: '100%' }}>
               <InteractiveDrawing
                 ref={drawingRef}
-                pdfId={canDetect ? Number(documentId) : null}
+                pdfId={documentId ? Number(documentId) : null}
                 directImageSrc={!fileIsPdf ? fileUrl : null}
                 pageNumber={1} // TODO: Add page state if needed
                 balloons={interactiveBalloons}
@@ -1564,6 +1615,7 @@ const QMSInspector = () => {
                     operatorMeasureMode={isOperatorView && inspectorMode === 'MEASURE'}
                     onMeasurePatch={handleMeasurePatch}
                     onSetInstrument={isOperatorView ? undefined : handleSetInstrument}
+                    onEditCharacteristic={isOperatorView ? undefined : handleEditCharacteristic}
                     onSetUsedInstrument={isOperatorView ? handleSetUsedInstrument : undefined}
                     quantityOptions={quantityOptions}
                     quantityNo={quantityNo}

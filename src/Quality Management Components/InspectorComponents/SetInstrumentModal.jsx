@@ -1,11 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Select, Spin, Typography } from 'antd';
-import { TOOLS_API_BASE_URL } from '../../Config/qualityconfig';
-import { getToolSubCategoryName } from './inspectorConstants';
+import { fetchInstrumentSubCategories } from './instrumentOptions';
 
 const { Text } = Typography;
-
-const INSTRUMENTS_API = `${TOOLS_API_BASE_URL}/tools-list/?category=${encodeURIComponent('Instruments')}`;
 
 const SetInstrumentModal = ({
   open,
@@ -26,18 +23,7 @@ const SetInstrumentModal = ({
     const loadInstruments = async () => {
       setLoadingOptions(true);
       try {
-        const res = await fetch(INSTRUMENTS_API);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const seen = new Set();
-        const unique = [];
-        (Array.isArray(data) ? data : []).forEach((item) => {
-          const sub = getToolSubCategoryName(item);
-          if (!sub || seen.has(sub)) return;
-          seen.add(sub);
-          unique.push(sub);
-        });
-        unique.sort((a, b) => a.localeCompare(b));
+        const unique = await fetchInstrumentSubCategories();
         if (!cancelled) setSubCategories(unique);
       } catch (err) {
         console.warn('Failed to load instruments list', err);

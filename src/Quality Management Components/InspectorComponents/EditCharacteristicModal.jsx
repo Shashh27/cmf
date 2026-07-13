@@ -4,11 +4,14 @@ import { DEFAULT_MEASURED_INSTRUMENT } from './inspectorConstants';
 import { buildInstrumentSelectOptions, fetchInstrumentSubCategories } from './instrumentOptions';
 
 const STANDARD_DIM_TYPES = [
+  { value: 'Linear', label: 'Linear' },
   { value: 'Length', label: 'Length' },
   { value: 'Diameter', label: 'Diameter' },
   { value: 'Radius', label: 'Radius' },
   { value: 'Angular', label: 'Angular' },
   { value: 'Chamfer', label: 'Chamfer' },
+  { value: 'Thread', label: 'Thread' },
+  { value: 'Basic', label: 'Basic' },
 ];
 
 const GDT_DIM_TYPES = [
@@ -28,12 +31,7 @@ const GDT_DIM_TYPES = [
   { value: 'GDT-Total Runout', label: 'Total Runout' },
 ];
 
-const ALL_DIM_VALUES = new Set([
-  ...STANDARD_DIM_TYPES.map((o) => o.value),
-  ...GDT_DIM_TYPES.map((o) => o.value),
-]);
-
-const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaultInstrument = DEFAULT_MEASURED_INSTRUMENT }) => {
+const EditCharacteristicModal = ({ open, record, onCancel, onOk, confirmLoading = false }) => {
   const [form] = Form.useForm();
   const [instrumentOptions, setInstrumentOptions] = useState([]);
   const [loadingInstruments, setLoadingInstruments] = useState(false);
@@ -48,7 +46,7 @@ const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaul
         const subs = await fetchInstrumentSubCategories();
         if (!cancelled) setInstrumentOptions(subs);
       } catch (err) {
-        console.warn('Failed to load instruments for stamp modal', err);
+        console.warn('Failed to load instruments for edit modal', err);
         if (!cancelled) setInstrumentOptions([]);
       } finally {
         if (!cancelled) setLoadingInstruments(false);
@@ -61,84 +59,91 @@ const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaul
     };
   }, [open]);
 
+  const currentDimType = (record?.dimType || '').trim();
+  const dimTypeOptions = useMemo(() => {
+    const standard = [...STANDARD_DIM_TYPES];
+    if (currentDimType && !standard.some((o) => o.value === currentDimType)
+      && !GDT_DIM_TYPES.some((o) => o.value === currentDimType)) {
+      standard.unshift({ value: currentDimType, label: currentDimType });
+    }
+    return { standard, gdt: GDT_DIM_TYPES };
+  }, [currentDimType]);
+
   const instrumentSelectOptions = useMemo(
-    () => buildInstrumentSelectOptions(instrumentOptions, [defaultInstrument]),
-    [instrumentOptions, defaultInstrument],
+    () => buildInstrumentSelectOptions(instrumentOptions, [record?.instrument]),
+    [instrumentOptions, record?.instrument],
   );
   useEffect(() => {
-    if (open) {
-      const inst = (defaultInstrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT;
-      form.setFieldsValue({
-        nominal: '',
-        uppertol: 0,
-        lowertol: 0,
-        dimension_type: 'Length',
-        measured_instrument: inst,
-      });
-    }
-  }, [open, form, defaultInstrument]);
+    if (!open || !record) return;
+    const ut = typeof record.uppertolNum === 'number'
+      ? record.uppertolNum
+      : parseFloat(String(record.tolPlus ?? '').replace(/^\+/, '')) || 0;
+    const lt = typeof record.lowertolNum === 'number'
+      ? record.lowertolNum
+      : parseFloat(String(record.tolMinus ?? '').replace(/^\+/, '')) || 0;
+    form.setFieldsValue({
+      nominal: record.nominal === '—' ? '' : (record.nominal ?? ''),
+      dimension_type: currentDimType || 'Linear',
+      zone: record.zone || '',
+      measured_instrument: (record.instrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT,
+      uppertol: ut,
+      lowertol: lt,
+    });
+  }, [open, record, form, currentDimType]);
 
   const handleOk = async () => {
     try {
       const v = await form.validateFields();
-      await onOk?.(v);
+      await onOk?.({
+        nominal: String(v.nominal).trim(),
+        dimension_type: v.dimension_type,
+        zone: String(v.zone || '').trim() || 'A1',
+        measured_instrument: (v.measured_instrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT,
+        uppertol: Number(v.uppertol) || 0,
+        lowertol: Number(v.lowertol) || 0,
+      });
     } catch {
       /* validation */
     }
   };
 
+  const balloonLabel = record?.balloonNo != null ? `#${record.balloonNo}` : '';
+
   return (
     <Modal
-      title="Stamp characteristic"
+      title={balloonLabel ? `Edit characteristic ${balloonLabel}` : 'Edit characteristic'}
       open={open}
       onCancel={onCancel}
       onOk={handleOk}
-      okText="Save to Master BOC"
+      okText="Save"
       confirmLoading={confirmLoading}
       destroyOnClose
       width={460}
     >
-      <p style={{ marginBottom: 12, color: '#64748b', fontSize: 13 }}>
-        Enter nominal and tolerances for the region you selected on the drawing.
-      </p>
-      <Form form={form} layout="vertical" requiredMark={false}>
+      <Form form={form} layout="vertical" requiredMark={false} style={{ marginTop: 8 }}>
         <Form.Item name="nominal" label="Nominal" rules={[{ required: true, message: 'Enter nominal' }]}>
-          <Input placeholder="e.g. 10.5 or Ø12" autoComplete="off" />
+          <Input placeholder="e.g. 11.5" autoComplete="off" />
         </Form.Item>
-        <Form.Item
-          name="dimension_type"
-          label="Dimension type"
-          rules={[
-            { required: true, message: 'Select dimension type' },
-            {
-              validator: (_, value) =>
-                !value || ALL_DIM_VALUES.has(value)
-                  ? Promise.resolve()
-                  : Promise.reject(new Error('Select a valid dimension type')),
-            },
-          ]}
-        >
-          <Select
-            showSearch
-            optionFilterProp="label"
-            placeholder="Select dimension type"
-            listHeight={320}
-          >
+        <Form.Item name="dimension_type" label="Dimension type" rules={[{ required: true, message: 'Select dimension type' }]}>
+          <Select showSearch optionFilterProp="label" placeholder="Select dimension type" listHeight={320}>
             <Select.OptGroup label="Standard">
-              {STANDARD_DIM_TYPES.map((opt) => (
+              {dimTypeOptions.standard.map((opt) => (
                 <Select.Option key={opt.value} value={opt.value} label={opt.label}>
                   {opt.label}
                 </Select.Option>
               ))}
             </Select.OptGroup>
             <Select.OptGroup label="GD&T Controls">
-              {GDT_DIM_TYPES.map((opt) => (
+              {dimTypeOptions.gdt.map((opt) => (
                 <Select.Option key={opt.value} value={opt.value} label={opt.label}>
                   {opt.label}
                 </Select.Option>
               ))}
             </Select.OptGroup>
           </Select>
+        </Form.Item>
+        <Form.Item name="zone" label="Zone" rules={[{ required: true, message: 'Enter zone' }]}>
+          <Input placeholder="e.g. D3" autoComplete="off" style={{ maxWidth: 120 }} />
         </Form.Item>
         <Form.Item name="measured_instrument" label="Instrument" rules={[{ required: true, message: 'Select instrument' }]}>
           <Spin spinning={loadingInstruments}>
@@ -162,4 +167,4 @@ const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaul
   );
 };
 
-export default StampCharacteristicModal;
+export default EditCharacteristicModal;
