@@ -51,36 +51,13 @@ export const InteractiveDrawing = forwardRef(({
   const [imageSrc, setImageSrc] = useState(null);
   const [pageInfo, setPageInfo] = useState(null);
   const containerSize = useRef({ width: 0, height: 0, left: 0, top: 0 });
+  const initialFitDoneRef = useRef(false);
 
   // Region Selection states
   const [selection, setSelection] = useState(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const selectionRef = useRef(null);
   const selectionRafId = useRef(0);
-
-  // Update container size cache on resize
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const updateSize = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        containerSize.current = {
-          width: rect.width,
-          height: rect.height,
-          left: rect.left,
-          top: rect.top
-        };
-      }
-    };
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(containerRef.current);
-    updateSize();
-    window.addEventListener('scroll', updateSize, { passive: true });
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('scroll', updateSize);
-    };
-  }, []);
 
   // Viewport states for Zoom/Pan
   const scale = useMotionValue(1);
@@ -98,6 +75,47 @@ export const InteractiveDrawing = forwardRef(({
     const scaleY = containerH / pageInfo.height;
     return Math.min(scaleX, scaleY, 1);
   }, [pageInfo, sidebarOffset]);
+
+  const applyInitialFit = useCallback(() => {
+    if (!pageInfo || initialFitDoneRef.current) return;
+    const { width, height } = containerSize.current;
+    if (width <= 0 || height <= 0) return;
+    const fitScale = calculateFitScale();
+    if (!Number.isFinite(fitScale) || fitScale <= 0) return;
+    animate(scale, fitScale, { type: 'spring', stiffness: 300, damping: 30 });
+    animate(x, sidebarOffset / 2, { type: 'spring', stiffness: 300, damping: 30 });
+    animate(y, 0, { type: 'spring', stiffness: 300, damping: 30 });
+    initialFitDoneRef.current = true;
+  }, [pageInfo, calculateFitScale, scale, x, y, sidebarOffset]);
+
+  // Update container size cache on resize
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        containerSize.current = {
+          width: rect.width,
+          height: rect.height,
+          left: rect.left,
+          top: rect.top
+        };
+        applyInitialFit();
+      }
+    };
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(containerRef.current);
+    updateSize();
+    window.addEventListener('scroll', updateSize, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('scroll', updateSize);
+    };
+  }, [applyInitialFit]);
+
+  useEffect(() => {
+    initialFitDoneRef.current = false;
+  }, [pdfId, directImageSrc, pageNumber]);
 
   // Middle-button Panning
   useEffect(() => {
@@ -144,9 +162,15 @@ export const InteractiveDrawing = forwardRef(({
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!pdfId && !directImageSrc) return;
+      if (!pdfId && !directImageSrc) {
+        setLoading(false);
+        setImageSrc(null);
+        setPageInfo(null);
+        return;
+      }
       setLoading(true);
       setError(null);
+      initialFitDoneRef.current = false;
       try {
         let pInfo = null;
         if (pdfId) {
@@ -180,14 +204,6 @@ export const InteractiveDrawing = forwardRef(({
             throw new Error('Failed to load drawing image');
           }
         }
-        if (pInfo && containerRef.current) {
-          const containerW = containerRef.current.clientWidth - (PADDING * 2 + sidebarOffset);
-          const containerH = containerRef.current.clientHeight - (PADDING * 2);
-          const fitScale = Math.min(containerW / pInfo.width, containerH / pInfo.height, 1);
-          animate(scale, fitScale, { type: 'spring', stiffness: 300, damping: 30 });
-          animate(x, sidebarOffset / 2, { type: 'spring', stiffness: 300, damping: 30 });
-          animate(y, 0, { type: 'spring', stiffness: 300, damping: 30 });
-        }
       } catch (err) {
         console.error('InteractiveDrawing error:', err);
         setError(err.message || 'Failed to load drawing');
@@ -199,12 +215,19 @@ export const InteractiveDrawing = forwardRef(({
     return () => { cancelled = true; };
   }, [pdfId, directImageSrc, pageNumber, sidebarOffset]);
 
+  useEffect(() => {
+    if (!pageInfo || !imageSrc) return;
+    applyInitialFit();
+  }, [pageInfo, imageSrc, applyInitialFit]);
+
   // Reset view
   const handleReset = useCallback(() => {
+    initialFitDoneRef.current = false;
     const fitScale = calculateFitScale();
     animate(scale, fitScale, { type: 'spring', stiffness: 300, damping: 30 });
     animate(x, sidebarOffset / 2, { type: 'spring', stiffness: 300, damping: 30 });
     animate(y, 0, { type: 'spring', stiffness: 300, damping: 30 });
+    initialFitDoneRef.current = true;
   }, [calculateFitScale, scale, x, y, sidebarOffset]);
 
   const visibleBalloons = useMemo(() => {

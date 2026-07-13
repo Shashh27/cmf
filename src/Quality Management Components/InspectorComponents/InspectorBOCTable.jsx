@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Table, Tag, Typography, Space, Button, Empty, Popover, Select, Divider, Input, message } from 'antd';
-import { FilterOutlined, UnorderedListOutlined, EditOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { Table, Tag, Typography, Space, Button, Empty, Popover, Select, Divider, Input, message, Menu } from 'antd';
+import { FilterOutlined, UnorderedListOutlined, EditOutlined, LeftOutlined, RightOutlined, ToolOutlined } from '@ant-design/icons';
 import SetInstrumentModal from './SetInstrumentModal';
 import UsedInstrumentModal from './UsedInstrumentModal';
+import EditCharacteristicModal from './EditCharacteristicModal';
+import { fetchInstrumentSubCategories } from './instrumentOptions';
 
 const { Text } = Typography;
 
@@ -102,6 +104,7 @@ const InspectorBOCTable = ({
   measureMode = false,
   onMeasurePatch,
   onSetInstrument,
+  onEditCharacteristic,
   onSetUsedInstrument,
   operatorMeasureMode = false,
   onQuantityChange,
@@ -114,6 +117,12 @@ const InspectorBOCTable = ({
   useEffect(() => {
     setQtyInput(String(quantityNo));
   }, [quantityNo]);
+
+  // Prefetch instrument sub-categories so Set instrument / Edit open instantly
+  useEffect(() => {
+    if (operatorMeasureMode || typeof onSetInstrument !== 'function') return;
+    void fetchInstrumentSubCategories().catch(() => {});
+  }, [operatorMeasureMode, onSetInstrument]);
 
   const handleQtySubmit = () => {
     const val = (qtyInput || '').trim();
@@ -132,6 +141,7 @@ const InspectorBOCTable = ({
   };
 
   const rangeAnchorIndexRef = useRef(null);
+  const rootRef = useRef(null);
   const tableScrollRef = useRef(null);
   const suppressRowClickRef = useRef(false);
   const skipBlurSaveRef = useRef(false);
@@ -139,7 +149,7 @@ const InspectorBOCTable = ({
   const [editingInstrumentRowId, setEditingInstrumentRowId] = React.useState(null);
   const [localColCount, setLocalColCount] = React.useState(null);
   const [tableBodyHeight, setTableBodyHeight] = useState(320);
-  const [tableViewportHeight, setTableViewportHeight] = useState(360);
+  const [tableAreaHeight, setTableAreaHeight] = useState(360);
   const [instrumentModalOpen, setInstrumentModalOpen] = useState(false);
   const [instrumentModalRows, setInstrumentModalRows] = useState([]);
   const [instrumentSaving, setInstrumentSaving] = useState(false);
@@ -147,6 +157,10 @@ const InspectorBOCTable = ({
   const [usedInstrumentRecord, setUsedInstrumentRecord] = useState(null);
   const [usedInstrumentSubCategory, setUsedInstrumentSubCategory] = useState('');
   const [usedInstrumentSaving, setUsedInstrumentSaving] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editModalRecord, setEditModalRecord] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, record: null });
 
   const getTableScrollEl = useCallback(() => {
     const wrap = tableScrollRef.current;
@@ -165,29 +179,36 @@ const InspectorBOCTable = ({
   }, [dataSource, localColCount]);
 
   useLayoutEffect(() => {
+    const root = rootRef.current;
     const wrap = tableScrollRef.current;
-    if (!wrap) return;
+    if (!root || !wrap) return;
 
     const measure = () => {
+      const toolbar = root.querySelector('.qms-boc-toolbar');
+      const toolbarBottom = toolbar?.getBoundingClientRect().bottom
+        ?? root.getBoundingClientRect().top + 44;
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-      const availableHeight = Math.max(
-        120,
-        Math.floor(viewportHeight - wrap.getBoundingClientRect().top),
-      );
+      const areaHeight = Math.max(200, Math.floor(viewportHeight - toolbarBottom - 8));
+
       const header = wrap.querySelector('.ant-table-header');
       const headerH = header?.getBoundingClientRect().height ?? 39;
-      const next = Math.floor(availableHeight - headerH);
-      setTableViewportHeight(availableHeight);
-      if (next > 80) setTableBodyHeight(next);
+      const bodyH = Math.max(120, areaHeight - headerH);
+
+      setTableAreaHeight(areaHeight);
+      setTableBodyHeight(bodyH);
     };
 
     measure();
+    requestAnimationFrame(() => requestAnimationFrame(measure));
+    const delayed = window.setTimeout(measure, 120);
     const ro = new ResizeObserver(measure);
-    if (wrap.parentElement) ro.observe(wrap.parentElement);
+    ro.observe(root);
+    if (root.parentElement) ro.observe(root.parentElement);
     window.addEventListener('resize', measure);
     window.visualViewport?.addEventListener('resize', measure);
     return () => {
       ro.disconnect();
+      window.clearTimeout(delayed);
       window.removeEventListener('resize', measure);
       window.visualViewport?.removeEventListener('resize', measure);
     };
@@ -522,11 +543,97 @@ const InspectorBOCTable = ({
     }
   }, [instrumentModalRows, onSetInstrument]);
 
+  const canEditRow = useCallback((record) => {
+    if (planEditLocked || measureMode || operatorMeasureMode) return false;
+    return typeof onEditCharacteristic === 'function' && Boolean(record?.id);
+  }, [planEditLocked, measureMode, operatorMeasureMode, onEditCharacteristic]);
+
+  const openEditModal = useCallback((record) => {
+    if (!record) return;
+    if (!canEditRow(record)) {
+      if (planEditLocked) message.warning('Plan is confirmed. Characteristics cannot be edited.');
+      else if (measureMode) message.warning('Switch to Plan to edit characteristic values.');
+      else message.warning('This row cannot be edited.');
+      return;
+    }
+    if (!selectedIds.includes(record.id)) {
+      onSelectedIdsChange?.([record.id], record.id);
+    }
+    setEditModalRecord(record);
+    setEditModalOpen(true);
+  }, [canEditRow, planEditLocked, measureMode, selectedIds, onSelectedIdsChange]);
+
+  const handleEditSave = useCallback(async (values) => {
+    if (!editModalRecord || !onEditCharacteristic) return;
+    setEditSaving(true);
+    try {
+      await onEditCharacteristic(editModalRecord, values);
+      message.success('Characteristic updated.');
+      setEditModalOpen(false);
+      setEditModalRecord(null);
+    } finally {
+      setEditSaving(false);
+    }
+  }, [editModalRecord, onEditCharacteristic]);
+
   const handleRowContextMenu = useCallback((record, e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (operatorMeasureMode) return;
-    openInstrumentModal(record);
-  }, [openInstrumentModal, operatorMeasureMode]);
+    if (!selectedIds.includes(record.id)) {
+      onSelectedIdsChange?.([record.id], record.id);
+    }
+    setContextMenu({
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      record,
+    });
+  }, [operatorMeasureMode, selectedIds, onSelectedIdsChange]);
+
+  const contextMenuItems = useMemo(() => {
+    const record = contextMenu.record;
+    const instrumentOk = record && canEditInstrument(record);
+    const editOk = record && canEditRow(record);
+    return [
+      {
+        key: 'set-instrument',
+        icon: <ToolOutlined />,
+        label: 'Set instrument',
+        disabled: !instrumentOk,
+      },
+      {
+        key: 'edit',
+        icon: <EditOutlined />,
+        label: 'Edit',
+        disabled: !editOk,
+      },
+    ];
+  }, [contextMenu.record, canEditInstrument, canEditRow]);
+
+  const handleContextMenuClick = useCallback(({ key }) => {
+    const record = contextMenu.record;
+    setContextMenu((prev) => ({ ...prev, open: false }));
+    if (!record) return;
+    if (key === 'set-instrument') openInstrumentModal(record);
+    if (key === 'edit') openEditModal(record);
+  }, [contextMenu.record, openInstrumentModal, openEditModal]);
+
+  useEffect(() => {
+    if (!contextMenu.open) return;
+    const close = () => setContextMenu((prev) => ({ ...prev, open: false }));
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu.open]);
 
   const handleUsedInstrumentSave = useCallback(async (usedInst) => {
     if (!usedInstrumentRecord || !onSetUsedInstrument) return;
@@ -564,8 +671,8 @@ const InspectorBOCTable = ({
   }, [dataSource, onSelectedIdsChange, selectedIds]);
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#fff', overflow: 'hidden' }}>
-      <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
+    <div ref={rootRef} style={{ flex: 1, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', background: '#fff', overflow: 'hidden' }}>
+      <div className="qms-boc-toolbar" style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
         <Space wrap><UnorderedListOutlined style={{ fontSize: 16, color: '#1890ff' }} /><Text strong style={{ fontSize: '12px', textTransform: 'uppercase' }}>Characteristics</Text><Tag color="blue" bordered={false} style={{ margin: 0, borderRadius: '4px', fontSize: '9px' }}>{badge}</Tag>
           {selectedIds.length > 0 && (
             <Tag bordered={false} style={{ margin: 0, borderRadius: '4px', fontSize: '9px', background: '#f0f5ff', color: '#1d4ed8' }}>
@@ -610,29 +717,15 @@ const InspectorBOCTable = ({
         ref={tableScrollRef}
         className="qms-boc-table-wrap"
         style={{
-          height: tableViewportHeight,
+          height: tableAreaHeight,
           flex: '0 0 auto',
-          minHeight: 0,
+          minHeight: 200,
           overflow: 'hidden',
           overscrollBehavior: 'contain',
           cursor: measureMode ? 'grab' : 'default',
         }}
       >
         <style>{`
-          .qms-boc-table-wrap .ant-spin-nested-loading,
-          .qms-boc-table-wrap .ant-spin-container,
-          .qms-boc-table-wrap .ant-table,
-          .qms-boc-table-wrap .ant-table-container {
-            height: 100%;
-          }
-          .qms-boc-table-wrap .ant-table-container {
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-          }
-          .qms-boc-table-wrap .ant-table-header {
-            flex: 0 0 auto;
-          }
           .qms-boc-table-wrap .ant-table-body {
             overflow-y: scroll !important;
             overflow-x: auto !important;
@@ -708,6 +801,37 @@ const InspectorBOCTable = ({
         onOk={handleUsedInstrumentSave}
         confirmLoading={usedInstrumentSaving}
       />
+      <EditCharacteristicModal
+        open={editModalOpen}
+        record={editModalRecord}
+        onCancel={() => {
+          setEditModalOpen(false);
+          setEditModalRecord(null);
+        }}
+        onOk={handleEditSave}
+        confirmLoading={editSaving}
+      />
+      {contextMenu.open ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1100,
+            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            borderRadius: 8,
+            background: '#fff',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <Menu
+            selectable={false}
+            items={contextMenuItems}
+            onClick={handleContextMenuClick}
+            style={{ border: 'none', minWidth: 160 }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 };
