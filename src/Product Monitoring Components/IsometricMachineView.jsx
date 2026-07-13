@@ -210,8 +210,8 @@ const positionMachines = (data) => {
     lineMap.get(line).push(m);
   });
 
-  // Sort lines in specific order: MILLING, TURNING, GRINDING, DIE SINKING, then others alphabetically
-  const lineOrder = ['MILLING', 'TURNING', 'GRINDING', 'DIE SINKING'];
+  // Sort lines in specific order: MILLING, GRINDING, TURNING, DIE SINKING, then others alphabetically
+  const lineOrder = ['MILLING', 'GRINDING', 'TURNING', 'DIE SINKING'];
   const sortedLines = [...lineMap.keys()].sort((a, b) => {
     const aNorm = a.trim().toUpperCase();
     const bNorm = b.trim().toUpperCase();
@@ -904,6 +904,19 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                   <div key={label}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>{label}</div>
                     <div style={{ fontSize: 13, color: '#1e293b', wordBreak: 'break-word' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+                {[
+                  ['TARGET', selectedMachine.part_qty ?? 0, '#334155'],
+                  ['PRODUCED', selectedMachine.produced_qty ?? 0, '#2563eb'],
+                  ['APPROVED', selectedMachine.approved_qty ?? 0, '#16a34a'],
+                  ['REJECTED', selectedMachine.rejected_qty ?? 0, '#dc2626'],
+                ].map(([label, value, color]) => (
+                  <div key={label} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '8px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color, lineHeight: 1.1 }}>{value}</div>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#94a3b8', marginTop: 2 }}>{label}</div>
                   </div>
                 ))}
               </div>

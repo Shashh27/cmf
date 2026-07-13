@@ -120,7 +120,7 @@ const OMSOrdersPdfDocument = ({
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CMTI
+            CMF DIGITALIZATION - CMTI
           </Text>
           <Text style={styles.subtitle}>
             Order Management System – Orders Summary Report
@@ -250,7 +250,7 @@ const OMSOrdersPdfDownload = ({
     const ws = XLSX.utils.aoa_to_sheet([]);
 
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CMTI"],
+      ["CMF DIGITALIZATION - CMTI"],
       ["Order Management System – Orders Summary Report"],
       [],
       [`Total Orders: ${exportOrders.length}`],

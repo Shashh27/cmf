@@ -3,27 +3,6 @@ import dayjs from 'dayjs';
 import axios from 'axios';
 import config from '../Config/config';
 
-// Helper function to find min/max dates
-const findDateRange = (items) => {
-  if (!items.length) return null;
-  
-  let earliest = dayjs(items[0].start_time);
-  let latest = dayjs(items[0].end_time);
-  
-  items.forEach(item => {
-    const start = dayjs(item.start_time);
-    const end = dayjs(item.end_time);
-    
-    if (start.isBefore(earliest)) earliest = start;
-    if (end.isAfter(latest)) latest = end;
-  });
-  
-  return {
-    earliest: earliest.format('YYYY-MM-DD HH:mm:ss'),
-    latest: latest.format('YYYY-MM-DD HH:mm:ss')
-  };
-};
-
 const useGanttStore = create((set, get) => ({
   dateRange: [dayjs().startOf('day'), dayjs().endOf('day')],
   selectedMachine: 'all',
@@ -63,28 +42,17 @@ const useGanttStore = create((set, get) => ({
       }
 
       const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-      console.log('Fetching from URL:', url);
 
       const response = await axios.get(url);
-      console.log('Raw API response:', response.data);
 
       // Ensure we have arrays even if the API returns null/undefined
       const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};
-
-      // Log raw data
-      console.log('Raw data counts:', {
-        planned_operations: planned_operations?.length || 0,
-        actual_production_logs: actual_production_logs?.length || 0
-      });
 
       // Transform planned operations
       const plannedItems = (planned_operations || [])
         .filter(op => {
           const hasRequiredFields = op.planned_start_time && op.planned_end_time && op.machine_name;
           const isValidDates = dayjs(op.planned_start_time).isValid() && dayjs(op.planned_end_time).isValid();
-          if (!hasRequiredFields || !isValidDates) {
-            console.log('Filtered out planned operation:', op);
-          }
           return hasRequiredFields && isValidDates;
         })
         .map(op => ({
@@ -107,9 +75,6 @@ const useGanttStore = create((set, get) => ({
         .filter(log => {
           const hasRequiredFields = log.from_date && log.from_time && log.machine_name;
           const isValidDates = dayjs(`${log.from_date} ${log.from_time}`).isValid();
-          if (!hasRequiredFields || !isValidDates) {
-            console.log('Filtered out production log:', log);
-          }
           return hasRequiredFields && isValidDates;
         })
         .map(log => {
@@ -149,14 +114,8 @@ const useGanttStore = create((set, get) => ({
 
       // Get unique machine names from the filtered data (like BEL)
       const uniqueMachines = [...new Set(allDataFiltered.map(item => item.machine))].sort();
-      
-      console.log('Final data analysis:', {
-        totalItems: allDataFiltered.length,
-        uniqueMachines: uniqueMachines,
-        dateRange: findDateRange(allDataFiltered)
-      });
 
-      set({ 
+      set({
         allGanttData: allDataFiltered, // Store all valid data
         ganttData: allDataFiltered, // Initially display all valid data
         machines: uniqueMachines, // Set the dynamic machine list (only machines with data)
@@ -180,15 +139,10 @@ const useGanttStore = create((set, get) => ({
 
   setDateRange: (range) => {
     if (!range || !Array.isArray(range) || range.length !== 2) {
-      console.log('Invalid range provided to setDateRange:', range);
       return;
     }
 
     const [start, end] = range;
-    console.log('Setting new date range:', {
-      start: start.format('YYYY-MM-DD HH:mm:ss'),
-      end: end.format('YYYY-MM-DD HH:mm:ss')
-    });
 
     set({ dateRange: [start, end] });
   },
@@ -211,28 +165,17 @@ const useGanttStore = create((set, get) => ({
 
     try {
       const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/`;
-      console.log('Fetching ALL data from URL:', url);
 
       const response = await axios.get(url);
-      console.log('Raw API response (all data):', response.data);
 
       // Ensure we have arrays even if the API returns null/undefined
       const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};
-
-      // Log raw data
-      console.log('Raw data counts (all data):', {
-        planned_operations: planned_operations?.length || 0,
-        actual_production_logs: actual_production_logs?.length || 0
-      });
 
       // Transform planned operations
       const plannedItems = (planned_operations || [])
         .filter(op => {
           const hasRequiredFields = op.planned_start_time && op.planned_end_time && op.machine_name;
           const isValidDates = dayjs(op.planned_start_time).isValid() && dayjs(op.planned_end_time).isValid();
-          if (!hasRequiredFields || !isValidDates) {
-            console.log('Filtered out planned operation:', op);
-          }
           return hasRequiredFields && isValidDates;
         })
         .map(op => ({
@@ -255,9 +198,6 @@ const useGanttStore = create((set, get) => ({
         .filter(log => {
           const hasRequiredFields = log.from_date && log.from_time && log.machine_name;
           const isValidDates = dayjs(`${log.from_date} ${log.from_time}`).isValid();
-          if (!hasRequiredFields || !isValidDates) {
-            console.log('Filtered out production log:', log);
-          }
           return hasRequiredFields && isValidDates;
         })
         .map(log => {
@@ -297,14 +237,8 @@ const useGanttStore = create((set, get) => ({
 
       // Get unique machine names from the filtered data (like BEL)
       const uniqueMachines = [...new Set(allDataFiltered.map(item => item.machine))].sort();
-      
-      console.log('Final data analysis (all data):', {
-        totalItems: allDataFiltered.length,
-        uniqueMachines: uniqueMachines,
-        dateRange: findDateRange(allDataFiltered)
-      });
 
-      set({ 
+      set({
         allGanttData: allDataFiltered, // Store all valid data
         ganttData: allDataFiltered, // Initially display all valid data
         machines: uniqueMachines, // Set the dynamic machine list (only machines with data)

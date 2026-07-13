@@ -125,6 +125,36 @@ const Field = ({ label, value, mono }) => (
   </div>
 );
 
+/* ─── Quantity grid (4 equal divs) ──────────────────────────── */
+const QuantityGrid = ({ machine }) => (
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
+    {[
+      { label: 'Target', value: safeGet(machine, 'part_qty', 0), color: '#334155' },
+      { label: 'Produced', value: safeGet(machine, 'produced_qty', 0), color: '#2563eb' },
+      { label: 'Approved', value: safeGet(machine, 'approved_qty', 0), color: '#16a34a' },
+      { label: 'Rejected', value: safeGet(machine, 'rejected_qty', 0), color: '#dc2626' },
+    ].map((item) => (
+      <div
+        key={item.label}
+        style={{
+          background: 'rgba(255,255,255,0.55)',
+          border: '1px solid rgba(148,163,184,0.3)',
+          borderRadius: 6,
+          padding: '6px 4px',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 800, color: item.color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {item.value}
+        </div>
+        <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b', marginTop: 3 }}>
+          {item.label}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 /* ─── Machine Card ──────────────────────────────────────────── */
 const MachineCard = ({ machine, onClick }) => {
   const status = machine.status || 'OFFLINE';
@@ -162,7 +192,7 @@ const MachineCard = ({ machine, onClick }) => {
           <Field label="Part Number" value={partNo} />
         </div>
         <Field label="Operation" value={opNo ? `${opNo}${opDesc ? ' · ' + opDesc : ''}` : null} />
-       
+        <QuantityGrid machine={machine} />
       </div>
     </div>
   );
@@ -223,7 +253,6 @@ const MachineModal = ({ machine, onClose }) => {
   const s = getS(status);
   const order   = safeGet(machine, 'production_order') || safeGet(machine, 'sale_order_number');
   const partNo  = safeGet(machine, 'part_number');
-  const partDesc= safeGet(machine, 'part_description');
   const opNo    = safeGet(machine, 'operation_number');
   const opDesc  = safeGet(machine, 'operation_description') || safeGet(machine, 'operation_name');
   const rawProg = safeGet(machine, 'active_program') || safeGet(machine, 'program_number') || safeGet(machine, 'selected_program');
@@ -253,10 +282,13 @@ const MachineModal = ({ machine, onClose }) => {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
           <MRow label="Production Order" value={order} />
           <MRow label="Part Number" value={partNo} />
-          <MRow label="Part Description" value={partDesc} />
           <MRow label="Operation" value={opNo ? `${opNo}${opDesc ? ' · ' + opDesc : ''}` : null} />
         </div>
-        
+
+        <div style={{ marginBottom: 16 }}>
+          <QuantityGrid machine={machine} />
+        </div>
+
         <div style={{ fontSize: 11, color: '#94a3b8' }}>
           Last updated: <span style={{ color: '#475569', fontWeight: 600 }}>{dayjs(machine.last_updated).format('YYYY-MM-DD HH:mm:ss')}</span>
         </div>
@@ -288,8 +320,10 @@ const MachineDashboard = () => {
       status: normalizeDisplayStatus(m.status),
       production_order: m.sale_order_number,
       operation_description: m.operation_name,
-      part_count: m.completed_qty,
-      launched_quantity: m.target_qty,
+      part_qty: m.part_qty ?? 0,
+      produced_qty: m.produced_qty ?? 0,
+      approved_qty: m.approved_qty ?? 0,
+      rejected_qty: m.rejected_qty ?? 0,
     })));
   };
 
@@ -394,9 +428,11 @@ const MachineDashboard = () => {
           <Select
             mode="multiple"
             placeholder="Select Machines"
-            style={{ width: 200, fontSize: 11 }}
+            style={{ width: 200, minWidth: 200, maxWidth: 200 }}
             size="small"
             allowClear
+            maxTagCount="responsive"
+            maxTagPlaceholder={(omitted) => `+${omitted.length} selected`}
             value={selectedMachineIds}
             onChange={(values) => setSelectedMachineIds(values || [])}
             options={[

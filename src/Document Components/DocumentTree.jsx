@@ -1,7 +1,20 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Tree, Spin, message, Button, Modal, Input, Upload, Card } from 'antd';
+import { Tree, Spin, message, Button, Modal, Input, Upload, Card, Select } from 'antd';
 import { FolderOutlined,  FileOutlined, CaretDownOutlined, CaretRightOutlined,ShoppingOutlined, AppstoreOutlined, PlusOutlined, FileAddOutlined, DeleteOutlined, UploadOutlined,ShoppingCartOutlined,DesktopOutlined} from '@ant-design/icons';
 import config from '../Config/config';
+
+const { Option } = Select;
+const DOC_TYPE_OPTIONS = ['General', 'Other'];
+
+const parseApiError = (errorData, status) => {
+  if (!errorData) return `Request failed (${status})`;
+  const { detail } = errorData;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || item.message || JSON.stringify(item)).join(', ');
+  }
+  return `Request failed (${status})`;
+};
 
 const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsChange }, ref) => {
   const [loading, setLoading] = useState(false);
@@ -38,6 +51,8 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [uploadFolderId, setUploadFolderId] = useState(null);
   const [fileList, setFileList] = useState([]);
+  const [uploadDocType, setUploadDocType] = useState('General');
+  const [uploadCustomDocType, setUploadCustomDocType] = useState('');
 
   const [machineNewFolderModalVisible, setMachineNewFolderModalVisible] = useState(false);
   const [machineNewFolderName, setMachineNewFolderName] = useState('');
@@ -79,7 +94,11 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/orders/`);
+      const userId = getUserId();
+      const url = userId 
+        ? `${config.API_BASE_URL}/orders/?manufacturing_coordinator_id=${userId}`
+        : `${config.API_BASE_URL}/orders/`;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }
@@ -864,11 +883,14 @@ const buildMachineFoldersTree = (folders, machine) => {
       return;
     }
 
+    if (uploadDocType === 'Other' && !uploadCustomDocType.trim()) {
+      message.error('Please enter a custom document type');
+      return;
+    }
+
     const fileObj = fileList[0];
-    // Get the actual file object from the originFileObj
     const file = fileObj.originFileObj || fileObj;
     
-    // Validate that we have a proper File object
     if (!(file instanceof File) && !(file instanceof Blob)) {
       message.error('Invalid file object');
       return;
@@ -877,20 +899,21 @@ const buildMachineFoldersTree = (folders, machine) => {
     const formData = new FormData();
     formData.append('file', file, file.name);
     formData.append('file_name', file.name);
-    
-    // Handle different upload scenarios
-    let uploadUrl;
-    // General folder upload
     formData.append('folder_id', uploadFolderId.toString());
-    {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      formData.append('user_id', userId.toString());
+
+    const resolvedDocType = uploadDocType === 'Other' ? uploadCustomDocType.trim() : uploadDocType;
+    if (resolvedDocType) {
+      formData.append('document_type', resolvedDocType);
     }
-    uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
+
+    const userId = getUserId();
+    if (!userId) {
+      message.error('User not found. Please login.');
+      return;
+    }
+    formData.append('user_id', userId.toString());
+
+    const uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
     
     try {
       setLoading(true);
@@ -898,32 +921,28 @@ const buildMachineFoldersTree = (folders, machine) => {
       const response = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
-        // Don't set Content-Type header, let browser set it with boundary
       });
 
-      
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Upload error response:', errorText);
         let errorData;
         try {
           errorData = JSON.parse(errorText);
         } catch {
           errorData = { detail: errorText };
         }
-        throw new Error(errorData.detail || `Failed to upload document: ${response.status} ${response.statusText}`);
+        throw new Error(parseApiError(errorData, response.status));
       }
 
-      const result = await response.json();
+      await response.json();
       message.success('Document uploaded successfully');
       setUploadModalVisible(false);
       setFileList([]);
       setUploadFolderId(null);
+      setUploadDocType('General');
+      setUploadCustomDocType('');
       
-      // Refresh folders
       await fetchGeneralFolders();
-      
-      // Reinitialize tree data
       initializeTreeData(orders, machines);
     } catch (error) {
       console.error('Upload error:', error);
@@ -1716,11 +1735,38 @@ const buildMachineFoldersTree = (folders, machine) => {
           setUploadModalVisible(false);
           setFileList([]);
           setUploadFolderId(null);
+          setUploadDocType('General');
+          setUploadCustomDocType('');
         }}
         okText="Upload"
         cancelText="Cancel"
         confirmLoading={loading}
       >
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>
+            Document Type:
+          </label>
+          <Select
+            style={{ width: '100%' }}
+            value={uploadDocType}
+            onChange={(value) => {
+              setUploadDocType(value);
+              if (value !== 'Other') setUploadCustomDocType('');
+            }}
+          >
+            {DOC_TYPE_OPTIONS.map((type) => (
+              <Option key={type} value={type}>{type}</Option>
+            ))}
+          </Select>
+          {uploadDocType === 'Other' && (
+            <Input
+              style={{ width: '100%', marginTop: 8 }}
+              placeholder="Enter custom document type"
+              value={uploadCustomDocType}
+              onChange={(e) => setUploadCustomDocType(e.target.value)}
+            />
+          )}
+        </div>
         <Upload
           beforeUpload={(file) => {
             console.log('Before upload - file:', file);

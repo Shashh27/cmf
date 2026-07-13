@@ -508,6 +508,10 @@ function App() {
 
           <Route path="/operator/preventive-maintenance" element={<OperatorDashboard />} />
 
+          <Route path="/admin/qms-inspector" element={<QMSInspector />} />
+          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
+          <Route path="/operator/qms-inspector" element={<QMSInspector />} />
+
           </Route>
 
 
@@ -521,15 +525,6 @@ function App() {
 
 
       </Layout>
-
-      {/* Full-screen routes (outside Layout) */}
-      <Routes>
-        <Route element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
-          <Route path="/admin/qms-inspector" element={<QMSInspector />} />
-          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
-          <Route path="/operator/qms-inspector" element={<QMSInspector />} />
-        </Route>
-      </Routes>
 
       {/* Chat Panel - floating widget */}
       <ChatPanel />

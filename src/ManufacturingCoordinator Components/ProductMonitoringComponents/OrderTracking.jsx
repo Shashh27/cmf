@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
-import { Card, Table, Spin, message, Row, Col, Statistic, Typography, Tag, Select, Empty, Space } from 'antd';
+import { Card, Table, Spin, message, Typography, Tag, Select, Empty, Space } from 'antd';
 import { 
-  ShoppingCartOutlined, 
   SyncOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   DatabaseOutlined,
-  ToolOutlined
+  ToolOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 /* ─── STATUS TAG ─────────────────────────────────────────────────────────── */
 const getStatusTag = (status) => {
@@ -39,7 +39,17 @@ const OrderTracking = () => {
   const [initialLoading, setInitialLoading]       = useState(true);
   const [searchOrder, setSearchOrder]             = useState('');
   const [searchPart, setSearchPart]               = useState('');
+  const [partStatusFilter, setPartStatusFilter]   = useState('all');
   const hasFetchedOrders = useRef(false);
+
+  const matchesPartStatusFilter = (part, filter) => {
+    const status = (part.status || '').toLowerCase();
+    if (filter === 'all') return true;
+    if (filter === 'completed') return status === 'completed';
+    if (filter === 'in_progress') return ['in progress', 'started'].includes(status);
+    if (filter === 'pending') return ['not started', 'pending'].includes(status);
+    return true;
+  };
 
   const getCurrentAdminId = () => {
     try {
@@ -125,6 +135,11 @@ const OrderTracking = () => {
       setProductionLogsData({});
       setSelectedPartId(null);
     }
+  }, [selectedOrderId]);
+
+  useEffect(() => {
+    setPartStatusFilter('all');
+    setSelectedPartId(null);
   }, [selectedOrderId]);
 
   useEffect(() => {
@@ -263,10 +278,25 @@ const OrderTracking = () => {
     o.sale_order_number?.toLowerCase().includes(searchOrder.toLowerCase())
   );
 
-  const filteredParts = partsData.filter(p => 
-    p.part_name?.toLowerCase().includes(searchPart.toLowerCase()) || 
-    p.part_number?.toLowerCase().includes(searchPart.toLowerCase())
-  );
+  const filteredParts = partsData
+    .filter((p) => matchesPartStatusFilter(p, partStatusFilter))
+    .filter((p) =>
+      p.part_name?.toLowerCase().includes(searchPart.toLowerCase())
+      || p.part_number?.toLowerCase().includes(searchPart.toLowerCase()),
+    );
+
+  const kpiItems = [
+    { key: 'all', label: 'Total Parts', value: totalParts, color: '#1677ff', icon: <AppstoreOutlined /> },
+    { key: 'completed', label: 'Completed', value: completedParts, color: '#52c41a', icon: <CheckCircleOutlined /> },
+    { key: 'in_progress', label: 'In Progress', value: inProgressParts, color: '#1890ff', icon: <SyncOutlined /> },
+    { key: 'pending', label: 'Pending', value: pendingParts, color: '#faad14', icon: <ClockCircleOutlined /> },
+  ];
+
+  useEffect(() => {
+    if (selectedPartId && !filteredParts.some((p) => p.part_id === selectedPartId)) {
+      setSelectedPartId(null);
+    }
+  }, [filteredParts, selectedPartId]);
 
   const statusColors = {
     completed: 'success',
@@ -366,14 +396,14 @@ const OrderTracking = () => {
       ),
     },
     {
-      title: 'Req',
+      title: 'Required',
       key: 'required',
       width: 42,
       align: 'center',
       render: () => <Text style={{ fontSize: 12, fontWeight: 500 }}>{selectedPart?.qty || 1}</Text>,
     },
     {
-      title: 'Prod',
+      title: 'Produced',
       key: 'produced',
       width: 46,
       align: 'center',
@@ -383,7 +413,7 @@ const OrderTracking = () => {
       },
     },
     {
-      title: 'Appr',
+      title: 'Approved',
       key: 'approved',
       width: 46,
       align: 'center',
@@ -392,18 +422,9 @@ const OrderTracking = () => {
         return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: 12 }}>{approved}</Text>;
       },
     },
+    
     {
-      title: 'Rew',
-      key: 'rework',
-      width: 42,
-      align: 'center',
-      render: (_, op) => {
-        const { rework } = getOpQtyTotals(op.production_logs);
-        return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: 12 }}>{rework}</Text>;
-      },
-    },
-    {
-      title: 'Rej',
+      title: 'Rejected',
       key: 'rejected',
       width: 42,
       align: 'center',
@@ -428,45 +449,39 @@ const OrderTracking = () => {
 
   return (
     <div className="order-tracking-root">
-      <Card
-        className="order-tracking-header"
-        styles={{ body: { padding: '10px 14px' } }}
-      >
-        <Row align="middle" justify="space-between" gutter={[8, 8]} wrap>
-          <Col xs={24} lg={8}>
-            <Space size="middle" wrap>
-              <ShoppingCartOutlined style={{ fontSize: 22, color: '#1890ff' }} />
-              <Title level={4} style={{ margin: 0, fontSize: 18 }}>Order Tracking Dashboard</Title>
-            </Space>
-          </Col>
-          {selectedOrderId && (
-            <Col xs={24} lg={16}>
-              <div className="order-tracking-stats">
-                <Statistic title="Total Parts" value={totalParts} styles={{ content: { fontSize: 18 } }} />
-                <Statistic title="Completed" value={completedParts} styles={{ content: { color: '#52c41a', fontSize: 18 } }} />
-                <Statistic title="In Progress" value={inProgressParts} styles={{ content: { color: '#1890ff', fontSize: 18 } }} />
-                <Statistic title="Pending" value={pendingParts} styles={{ content: { color: '#faad14', fontSize: 18 } }} />
-              </div>
-            </Col>
-          )}
-        </Row>
-      </Card>
+      {selectedOrderId && (
+        <Card className="order-tracking-header" styles={{ body: { padding: '12px 14px' } }}>
+          <div className="order-tracking-kpis">
+            {kpiItems.map((kpi) => (
+              <button
+                key={kpi.key}
+                type="button"
+                className={`ot-kpi-card ot-kpi-${kpi.key}${partStatusFilter === kpi.key ? ' active' : ''}`}
+                onClick={() => setPartStatusFilter((prev) => (
+                  prev === kpi.key && kpi.key !== 'all' ? 'all' : kpi.key
+                ))}
+              >
+                <span className="ot-kpi-icon" style={{ color: kpi.color }}>{kpi.icon}</span>
+                <div className="ot-kpi-body">
+                  <span className="ot-kpi-value" style={{ color: kpi.color }}>{kpi.value}</span>
+                  <span className="ot-kpi-label">{kpi.label}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="order-tracking-grid">
         {/* Orders */}
         <Card
           title={<Space size={6}><DatabaseOutlined /> Orders</Space>}
-          className="order-tracking-panel"
-          styles={{
-            body: { padding: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 },
-            header: { padding: '0 12px', minHeight: 42, flexShrink: 0 },
-          }}
-        >
-          <div className="ot-panel-filter">
+          extra={(
             <Select
               showSearch
-              placeholder="Search orders..."
-              style={{ width: '100%' }}
+              allowClear
+              placeholder="Search..."
+              className="ot-panel-search"
               onSearch={setSearchOrder}
               onChange={setSelectedOrderId}
               value={selectedOrderId}
@@ -479,7 +494,13 @@ const OrderTracking = () => {
                 </Select.Option>
               ))}
             </Select>
-          </div>
+          )}
+          className="order-tracking-panel"
+          styles={{
+            body: { padding: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 },
+            header: { padding: '0 12px', minHeight: 42, flexShrink: 0 },
+          }}
+        >
           <div className="ot-panel-scroll">
             {initialLoading ? (
               <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
@@ -504,17 +525,12 @@ const OrderTracking = () => {
         {/* Parts */}
         <Card
           title={<Space size={6}><ToolOutlined /> Parts ({filteredParts.length})</Space>}
-          className="order-tracking-panel"
-          styles={{
-            body: { padding: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 },
-            header: { padding: '0 12px', minHeight: 42, flexShrink: 0 },
-          }}
-        >
-          <div className="ot-panel-filter">
+          extra={(
             <Select
               showSearch
-              placeholder="Filter parts..."
-              style={{ width: '100%' }}
+              allowClear
+              placeholder="Search..."
+              className="ot-panel-search"
               onSearch={setSearchPart}
               onChange={setSelectedPartId}
               value={selectedPartId}
@@ -526,7 +542,13 @@ const OrderTracking = () => {
                 </Select.Option>
               ))}
             </Select>
-          </div>
+          )}
+          className="order-tracking-panel"
+          styles={{
+            body: { padding: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 },
+            header: { padding: '0 12px', minHeight: 42, flexShrink: 0 },
+          }}
+        >
           <div className="ot-panel-scroll">
             <Table
               className="ot-fit-table"
@@ -663,15 +685,74 @@ const OrderTracking = () => {
           box-shadow: 0 1px 2px rgba(0,0,0,0.04);
           flex-shrink: 0;
         }
-        .order-tracking-stats {
+        .order-tracking-kpis {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 8px 16px;
+          gap: 10px;
           width: 100%;
         }
-        .order-tracking-stats .ant-statistic-title {
-          font-size: 11px;
-          margin-bottom: 0;
+        .ot-kpi-card {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 14px;
+          border: 1px solid #e8e8e8;
+          border-radius: 10px;
+          background: #fff;
+          cursor: pointer;
+          transition: all 0.18s ease;
+          min-height: 72px;
+          text-align: left;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .ot-kpi-card.ot-kpi-all { border-left: 4px solid #1677ff; }
+        .ot-kpi-card.ot-kpi-completed { border-left: 4px solid #52c41a; }
+        .ot-kpi-card.ot-kpi-in_progress { border-left: 4px solid #1890ff; }
+        .ot-kpi-card.ot-kpi-pending { border-left: 4px solid #faad14; }
+        .ot-kpi-card:hover {
+          border-color: #91caff;
+          background: #f8fbff;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 10px rgba(24,144,255,0.08);
+        }
+        .ot-kpi-card.active {
+          border-color: #1890ff;
+          background: linear-gradient(135deg, #f0f7ff 0%, #e6f4ff 100%);
+          box-shadow: 0 0 0 1px #91caff inset, 0 4px 12px rgba(24,144,255,0.12);
+        }
+        .ot-kpi-icon {
+          font-size: 22px;
+          flex-shrink: 0;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 8px;
+          background: rgba(0,0,0,0.03);
+        }
+        .ot-kpi-body {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+        }
+        .ot-kpi-value {
+          font-size: 24px;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+        .ot-kpi-label {
+          font-size: 12px;
+          color: #8c8c8c;
+          font-weight: 500;
+        }
+        .ot-panel-search {
+          width: min(180px, 42vw) !important;
+          min-width: 120px;
+        }
+        .order-tracking-panel .ant-card-extra {
+          padding: 8px 0 !important;
         }
         .order-tracking-grid {
           flex: 1;
@@ -802,7 +883,7 @@ const OrderTracking = () => {
             height: auto;
             max-height: 42vh;
           }
-          .order-tracking-stats {
+          .order-tracking-kpis {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
@@ -810,7 +891,7 @@ const OrderTracking = () => {
         @media (max-width: 576px) {
           .order-tracking-root { padding: 8px; gap: 8px; }
           .order-tracking-panel { max-height: none; min-height: 240px; }
-          .order-tracking-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .order-tracking-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .ot-log-grid { grid-template-columns: 1fr 1fr; }
         }
       `}</style>

@@ -465,7 +465,7 @@ const InventoryRequestsTable = () => {
         </Row>
       </div>
       <InventoryOverviewTableStyles />
-      <div style={{ width: '100%', overflow: 'hidden' }}>
+      <div style={{ width: '100%', overflowX: 'auto' }}>
       <Table
         {...getInventoryOverviewTableProps({
           columns,

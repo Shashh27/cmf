@@ -51,6 +51,17 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const [machineFileList, setMachineFileList] = useState([]);
   const [commonRootDocumentCount, setCommonRootDocumentCount] = useState(0);
 
+  const getUserId = () => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) return null;
+      const u = JSON.parse(s);
+      return u && (u.id || u.user_id || u.userId) ? (u.id || u.user_id || u.userId) : null;
+    } catch {
+      return null;
+    }
+  };
+
   // Fetch orders, parts and general folders on component mount
   useEffect(() => {
     fetchOrders();
@@ -69,7 +80,11 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/orders/`);
+      const userId = getUserId();
+      const url = userId 
+        ? `${config.API_BASE_URL}/orders/?manufacturing_coordinator_id=${userId}`
+        : `${config.API_BASE_URL}/orders/`;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }
@@ -860,6 +875,13 @@ const buildMachineFoldersTree = (folders, machine) => {
     // General folder upload
     formData.append('folder_id', uploadFolderId.toString());
     uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
+
+    const userId = getUserId();
+    if (!userId) {
+      message.error('User not found. Please login.');
+      return;
+    }
+    formData.append('user_id', userId.toString());
     
     try {
       setLoading(true);
@@ -920,6 +942,13 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (commonUploadFolderId !== null && commonUploadFolderId !== undefined) {
       formData.append('folder_id', commonUploadFolderId.toString());
     }
+
+    const userId = getUserId();
+    if (!userId) {
+      message.error('User not found. Please login.');
+      return;
+    }
+    formData.append('user_id', userId.toString());
 
     try {
       setLoading(true);
@@ -1100,6 +1129,13 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (machineUploadMachineId) {
       formData.append('machine_id', machineUploadMachineId.toString());
     }
+
+    const userId = getUserId();
+    if (!userId) {
+      message.error('User not found. Please login.');
+      return;
+    }
+    formData.append('user_id', userId.toString());
 
     try {
       setLoading(true);

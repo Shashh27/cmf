@@ -5,7 +5,7 @@ import {
   formatDateTime, formatDate, machineLabel, itemTypeShort, frequencySummary,
 } from './pmUtils';
 
-const BRAND = 'CMF DIGITIZATION - CMTI';
+const BRAND = 'CMF DIGITALIZATION - CMTI';
 const HEADER_FILL = 'FF4A6CF7';
 const HEADER_FONT = 'FFFFFFFF';
 const ALT_FILL = 'FFF8FAFC';
