@@ -266,16 +266,16 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
             logs = production_logs_map.get(op.id, [])
             status = _resolve_operation_status(logs, status_info, required_qty)
             
-            if op_status == "Completed":
+            if status == "Completed":
                 completed_operations_count += 1
             
             operation_tracking_list.append(OperationTrackingStatus(
                 operation_id=op.id,
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
-                status=op_status,
+                status=status,
                 started_at=status_info["first_started"],
-                completed_at=status_info["last_completed"] if op_status == "Completed" else None,
+                completed_at=status_info["last_completed"] if status == "Completed" else None,
                 operator_id=status_info["operator_id"],
                 operator_name=operator_map.get(status_info["operator_id"]),
                 production_logs=logs,
@@ -399,16 +399,16 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
             logs = production_logs_map.get(op.id, [])
             status = _resolve_operation_status(logs, status_info, required_qty)
             
-            if op_status == "Completed":
+            if status == "Completed":
                 completed_operations_count += 1
             
             operation_tracking_list.append(OperationTrackingStatus(
                 operation_id=op.id,
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
-                status=op_status,
+                status=status,
                 started_at=status_info["first_started"],
-                completed_at=status_info["last_completed"] if op_status == "Completed" else None,
+                completed_at=status_info["last_completed"] if status == "Completed" else None,
                 operator_id=status_info["operator_id"],
                 operator_name=None,
                 machine_id=op.machine_id,
@@ -543,16 +543,16 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
         logs = production_logs_map.get(op.id, [])
         status = _resolve_operation_status(logs, status_info, required_qty)
         
-        if op_status == "Completed":
+        if status == "Completed":
             completed_operations_count += 1
         
         operation_tracking_list.append(OperationTrackingStatus(
             operation_id=op.id,
             operation_number=op.operation_number,
             operation_name=op.operation_name,
-            status=op_status,
+            status=status,
             started_at=status_info["first_started"],
-            completed_at=status_info["last_completed"] if op_status == "Completed" else None,
+            completed_at=status_info["last_completed"] if status == "Completed" else None,
             operator_id=status_info["operator_id"],
             operator_name=operator_map.get(status_info["operator_id"]),
             production_logs=logs,
