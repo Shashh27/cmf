@@ -557,13 +557,11 @@ const PokaYokeChecklist = ({
       const responseLabel = formatResponseLabel(
         submittedToday.response_value ?? cp.latest_response_value ?? cp.response_value
       );
-      const color = isRejected ? '#dc2626' : isPending ? '#d97706' : '#15803d';
+      const color = isRejected ? '#dc2626' : '#15803d';
       const submittedRemark = cp.operator_comments ?? cp.latest_operator_comments ?? '';
       const fallbackLabel = isRejected
         ? 'Non conforming'
-        : isPending
-          ? 'Response sent'
-          : 'Conforming';
+        : 'Response sent';
 
       return (
         <div>
@@ -595,7 +593,7 @@ const PokaYokeChecklist = ({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
             <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
-              {responseLabel ?? 'Conforming'}
+              {responseLabel ?? 'Response sent'}
             </span>
           </div>
           {submittedRemark && (
@@ -977,8 +975,6 @@ const PokaYokeChecklist = ({
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0 12px', flexWrap: 'wrap', flexShrink: 0 }}>
       {[
         { icon: <CheckCircleFilled style={{ color: '#22c55e', fontSize: 13 }} />,     label: 'Response sent' },
-        { icon: <CheckCircleFilled style={{ color: '#15803d', fontSize: 13 }} />,     label: 'Conforming' },
-        { icon: <CloseCircleFilled  style={{ color: '#ef4444', fontSize: 13 }} />,     label: 'Non conforming' },
         { icon: <CalendarOutlined   style={{ fontSize: 13, color: '#0284c7' }} />,     label: 'Time based' },
         { icon: <ThunderboltOutlined style={{ fontSize: 13, color: '#7c3aed' }} />,    label: 'Usage based' },
         { icon: <ClockCircleOutlined style={{ fontSize: 13, color: '#059669' }} />,    label: 'Condition based' },

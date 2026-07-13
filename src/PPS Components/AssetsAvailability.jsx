@@ -10,7 +10,7 @@ dayjs.extend(isSameOrBefore);
 
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { Card, Row, Col, Tabs, Table, Tag, message, Spin, Button, Modal, Form, Select, DatePicker, Input, Space, Switch } from "antd";
-import { CheckCircleOutlined, ExclamationCircleOutlined, InfoCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined 
+import { CheckCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined 
 } from "@ant-design/icons";
 import MaintenanceSection from "./MaintenanceSection";
 import MachineAssignment from "./Machineassignment";
@@ -32,10 +32,12 @@ const AssetAvailability = () => {
   const [selectedStatus, setSelectedStatus] = useState(null);
 
   // Search and Pagination states
-  const [machineSearchText, setMachineSearchText] = useState(null);
-  const [wcSearchText, setWcSearchText] = useState(null);
+  const [machineSearchText, setMachineSearchText] = useState([]);
+  const [wcSearchText, setWcSearchText] = useState([]);
   const [statusSearchText, setStatusSearchText] = useState(null);
   const [machinePageSize, setMachinePageSize] = useState(10);
+  const [kpiFilter, setKpiFilter] = useState('all');
+  const [refreshing, setRefreshing] = useState(false);
 
   // ← NEW: track table-level filters (for Status column filter)
   const [tableFilters, setTableFilters] = useState({});
@@ -63,9 +65,10 @@ const AssetAvailability = () => {
     fetchMachineStatus();
   }, []);
 
-  const fetchMachineStatus = async () => {
+  const fetchMachineStatus = async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-status/`);
       if (response.ok) {
         const data = await response.json();
@@ -79,7 +82,8 @@ const AssetAvailability = () => {
       console.error("Error fetching machine status:", error);
       message.error("Error fetching machine status data");
     } finally {
-      setLoading(false);
+      if (isRefresh) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
@@ -296,26 +300,90 @@ const AssetAvailability = () => {
     return { fromRequired: false, toRequired: false };
   };
 
-  const getTotalMachines = () => machineData?.total_machines || 0;
+  const getTotalMachines = () => machineData?.total_machines || machineData?.statuses?.length || 0;
+
+  const isActiveMachine = (status) => {
+    const statusName = (status.status_name || '').toLowerCase();
+    return statusName.includes('active') || statusName.includes('running') ||
+      statusName.includes('on') || status.status_id === 1;
+  };
+
+  const isInactiveMachine = (status) => {
+    const statusName = (status.status_name || '').toLowerCase();
+    return statusName.includes('inactive') || statusName.includes('down') ||
+      statusName.includes('off') || statusName.includes('maintenance') ||
+      status.status_id === 2 || status.status_id === 3;
+  };
 
   const getActiveMachines = () => {
     if (!machineData?.statuses) return 0;
-    return machineData.statuses.filter(status => {
-      const statusName = (status.status_name || '').toLowerCase();
-      return statusName.includes('active') || statusName.includes('running') || 
-             statusName.includes('on') || status.status_id === 1;
-    }).length;
+    return machineData.statuses.filter(isActiveMachine).length;
   };
 
   const getInactiveMachines = () => {
     if (!machineData?.statuses) return 0;
-    return machineData.statuses.filter(status => {
-      const statusName = (status.status_name || '').toLowerCase();
-      return statusName.includes('inactive') || statusName.includes('down') ||
-             statusName.includes('off') || statusName.includes('maintenance') ||
-             status.status_id === 2 || status.status_id === 3;
-    }).length;
+    return machineData.statuses.filter(isInactiveMachine).length;
   };
+
+  const getFilteredMachineStatuses = () => {
+    const base = machineData?.statuses || [];
+    const machineFilters = Array.isArray(machineSearchText) ? machineSearchText : [];
+    const wcFilters = Array.isArray(wcSearchText) ? wcSearchText : [];
+
+    return base.filter(item => {
+      const matchesSearch =
+        (machineFilters.length === 0 || machineFilters.includes(item.machine_make)) &&
+        (wcFilters.length === 0 || wcFilters.includes(item.work_center_name)) &&
+        (!statusSearchText || item.status_name === statusSearchText);
+
+      if (!matchesSearch) return false;
+
+      if (kpiFilter === 'active') return isActiveMachine(item);
+      if (kpiFilter === 'inactive') return isInactiveMachine(item);
+      return true;
+    });
+  };
+
+  const handleKpiClick = (filterKey) => {
+    setKpiFilter(filterKey);
+    setTableFilters({});
+  };
+
+  const kpiCards = [
+    {
+      key: 'all',
+      label: 'Total Machines',
+      value: getTotalMachines(),
+      color: '#2f54eb',
+      iconColor: '#597ef7',
+      gradient: 'linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%)',
+      border: '#d6e4ff',
+      ring: '#597ef7',
+      icon: <SettingOutlined />,
+    },
+    {
+      key: 'active',
+      label: 'Active',
+      value: getActiveMachines(),
+      color: '#389e0d',
+      iconColor: '#52c41a',
+      gradient: 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)',
+      border: '#b7eb8f',
+      ring: '#52c41a',
+      icon: <CheckCircleOutlined />,
+    },
+    {
+      key: 'inactive',
+      label: 'Inactive',
+      value: getInactiveMachines(),
+      color: '#cf1322',
+      iconColor: '#f5222d',
+      gradient: 'linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%)',
+      border: '#ffa39e',
+      ring: '#f5222d',
+      icon: <ExclamationCircleOutlined />,
+    },
+  ];
 
   // ← NEW: handle table onChange to capture filter state
   const handleTableChange = (pagination, filters) => {
@@ -427,8 +495,8 @@ const AssetAvailability = () => {
         { text: 'ON', value: 1 },
         { text: 'OFF', value: 2 },
       ],
-      filteredValue: tableFilters.status_id || null,
-      onFilter: (value, record) => record.status_id === value,
+      filteredValue: kpiFilter === 'all' ? (tableFilters.status_id || null) : null,
+      onFilter: kpiFilter === 'all' ? (value, record) => record.status_id === value : undefined,
       render: (statusId, record) => {
         const editable = isEditing(record);
         if (editable) {
@@ -536,125 +604,117 @@ const AssetAvailability = () => {
               {/* Header Section */}
               
 
-              {/* KPI Cards Section */}
-              <Row gutter={[24, 24]} style={{ marginBottom: '32px' }}>
-                <Col xs={24} sm={12} lg={8}>
-                  <Card 
-                    style={{ 
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, #f0f5ff 0%, #ffffff 100%)',
-                      border: '1px solid #d6e4ff',
-                      boxShadow: '0 4px 12px rgba(24, 144, 255, 0.08)'
-                    }}
-                    bodyStyle={{ padding: '20px' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <p style={{ color: '#597ef7', fontWeight: 600, fontSize: '16px', margin: 0 }}>Total Machines</p>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
-                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#2f54eb' }}>{getTotalMachines()}</span>
-                          <span style={{ color: '#597ef7', fontSize: '14px' }}>Machines</span>
-                        </div>
-                      </div>
-                      <div style={{ 
-                        background: '#f0f5ff', padding: '12px', borderRadius: '10px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <InfoCircleOutlined style={{ fontSize: '24px', color: '#597ef7' }} />
-                      </div>
-                    </div>
-                  </Card>
-                </Col>
-                <Col xs={24} sm={12} lg={8}>
-                  <Card 
-                    style={{ 
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)',
-                      border: '1px solid #d9f7be',
-                      boxShadow: '0 4px 12px rgba(82, 196, 26, 0.08)'
-                    }}
-                    bodyStyle={{ padding: '20px' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <p style={{ color: '#52c41a', fontWeight: 600, fontSize: '16px', margin: 0 }}>Active Machines</p>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
-                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#389e0d' }}>{getActiveMachines()}</span>
-                          <span style={{ color: '#52c41a', fontSize: '14px' }}>Machines</span>
-                        </div>
-                      </div>
-                      <div style={{ 
-                        background: '#f6ffed', padding: '12px', borderRadius: '10px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <CheckCircleOutlined style={{ fontSize: '24px', color: '#52c41a' }} />
-                      </div>
-                    </div>
-                  </Card>
-                </Col>
-                <Col xs={24} sm={12} lg={8}>
-                  <Card 
-                    style={{ 
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, #fff1f0 0%, #ffffff 100%)',
-                      border: '1px solid #ffa39e',
-                      boxShadow: '0 4px 12px rgba(255, 77, 79, 0.08)'
-                    }}
-                    bodyStyle={{ padding: '20px' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <p style={{ color: '#f5222d', fontWeight: 600, fontSize: '16px', margin: 0 }}>Inactive Machines</p>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
-                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#cf1322' }}>{getInactiveMachines()}</span>
-                          <span style={{ color: '#f5222d', fontSize: '14px' }}>Machines</span>
-                        </div>
-                      </div>
-                      <div style={{ 
-                        background: '#fff1f0', padding: '12px', borderRadius: '10px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <ExclamationCircleOutlined style={{ fontSize: '24px', color: '#f5222d' }} />
-                      </div>
-                    </div>
-                  </Card>
-                </Col>
-              </Row>
-
-              {/* Filters Section */}
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'flex-end', 
+              {/* KPI cards (left) + filters (right) */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: '16px',
+                gap: 16,
+                marginBottom: 16,
                 flexWrap: 'wrap',
-                gap: '16px'
               }}>
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 500 }}>Machine Name:</span>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {kpiCards.map((card) => {
+                    const isSelected = kpiFilter === card.key;
+                    return (
+                      <div
+                        key={card.key}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleKpiClick(card.key)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleKpiClick(card.key)}
+                        style={{
+                          width: 175,
+                          borderRadius: 10,
+                          padding: '14px 16px',
+                          background: card.gradient,
+                          border: `1px solid ${card.border}`,
+                          boxShadow: isSelected
+                            ? `0 0 0 2px ${card.ring}`
+                            : '0 1px 4px rgba(0,0,0,0.08)',
+                          cursor: 'pointer',
+                          transition: 'box-shadow 0.2s',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: '#64748b',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              marginBottom: 4,
+                            }}>
+                              {card.label}
+                            </div>
+                            <div style={{
+                              fontSize: 26,
+                              fontWeight: 700,
+                              color: card.color,
+                              lineHeight: 1.1,
+                            }}>
+                              {card.value}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 22, color: card.iconColor, flexShrink: 0 }}>
+                            {card.icon}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {kpiFilter !== 'all' && (
+                    <Button type="link" size="small" style={{ padding: '0 4px', height: 'auto', fontSize: 12 }} onClick={() => handleKpiClick('all')}>
+                      Show all
+                    </Button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontWeight: 500, fontSize: 13, whiteSpace: 'nowrap' }}>Machine Name:</span>
                     <Select
-                      placeholder={<span><SearchOutlined /> All Machines</span>}
+                      mode="multiple"
+                      placeholder="All Machines"
                       allowClear
                       showSearch
-                      style={{ width: 180 }}
+                      maxTagCount={1}
+                      maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+                      style={{ minWidth: 200 }}
                       value={machineSearchText}
-                      onChange={value => setMachineSearchText(value)}
+                      onChange={value => setMachineSearchText(value || [])}
                       options={getMachineOptions()}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 500 }}>Work Center:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontWeight: 500, fontSize: 13, whiteSpace: 'nowrap' }}>Work Center:</span>
                     <Select
-                      placeholder={<span><SearchOutlined /> All Work Centers</span>}
+                      mode="multiple"
+                      placeholder="All Work Centers"
                       allowClear
                       showSearch
-                      style={{ width: 180 }}
+                      maxTagCount={1}
+                      maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+                      style={{ minWidth: 200 }}
                       value={wcSearchText}
-                      onChange={value => setWcSearchText(value)}
+                      onChange={value => setWcSearchText(value || [])}
                       options={getWcOptions()}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
                     />
                   </div>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    onClick={() => fetchMachineStatus(true)}
+                    loading={refreshing}
+                    title="Refresh"
+                  />
                 </div>
               </div>
 
@@ -663,11 +723,7 @@ const AssetAvailability = () => {
                 <Form form={inlineEditForm} component={false}>
                   <Table
                     columns={machineStatusColumns}
-                    dataSource={(machineData?.statuses || []).filter(item => 
-                      (!machineSearchText || item.machine_make === machineSearchText) &&
-                      (!wcSearchText || item.work_center_name === wcSearchText) &&
-                      (!statusSearchText || item.status_name === statusSearchText)
-                    )}
+                    dataSource={getFilteredMachineStatuses()}
                     rowKey={(record) => record.id || record.machine_id}
                     scroll={{ x: 800 }}
                     pagination={{
@@ -680,6 +736,7 @@ const AssetAvailability = () => {
                     }}
                     // ← NEW: captures filter + pagination changes
                     onChange={handleTableChange}
+                    loading={refreshing}
                     className="custom-table"
                   />
                 </Form>

@@ -16,6 +16,8 @@ import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
 
 import { API_BASE_URL } from '../../Config/auth';
 
+import { QUALITY_API_BASE_URL } from '../../Config/qualityconfig';
+
 
 
 const { Sider } = Layout;
@@ -61,6 +63,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
   const prefix = getRolePrefix();
+
+  const renderNotificationMenuLabel = (to, text = 'Notification') => (
+    <Link to={to} onClick={() => setMobileDrawerOpen(false)}>
+      <Badge count={notificationCount} offset={[10, 0]}>
+        {text}
+      </Badge>
+    </Link>
+  );
 
 
 
@@ -122,7 +132,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-  // Fetch notification count for operator and project coordinator
+  // Fetch notification count for sidebar badge
 
   useEffect(() => {
 
@@ -138,9 +148,17 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       fetchPCNotificationCount();
 
+    } else if (prefix === '/admin') {
+
+      fetchAdminNotificationCount();
+
+    } else if (prefix === '/manufacturing_coordinator') {
+
+      fetchMCNotificationCount();
+
     }
 
-  }, []);
+  }, [prefix]);
 
 
 
@@ -200,8 +218,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
             hasReviewer &&
             (log.produced_quantity || 0) > 0 &&
             !log.operator_acknowledged_at &&
-            !log.operator_acknowledged &&
-            !log.acknowledged
+            !log.operator_acknowledged
           );
         }).length;
       }
@@ -332,6 +349,208 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     } catch (error) {
 
       console.error('Error fetching PC notification count:', error);
+
+    }
+
+  };
+
+
+
+  const fetchAdminNotificationCount = async () => {
+
+    try {
+
+      const endpoints = [
+
+        `${API_BASE_URL}/order-notifications/`,
+
+        `${API_BASE_URL}/machine-notifications/`,
+
+        `${API_BASE_URL}/tool-issues-notifications/`,
+
+        `${API_BASE_URL}/component-issues-notifications/`,
+
+        `${API_BASE_URL}/machine-calibration-notifications/`,
+
+      ];
+
+      const [orders, machines, tools, components, calibrations, inspRes] = await Promise.all([
+
+        ...endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : []))),
+
+        fetch(`${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`),
+
+      ]);
+
+      const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.is_ack).length : 0);
+
+      const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
+
+      setNotificationCount(
+
+        countPending(orders) +
+
+        countPending(machines) +
+
+        countPending(tools) +
+
+        countPending(components) +
+
+        countPending(calibrations) +
+
+        (Array.isArray(inspectionPlans) ? inspectionPlans.length : 0)
+
+      );
+
+    } catch (error) {
+
+      console.error('Error fetching admin notification count:', error);
+
+    }
+
+  };
+
+
+
+  const fetchMCNotificationCount = async () => {
+
+    try {
+
+      const storedUser = localStorage.getItem('user');
+
+      let mcId = null;
+
+      if (storedUser) {
+
+        try {
+
+          const user = JSON.parse(storedUser);
+
+          mcId = user.id ?? user.user_id ?? user.userId ?? null;
+
+        } catch (e) {
+
+          console.error('Error parsing user from local storage', e);
+
+        }
+
+      }
+
+
+
+      const params = new URLSearchParams();
+
+      if (mcId) params.set('mc_id', mcId);
+
+      const qs = params.toString();
+
+      const endpoints = [
+
+        `${API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
+
+        `${API_BASE_URL}/machine-notifications/${qs ? `?${qs}` : ''}`,
+
+        `${API_BASE_URL}/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
+
+        `${API_BASE_URL}/component-issues-notifications/${qs ? `?${qs}` : ''}`,
+
+        `${API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
+
+      ];
+
+
+
+      const [orders, machines, tools, components, calibrations, productionResponse, pokayokeResponse] = await Promise.all([
+
+        ...endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : []))),
+
+        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
+
+        fetch(`${API_BASE_URL}/operation-checklists/submissions`),
+
+      ]);
+
+
+
+      const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.mc_is_ack).length : 0);
+
+
+
+      let productionCount = 0;
+
+      if (productionResponse.ok) {
+
+        const data = await productionResponse.json();
+
+        productionCount = (data || []).filter((log) => {
+
+          const noSupervisorAssigned =
+
+            log.supervisor_id === null || log.supervisor_id === undefined;
+
+          const matchesUser =
+
+            mcId &&
+
+            (String(log.supervisor_id) === String(mcId) || String(log.user_id) === String(mcId));
+
+          const approvedByName = log.supervisor?.user_name || log.reviewer?.user_name;
+
+          return (
+
+            (noSupervisorAssigned || matchesUser) &&
+
+            ((log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0) &&
+
+            !approvedByName &&
+
+            !log.supervisor_acknowledged_at &&
+
+            !log.acknowledged_at &&
+
+            !log.acknowledged
+
+          );
+
+        }).length;
+
+      }
+
+
+
+      let pokayokeCount = 0;
+
+      if (pokayokeResponse.ok) {
+
+        const data = await pokayokeResponse.json();
+
+        pokayokeCount = (data || []).filter((log) => !log.mc_ack_by).length;
+
+      }
+
+
+
+      setNotificationCount(
+
+        countPending(orders) +
+
+        countPending(machines) +
+
+        countPending(tools) +
+
+        countPending(components) +
+
+        countPending(calibrations) +
+
+        productionCount +
+
+        pokayokeCount
+
+      );
+
+    } catch (error) {
+
+      console.error('Error fetching MC notification count:', error);
 
     }
 
@@ -521,7 +740,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       key: `${prefix}/notification`,
 
-      label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
+      label: renderNotificationMenuLabel(`${prefix}/notification`),
 
       icon: <BellOutlined />,
 
@@ -897,7 +1116,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
         key: `${prefix}/notification`,
 
-        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
+        label: renderNotificationMenuLabel(`${prefix}/notification`),
 
         icon: <BellOutlined />,
 

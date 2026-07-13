@@ -119,7 +119,7 @@ function buildBodyRowsHtml(rows, layout, { isConsolidated = false, padForFooter 
   const dataRows = (rows || []).map((row) => rowHtml(row, layout)).join('');
   if (!padForFooter) return dataRows;
 
-  const maxRows = computeMaxDataRowsPerPage(true, { singleHeaderRow: isConsolidated });
+  const maxRows = getDataRowsPerPage({ singleHeaderRow: isConsolidated });
   const fillerCount = Math.max(0, maxRows - (rows || []).length);
   const fillerRows = Array.from({ length: fillerCount }, () => fillerDataRowHtml(layout, isConsolidated)).join('');
   return dataRows + fillerRows;
@@ -140,11 +140,14 @@ export function buildReportPayload({
   const shared = {
     reportNo: `RPT-${orderId}-${opNo}`,
     componentTitle: partName || '',
-    date: new Date().toLocaleDateString(),
+    date: (() => {
+      const today = new Date();
+      return `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+    })(),
     projectNo: String(orderId),
     drgNo: partNumber || '',
     projectName: projectName || '',
-    assembly: assembly || 'Main',
+    assembly: '',
   };
 
   if (isConsolidated) {
@@ -462,7 +465,10 @@ function footerRowValues(footerRows, index) {
   return [row.chemical || '', row.ultrasonic || '', row.hardness || ''];
 }
 
-/** A4 content budget (mm) — conservative so rows + footer fit without clipping. */
+/** Fixed data rows per A4 page when the Chemical/Ultrasonic/Hardness footer is shown. */
+export const REPORT_DATA_ROWS_PER_PAGE = 16;
+
+/** A4 content budget (mm) — tuned for 16 data rows + footer on every page. */
 export const REPORT_PAGE_LAYOUT_MM = {
   pageContentHeight: 268,
   banner: 22,
@@ -472,55 +478,38 @@ export const REPORT_PAGE_LAYOUT_MM = {
   footer: 58,
 };
 
-const MIN_ORPHAN_ROWS = 8;
-
-export function computeMaxDataRowsPerPage(includeFooter, { singleHeaderRow = false } = {}) {
-  const { pageContentHeight, banner, meta, headers, dataRow, footer } = REPORT_PAGE_LAYOUT_MM;
-  const headerBudget = singleHeaderRow ? 8 : headers;
-  const fixed = banner + meta + headerBudget + (includeFooter ? footer : 0);
-  const raw = (pageContentHeight - fixed) / dataRow;
-  const safety = includeFooter ? 0.88 : 0.92;
-  return Math.max(1, Math.floor(raw * safety));
+export function getDataRowsPerPage({ singleHeaderRow = false } = {}) {
+  void singleHeaderRow;
+  return REPORT_DATA_ROWS_PER_PAGE;
 }
 
-/** Split characteristic rows across A4 pages; footer only on the final chunk. */
+export function computeMaxDataRowsPerPage(includeFooter, { singleHeaderRow = false } = {}) {
+  if (includeFooter) return getDataRowsPerPage({ singleHeaderRow });
+  const { pageContentHeight, banner, meta, headers, dataRow } = REPORT_PAGE_LAYOUT_MM;
+  const headerBudget = singleHeaderRow ? 8 : headers;
+  const fixed = banner + meta + headerBudget;
+  const raw = (pageContentHeight - fixed) / dataRow;
+  return Math.max(1, Math.floor(raw * 0.95));
+}
+
+function footerSpacerRowHtml(totalCols) {
+  return `<tr class="ir-footer-spacer" aria-hidden="true"><td colspan="${totalCols}"><p>&nbsp;</p></td></tr>`;
+}
+
+/** Split characteristic rows across A4 pages — 16 rows + footer on every page. */
 export function paginateReportRows(rows, { singleHeaderRow = false } = {}) {
   const list = Array.isArray(rows) ? rows : [];
+  const pageSize = getDataRowsPerPage({ singleHeaderRow });
+
   if (!list.length) return [{ rows: [], showFooter: true }];
 
-  const maxNoFooter = computeMaxDataRowsPerPage(false, { singleHeaderRow });
-  const maxWithFooter = computeMaxDataRowsPerPage(true, { singleHeaderRow });
   const pages = [];
-  let i = 0;
-
-  while (i < list.length) {
-    const remaining = list.length - i;
-    if (remaining <= maxWithFooter) {
-      pages.push({ rows: list.slice(i), showFooter: true });
-      break;
-    }
-    if (remaining <= maxNoFooter) {
-      const lead = remaining - maxWithFooter;
-      if (lead > 0 && lead < MIN_ORPHAN_ROWS) {
-        const first = Math.floor(remaining / 2);
-        if (first > 0) {
-          pages.push({ rows: list.slice(i, i + first), showFooter: false });
-          i += first;
-        }
-        pages.push({ rows: list.slice(i), showFooter: true });
-        break;
-      }
-      if (lead > 0) {
-        pages.push({ rows: list.slice(i, i + lead), showFooter: false });
-        i += lead;
-      }
-      pages.push({ rows: list.slice(i), showFooter: true });
-      break;
-    }
-    pages.push({ rows: list.slice(i, i + maxNoFooter), showFooter: false });
-    i += maxNoFooter;
+  for (let i = 0; i < list.length; i += pageSize) {
+    pages.push({
+      rows: list.slice(i, i + pageSize),
+      showFooter: true,
+    });
   }
-
   return pages;
 }
 
@@ -553,9 +542,9 @@ export function buildPageList(rowGroups, shared, {
         quantityCount: isConsolidated ? quantityCount : undefined,
         isConsolidated,
         totalCols: colLayout.totalCols,
-        footerRows: chunk.showFooter ? (footerRows ?? group.footerRows) : undefined,
-        inspectedBy: chunk.showFooter ? inspectedBy : undefined,
-        checkedBy: chunk.showFooter ? checkedBy : undefined,
+        footerRows: footerRows ?? group.footerRows,
+        inspectedBy,
+        checkedBy,
       });
     });
   });
@@ -605,7 +594,15 @@ function groupPagesByQty(pages) {
 
 export { groupPagesByQty };
 
-/** One A4 page — standard or consolidated layout; footer omitted on continuation pages. */
+function buildFooterHtml(data, layout, totalCols, { isConsolidated = false } = {}) {
+  if (data.showFooter === false) return '';
+  const dataRowCount = (data.rows || []).length;
+  const maxRows = getDataRowsPerPage({ singleHeaderRow: isConsolidated });
+  const needsSpacer = dataRowCount < maxRows;
+  return `${needsSpacer ? footerSpacerRowHtml(totalCols) : ''}${footerBlockHtml(data, layout)}`;
+}
+
+/** One A4 page — standard or consolidated layout; footer on every page after up to 16 rows. */
 export function buildSingleSheetTableHtml(data) {
   if (!data) return '';
   if (data.isConsolidated) {
@@ -626,7 +623,7 @@ export function buildSingleSheetTableHtml(data) {
   const colgroup = `<colgroup>${colWidths.map((w) => `<col style="width:${w}%">`).join('')}</colgroup>`;
   const showFooter = data.showFooter !== false;
 
-  const footerHtml = showFooter ? footerBlockHtml(data, layout) : '';
+  const footerHtml = showFooter ? buildFooterHtml(data, layout, totalCols) : '';
 
   return `<table class="ir-sheet-table">
     ${colgroup}
@@ -675,7 +672,7 @@ function buildConsolidatedSheetTableHtml(data) {
 
   const colgroup = `<colgroup>${colWidths.map((w) => `<col style="width:${w}%">`).join('')}</colgroup>`;
 
-  const footerHtml = showFooter ? footerBlockHtml(data, layout) : '';
+  const footerHtml = showFooter ? buildFooterHtml(data, layout, totalCols, { isConsolidated: true }) : '';
 
   return `<table class="ir-sheet-table ir-sheet-table--consolidated" data-qty-count="${quantityCount}">
     ${colgroup}
