@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip } from 'antd';
-import { FileTextOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip, Alert, Row, Col, Divider } from 'antd';
+import { FileTextOutlined, EyeOutlined, CheckCircleOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
@@ -14,9 +14,21 @@ const { Text, Title } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
+const getInventoryToolId = (record) => {
+  if (record?.tool?.id != null) return record.tool.id;
+  if (record?.tool_id != null) return record.tool_id;
+  return record?.id;
+};
 
+const getBaseToolQuantity = (record) => record?.tool?.quantity ?? record?.quantity ?? 0;
 
-const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0, productionStats: propStats }) => {
+const getAvailableToolQuantity = (record, pendingQtyByToolId = {}) => {
+  const toolId = getInventoryToolId(record);
+  const pending = pendingQtyByToolId[toolId] || 0;
+  return Math.max(0, getBaseToolQuantity(record) - pending);
+};
+
+const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0, productionStats: propStats, onProductionSubmit }) => {
   const [loading, setLoading] = useState(false);
   const [partData, setPartData] = useState(null);
   const [selectedOperation, setSelectedOperation] = useState(null);
@@ -39,6 +51,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const [isRequestModalVisible, setIsRequestModalVisible] = useState(false);
   const [selectedToolForRequest, setSelectedToolForRequest] = useState(null);
+  const [selectedToolRecord, setSelectedToolRecord] = useState(null);
+  const [pendingQtyByToolId, setPendingQtyByToolId] = useState({});
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestForm] = Form.useForm();
   
@@ -47,6 +61,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [completingOp, setCompletingOp] = useState(null);
   const [completeLoading, setCompleteLoading] = useState(false);
   const [completeForm] = Form.useForm();
+  const watchedProduced = Form.useWatch('produced_quantity', completeForm);
+  const watchedRework = Form.useWatch('rework_submit_quantity', completeForm);
+  const totalPresented =
+    (parseInt(watchedProduced, 10) || 0) + (parseInt(watchedRework, 10) || 0);
 
   // Activate Confirmation Modal State
   const [isActivateModalVisible, setIsActivateModalVisible] = useState(false);
@@ -60,6 +78,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
+  const [requestOperations, setRequestOperations] = useState([]);
   const [productionStats, setProductionStats] = useState({
     totalProduced: 0,
     totalRework: 0,
@@ -84,8 +103,26 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   useEffect(() => {
     if (partData) {
       fetchSubmissionStatuses();
+      fetchPendingToolQuantities();
     }
   }, [partData]);
+
+  const fetchPendingToolQuantities = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/inventory-requests/`);
+      if (response.status === 200) {
+        const map = {};
+        (response.data || []).forEach((req) => {
+          if ((req.status || '').toLowerCase() === 'pending' && req.tool_id) {
+            map[req.tool_id] = (map[req.tool_id] || 0) + (req.quantity || 0);
+          }
+        });
+        setPendingQtyByToolId(map);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pending tool requests:', error);
+    }
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -129,6 +166,23 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     } catch (error) {
       console.error('Failed to fetch parts:', error);
       notification.error({ message: 'Failed to fetch parts' });
+    }
+  };
+
+  const fetchOperations = async (partId) => {
+    if (!partId) {
+      setRequestOperations([]);
+      return;
+    }
+    try {
+      const response = await axios.get(`${API_BASE_URL}/operations/part/${partId}`);
+      if (response.status === 200) {
+        setRequestOperations(Array.isArray(response.data) ? response.data : []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch operations:', error);
+      notification.error({ message: 'Failed to fetch operations' });
+      setRequestOperations([]);
     }
   };
 
@@ -254,14 +308,14 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     { title: 'Tool Name', key: 'tool_name', render: (_, record) => record.tool?.item_description || record.item_description || '-' },
     { title: 'Range', key: 'range', render: (_, record) => record.tool?.range || record.range || '-' },
     { title: 'Type', key: 'type', render: (_, record) => record.tool?.type || record.type || '-' },
-    { title: 'Available', key: 'available_qty', render: (_, record) => record.tool?.quantity ?? record.quantity ?? 0 },
+    { title: 'Available', key: 'available_qty', render: (_, record) => getAvailableToolQuantity(record, pendingQtyByToolId) },
     {
 
       title: 'Action', key: 'action',
       render: (_, record) => (
         <Button type="primary" size="small"
           onClick={() => handleShowRequestModal(record)}
-          disabled={(record.tool?.quantity ?? record.quantity ?? 0) <= 0}
+          disabled={getAvailableToolQuantity(record, pendingQtyByToolId) <= 0}
         >Request</Button>
       )
     },
@@ -332,14 +386,26 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         // ✅ Completed = sum of approved_quantity from production-logs API
         const completedQty = effectiveStats.totalApproved || 0;
 
-        // ✅ Remaining = total - approved (never go below 0)
-        const remainingQty = Math.max(0, totalQty - completedQty);
+        // ✅ Remaining to close = only approved_quantity closes the order
+        const remainingQty = effectiveStats.remainingToClose ?? Math.max(0, totalQty - completedQty);
+        const reworkDue = effectiveStats.reworkDue || 0;
+        const rejectDue = effectiveStats.rejectDue || 0;
 
         return (
-          <div style={{ fontSize: '12px' }}>
-            <div>Total: {totalQty}</div>
-            <div>Completed: {completedQty}</div>
-            <div>Remaining: {remainingQty}</div>
+          <div style={{ fontSize: '12px', lineHeight: 1.6 }}>
+            <div><Text type="secondary">Total:</Text> <strong>{totalQty}</strong></div>
+            <div><Text type="secondary">Approved:</Text> <strong style={{ color: '#52c41a' }}>{completedQty}</strong></div>
+            <div><Text type="secondary">Remaining:</Text> <strong style={{ color: '#1677FF' }}>{remainingQty}</strong></div>
+            {reworkDue > 0 && (
+              <div style={{ color: '#FA8C16', marginTop: 2 }}>
+                ↻ Rework: {reworkDue}
+              </div>
+            )}
+            {rejectDue > 0 && (
+              <div style={{ color: '#FF4D4F' }}>
+                ✕ Reject: {rejectDue}
+              </div>
+            )}
           </div>
         );
       }
@@ -425,7 +491,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         // Check if operation is completed by status OR by production quota
         const isCompletedByStatus = [selectedJob?.status, selectedJob?.operation_status].some(s => s?.toString().toUpperCase() === 'COMPLETED');
         const totalQuantity = selectedJob?.total_quantity || selectedJob?.quantity || 0;
-        const isCompletedByQuota = totalQuantity > 0 && effectiveStats.totalApproved >= totalQuantity;
+        const isCompletedByQuota = totalQuantity > 0 && (
+          effectiveStats.remainingToClose === 0 ||
+          effectiveStats.totalApproved >= totalQuantity
+        );
         const isCompleted = isCompletedByStatus || isCompletedByQuota;
         
         // This specific operation's activation status
@@ -493,7 +562,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
                 color: '#52c41a'
               } : {}}
             >
-              Complete
+              Submit Log
             </Button>
           </Space>
         );
@@ -551,11 +620,14 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const handleShowRequestModal = (record) => {
     const tool = record.tool || record;
+    setSelectedToolRecord(record);
     setSelectedToolForRequest(tool);
     setIsRequestModalVisible(true);
 
     const currentOrderId = selectedJob.sale_order_id || selectedJob.order_id || selectedJob.id;
     const currentOrder = orders.find(o => o.id === currentOrderId);
+    const partId = selectedJob?.part_id || selectedJob?.id;
+    const operationId = selectedJob?.operation_id || selectedJob?.id || selectedJob?.job_id;
 
     if (currentOrder) {
       fetchParts(currentOrder.sale_order_number);
@@ -563,9 +635,16 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       fetchParts(selectedJob.sale_order_number || selectedJob.production_order);
     }
 
+    if (partId) {
+      fetchOperations(partId);
+    } else {
+      setRequestOperations([]);
+    }
+
     requestForm.setFieldsValue({
       project_id: currentOrderId,
-      part_id: selectedJob?.part_id || selectedJob?.id,
+      part_id: partId,
+      operation_id: operationId,
       quantity: 1,
     });
   };
@@ -688,12 +767,21 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setIsCompleteModalVisible(true);
     completeForm.setFieldsValue({
       produced_quantity: null,
+      rework_submit_quantity: null,
       notes: ''
     });
   };
 
   const handleCompleteSubmit = async (values) => {
     if (!selectedJob || !completingOp) return;
+
+    const producedQty = parseInt(values.produced_quantity, 10) || 0;
+    const reworkSubmitQty = parseInt(values.rework_submit_quantity, 10) || 0;
+
+    if (producedQty === 0 && reworkSubmitQty === 0) {
+      message.error('Enter at least one quantity: new produced units or rework submit.');
+      return;
+    }
 
     let operationId = selectedJob.id || selectedJob.operation_id || selectedJob.job_id || selectedJob.schedule_id;
     let operatorId = null;
@@ -716,20 +804,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setCompleteLoading(true);
     try {
-      const now = dayjs();
       const payload = {
-        operation_id: parseInt(operationId),
-        operator_id: parseInt(operatorId),
-        supervisor_id: 0,
         notes: values.notes || '',
-        remarks: '',
-        produced_quantity: parseInt(values.produced_quantity) || 0,
-        approved_quantity: 0,
-        from_date: now.format('YYYY-MM-DD'),
-        from_time: now.format('HH:mm:ss') + '.000Z',
-        to_date: now.format('YYYY-MM-DD'),
-        to_time: now.format('HH:mm:ss') + '.000Z',
-        status: 'pending'
+        produced_quantity: producedQty,
+        rework_submit_quantity: reworkSubmitQty,
       };
 
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/submit`, {
@@ -742,7 +820,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         message.success('Production log submitted successfully!');
         setIsCompleteModalVisible(false);
         completeForm.resetFields();
-        window.location.reload();
+        if (onProductionSubmit) onProductionSubmit();
       } else {
         const errorData = await response.json();
         message.error(`Failed to submit production log: ${errorData.detail || 'Unknown error'}`);
@@ -766,10 +844,11 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setRequestLoading(true);
     try {
       const payload = {
-        tool_id: selectedToolForRequest?.id || 0,
+        tool_id: getInventoryToolId(selectedToolRecord) || selectedToolForRequest?.id || 0,
         operator_id: operatorId,
         project_id: values.project_id,
         part_id: values.part_id,
+        operation_id: values.operation_id,
         quantity: values.quantity,
         purpose_of_use: values.purpose_of_use || ""
       };
@@ -779,6 +858,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         notification.success({ message: 'Success', description: 'Request submitted successfully' });
         setIsRequestModalVisible(false);
         requestForm.resetFields();
+        setSelectedToolRecord(null);
+        await fetchPendingToolQuantities();
       }
 
     } catch (error) {
@@ -993,7 +1074,12 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       <Modal
         title="Request Inventory"
         open={isRequestModalVisible}
-        onCancel={() => { setIsRequestModalVisible(false); requestForm.resetFields(); }}
+        onCancel={() => {
+          setIsRequestModalVisible(false);
+          requestForm.resetFields();
+          setRequestOperations([]);
+          setSelectedToolRecord(null);
+        }}
         footer={null}
         maskClosable={false}
       >
@@ -1003,7 +1089,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               onChange={(value) => {
                 const selectedOrder = orders.find(o => o.id === value);
                 if (selectedOrder) fetchParts(selectedOrder.sale_order_number);
-                requestForm.setFieldsValue({ part_id: undefined });
+                requestForm.setFieldsValue({ part_id: undefined, operation_id: undefined });
+                setRequestOperations([]);
               }}
             >
               {orders.map(o => <Option key={o.id} value={o.id}>{o.sale_order_number || `Order ${o.id}`}</Option>)}
@@ -1011,8 +1098,27 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           </Form.Item>
 
           <Form.Item name="part_id" label="Part" rules={[{ required: true, message: 'Please select a part' }]}>
-            <Select disabled placeholder="Select a part">
+            <Select disabled placeholder="Select a part"
+              onChange={(value) => {
+                fetchOperations(value);
+                requestForm.setFieldsValue({ operation_id: undefined });
+              }}
+            >
               {parts.map(p => <Option key={p.id} value={p.id}>{p.part_name || p.part_number}</Option>)}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="operation_id" label="Operation" rules={[{ required: true, message: 'Please select an operation' }]}>
+            <Select disabled placeholder="Select an operation" showSearch optionFilterProp="label">
+              {requestOperations.map((op) => (
+                <Option
+                  key={op.id}
+                  value={op.id}
+                  label={`${op.operation_number || ''} - ${op.operation_name || ''}`}
+                >
+                  {op.operation_number} - {op.operation_name}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 
@@ -1021,13 +1127,17 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               { required: true, message: 'Please enter quantity' },
               {
                 validator(_, value) {
-                  const available = selectedToolForRequest?.quantity ?? 0;
+                  const available = getAvailableToolQuantity(selectedToolRecord, pendingQtyByToolId);
                   if (value && value > available) return Promise.reject(new Error(`Available quantity: ${available}.`));
                   return Promise.resolve();
                 },
               },
             ]}
-            extra={<span style={{ fontSize: 12, color: '#8c8c8c' }}>Available: {selectedToolForRequest?.quantity ?? 0}</span>}
+            extra={(
+              <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+                Available: {getAvailableToolQuantity(selectedToolRecord, pendingQtyByToolId)}
+              </span>
+            )}
           >
             <InputNumber min={1} style={{ width: '100%' }} precision={0}
               parser={value => value.replace(/[^\d]/g, '')}
@@ -1043,7 +1153,15 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
           <Form.Item>
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => { setIsRequestModalVisible(false); requestForm.resetFields(); }}>Cancel</Button>
+              <Button onClick={() => {
+                setIsRequestModalVisible(false);
+                requestForm.resetFields();
+                setRequestOperations([]);
+                setSelectedToolRecord(null);
+              }}
+              >
+                Cancel
+              </Button>
               <Button type="primary" htmlType="submit" loading={requestLoading}>Submit Request</Button>
             </Space>
           </Form.Item>
@@ -1060,7 +1178,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             Cancel
           </Button>,
           <Button key="activate" type="primary" loading={activating} onClick={() => handleActivate(operationToActivate)}>
-            Activate
+            Confirm & Activate
           </Button>
         ]}
       >
@@ -1123,81 +1241,198 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         title={
           <Space>
             <CheckCircleOutlined style={{ color: '#52c41a' }} />
-            <span>Complete Operation: {completingOp?.operation_name || completingOp?.name}</span>
+            <span>Submit Production Log: {completingOp?.operation_name || completingOp?.name}</span>
           </Space>
         }
         open={isCompleteModalVisible}
         onCancel={() => setIsCompleteModalVisible(false)}
         footer={null}
         destroyOnClose
+        width={720}
       >
         <Form
           form={completeForm}
           layout="vertical"
           onFinish={handleCompleteSubmit}
         >
-          <Form.Item
-            name="produced_quantity"
-            label="Produced Quantity"
-            rules={[
-              { required: true, message: 'Please enter produced quantity' },
-              {
-                validator: (_, value) => {
-                  if (value === 0 || value === '0') {
-                    return Promise.reject(new Error('Produced quantity cannot be 0'));
-                  }
-                  return Promise.resolve();
-                }
-              }
-            ]}
-          >
-            <InputNumber
-              min={0}
-              max={999999}
-              style={{ width: '100%' }}
-              placeholder="Enter quantity"
-              precision={0}
-              parser={value => {
-                // Strip non-digits then cap at 6 digits
-                const digits = String(value || '').replace(/[^\d]/g, '').slice(0, 6);
-                return digits ? parseInt(digits, 10) : '';
-              }}
-              formatter={value => {
-                if (value === '' || value === null || value === undefined) return '';
-                // Ensure formatted value never exceeds 6 digits
-                return String(value).replace(/[^\d]/g, '').slice(0, 6);
-              }}
-              onKeyDown={e => {
-                const currentVal = String(completeForm.getFieldValue('produced_quantity') || '');
-                const isDigit = /^\d$/.test(e.key);
-                const isControl = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key);
-                // Block non-digits
-                if (!isDigit && !isControl) {
-                  e.preventDefault();
-                  return;
-                }
-                // Block digit input if already at 6 digits
-                if (isDigit && currentVal.replace(/[^\d]/g, '').length >= 6) {
-                  e.preventDefault();
-                }
-              }}
-            />
-          </Form.Item>
+          {/* Ledger summary */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 10,
+            marginBottom: 16,
+          }}>
+            {[
+              { label: 'Remaining to close', value: effectiveStats.remainingToClose ?? '-', color: '#1677FF' },
+              { label: 'Rework due', value: effectiveStats.reworkDue || 0, color: '#FA8C16' },
+              { label: 'Reject due', value: effectiveStats.rejectDue || 0, color: '#FF4D4F' },
+            ].map(({ label, value, color }) => (
+              <div
+                key={label}
+                style={{
+                  background: '#fafafa',
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  textAlign: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 11, color: '#94a3b8', display: 'block' }}>{label}</Text>
+                <Text strong style={{ fontSize: 20, color }}>{value}</Text>
+              </div>
+            ))}
+          </div>
+
+          <Divider style={{ margin: '0 0 16px' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>Choose what you are submitting</Text>
+          </Divider>
+
+          <Row gutter={16}>
+            {/* Section 1: New units */}
+            <Col xs={24} md={12}>
+              <div style={{
+                background: '#f6ffed',
+                border: '2px solid #b7eb8f',
+                borderRadius: 12,
+                padding: 16,
+                height: '100%',
+              }}>
+                <Space align="start" style={{ marginBottom: 12 }}>
+                  <PlusCircleOutlined style={{ color: '#52c41a', fontSize: 20, marginTop: 2 }} />
+                  <div>
+                    <Text strong style={{ display: 'block', color: '#389e0d' }}>New Units</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Brand-new parts you made now
+                    </Text>
+                  </div>
+                </Space>
+                <ul style={{ fontSize: 11, color: '#595959', paddingLeft: 18, margin: '0 0 12px' }}>
+                  <li>First production run</li>
+                  <li>Replacement for rejected scrap</li>
+                  <li>Balance never produced yet</li>
+                </ul>
+                {effectiveStats.rejectDue > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`${effectiveStats.rejectDue} rejected — make new units here`}
+                    style={{ marginBottom: 12, fontSize: 11 }}
+                  />
+                )}
+                <Form.Item
+                  name="produced_quantity"
+                  label="Quantity"
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber
+                    min={0}
+                    max={999999}
+                    style={{ width: '100%' }}
+                    placeholder="0"
+                    precision={0}
+                    parser={value => {
+                      const digits = String(value || '').replace(/[^\d]/g, '').slice(0, 6);
+                      return digits ? parseInt(digits, 10) : '';
+                    }}
+                    formatter={value => {
+                      if (value === '' || value === null || value === undefined) return '';
+                      return String(value).replace(/[^\d]/g, '').slice(0, 6);
+                    }}
+                  />
+                </Form.Item>
+              </div>
+            </Col>
+
+            {/* Section 2: Rework */}
+            <Col xs={24} md={12}>
+              <div style={{
+                background: '#fff7e6',
+                border: '2px solid #ffd591',
+                borderRadius: 12,
+                padding: 16,
+                height: '100%',
+              }}>
+                <Space align="start" style={{ marginBottom: 12 }}>
+                  <ReloadOutlined style={{ color: '#FA8C16', fontSize: 20, marginTop: 2 }} />
+                  <div>
+                    <Text strong style={{ display: 'block', color: '#d46b08' }}>Rework (Same Parts)</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Parts you already made, fixed and sent again
+                    </Text>
+                  </div>
+                </Space>
+                <ul style={{ fontSize: 11, color: '#595959', paddingLeft: 18, margin: '0 0 12px' }}>
+                  <li>Same physical parts from earlier</li>
+                  <li>Do <strong>not</strong> count as new production</li>
+                  <li>Leave at 0 if nothing to rework</li>
+                </ul>
+                {effectiveStats.reworkDue > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`${effectiveStats.reworkDue} awaiting rework — enter here`}
+                    style={{ marginBottom: 12, fontSize: 11 }}
+                  />
+                )}
+                <Form.Item
+                  name="rework_submit_quantity"
+                  label="Quantity"
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber
+                    min={0}
+                    max={999999}
+                    style={{ width: '100%' }}
+                    placeholder="0"
+                    precision={0}
+                    parser={value => {
+                      const digits = String(value || '').replace(/[^\d]/g, '').slice(0, 6);
+                      return digits ? parseInt(digits, 10) : '';
+                    }}
+                    formatter={value => {
+                      if (value === '' || value === null || value === undefined) return '';
+                      return String(value).replace(/[^\d]/g, '').slice(0, 6);
+                    }}
+                  />
+                </Form.Item>
+              </div>
+            </Col>
+          </Row>
+
+          {/* Live total */}
+          <div style={{
+            marginTop: 16,
+            padding: '10px 14px',
+            background: totalPresented > 0 ? '#e6f4ff' : '#fafafa',
+            border: `1px solid ${totalPresented > 0 ? '#91caff' : '#f0f0f0'}`,
+            borderRadius: 8,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <Text style={{ fontSize: 12 }}>
+              New units + Rework = <strong>Total presented for review</strong>
+            </Text>
+            <Text strong style={{ fontSize: 18, color: totalPresented > 0 ? '#1677FF' : '#94a3b8' }}>
+              {totalPresented}
+            </Text>
+          </div>
 
           <Form.Item
             name="notes"
             label="Notes (optional)"
+            style={{ marginTop: 16, marginBottom: 0 }}
           >
-            <TextArea rows={4} placeholder="Enter any notes or observations" />
+            <TextArea rows={3} placeholder="Enter any notes or observations" />
           </Form.Item>
 
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+          <Form.Item style={{ marginBottom: 0, marginTop: 16, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsCompleteModalVisible(false)}>
                 Back
               </Button>
               <Button type="primary" htmlType="submit" loading={completeLoading}>
-                Submit
+                Submit Log
               </Button>
             </Space>
           </Form.Item>

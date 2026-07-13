@@ -2688,7 +2688,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                 open={!!reportTarget}
                 target={reportTarget}
                 projectName={reportTarget ? (productHierarchies[selectedItem?.productId]?.product?.product_name || '') : ''}
-                assemblyName={selectedItem?.assembly_name || 'Main'}
+                assemblyName={selectedItem?.assembly_name || ''}
                 onClose={() => {
                   setReportTarget(null);
                 }}

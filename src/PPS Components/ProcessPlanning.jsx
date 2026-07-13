@@ -6,6 +6,40 @@ import { API_BASE_URL } from "../Config/auth";
 import dayjs from "dayjs";
 import axios from "axios";
 
+const getApiErrorMessage = (error, fallback = "Failed updating parts") => {
+  const data = error?.response?.data;
+  if (!data) return error?.message || fallback;
+  const detail = data.detail;
+  if (typeof detail === "string") return detail;
+  if (detail?.message) return detail.message;
+  if (typeof data.message === "string") return data.message;
+  return fallback;
+};
+
+const getPartOperations = (partOpDetails, partId) => {
+  const details = partOpDetails[partId];
+  if (!details) return [];
+  return Array.isArray(details) ? details : (details.operations || []);
+};
+
+const isPartCompleted = (partOpDetails, partId) => {
+  const details = partOpDetails[partId];
+  if (!details) return false;
+  const message = Array.isArray(details) ? "" : (details.message || "");
+  if (String(message).toLowerCase() === "completed") return true;
+  const ops = getPartOperations(partOpDetails, partId);
+  return ops.length > 0 && ops.every(op => String(op.operation_status || "").toLowerCase() === "completed");
+};
+
+const formatPartLabel = (data, partId) => {
+  const name = data?.part_name;
+  const num = data?.part_number;
+  if (name && num) return `${name} (${num})`;
+  if (name) return name;
+  if (num) return num;
+  return `Part ${partId}`;
+};
+
 const ProcessPlanning = ({ initialOrderId }) => {
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -115,8 +149,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
     try {
       const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
       if (res.status === 200) {
-        setPartOpDetails(prev => ({ ...prev, [partId]: res.data.operations || [] }));
-        
+        setPartOpDetails(prev => ({
+          ...prev,
+          [partId]: {
+            operations: res.data.operations || [],
+            message: res.data.message || "",
+          },
+        }));
+
         // Fetch operation status for each unique operation in the response
         const operations = res.data.operations || [];
         const uniqueOperationIds = [...new Set(operations.map(op => op.operation_id))];
@@ -496,7 +536,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     } catch (error) {
       console.error("Error updating order status:", error);
-      message.error("Failed to update order status");
+      message.error(getApiErrorMessage(error, "Failed to update order status"));
     }
   };
 
@@ -544,17 +584,18 @@ const ProcessPlanning = ({ initialOrderId }) => {
       responses.forEach((response, index) => {
         const data = response.data;
         const partId = selectedInIds[index];
+        const partLabel = formatPartLabel(data, partId);
         if (data && data.message) {
           const msg = data.message.toLowerCase();
           // Check if message is an error (contains "cannot", "failed", "error", etc.)
           if (msg.includes("cannot") || msg.includes("failed") || msg.includes("error") || msg.includes("already")) {
-            errorMessages.push(`Part ${partId}: ${data.message}`);
+            errorMessages.push(`${partLabel}: ${data.message}`);
           } else {
-            successMessages.push(`Part ${partId}: ${data.message}`);
+            successMessages.push(`${partLabel}: ${data.message}`);
           }
         } else {
           // No message usually means success
-          successMessages.push(`Part ${partId}: Status updated`);
+          successMessages.push(`${partLabel}: Status updated`);
         }
       });
 
@@ -600,7 +641,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       setSelectedInIds([]);
     } catch (error) {
-      message.error("Failed updating parts");
+      message.error(getApiErrorMessage(error));
     }
   };
 
@@ -638,7 +679,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     {
       title: "Start Time",
       render: (_, record) => {
-        const ops = partOpDetails[record.id] || [];
+        const ops = getPartOperations(partOpDetails, record.id);
         if (ops.length === 0) return "-";
         const startTimes = ops.map(o => o.planned_start_time).filter(Boolean);
         if (startTimes.length === 0) return "-";
@@ -648,7 +689,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     {
       title: "End Time",
       render: (_, record) => {
-        const ops = partOpDetails[record.id] || [];
+        const ops = getPartOperations(partOpDetails, record.id);
         if (ops.length === 0) return "-";
         const endTimes = ops.map(o => o.planned_end_time).filter(Boolean);
         if (endTimes.length === 0) return "-";
@@ -659,6 +700,13 @@ const ProcessPlanning = ({ initialOrderId }) => {
     {
       title: "Status",
       render: (_, r) => {
+        if (isPartCompleted(partOpDetails, r.id)) {
+          return (
+            <Tag style={{ backgroundColor: "#87CEEB", color: "#1a1a1a", borderColor: "#6ec6e6" }}>
+              Completed
+            </Tag>
+          );
+        }
         const st = partStatuses[r.id] || "Inactive";
         return <Tag color={st === "Active" ? "green" : "default"}>{st}</Tag>;
       }
@@ -797,7 +845,10 @@ const ProcessPlanning = ({ initialOrderId }) => {
       startDate: dateOnly(order.order_date || order.start_date),
       dueDate: dateOnly(order.due_date),
       pdc: (() => {
-        const allEndTimes = Object.values(partOpDetails).flat().map(op => op.planned_end_time).filter(Boolean);
+        const allEndTimes = Object.keys(partOpDetails)
+          .flatMap(partId => getPartOperations(partOpDetails, partId))
+          .map(op => op.planned_end_time)
+          .filter(Boolean);
         if (allEndTimes.length === 0) return "Not yet scheduled";
         const latestEndTime = dayjs(allEndTimes.sort().reverse()[0]);
         return latestEndTime.isValid() ? latestEndTime.format("DD-MM-YYYY") : "Not yet scheduled";
@@ -986,7 +1037,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                       <DownOutlined onClick={e => { e.stopPropagation(); onExpand(record, e); }} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
                     ),
                   expandedRowRender: (record) => {
-                    const rawData = partOpDetails[record.id] || [];
+                    const rawData = getPartOperations(partOpDetails, record.id);
                     
                     // Grouping logic: same operation ID and name
                     const groupedData = [];

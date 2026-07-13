@@ -103,8 +103,8 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   // Breakdown Logs state
   const [downtimeLogs, setDowntimeLogs] = useState([]);
   const [downtimeLoading, setDowntimeLoading] = useState(false);
-  const [logSearchText, setLogSearchText] = useState(null);
-  const [logWcSearchText, setLogWcSearchText] = useState(null);
+  const [logSearchText, setLogSearchText] = useState([]);
+  const [logWcSearchText, setLogWcSearchText] = useState([]);
   const [logPageSize, setLogPageSize] = useState(10);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -168,7 +168,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   };
 
   const getCurrentUserId = () => {
-    try { const u = JSON.parse(localStorage.getItem("user")); return u?.id || null; }
+    try { const u = JSON.parse(localStorage.getItem("user")); return u?.id ?? u?.user_id ?? u?.userId ?? null; }
     catch { return null; }
   };
 
@@ -246,6 +246,12 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   };
 
   const handleAcknowledgeLeave = async (leaveId) => {
+    const approvedBy = getCurrentUserId();
+    if (!approvedBy) {
+      message.error("Could not identify the current user. Please log in again.");
+      return;
+    }
+
     try {
       setAcknowledgingId(leaveId);
       const res = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves/${leaveId}/approve`, {
@@ -253,16 +259,22 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: 'acknowledged' }),
+        body: JSON.stringify({
+          status: 'acknowledged',
+          approved_by: approvedBy,
+        }),
       });
 
       if (res.ok) {
         message.success('Leave acknowledged successfully');
-        // Refresh the leave logs
         fetchLeaveLogs();
       } else {
         const errorData = await res.json();
-        message.error(errorData.detail || 'Failed to acknowledge leave');
+        const detail = errorData.detail;
+        const errorMessage = Array.isArray(detail)
+          ? detail.map((d) => d.msg || d).join(', ')
+          : (detail || 'Failed to acknowledge leave');
+        message.error(errorMessage);
       }
     } catch (error) {
       console.error('Error acknowledging leave:', error);
@@ -405,6 +417,12 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         { text: "Acknowledged", value: "acknowledged" },
       ],
       onFilter: (value, record) => record.status?.toLowerCase() === value,
+    },
+    {
+      title: "Ack By",
+      dataIndex: "acknowledged_by",
+      key: "acknowledged_by",
+      render: (val, record) => val || record.approved_by_name || "-",
     },
     {
       title: "Action",
@@ -784,26 +802,77 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
 
   // ── Breakdown Logs Tab ──────────────────────────────────────────────────
   if (activeTab === "downtime-logs") {
+    const filteredDowntimeLogs = downtimeLogs.filter(i => {
+      const machineFilters = Array.isArray(logSearchText) ? logSearchText : [];
+      const wcFilters = Array.isArray(logWcSearchText) ? logWcSearchText : [];
+      return (
+        (machineFilters.length === 0 || machineFilters.includes(i.machine_name)) &&
+        (wcFilters.length === 0 || wcFilters.includes(i.work_center_name)) &&
+        (i.status_name?.toLowerCase() === "off" || i.status_id === 2)
+      );
+    });
+
     return (
       <div style={{ padding: "24px 0" }}>
-        {downtimeLoading ? (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 500 }}>Machine Name:</span>
+            <Select
+              mode="multiple"
+              placeholder="All Machines"
+              allowClear
+              showSearch
+              maxTagCount={1}
+              maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+              style={{ minWidth: 220 }}
+              value={logSearchText}
+              onChange={value => setLogSearchText(value || [])}
+              options={getMachineOptions()}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+            />
+            <span style={{ fontWeight: 500, marginLeft: 8 }}>Work Center:</span>
+            <Select
+              mode="multiple"
+              placeholder="All Work Centers"
+              allowClear
+              showSearch
+              maxTagCount={1}
+              maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+              style={{ minWidth: 220 }}
+              value={logWcSearchText}
+              onChange={value => setLogWcSearchText(value || [])}
+              options={getWcOptions()}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </div>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={fetchDowntimeLogs}
+            loading={downtimeLoading}
+          >
+            Refresh
+          </Button>
+        </div>
+
+        {downtimeLoading && downtimeLogs.length === 0 ? (
           <div style={{ textAlign: "center", padding: "50px" }}><Spin size="large" /><p>Loading downtime logs...</p></div>
         ) : (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: 16, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 500 }}>Machine Name:</span>
-              <Select placeholder={<span><SearchOutlined /> All Machines</span>} allowClear showSearch style={{ width: 250 }} value={logSearchText} onChange={setLogSearchText} options={getMachineOptions()} />
-              <span style={{ fontWeight: 500, marginLeft: 16 }}>Work Center:</span>
-              <Select placeholder={<span><SearchOutlined /> All Work Centers</span>} allowClear showSearch style={{ width: 250 }} value={logWcSearchText} onChange={setLogWcSearchText} options={getWcOptions()} />
-            </div>
-
             <Table
               columns={downtimeColumns}
-              dataSource={downtimeLogs.filter(i =>
-                (!logSearchText || i.machine_name === logSearchText) &&
-                (!logWcSearchText || i.work_center_name === logWcSearchText) &&
-                (i.status_name?.toLowerCase() === "off" || i.status_id === 2)
-              )}
+              dataSource={filteredDowntimeLogs}
+              loading={downtimeLoading}
               rowKey="tempId" scroll={{ x: 800 }}
               pagination={{ pageSize: logPageSize, showSizeChanger: true, showQuickJumper: true, pageSizeOptions: ["10","20","50","100"], onShowSizeChange: (_, size) => setLogPageSize(size), showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
               className="custom-table"

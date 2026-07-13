@@ -19,6 +19,12 @@ const CATEGORY_COLORS = {
   Misc:        { bg: '#fff7e6', text: '#d46b08', border: '#ffd591', dot: '#fa8c16' },
 };
 
+const getAvailableToolQuantity = (record, pendingQtyByToolId = {}) => {
+  const toolId = record?.id;
+  const pending = toolId != null ? (pendingQtyByToolId[toolId] || 0) : 0;
+  return Math.max(0, (record?.quantity ?? 0) - pending);
+};
+
 /* ═══════════════════════════════════════════════════════════
    SIDEBAR — 2-level tree
 ═══════════════════════════════════════════════════════════ */
@@ -164,6 +170,7 @@ const Inventory = () => {
   const [operations, setOperations] = useState([]);
   const [requestLoading, setRequestLoading] = useState(false);
   const [selectedToolId, setSelectedToolId] = useState(null);
+  const [pendingQtyByToolId, setPendingQtyByToolId] = useState({});
   const [selectedJob, setSelectedJob] = useState(null);
   const [isJobSelected, setIsJobSelected] = useState(false);
 
@@ -183,7 +190,30 @@ const Inventory = () => {
   useEffect(() => {
     fetchTree();
     fetchOrders();
+    fetchPendingToolQuantities();
   }, []);
+
+  const fetchPendingToolQuantities = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const map = {};
+      (Array.isArray(data) ? data : []).forEach((req) => {
+        if ((req.status || '').toLowerCase() === 'pending' && req.tool_id) {
+          map[req.tool_id] = (map[req.tool_id] || 0) + (req.quantity || 0);
+        }
+      });
+      setPendingQtyByToolId(map);
+    } catch (error) {
+      console.error('Failed to fetch pending tool requests:', error);
+    }
+  };
+
+  const getAvailableForToolId = (toolId) => {
+    const tool = tools.find((t) => t.id === toolId);
+    return getAvailableToolQuantity(tool || { id: toolId, quantity: 0 }, pendingQtyByToolId);
+  };
 
   const fetchTree = async () => {
     if (fetchingTree.current) return;
@@ -402,6 +432,7 @@ const Inventory = () => {
         message.success('Request submitted successfully');
         setIsRequestModalVisible(false);
         requestForm.resetFields();
+        await fetchPendingToolQuantities();
         if (selected?.sub_category) fetchBySubCategory(selected.category, selected.sub_category);
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -447,8 +478,8 @@ const Inventory = () => {
     { title: 'Make', dataIndex: 'make', key: 'make', width: 110, align: 'center', ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
     {
       title: 'Available', dataIndex: 'quantity', key: 'quantity', width: 90, align: 'center',
-      render: (v) => {
-        const n = v ?? 0;
+      render: (_, record) => {
+        const n = getAvailableToolQuantity(record, pendingQtyByToolId);
         return <span style={{ fontSize: 13, color: '#333' }}>{n}</span>;
       },
     },
@@ -459,7 +490,7 @@ const Inventory = () => {
         <Button
           type="primary"
           size="small"
-          disabled={record.quantity <= 0}
+          disabled={getAvailableToolQuantity(record, pendingQtyByToolId) <= 0}
           onClick={() => {
             setSelectedToolId(record.id);
             requestForm.resetFields();
@@ -801,8 +832,7 @@ const Inventory = () => {
                   if (isNaN(num) || num <= 0) {
                     return Promise.reject(new Error('Quantity must be greater than 0'));
                   }
-                  const selectedTool = tools.find(t => t.id === selectedToolId);
-                  const available = selectedTool?.quantity ?? 0;
+                  const available = getAvailableForToolId(selectedToolId);
                   if (num > available) {
                     return Promise.reject(
                       new Error(`Available quantity: ${available}. You cannot request more than this.`)
@@ -814,7 +844,7 @@ const Inventory = () => {
             ]}
             extra={
               <span style={{ fontSize: 12, color: '#8c8c8c' }}>
-                Available quantity: {tools.find(t => t.id === selectedToolId)?.quantity ?? 0}. You cannot request more than this.
+                Available quantity: {getAvailableForToolId(selectedToolId)}. You cannot request more than this.
               </span>
             }
           >

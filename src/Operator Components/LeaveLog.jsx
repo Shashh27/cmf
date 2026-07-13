@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Form, Input, Button, DatePicker, Table, message, Space, Tag,} from 'antd';
-import { SearchOutlined,CalendarOutlined} from '@ant-design/icons';
+import { SearchOutlined, CalendarOutlined, ReloadOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 
 const LeaveLog = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [tableLoading, setTableLoading] = useState(false);
   const [leaves, setLeaves] = useState([]);
   const [filteredLeaves, setFilteredLeaves] = useState([]);
   const [searchText, setSearchText] = useState('');
@@ -22,17 +23,22 @@ const LeaveLog = () => {
     }
   };
 
-  const fetchLeaves = async () => {
+  const fetchLeaves = async ({ showTableLoading = false } = {}) => {
     try {
+      if (showTableLoading) setTableLoading(true);
       const operatorId = getOperatorId();
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves/?operator_id=${operatorId}`);
       if (response.ok) {
         const data = await response.json();
         setLeaves(data);
         setFilteredLeaves(data);
+      } else {
+        message.error('Failed to fetch leaves');
       }
     } catch (error) {
       message.error('Failed to fetch leaves');
+    } finally {
+      if (showTableLoading) setTableLoading(false);
     }
   };
 
@@ -240,6 +246,13 @@ const LeaveLog = () => {
         return <Tag color={color}>{status || 'Unknown'}</Tag>;
       },
     },
+    {
+      title: 'Ack By',
+      dataIndex: 'acknowledged_by',
+      key: 'acknowledged_by',
+      width: 120,
+      render: (val, record) => val || record.approved_by_name || '-',
+    },
   ];
 
   return (
@@ -313,13 +326,21 @@ const LeaveLog = () => {
         <Col xs={24} lg={14}>
           <Card
             title="My Past Requests"
+            extra={(
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => fetchLeaves({ showTableLoading: true })}
+                loading={tableLoading}
+              />
+            )}
           >
             <Table
               columns={columns}
               dataSource={filteredLeaves}
               rowKey="id"
               size="small"
-              scroll={{ x: 600, y: '60vh' }}
+              loading={tableLoading}
+              scroll={{ x: 700, y: '60vh' }}
               pagination={{
                 pageSize: 10,
                 showSizeChanger: false,

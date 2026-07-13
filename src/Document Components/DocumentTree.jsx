@@ -76,6 +76,17 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     }
   };
 
+  const getUserRole = () => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) return null;
+      const u = JSON.parse(s);
+      return (u?.role || u?.user_role || '').toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+
   // Fetch orders, parts and general folders on component mount
   useEffect(() => {
     fetchOrders();
@@ -94,8 +105,9 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const fetchOrders = async () => {
     setLoading(true);
     try {
+      const role = getUserRole();
       const userId = getUserId();
-      const url = userId 
+      const url = role === 'manufacturing_coordinator' && userId
         ? `${config.API_BASE_URL}/orders/?manufacturing_coordinator_id=${userId}`
         : `${config.API_BASE_URL}/orders/`;
       const response = await fetch(url);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Table, Typography, Tag, message, Button, Space,
-  Tooltip, Empty, Modal, Input, Select, DatePicker,
+  Tooltip, Empty, Modal, Input, Select, DatePicker, Card, Spin,
 } from 'antd';
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
@@ -69,6 +69,21 @@ const getApprovedByName = (log) =>
   (log?.user_id ? `User #${log.user_id}` : null) ||
   '-';
 
+const getTotalPresented = (log) =>
+  (log?.produced_quantity || 0) + (log?.operator_rework_quantity || 0);
+
+const isLogReviewed = (log) =>
+  log?.approved_quantity !== null && log?.approved_quantity !== undefined;
+
+const canReviewLog = (log) =>
+  log?.can_review !== false &&
+  !log?.review_locked &&
+  !isLogReviewed(log) &&
+  (log?.status?.toLowerCase() === 'pending' || log?.status?.toLowerCase() === 'inprogress');
+
+const hasLogSubmission = (log) =>
+  (log?.produced_quantity || 0) > 0 || (log?.operator_rework_quantity || 0) > 0;
+
 const ProductionCompletion = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -91,13 +106,20 @@ const ProductionCompletion = () => {
     visible: false, log: null, approvedQty: 0, reworkQty: 0, rejectedQty: 0, remark: '',
   });
 
+  const [pdfPreview, setPdfPreview] = useState({ open: false, url: null, filename: '', recordCount: 0 });
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
   const getSupervisorId = () => {
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
-      try { return JSON.parse(storedUser).id; }
-      catch (e) { console.error('Error parsing user from localStorage', e); }
+      try {
+        const user = JSON.parse(storedUser);
+        return user.id ?? user.user_id ?? user.userId ?? null;
+      } catch (e) {
+        console.error('Error parsing user from localStorage', e);
+      }
     }
-    return null;
+    return localStorage.getItem('supervisor_id') || localStorage.getItem('user_id') || null;
   };
 
   const supervisorId = getSupervisorId();
@@ -114,7 +136,7 @@ const ProductionCompletion = () => {
       const allLogs = await response.json();
 
       const visibleLogs = allLogs.filter(
-        (log) => log.operator_status?.toLowerCase() !== 'inprogress'
+        (log) => log.operator_status?.toLowerCase() !== 'inprogress' && hasLogSubmission(log)
       );
 
       if (visibleLogs.length === 0) { setLogs([]); return; }
@@ -340,16 +362,19 @@ const ProductionCompletion = () => {
     const totalRejected = parseInt(rejectedQty) || 0;
     const totalAssigned = totalApproved + totalRework + totalRejected;
 
-    if (totalAssigned !== log.produced_quantity) {
-      message.error(`Total of approved (${totalApproved}) + rework (${totalRework}) + rejected (${totalRejected}) must equal produced quantity (${log.produced_quantity}). Got total ${totalAssigned} instead.`);
-      return;
-    }
-    if (totalApproved > log.produced_quantity) {
-      message.error(`Approved quantity (${totalApproved}) cannot be greater than produced quantity (${log.produced_quantity}).`);
+    const totalPresented = getTotalPresented(log);
+
+    if (totalAssigned !== totalPresented) {
+      message.error(`Total of approved (${totalApproved}) + rework (${totalRework}) + rejected (${totalRejected}) must equal presented quantity (${totalPresented}) = produced (${log.produced_quantity || 0}) + operator rework (${log.operator_rework_quantity || 0}). Got total ${totalAssigned} instead.`);
       return;
     }
     if (totalRework < 0 || totalRejected < 0) {
       message.error('Rework and rejected quantities cannot be negative.');
+      return;
+    }
+
+    if (!supervisorId) {
+      message.error('User not found in session. Please log in again.');
       return;
     }
 
@@ -360,7 +385,7 @@ const ProductionCompletion = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'inprogress',
-          supervisor_id: supervisorId,
+          user_id: supervisorId,
           remarks: remark || null,
           approved_quantity: totalApproved,
           rework_quantity: totalRework,
@@ -369,9 +394,19 @@ const ProductionCompletion = () => {
       });
 
       if (response.ok) {
-        message.success('Quantities updated successfully');
+        const updated = await response.json();
+        message.success(
+          updated.remaining_to_close === 0
+            ? 'Review saved — part order is complete'
+            : 'Quantities updated successfully'
+        );
         setLogs(prev => prev.map(l => l.id === log.id
-          ? { ...l, approved_quantity: totalApproved, rework_quantity: totalRework, rejected_quantity: totalRejected, status: 'completed' }
+          ? {
+            ...l,
+            ...updated,
+            planned_schedule_item: l.planned_schedule_item,
+            operator_name: l.operator_name,
+          }
           : l
         ));
         closeUpdateModal();
@@ -389,12 +424,17 @@ const ProductionCompletion = () => {
 
   const handleUpdateStatus = async () => {
     const { log, newStatus, remark } = remarkModal;
+    if (!supervisorId) {
+      message.error('User not found in session. Please log in again.');
+      return;
+    }
+
     setLoading(true);
 
     const payload = {
       operation_id: log.operation_id,
       operator_id: log.operator_id,
-      supervisor_id: supervisorId,
+      user_id: supervisorId,
       notes: log.notes,
       remarks: remark || null,
       from_date: log.from_date,
@@ -406,8 +446,9 @@ const ProductionCompletion = () => {
 
     if (newStatus !== 'completed') {
       const approvedQuantity = parseInt(remarkModal.approvedQuantity) || 0;
-      if (newStatus === 'rework' && approvedQuantity >= log.produced_quantity) {
-        message.error(`For rework status, approved quantity (${approvedQuantity}) must be less than produced quantity (${log.produced_quantity})`);
+      const totalPresented = getTotalPresented(log);
+      if (newStatus === 'rework' && approvedQuantity >= totalPresented) {
+        message.error(`For rework status, approved quantity (${approvedQuantity}) must be less than presented quantity (${totalPresented})`);
         setLoading(false);
         return;
       }
@@ -475,10 +516,9 @@ const ProductionCompletion = () => {
 
   const getMachineName = (log) => log.planned_schedule_item?.machine_name || 'N/A';
 
-  const handleDownloadPDF = async () => {
-    try {
-      const exportLogs = getPdfExportLogs();
-      const doc = new jsPDF('l', 'mm', 'a4');
+  const buildPdfDocument = async () => {
+    const exportLogs = getPdfExportLogs();
+    const doc = new jsPDF('l', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 10;
       let logoDataUrl = null;
@@ -550,9 +590,7 @@ const ProductionCompletion = () => {
       if (exportLogs.length === 0) {
         doc.setFontSize(11);
         doc.text('No production logs found.', pageWidth / 2, startY + 10, { align: 'center' });
-        doc.save('production_completion.pdf');
-        message.success('PDF downloaded successfully');
-        return;
+        return { doc, recordCount: 0 };
       }
 
       const partQty = (log) => {
@@ -573,9 +611,14 @@ const ProductionCompletion = () => {
         getMachineName(log),
         partQty(log),
         log.produced_quantity ?? '-',
+        log.operator_rework_quantity ?? '-',
+        getTotalPresented(log),
         log.approved_quantity ?? '-',
         log.rework_quantity ?? '-',
         log.rejected_quantity ?? '-',
+        log.remaining_to_close ?? '-',
+        log.rework_due ?? '-',
+        log.reject_due ?? '-',
         log.notes || '-',
         formatDateTime(log.from_date, log.from_time),
         formatDateTime(log.to_date, log.to_time),
@@ -583,14 +626,14 @@ const ProductionCompletion = () => {
         getApprovedByName(log),
       ]);
 
-      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 16, 18, 12, 11, 11, 11, 11, 14, 20, 20, 16, 14];
+      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 16, 18, 12, 10, 10, 10, 10, 10, 10, 10, 10, 10, 14, 20, 20, 16, 14];
       const pdfColWeightTotal = pdfColWeights.reduce((sum, w) => sum + w, 0);
       const pdfColumnStyles = Object.fromEntries(
         pdfColWeights.map((weight, index) => [
           index,
           {
             cellWidth: (weight / pdfColWeightTotal) * tableWidth,
-            ...(index === 0 || [6, 9, 10, 11, 12, 13].includes(index) ? { halign: 'center' } : {}),
+            ...(index === 0 || [6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(index) ? { halign: 'center' } : {}),
           },
         ])
       );
@@ -601,7 +644,8 @@ const ProductionCompletion = () => {
         tableWidth,
         head: [[
           'Sl No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
-          'Operator', 'Machine', 'Total Qty', 'Produced', 'Approved', 'Rework', 'Rejected',
+          'Operator', 'Machine', 'Total Qty', 'New Prod.', 'Rework Sub.', 'Produced',
+          'Approved', 'Rework', 'Rejected', 'Rem. Close', 'Rework Due', 'Reject Due',
           'Notes', 'Start Time', 'End Time', 'Remarks', 'Approved By',
         ]],
         body: tableData,
@@ -628,27 +672,57 @@ const ProductionCompletion = () => {
         columnStyles: pdfColumnStyles,
       });
 
-      doc.save('production_completion.pdf');
-      message.success('PDF downloaded successfully');
+      return { doc, recordCount: exportLogs.length };
+  };
+
+  const closePdfPreview = () => {
+    if (pdfPreview.url) URL.revokeObjectURL(pdfPreview.url);
+    setPdfPreview({ open: false, url: null, filename: '', recordCount: 0 });
+  };
+
+  const handleOpenPdfPreview = async () => {
+    try {
+      setPdfGenerating(true);
+      const { doc, recordCount } = await buildPdfDocument();
+      const url = doc.output('bloburl');
+      setPdfPreview({
+        open: true,
+        url,
+        filename: 'production_completion.pdf',
+        recordCount,
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
-      message.error('Failed to generate PDF');
+      message.error('Failed to generate PDF preview');
+    } finally {
+      setPdfGenerating(false);
     }
   };
 
+  const handleConfirmPdfDownload = () => {
+    if (!pdfPreview.url) return;
+    const link = document.createElement('a');
+    link.href = pdfPreview.url;
+    link.download = pdfPreview.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    message.success('PDF downloaded successfully');
+    closePdfPreview();
+  };
+
   const ActionButtons = ({ record }) => {
-    const hasQuantities = (record.approved_quantity > 0) || (record.rework_quantity > 0) || (record.rejected_quantity > 0);
-    const isDisabled = record.status === 'completed' || record.status === 'rework' || hasQuantities;
+    const reviewable = canReviewLog(record);
     return (
-      <Tooltip title="Update Quantities">
+      <Tooltip title={reviewable ? 'Review quantities' : 'Already reviewed'}>
         <Button
           type="link"
           size="small"
           icon={<EditOutlined />}
-          disabled={isDisabled}
+          disabled={!reviewable}
           onClick={() => openUpdateModal(record)}
         >
-          Update
+          Review
         </Button>
       </Tooltip>
     );
@@ -714,32 +788,73 @@ const ProductionCompletion = () => {
       render: (_, record) => <Text>{record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}</Text>,
     },
     {
-      title: 'Produced Qty',
+      title: 'New Produced',
       dataIndex: 'produced_quantity',
       key: 'produced_quantity',
       width: 80,
+      align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
-      title: 'Approved Qty',
+      title: 'Rework Submit',
+      dataIndex: 'operator_rework_quantity',
+      key: 'operator_rework_quantity',
+      width: 85,
+      align: 'center',
+      render: (qty) => <Text style={{ fontSize: 12, color: qty > 0 ? '#FA8C16' : undefined }}>{qty ?? '-'}</Text>,
+    },
+    {
+      title: 'Produced',
+      key: 'presented',
+      width: 75,
+      align: 'center',
+      render: (_, record) => (
+        <Text strong style={{ fontSize: 12 }}>{getTotalPresented(record)}</Text>
+      ),
+    },
+    {
+      title: 'Approved',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
-      width: 80,
-      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
+      width: 75,
+      align: 'center',
+      render: (qty) => (
+        <Text style={{ fontSize: 12, color: qty > 0 ? '#52c41a' : undefined, fontWeight: qty > 0 ? 600 : 400 }}>
+          {qty ?? '-'}
+        </Text>
+      ),
     },
     {
-      title: 'Rework Qty',
+      title: 'Rework (rev.)',
       dataIndex: 'rework_quantity',
       key: 'rework_quantity',
-      width: 80,
-      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
+      width: 85,
+      align: 'center',
+      render: (qty) => <Text style={{ fontSize: 12, color: qty > 0 ? '#FA8C16' : undefined }}>{qty ?? '-'}</Text>,
     },
     {
-      title: 'Rejected Qty',
+      title: 'Rejected',
       dataIndex: 'rejected_quantity',
       key: 'rejected_quantity',
-      width: 80,
-      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
+      width: 75,
+      align: 'center',
+      render: (qty) => <Text style={{ fontSize: 12, color: qty > 0 ? '#ff4d4f' : undefined }}>{qty ?? '-'}</Text>,
+    },
+    {
+      title: 'Order Ledger',
+      key: 'ledger',
+      width: 95,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text style={{ fontSize: 11 }}>Close: <strong>{record.remaining_to_close ?? '-'}</strong></Text>
+          {(record.rework_due > 0) && (
+            <Text style={{ fontSize: 11, color: '#FA8C16' }}>Rework: {record.rework_due}</Text>
+          )}
+          {(record.reject_due > 0) && (
+            <Text style={{ fontSize: 11, color: '#FF4D4F' }}>Reject: {record.reject_due}</Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: 'Notes',
@@ -925,7 +1040,7 @@ const ProductionCompletion = () => {
                 Clear
               </Button>
             )}
-            <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
+            <Button icon={<DownloadOutlined />} onClick={handleOpenPdfPreview} loading={pdfGenerating}>
               Download PDF
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => { setRefreshing(true); fetchLogs(); }} loading={refreshing}>
@@ -962,6 +1077,39 @@ const ProductionCompletion = () => {
             scroll={{ x: 'max-content', y: 'calc(84vh - 280px)' }}
           />
         </div>
+
+      <Modal
+        title="Production Completion — PDF Preview"
+        open={pdfPreview.open}
+        onCancel={closePdfPreview}
+        width="92%"
+        style={{ maxWidth: 1200, top: 20 }}
+        destroyOnClose
+        footer={[
+          <Button key="close" onClick={closePdfPreview}>Close</Button>,
+          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={handleConfirmPdfDownload}>
+            Download PDF
+          </Button>,
+        ]}
+      >
+        <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', borderColor: '#adc6ff' }}>
+          <Space wrap size="large">
+            <Text><Text strong>Supervisor:</Text> {supervisorMeta.name}</Text>
+            <Text><Text strong>Period:</Text> {getFilterPeriodLabel()}</Text>
+            <Text><Text strong>Records:</Text> {pdfPreview.recordCount}</Text>
+            <Text><Text strong>Generated:</Text> {dayjs().format('DD-MM-YYYY, HH:mm:ss')}</Text>
+          </Space>
+        </Card>
+        {pdfPreview.url ? (
+          <iframe
+            src={pdfPreview.url}
+            title="Production Completion PDF Preview"
+            style={{ width: '100%', height: '68vh', border: '1px solid #d9d9d9', borderRadius: 4 }}
+          />
+        ) : (
+          <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
+        )}
+      </Modal>
 
       {/* ── Remark / Status Modal ─────────────────────────────────────────── */}
       <Modal
@@ -1030,13 +1178,13 @@ const ProductionCompletion = () => {
         open={updateModal.visible}
         onCancel={closeUpdateModal}
         onOk={handleUpdateQuantities}
-        okText="Update"
+        okText="Submit Review"
         okButtonProps={{ loading }}
         cancelText="Cancel"
         title={
           <Space align="center">
             <EditOutlined style={{ color: '#1677ff', fontSize: 18, marginRight: 8 }} />
-            <span>Update Quantities</span>
+            <span>Review Quantities</span>
           </Space>
         }
         destroyOnClose
@@ -1044,25 +1192,55 @@ const ProductionCompletion = () => {
         {updateModal.log && (
           <>
             <div style={{ marginBottom: 16 }}>
-              <Text strong style={{ display: 'block', marginBottom: 6 }}>Total Produced</Text>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>New Produced</Text>
               <Input type="number" value={updateModal.log.produced_quantity} disabled style={{ backgroundColor: '#f5f5f5' }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>Operator Rework Submitted</Text>
+              <Input type="number" value={updateModal.log.operator_rework_quantity || 0} disabled style={{ backgroundColor: '#f5f5f5' }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>Total Presented</Text>
+              <Input
+                type="number"
+                value={getTotalPresented(updateModal.log)}
+                disabled
+                style={{ backgroundColor: '#f5f5f5' }}
+              />
             </div>
 
             <QuantityInput
-              label="Approved Qty"
+              label="Approved"
               value={updateModal.approvedQty}
               onChange={(val) => setUpdateModal(prev => ({ ...prev, approvedQty: val }))}
             />
             <QuantityInput
-              label="Rework Qty"
+              label="Rework (review)"
               value={updateModal.reworkQty}
               onChange={(val) => setUpdateModal(prev => ({ ...prev, reworkQty: val }))}
             />
             <QuantityInput
-              label="Rejected Qty"
+              label="Rejected"
               value={updateModal.rejectedQty}
               onChange={(val) => setUpdateModal(prev => ({ ...prev, rejectedQty: val }))}
             />
+
+            {(() => {
+              const totalPresented = getTotalPresented(updateModal.log);
+              const assigned = (parseInt(updateModal.approvedQty, 10) || 0)
+                + (parseInt(updateModal.reworkQty, 10) || 0)
+                + (parseInt(updateModal.rejectedQty, 10) || 0);
+              const matches = assigned === totalPresented;
+              return (
+                <Text
+                  type={matches ? 'success' : 'danger'}
+                  style={{ fontSize: 12, display: 'block', marginBottom: 12 }}
+                >
+                  Split total: {assigned} / {totalPresented} presented
+                  {!matches && ' — must match before submit'}
+                </Text>
+              );
+            })()}
 
             <div style={{ marginBottom: 16 }}>
               <Text strong style={{ display: 'block', marginBottom: 6 }}>
@@ -1079,7 +1257,7 @@ const ProductionCompletion = () => {
             </div>
 
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Total of approved + rework + rejected must not exceed produced quantity
+              Total of approved + rework + rejected must equal presented quantity (produced + operator rework)
             </Text>
           </>
         )}

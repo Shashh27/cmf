@@ -8,11 +8,6 @@ const { Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
-// ─── Source of truth: ONLY selectedJob.status from the API ───────────────────
-// localStorage is NOT used — it caused ALL jobs on a machine to show
-// "In Progress" even when their status was still "pending" in the backend.
-// ─────────────────────────────────────────────────────────────────────────────
-
 const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmit }) => {
   const [fromDate, setFromDate] = useState(null);
   const [fromHour, setFromHour] = useState(null);
@@ -22,11 +17,9 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
   const [toMinute, setToMinute] = useState(null);
   const [notes, setNotes] = useState('');
   const [producedQuantity, setProducedQuantity] = useState(0);
+  const [reworkSubmitQuantity, setReworkSubmitQuantity] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // True only when:
-  // 1. Parent says activated (user just clicked Activate), OR
-  // 2. The API already returned status IN-PROGRESS for this specific job
   const effectivelyActivated = isActivated || 
                                 [selectedJob?.status, selectedJob?.operation_status].some(s => {
                                   const up = s?.toString().toUpperCase();
@@ -47,23 +40,32 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
       return;
     }
 
+    const producedQty = parseInt(producedQuantity, 10) || 0;
+    const reworkSubmitQty = parseInt(reworkSubmitQuantity, 10) || 0;
+
+    if (producedQty === 0 && reworkSubmitQty === 0) {
+      message.error('Enter at least one quantity: new produced units or rework submit.');
+      return;
+    }
+
     let operationId = selectedJob.id || selectedJob.operation_id || selectedJob.job_id || selectedJob.schedule_id;
     if (!operationId) {
       message.error('Operation ID not found. Please check the job selection.');
       return;
     }
 
-    // Check if production quota is already met
     const totalQuantity = selectedJob.total_quantity || selectedJob.quantity || 0;
     if (totalQuantity > 0) {
       try {
         const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
         if (response.ok) {
           const logs = await response.json();
-          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+          const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          const latestLog = sortedLogs[0];
+          const remainingToClose = latestLog?.remaining_to_close ?? totalQuantity;
           
-          if (totalApproved >= totalQuantity) {
-            message.error(`Production quota already met. Approved quantity (${totalApproved}) has reached total quantity (${totalQuantity}). No more production logs can be submitted.`);
+          if (remainingToClose <= 0) {
+            message.error('Production quota already met. No more production logs can be submitted.');
             return;
           }
         }
@@ -72,43 +74,15 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
       }
     }
 
-    let operatorId = null;
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        operatorId = user.id;
-      } catch (e) {
-        console.error("Error parsing user from local storage", e);
-      }
-    }
-    if (!operatorId) operatorId = localStorage.getItem('operator_id');
-    if (!operatorId) {
-      message.error('Operator not found in session. Please log in again.');
-      return;
-    }
-
     setLoading(true);
     try {
-      const fromDateTime = dayjs(fromDate).hour(fromHour).minute(fromMinute).second(0);
-      const toDateTime = dayjs(toDate).hour(toHour).minute(toMinute).second(0);
-
       const payload = {
-        operation_id: parseInt(operationId),
-        operator_id: parseInt(operatorId),
-        supervisor_id: 0,
         notes: notes || '',
-        remarks: '',
-        produced_quantity: parseInt(producedQuantity) || 0,
-        approved_quantity: 0,
-        from_date: fromDateTime.format('YYYY-MM-DD'),
-        from_time: fromDateTime.format('HH:mm:ss') + '.000Z',
-        to_date: toDateTime.format('YYYY-MM-DD'),
-        to_time: toDateTime.format('HH:mm:ss') + '.000Z',
-        status: 'pending'
+        produced_quantity: producedQty,
+        rework_submit_quantity: reworkSubmitQty,
       };
 
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`, {
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -116,14 +90,14 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
 
       if (response.ok) {
         message.success('Production log submitted successfully!');
-        const submittedQuantity = parseInt(producedQuantity) || 0;
         if (onProductionSubmit) {
-          onProductionSubmit(submittedQuantity);
+          onProductionSubmit(producedQty + reworkSubmitQty);
         }
         setFromDate(null); setFromHour(null); setFromMinute(null);
         setToDate(null); setToHour(null); setToMinute(null);
         setNotes('');
         setProducedQuantity(0);
+        setReworkSubmitQuantity(0);
       } else {
         const errorData = await response.json();
         message.error(`Failed to submit production log: ${errorData.detail || 'Unknown error'}`);
@@ -208,13 +182,24 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
           </Col>
         </Row>
 
-        <Text style={{ display: 'block', marginBottom: 6 }}>Produced Quantity</Text>
+        <Text style={{ display: 'block', marginBottom: 6 }}>Produced Quantity (new units)</Text>
         <Input
           type="number"
-          placeholder="Enter produced quantity"
+          placeholder="First-run or reject replacement"
           disabled={!effectivelyActivated}
           value={producedQuantity}
           onChange={(e) => setProducedQuantity(e.target.value)}
+          min={0}
+          style={{ marginBottom: 12 }}
+        />
+
+        <Text style={{ display: 'block', marginBottom: 6 }}>Rework Submit Quantity</Text>
+        <Input
+          type="number"
+          placeholder="Same parts reworked"
+          disabled={!effectivelyActivated}
+          value={reworkSubmitQuantity}
+          onChange={(e) => setReworkSubmitQuantity(e.target.value)}
           min={0}
           style={{ marginBottom: 12 }}
         />

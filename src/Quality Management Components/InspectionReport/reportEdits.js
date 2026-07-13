@@ -119,7 +119,7 @@ function repaginatePayload(payload, rows, footerMeta = {}) {
     projectNo: payload.projectNo,
     drgNo: payload.drgNo,
     projectName: payload.projectName,
-    assembly: payload.assembly,
+    assembly: '',
     totalQuantity: payload.totalQuantity,
   };
 
@@ -226,6 +226,7 @@ export function mergeReportEditsFromHtml(html, payload) {
 }
 
 export function applySavedEditsToPayload(payload, saved) {
+  if (payload) payload.assembly = '';
   if (!payload || !saved?.saved) return payload;
 
   const rows = (payload.rows || []).map((row, idx) => {
@@ -293,6 +294,7 @@ export function applySavedEditsToPayload(payload, saved) {
 
   return {
     ...payload,
+    assembly: '',
     rows,
     sheets,
     footerRows: footerMeta.footerRows,

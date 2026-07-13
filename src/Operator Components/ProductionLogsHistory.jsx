@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Table, Typography, Tag, message, DatePicker, Button, Space, Select, Tooltip } from 'antd';
+import { Table, Typography, Tag, message, DatePicker, Button, Space, Select, Tooltip, Modal, Card, Spin } from 'antd';
 import { ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined, ClearOutlined } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -45,6 +45,9 @@ const ProductionLogsHistory = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  const [pdfPreview, setPdfPreview] = useState({ open: false, url: null, filename: '', recordCount: 0 });
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
   const fetchProductionLogs = useCallback(async () => {
     setLoading(true);
     try {
@@ -70,7 +73,7 @@ const ProductionLogsHistory = () => {
 
       const data = await response.json();
       const produced = (data || [])
-        .filter(log => (log.produced_quantity || 0) > 0)
+        .filter(log => (log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0)
         .sort((a, b) =>
           (b.created_at ? dayjs(b.created_at).valueOf() : 0) -
           (a.created_at ? dayjs(a.created_at).valueOf() : 0)
@@ -292,10 +295,9 @@ const ProductionLogsHistory = () => {
       ? `(${log.machine.make}) ${log.machine.model}`
       : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A';
 
-  const handleDownloadPDF = async () => {
-    try {
-      const exportLogs = getPdfExportLogs();
-      const doc = new jsPDF('l', 'mm', 'a4');
+  const buildPdfDocument = async () => {
+    const exportLogs = getPdfExportLogs();
+    const doc = new jsPDF('l', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 10;
       let logoDataUrl = null;
@@ -367,9 +369,7 @@ const ProductionLogsHistory = () => {
       if (exportLogs.length === 0) {
         doc.setFontSize(11);
         doc.text('No production logs found.', pageWidth / 2, startY + 10, { align: 'center' });
-        doc.save('production_logs_history.pdf');
-        message.success('PDF downloaded successfully');
-        return;
+        return { doc, recordCount: 0 };
       }
 
       const partQty = (log) => {
@@ -444,12 +444,43 @@ const ProductionLogsHistory = () => {
         columnStyles: pdfColumnStyles,
       });
 
-      doc.save('production_logs_history.pdf');
-      message.success('PDF downloaded successfully');
+      return { doc, recordCount: exportLogs.length };
+  };
+
+  const closePdfPreview = () => {
+    if (pdfPreview.url) URL.revokeObjectURL(pdfPreview.url);
+    setPdfPreview({ open: false, url: null, filename: '', recordCount: 0 });
+  };
+
+  const handleOpenPdfPreview = async () => {
+    try {
+      setPdfGenerating(true);
+      const { doc, recordCount } = await buildPdfDocument();
+      const url = doc.output('bloburl');
+      setPdfPreview({
+        open: true,
+        url,
+        filename: 'production_logs_history.pdf',
+        recordCount,
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
-      message.error('Failed to generate PDF');
+      message.error('Failed to generate PDF preview');
+    } finally {
+      setPdfGenerating(false);
     }
+  };
+
+  const handleConfirmPdfDownload = () => {
+    if (!pdfPreview.url) return;
+    const link = document.createElement('a');
+    link.href = pdfPreview.url;
+    link.download = pdfPreview.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    message.success('PDF downloaded successfully');
+    closePdfPreview();
   };
 
   const columns = [
@@ -562,6 +593,14 @@ const ProductionLogsHistory = () => {
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
+      title: 'Op. Rework',
+      dataIndex: 'operator_rework_quantity',
+      key: 'operator_rework_quantity',
+      width: 80,
+      align: 'center',
+      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
+    },
+    {
       title: 'Approved Qty',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
@@ -584,6 +623,23 @@ const ProductionLogsHistory = () => {
       width: 80,
       align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
+    },
+    {
+      title: 'Ledger',
+      key: 'ledger',
+      width: 90,
+      align: 'center',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text style={{ fontSize: 11 }}>Close: <strong>{record.remaining_to_close ?? '-'}</strong></Text>
+          {(record.rework_due > 0) && (
+            <Text style={{ fontSize: 11, color: '#FA8C16' }}>Rw: {record.rework_due}</Text>
+          )}
+          {(record.reject_due > 0) && (
+            <Text style={{ fontSize: 11, color: '#FF4D4F' }}>Rej: {record.reject_due}</Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: 'Status',
@@ -728,7 +784,7 @@ const ProductionLogsHistory = () => {
             )}
           </Space>
           <Space>
-            <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
+            <Button icon={<DownloadOutlined />} onClick={handleOpenPdfPreview} loading={pdfGenerating}>
               Download PDF
             </Button>
             <Button icon={<ReloadOutlined />} onClick={fetchProductionLogs} loading={loading}>
@@ -760,6 +816,39 @@ const ProductionLogsHistory = () => {
             scroll={{ x: 'max-content', y: 'calc(84vh - 280px)' }}
           />
         </div>
+
+      <Modal
+        title="Production Logs — PDF Preview"
+        open={pdfPreview.open}
+        onCancel={closePdfPreview}
+        width="92%"
+        style={{ maxWidth: 1200, top: 20 }}
+        destroyOnClose
+        footer={[
+          <Button key="close" onClick={closePdfPreview}>Close</Button>,
+          <Button key="primary" type="primary" icon={<DownloadOutlined />} onClick={handleConfirmPdfDownload}>
+            Download PDF
+          </Button>,
+        ]}
+      >
+        <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', borderColor: '#adc6ff' }}>
+          <Space wrap size="large">
+            <Text><Text strong>Operator:</Text> {operatorMeta.name}</Text>
+            <Text><Text strong>Period:</Text> {getFilterPeriodLabel()}</Text>
+            <Text><Text strong>Records:</Text> {pdfPreview.recordCount}</Text>
+            <Text><Text strong>Generated:</Text> {dayjs().format('DD-MM-YYYY, HH:mm:ss')}</Text>
+          </Space>
+        </Card>
+        {pdfPreview.url ? (
+          <iframe
+            src={pdfPreview.url}
+            title="Production Logs PDF Preview"
+            style={{ width: '100%', height: '68vh', border: '1px solid #d9d9d9', borderRadius: 4 }}
+          />
+        ) : (
+          <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
+        )}
+      </Modal>
     </div>
   );
 };

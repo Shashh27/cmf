@@ -6,7 +6,7 @@ import PokaYokeHistoryCalendar from './PokaYokeHistoryCalendar';
 import { API_BASE_URL } from '../Config/auth';
 
 const PreventiveMaintenance = () => {
-  const [activeTab, setActiveTab] = useState('history');
+  const [activeTab, setActiveTab] = useState('checklists');
   const [machines, setMachines] = useState([]);
   const [machinesLoading, setMachinesLoading] = useState(false);
 

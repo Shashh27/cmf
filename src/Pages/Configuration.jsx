@@ -3,7 +3,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card, Input } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-design/icons";
-import workcenterModal from "../Configuration Components/workcenterModal";
+import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
 import VendorsTable from "../Configuration Components/VendorsTable";
@@ -375,7 +375,7 @@ const Configuration = () => {
         className="responsive-tabs"
       />
 
-      <workcenterModal
+      <WorkCenterModal
         workcenter={editingworkcenter}
         isOpen={workcenterModalOpen}
         userId={userId}

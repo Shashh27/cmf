@@ -234,14 +234,15 @@ const Notifications = () => {
         // - logs where supervisor hasn't responded yet (supervisor_id is null)
         // - logs where supervisor has responded (supervisor_id matches current supervisor)
         // - logs reviewed via user_id (MC/supervisor as reviewer)
-        // and produced_quantity > 0
+        // and has operator submission (new produced and/or rework submit)
         const supervisorLogs = (data || []).filter((log) => {
           const noSupervisorAssigned =
             log.supervisor_id === null || log.supervisor_id === undefined;
           const matchesSupervisor =
             String(log.supervisor_id) === String(supervisorId) ||
             String(log.user_id) === String(supervisorId);
-          return (noSupervisorAssigned || matchesSupervisor) && (log.produced_quantity || 0) > 0;
+          const hasSubmission = (log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0;
+          return (noSupervisorAssigned || matchesSupervisor) && hasSubmission;
         });
         // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorLogs.sort((a, b) => {
@@ -1039,19 +1040,53 @@ const Notifications = () => {
       title: 'Part\nQty',
       key: 'partQuantity',
       align: 'center',
-      width: 60,
-      render: (text, record) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{record.operation?.part?.quantity || 0}</span>
-      ),
+      width: 70,
+      render: (text, record) => {
+        const total = record.operation?.part?.quantity || 0;
+        const remaining = record.remaining_to_close;
+        return (
+          <div style={{ fontSize: 12 }}>
+            <div style={{ fontWeight: 'bold' }}>{total}</div>
+            {remaining !== null && remaining !== undefined && (
+              <div style={{ color: remaining === 0 ? '#52c41a' : '#1677ff', fontSize: 11 }}>
+                Left: {remaining}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
-      title: 'Produced\nQty',
+      title: 'New\nProduced',
       dataIndex: 'produced_quantity',
       key: 'producedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text ?? 0}</span>
+      ),
+    },
+    {
+      title: 'Rework\nSubmit',
+      dataIndex: 'operator_rework_quantity',
+      key: 'operatorReworkQuantity',
+      align: 'center',
+      width: 70,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
+          {text ?? 0}
+        </span>
+      ),
+    },
+    {
+      title: 'Presented',
+      key: 'presented',
+      align: 'center',
+      width: 70,
+      render: (_, record) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>
+          {(record.produced_quantity || 0) + (record.operator_rework_quantity || 0)}
+        </span>
       ),
     },
     {
@@ -1059,29 +1094,48 @@ const Notifications = () => {
       dataIndex: 'approved_quantity',
       key: 'approvedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#52c41a' : undefined }}>
+          {text ?? '-'}
+        </span>
       ),
     },
     {
-      title: 'Rework\nQty',
+      title: 'Rework\n(rev.)',
       dataIndex: 'rework_quantity',
       key: 'reworkQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
+          {text ?? '-'}
+        </span>
       ),
     },
     {
-      title: 'Rejected\nQty',
+      title: 'Rejected',
       dataIndex: 'rejected_quantity',
       key: 'rejectedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#ff4d4f' : undefined }}>
+          {text ?? '-'}
+        </span>
+      ),
+    },
+    {
+      title: 'Due',
+      key: 'ledgerDue',
+      align: 'center',
+      width: 80,
+      render: (_, record) => (
+        <div style={{ fontSize: 11 }}>
+          {(record.rework_due > 0) && <div style={{ color: '#FA8C16' }}>Rw: {record.rework_due}</div>}
+          {(record.reject_due > 0) && <div style={{ color: '#ff4d4f' }}>Rej: {record.reject_due}</div>}
+          {!record.rework_due && !record.reject_due && <span>-</span>}
+        </div>
       ),
     },
     {
