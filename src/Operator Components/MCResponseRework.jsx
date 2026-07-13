@@ -5,7 +5,8 @@ import { SettingOutlined, WarningOutlined, MessageOutlined, CheckCircleOutlined 
 const { Text } = Typography;
 
 const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onReportIssue }) => {
-  const hasRework = productionStats?.hasRework;
+  const hasPendingWork = (productionStats?.reworkDue || 0) > 0 || (productionStats?.rejectDue || 0) > 0;
+  const hasReviewFeedback = productionStats?.latestApproved !== null && productionStats?.latestApproved !== undefined;
   const hasMCReply = !!latestHelpReply;
 
   return (
@@ -28,13 +29,12 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
       }
       style={{ borderRadius: 16, height: cardHeight, display: 'flex', flexDirection: 'column' }}
       headStyle={{ borderRadius: '16px 16px 0 0', padding: '10px 16px', minHeight: 'unset' }}
-      bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
+      bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}
     >
-      {/* Side-by-side layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, height: '100%' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
-        {/* LEFT: Rework Panel */}
-        {hasRework ? (
+        {/* LEFT: Rework / Ledger Panel */}
+        {hasPendingWork ? (
           <div style={{
             background: '#FFF7F0',
             borderRadius: 10,
@@ -43,18 +43,21 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
+            minHeight: 0,
+            height: '100%',
+            overflowY: 'auto',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <WarningOutlined style={{ color: '#FA8C16', fontSize: 14 }} />
-              <Text strong style={{ color: '#FA8C16', fontSize: 12 }}>Rework Required</Text>
+              <Text strong style={{ color: '#FA8C16', fontSize: 12 }}>Action Required</Text>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[
-                { label: 'Produced', value: productionStats.latestProduced || 0, color: '#52C41A' },
-                { label: 'Approved', value: productionStats.latestApproved || 0, color: '#52C41A' },
-                { label: 'Rework',   value: productionStats.latestRework   || 0, color: '#FA8C16' },
-                { label: 'Rejected', value: productionStats.latestRejected || 0, color: '#FF4D4F' },
+                { label: 'Remaining', value: productionStats.remainingToClose || 0, color: '#1677FF' },
+                { label: 'Rework due', value: productionStats.reworkDue || 0, color: '#FA8C16' },
+                { label: 'Reject due', value: productionStats.rejectDue || 0, color: '#FF4D4F' },
+                { label: 'Approved', value: productionStats.totalApproved || 0, color: '#52C41A' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 8, padding: '6px 10px' }}>
                   <Text style={{ color: '#94a3b8', fontSize: 11, display: 'block' }}>{label}</Text>
@@ -62,6 +65,27 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
                 </div>
               ))}
             </div>
+
+            <div style={{ background: 'rgba(255,255,255,0.5)', borderRadius: 6, padding: '6px 8px', border: '1px solid #FFD8A8' }}>
+              <Text style={{ color: '#8C4A00', fontSize: 11 }}>
+                Rework due → submit via <strong>Rework Submit</strong>. Reject due → make new via <strong>Produced Quantity</strong>.
+              </Text>
+            </div>
+
+            {hasReviewFeedback && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                {[
+                  { label: 'Last approved', value: productionStats.latestApproved || 0, color: '#52C41A' },
+                  { label: 'Last rework', value: productionStats.latestRework || 0, color: '#FA8C16' },
+                  { label: 'Last rejected', value: productionStats.latestRejected || 0, color: '#FF4D4F' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ background: 'rgba(255,255,255,0.4)', borderRadius: 6, padding: '4px 6px', textAlign: 'center' }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 10, display: 'block' }}>{label}</Text>
+                    <Text style={{ color, fontSize: 14, fontWeight: 700 }}>{value}</Text>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {productionStats.latestRemarks && (
               <div style={{
@@ -88,9 +112,17 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
+            minHeight: 0,
+            height: '100%',
+            overflowY: 'auto',
           }}>
             <CheckCircleOutlined style={{ color: '#52C41A', fontSize: 24 }} />
             <Text style={{ color: '#389E0D', fontSize: 13, fontWeight: 600 }}>No Rework Pending</Text>
+            {(productionStats?.remainingToClose > 0) && (
+              <Text style={{ color: '#64748b', fontSize: 12 }}>
+                {productionStats.remainingToClose} remaining to close
+              </Text>
+            )}
           </div>
         )}
 
@@ -104,6 +136,8 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
+            minHeight: 0,
+            height: '100%',
             overflow: 'hidden',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -175,6 +209,9 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
+            minHeight: 0,
+            height: '100%',
+            overflowY: 'auto',
           }}>
             <Text type="secondary" style={{ fontSize: 13 }}>No MC Responses yet</Text>
           </div>

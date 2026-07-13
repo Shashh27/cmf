@@ -371,6 +371,16 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       },
     },
     {
+      title: 'Uploaded By',
+      key: 'uploaded_by',
+      minWidth: 120,
+      align: 'center',
+      render: (_, record) => {
+        const userName = record.user_name || record.uploaded_by || '-';
+        return userName;
+      },
+    },
+    {
       title: 'Actions',
       key: 'actions',
       align: 'center',
@@ -660,6 +670,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     formData.append('file', file, file.name);
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       setVersionUploading(true);
       let url = '';
       
@@ -669,20 +684,24 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         // Use the actual uploaded file name instead of parent document name
         formData.append('file_name', file.name);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'common-folder' || uploadingDocument.doc_source_type === 'common-root') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
         if (uploadingDocument.folder_id !== null && uploadingDocument.folder_id !== undefined) {
           formData.append('folder_id', uploadingDocument.folder_id.toString());
         }
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         formData.append('document_name', file.name); // Use the name of the new file
@@ -690,6 +709,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_version', nextVersion);
         formData.append('part_id', selectedNode.partId);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'part-ipid' || uploadingDocument.doc_source_type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/upload/`;
         const operationId = uploadingDocument.operation_id || selectedNode.operationId;
@@ -697,16 +717,16 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_type', uploadingDocument.document_type || 'CNC');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
         // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
         formData.delete('file');
         formData.append('files', file, file.name);
       } else if (uploadingDocument.doc_source_type === 'folder' && selectedNode.category === 'Reports') {
-        const userId = getUserId();
         url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
         formData.append('document_type', uploadingDocument.document_type || 'Other');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
-        if (userId) formData.append('user_id', userId.toString());
+        formData.append('user_id', userId.toString());
       }
 
       if (!url) {
@@ -826,11 +846,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_type', selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 'other');
         formData.append('document_version', '1.0');
         formData.append('part_id', selectedNode.partId);
+        formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/upload/`;
         formData.append('operation_id', selectedNode.operationId);
         formData.append('document_type', addDocType === 'Other' ? customDocType : addDocType);
         formData.append('document_version', '1.0');
+        formData.append('user_id', userId.toString());
         // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
         // Remove the existing 'files' and add them with proper naming
         const files = formData.getAll('files');

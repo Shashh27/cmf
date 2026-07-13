@@ -62,7 +62,7 @@ const PartReportPdfDocument = ({ partData }) => {
     <Document>
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
-          <Text style={styles.title}>CMF DIGITIZATION - CMTI</Text>
+          <Text style={styles.title}>CMF DIGITALIZATION - CMTI</Text>
           <Text style={styles.subtitle}>Part Document & Process Plan Report</Text>
           <View style={styles.metaRow}>
             <View>

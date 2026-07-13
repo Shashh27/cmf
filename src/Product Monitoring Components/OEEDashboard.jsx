@@ -1,17 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
-  Card, DatePicker,
+  DatePicker,
   Select, Empty, Spin, Tabs, Table, Tooltip,
-  Button, Divider, Modal, Input
+  Button, Modal, Input
 } from 'antd';
 import { Line } from '@ant-design/plots';
 
 import {
   Activity, BarChart2,
-  AlertTriangle, RefreshCw,
-  Wrench,
+  RefreshCw, Filter,
   Award, Clock,
-  CheckCircle, XCircle, Target
+  CheckCircle, Target, AlertTriangle
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import axios from 'axios';
@@ -20,15 +19,182 @@ import { API_BASE_URL } from '../Config/auth';
 const { Option } = Select;
 const { Search: SearchInput } = Input;
 
+const formatPercent = (value) => (
+  value === null || value === undefined ? '—' : `${Number(value).toFixed(1)}%`
+);
+const formatMinutes = (value) => (
+  value === null || value === undefined ? '—' : `${value} min`
+);
+const formatCount = (value) => (
+  value === null || value === undefined ? '—' : value
+);
+const getOeeColor = (value) => {
+  if (value === null || value === undefined) return '#94a3b8';
+  if (value >= 85) return '#10b981';
+  if (value >= 60) return '#f59e0b';
+  return '#ef4444';
+};
+
+const OEE_TIER = {
+  EXCELLENT: { cardBg: '#f0fdf4', cardBorder: '#86efac', pillBg: '#16a34a', pillText: '#fff', label: 'Excellent' },
+  AVERAGE: { cardBg: '#fffbeb', cardBorder: '#fcd34d', pillBg: '#f59e0b', pillText: '#fff', label: 'Average' },
+  POOR: { cardBg: '#fff1f2', cardBorder: '#fca5a5', pillBg: '#dc2626', pillText: '#fff', label: 'Poor' },
+  NO_DATA: { cardBg: '#f8fafc', cardBorder: '#cbd5e1', pillBg: '#64748b', pillText: '#fff', label: 'No Data' },
+};
+
+const getOeeTierKey = (value) => {
+  if (value === null || value === undefined) return 'NO_DATA';
+  if (value >= 85) return 'EXCELLENT';
+  if (value >= 60) return 'AVERAGE';
+  return 'POOR';
+};
+
+const TIER_MATCH = {
+  ALL: () => true,
+  EXCELLENT: (value) => getOeeTierKey(value) === 'EXCELLENT',
+  AVERAGE: (value) => getOeeTierKey(value) === 'AVERAGE',
+  POOR: (value) => getOeeTierKey(value) === 'POOR',
+  NO_DATA: (value) => getOeeTierKey(value) === 'NO_DATA',
+};
+
+const Field = ({ label, value, accent }) => (
+  <div>
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#64748b', marginBottom: 3 }}>
+      {label}
+    </div>
+    <div style={{
+      fontSize: 13, fontWeight: 600, color: value && value !== '—' ? (accent || '#0f172a') : '#94a3b8',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    }}>
+      {value || '—'}
+    </div>
+  </div>
+);
+
+const MetricBox = ({ label, value, color, bg }) => (
+  <div style={{ background: bg, borderRadius: 8, padding: '10px 6px', textAlign: 'center', minWidth: 0 }}>
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#64748b', marginBottom: 4 }}>
+      {label}
+    </div>
+    <div style={{ fontSize: 17, fontWeight: 800, color: value !== '—' ? color : '#94a3b8', lineHeight: 1.2 }}>
+      {value}
+    </div>
+  </div>
+);
+
+const OeeStatusPill = ({ oee }) => {
+  if (oee === null || oee === undefined) return null;
+  const s = OEE_TIER[getOeeTierKey(oee)];
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '4px 10px', borderRadius: 99,
+      background: s.pillBg, fontSize: 11, fontWeight: 700,
+      color: s.pillText, letterSpacing: '0.05em', textTransform: 'uppercase',
+      flexShrink: 0, whiteSpace: 'nowrap',
+    }}>
+      {s.label}
+    </span>
+  );
+};
+
+const OEEMachineCard = ({ machine, onClick }) => {
+  const oee = machine.oee ?? machine.average_oee ?? null;
+  const availability = machine.availability ?? machine.average_availability ?? null;
+  const performance = machine.performance ?? machine.average_performance ?? null;
+  const quality = machine.quality ?? machine.average_quality ?? null;
+  const hasOee = oee !== null && oee !== undefined;
+  const tier = hasOee ? OEE_TIER[getOeeTierKey(oee)] : { cardBg: '#ffffff', cardBorder: '#e2e8f0' };
+  const accentColor = hasOee ? getOeeColor(oee) : '#cbd5e1';
+  const availLoss = machine.losses?.availability_loss ?? null;
+  const perfLoss = machine.losses?.performance_loss ?? null;
+  const qualLoss = machine.losses?.quality_loss ?? null;
+  const hasParts = [machine.total_parts, machine.good_parts, machine.bad_parts].some(v => v != null);
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: tier.cardBg,
+        border: `1.5px solid ${tier.cardBorder}`,
+        borderTop: `4px solid ${accentColor}`,
+        borderRadius: 10,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'box-shadow 0.15s, transform 0.15s',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 18px rgba(0,0,0,0.10)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)'; }}
+    >
+      <div style={{ padding: '14px 14px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', lineHeight: 1.3, wordBreak: 'break-word' }}>
+            {machine.machine_name || 'Unknown'}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <OeeStatusPill oee={oee} />
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: 26, fontWeight: 900, color: hasOee ? getOeeColor(oee) : '#94a3b8', lineHeight: 1 }}>
+            {formatPercent(oee)}
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginTop: 4 }}>
+            OEE
+          </div>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: tier.cardBorder, opacity: 0.45, margin: '0 14px' }} />
+
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          <MetricBox label="Availability" value={formatPercent(availability)} color="#2563eb" bg="#eff6ff" />
+          <MetricBox label="Performance" value={formatPercent(performance)} color="#d97706" bg="#fffbeb" />
+          <MetricBox label="Quality" value={formatPercent(quality)} color="#7c3aed" bg="#f5f3ff" />
+        </div>
+
+        {hasParts && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: '10px 12px', background: 'rgba(255,255,255,0.65)', borderRadius: 8, border: '1px solid rgba(0,0,0,0.04)' }}>
+            <Field label="Total Parts" value={formatCount(machine.total_parts)} />
+            <Field label="Good Parts" value={formatCount(machine.good_parts)} accent="#16a34a" />
+            <Field label="Bad Parts" value={formatCount(machine.bad_parts)} accent="#dc2626" />
+          </div>
+        )}
+
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+            <AlertTriangle size={12} color="#ef4444" />
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748b' }}>
+              Loss Analysis
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <MetricBox label="Avail. Loss" value={formatPercent(availLoss)} color="#dc2626" bg="#fef2f2" />
+            <MetricBox label="Perf. Loss" value={formatPercent(perfLoss)} color="#ea580c" bg="#fff7ed" />
+            <MetricBox label="Qual. Loss" value={formatPercent(qualLoss)} color="#db2777" bg="#fdf2f8" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const OEEDashboard = () => {
   const [machines, setMachines] = useState([]);
   const [oeeData, setOeeData] = useState({
     dateRange: dayjs(),
     selectedShift: 'all',
-    selectedMachine: 'all'
   });
 
   const [activeTab, setActiveTab] = useState('3');
+  const [selectedMachineIds, setSelectedMachineIds] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [machineSortOrder, setMachineSortOrder] = useState('oee');
+  const [tierFilter, setTierFilter] = useState('ALL');
   const [trendModalVisible, setTrendModalVisible] = useState(false);
   const [trendModalLoading, setTrendModalLoading] = useState(false);
   const [selectedMachineForTrend, setSelectedMachineForTrend] = useState(null);
@@ -41,7 +207,6 @@ const OEEDashboard = () => {
   const [allMachinesOEE, setAllMachinesOEE] = useState([]);
   const [isLoadingMachines, setIsLoadingMachines] = useState(false);
   const [selectedMachineData, setSelectedMachineData] = useState(null);
-  const [filteredMachines, setFilteredMachines] = useState([]);
   const [shiftSummaryData, setShiftSummaryData] = useState([]);
   const [isLoadingShiftSummary, setIsLoadingShiftSummary] = useState(false);
   const [trendData, setTrendData] = useState([]);
@@ -49,27 +214,33 @@ const OEEDashboard = () => {
   const [isLoadingOverallOEE, setIsLoadingOverallOEE] = useState(false);
 
   useEffect(() => {
-    const initializeDashboard = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/monitoring/live`);
-        const currentMachines = response.data.map(m => ({
-          machine_id: m.machine_id,
-          machine_name: m.machine_name
-        }));
-        setMachines(currentMachines);
-      } catch (error) {}
-      fetchAllData();
-    };
-    initializeDashboard();
+    fetchAllData();
   }, [oeeData.dateRange, oeeData.selectedShift]);
 
-  useEffect(() => {
-    if (oeeData.selectedMachine && oeeData.selectedMachine !== 'all') {
-      setFilteredMachines(allMachinesOEE.filter(m => m.machine_id === oeeData.selectedMachine));
-    } else {
-      setFilteredMachines(allMachinesOEE);
-    }
-  }, [oeeData.selectedMachine, allMachinesOEE]);
+  const displayedMachines = useMemo(() => {
+    const matchTier = TIER_MATCH[tierFilter] || TIER_MATCH.ALL;
+    return [...allMachinesOEE]
+      .filter((machine) => {
+        const machineOee = machine.oee ?? machine.average_oee ?? null;
+        const matchesTier = matchTier(machineOee);
+        const matchesSearch = !searchQuery || (machine.machine_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesSelection = selectedMachineIds.length === 0
+          || selectedMachineIds.includes('ALL')
+          || selectedMachineIds.includes(machine.machine_id);
+        return matchesTier && matchesSearch && matchesSelection;
+      })
+      .sort((a, b) => {
+        if (machineSortOrder === 'name') {
+          return (a.machine_name || '').localeCompare(b.machine_name || '');
+        }
+        const aOee = a.oee ?? a.average_oee ?? -1;
+        const bOee = b.oee ?? b.average_oee ?? -1;
+        if (aOee === -1 && bOee === -1) return 0;
+        if (aOee === -1) return 1;
+        if (bOee === -1) return -1;
+        return bOee - aOee;
+      });
+  }, [allMachinesOEE, selectedMachineIds, searchQuery, machineSortOrder, tierFilter]);
 
   const fetchAllData = async () => {
     setIsLoadingOverallOEE(true);
@@ -87,25 +258,28 @@ const OEEDashboard = () => {
       const data = response.data;
 
       setOverallOEEData(data);
-      setAllMachinesOEE(data.machine_breakdown);
-      setFilteredMachines(data.machine_breakdown);
+      setAllMachinesOEE(data.machine_breakdown || []);
+      setMachines((data.machine_breakdown || []).map((m) => ({
+        machine_id: m.machine_id,
+        machine_name: m.machine_name,
+      })));
 
-      const tableData = data.detailed_summaries.map((item, index) => ({
+      const tableData = (data.detailed_summaries || []).map((item, index) => ({
         key: index,
         date: item.date,
         shift: item.shift,
         machine: item.machine_name,
         machineId: item.machine_id,
-        productionTime: item.production_time,
-        idleTime: item.idle_time,
-        offTime: item.off_time,
-        totalParts: item.total_parts,
-        goodParts: item.good_parts,
-        bad_parts: item.bad_parts,
-        availability: item.oee_metrics?.availability || 0,
-        performance: item.oee_metrics?.performance || 0,
-        quality: item.oee_metrics?.quality || 0,
-        oee: item.oee_metrics?.oee || 0
+        productionTime: item.production_time ?? null,
+        idleTime: item.idle_time ?? null,
+        offTime: item.off_time ?? null,
+        totalParts: item.total_parts ?? null,
+        goodParts: item.good_parts ?? null,
+        badParts: item.bad_parts ?? null,
+        availability: item.oee_metrics?.availability ?? null,
+        performance: item.oee_metrics?.performance ?? null,
+        quality: item.oee_metrics?.quality ?? null,
+        oee: item.oee_metrics?.oee ?? null,
       }));
       setShiftSummaryData(tableData);
     } catch (error) {
@@ -148,7 +322,6 @@ const OEEDashboard = () => {
   const handleDateChange = (date) => {
     if (date) setOeeData({ ...oeeData, dateRange: date });
   };
-  const handleMachineChange = (value) => setOeeData({ ...oeeData, selectedMachine: value });
   const handleShiftChange = (value) => setOeeData({ ...oeeData, selectedShift: value });
   const handleRefresh = () => {
     setOeeData({ ...oeeData, dateRange: dayjs() });
@@ -159,9 +332,14 @@ const OEEDashboard = () => {
   const sortedShiftSummaryData = [...shiftSummaryData].sort((a, b) => {
     const sortField = shiftSummaryFilter.sortBy;
     const sortOrder = shiftSummaryFilter.sortDirection === 'asc' ? 1 : -1;
-    if (sortField === 'date') return sortOrder * (new Date(a.date) - new Date(b.date));
-    if (typeof a[sortField] === 'string') return sortOrder * a[sortField].localeCompare(b[sortField]);
-    return sortOrder * (a[sortField] - b[sortField]);
+    const aVal = a[sortField];
+    const bVal = b[sortField];
+    if (aVal == null && bVal == null) return 0;
+    if (aVal == null) return 1;
+    if (bVal == null) return -1;
+    if (sortField === 'date') return sortOrder * (new Date(aVal) - new Date(bVal));
+    if (typeof aVal === 'string') return sortOrder * aVal.localeCompare(bVal);
+    return sortOrder * (aVal - bVal);
   });
 
   const filteredShiftSummaryData = sortedShiftSummaryData.filter(item => {
@@ -182,24 +360,24 @@ const OEEDashboard = () => {
     {
       title: 'Production Time', dataIndex: 'productionTime', key: 'productionTime', width: 120,
       render: (value) => (
-        <Tooltip title={`${value} minutes`}>
-          <div className="font-medium text-emerald-600">{value} min</div>
+        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
+          <div className="font-medium text-emerald-600">{formatMinutes(value)}</div>
         </Tooltip>
       )
     },
     {
       title: 'Idle Time', dataIndex: 'idleTime', key: 'idleTime', width: 120,
       render: (value) => (
-        <Tooltip title={`${value} minutes`}>
-          <div className="font-medium text-amber-600">{value} min</div>
+        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
+          <div className="font-medium text-amber-600">{formatMinutes(value)}</div>
         </Tooltip>
       )
     },
     {
       title: 'Off Time', dataIndex: 'offTime', key: 'offTime', width: 120,
       render: (value) => (
-        <Tooltip title={`${value} minutes`}>
-          <div className="font-medium text-red-600">{value} min</div>
+        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
+          <div className="font-medium text-red-600">{formatMinutes(value)}</div>
         </Tooltip>
       )
     },
@@ -209,15 +387,15 @@ const OEEDashboard = () => {
         <div className="space-y-1">
           <div className="flex items-center justify-between">
             <span className="text-gray-500">Total:</span>
-            <span className="font-medium">{record.totalParts}</span>
+            <span className="font-medium">{formatCount(record.totalParts)}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-green-600">Good:</span>
-            <span className="font-medium text-green-600">{record.goodParts}</span>
+            <span className="font-medium text-green-600">{formatCount(record.goodParts)}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-red-600">Bad:</span>
-            <span className="font-medium text-red-600">{record.badParts}</span>
+            <span className="font-medium text-red-600">{formatCount(record.badParts)}</span>
           </div>
         </div>
       )
@@ -225,24 +403,24 @@ const OEEDashboard = () => {
     {
       title: 'Availability', dataIndex: 'availability', key: 'availability', width: 100,
       render: (value) => (
-        <Tooltip title={`${value.toFixed(1)}%`}>
-          <div className="font-medium text-blue-600">{value.toFixed(1)}%</div>
+        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
+          <div className="font-medium text-blue-600">{formatPercent(value)}</div>
         </Tooltip>
       )
     },
     {
       title: 'Performance', dataIndex: 'performance', key: 'performance', width: 100,
       render: (value) => (
-        <Tooltip title={`${value.toFixed(1)}%`}>
-          <div className="font-medium text-amber-600">{value.toFixed(1)}%</div>
+        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
+          <div className="font-medium text-amber-600">{formatPercent(value)}</div>
         </Tooltip>
       )
     },
     {
       title: 'Quality', dataIndex: 'quality', key: 'quality', width: 100,
       render: (value) => (
-        <Tooltip title={`${value.toFixed(1)}%`}>
-          <div className="font-medium text-purple-600">{value.toFixed(1)}%</div>
+        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
+          <div className="font-medium text-purple-600">{formatPercent(value)}</div>
         </Tooltip>
       )
     },
@@ -250,14 +428,17 @@ const OEEDashboard = () => {
       title: 'OEE', dataIndex: 'oee', key: 'oee', width: 120, fixed: 'right',
       render: (value) => (
         <div className="flex items-center gap-2">
-          <div className="font-medium" style={{
-            color: value >= 85 ? '#10b981' : value >= 60 ? '#f59e0b' : '#ef4444'
-          }}>
-            {value.toFixed(1)}%
+          <div className="font-medium" style={{ color: getOeeColor(value) }}>
+            {formatPercent(value)}
           </div>
         </div>
       ),
-      sorter: (a, b) => a.oee - b.oee,
+      sorter: (a, b) => {
+        if (a.oee == null && b.oee == null) return 0;
+        if (a.oee == null) return 1;
+        if (b.oee == null) return -1;
+        return a.oee - b.oee;
+      },
       defaultSortOrder: 'descend'
     }
   ];
@@ -273,129 +454,66 @@ const OEEDashboard = () => {
       ),
       children: (
         <div className="p-1">
-          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="flex items-center">
-              <Activity size={18} className="text-blue-500 mr-3" />
-              <Select
-                placeholder="Select a machine"
-                style={{ width: 300 }}
-                onChange={handleMachineChange}
-                value={oeeData.selectedMachine}
-                allowClear
-                className="min-w-[250px]"
-                styles={{ popup: { root: { borderRadius: '8px' } } }}
-              >
-                <Option value="all">All Machines</Option>
-                {machines.map(machine => (
-                  <Option key={machine.machine_id} value={machine.machine_id}>
-                    {machine.machine_name}
-                  </Option>
-                ))}
-              </Select>
+          {showFilters && (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '13px 16px', marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>OEE Tier</div>
+                <Select value={tierFilter} onChange={setTierFilter} size="small" style={{ width: 140 }}>
+                  <Option value="ALL">All</Option>
+                  <Option value="EXCELLENT">Excellent</Option>
+                  <Option value="AVERAGE">Average</Option>
+                  <Option value="POOR">Poor</Option>
+                  <Option value="NO_DATA">No Data</Option>
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Sort</div>
+                <Select value={machineSortOrder} onChange={setMachineSortOrder} size="small" style={{ width: 130 }}>
+                  <Option value="oee">By OEE</Option>
+                  <Option value="name">By Name</Option>
+                </Select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 5 }}>Search</div>
+                <SearchInput placeholder="Search machines…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} size="small" style={{ width: 200 }} allowClear />
+              </div>
+              {(tierFilter !== 'ALL' || searchQuery) && (
+                <Button size="small" type="link" style={{ fontSize: 12, padding: 0 }} onClick={() => { setTierFilter('ALL'); setSearchQuery(''); }}>Clear all</Button>
+              )}
             </div>
-            <Button
-              icon={<RefreshCw size={16} />}
-              onClick={() => fetchAllData()}
-              loading={isLoadingMachines}
-              className="flex items-center hover:bg-blue-50 border-blue-200 text-blue-600 hover:text-blue-700"
-            >
-              Refresh Data
-            </Button>
+          )}
+
+          <div style={{ marginBottom: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
+              {displayedMachines.length} machine{displayedMachines.length !== 1 ? 's' : ''}{tierFilter !== 'ALL' || searchQuery || selectedMachineIds.length > 0 ? ' · filtered' : ''}
+            </span>
           </div>
 
           {isLoadingMachines ? (
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: 256, background: '#fff', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: 256, background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
               <Spin size="large" />
               <p style={{ marginTop: 16, color: '#64748b' }}>Loading machine data...</p>
             </div>
-          ) : filteredMachines.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredMachines.map(machine => (
-                <div
+          ) : displayedMachines.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+              {displayedMachines.map(machine => (
+                <OEEMachineCard
                   key={machine.machine_id}
-                  style={{
-                    background: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 8,
-                    borderTop: `4px solid ${(machine.oee || machine.average_oee || 0) >= 85 ? '#10b981' : (machine.oee || machine.average_oee || 0) >= 60 ? '#f59e0b' : '#ef4444'}`,
-                    padding: '16px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                    transition: 'box-shadow 0.2s',
-                  }}
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <div className="text-lg font-semibold">{machine.machine_name}</div>
-                      <div className="text-xs text-gray-500 flex items-center">
-                        <Wrench size={12} className="mr-1" />
-                        ID: {machine.machine_id}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <div className="text-2xl font-bold mt-1" style={{
-                        color: (machine.oee || machine.average_oee || 0) >= 85 ? '#10b981' :
-                               (machine.oee || machine.average_oee || 0) >= 60 ? '#f59e0b' : '#ef4444'
-                      }}>
-                        {(machine.oee || machine.average_oee || 0).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-gray-500">OEE Score</div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <div className="bg-blue-50 rounded-lg p-2 text-center">
-                      <div className="text-xs text-gray-500">Availability</div>
-                      <div className="text-xl font-bold text-blue-600">
-                        {(machine.availability || machine.average_availability || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="bg-amber-50 rounded-lg p-2 text-center">
-                      <div className="text-xs text-gray-500">Performance</div>
-                      <div className="text-xl font-semibold text-amber-600">
-                        {(machine.performance || machine.average_performance || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-2 text-center">
-                      <div className="text-xs text-gray-500">Quality</div>
-                      <div className="text-xl font-semibold text-purple-600">
-                        {(machine.quality || machine.average_quality || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-
-                  <Divider className="my-2">
-                    <span className="text-xs text-gray-500 flex items-center">
-                      <AlertTriangle size={12} className="mr-1 text-red-500" />
-                      Loss Analysis
-                    </span>
-                  </Divider>
-
-                  <div className="grid grid-cols-3 gap-2 text-center mb-4">
-                    <div>
-                      <div className="text-xs text-gray-500">Availability Loss</div>
-                      <div className="text-sm font-semibold text-red-500">
-                        {(machine.losses?.availability_loss || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Performance Loss</div>
-                      <div className="text-sm font-semibold text-orange-500">
-                        {(machine.losses?.performance_loss || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Quality Loss</div>
-                      <div className="text-sm font-semibold text-pink-500">
-                        {(machine.losses?.quality_loss || 0).toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  machine={machine}
+                  onClick={() => showTrendModal(machine.machine_id)}
+                />
               ))}
             </div>
           ) : (
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 48, textAlign: 'center' }}>
-              <Empty description="No machine OEE data found for the selected criteria" />
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '60px 0', textAlign: 'center' }}>
+              <Empty description={
+                allMachinesOEE.length > 0 ? 'No machines match your filters' : 'No machines configured'
+              } />
+              {allMachinesOEE.length > 0 && (
+                <Button size="small" style={{ marginTop: 8 }} onClick={() => { setTierFilter('ALL'); setSearchQuery(''); setSelectedMachineIds([]); }}>
+                  Clear filters
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -442,7 +560,7 @@ const OEEDashboard = () => {
             <div className="flex justify-center items-center py-10">
               <Spin size="large" />
             </div>
-          ) : filteredShiftSummaryData.length > 0 ? (
+          ) : shiftSummaryData.length > 0 ? (
             <Table
               columns={columns}
               dataSource={filteredShiftSummaryData}
@@ -460,7 +578,7 @@ const OEEDashboard = () => {
             />
           ) : (
             <div style={{ padding: 48, textAlign: 'center' }}>
-              <Empty description="No shift summary data available" />
+              <Empty description="No machines configured" />
             </div>
           )}
         </div>
@@ -488,13 +606,28 @@ const OEEDashboard = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
-            OEE
+            Overall Equipment Effectiveness
           </h1>
           <div style={{ fontSize: 13, color: '#64748b', marginTop: 2, fontWeight: 500 }}>
-            {dayjs().format('MMMM D, YYYY · HH:mm:ss')}
+            {dayjs(oeeData.dateRange).format('MMMM D, YYYY')} · {dayjs().format('HH:mm:ss')}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Select
+            mode="multiple"
+            placeholder="Select Machines"
+            style={{ width: 200, minWidth: 200, maxWidth: 200 }}
+            size="small"
+            allowClear
+            maxTagCount="responsive"
+            maxTagPlaceholder={(omitted) => `+${omitted.length} selected`}
+            value={selectedMachineIds}
+            onChange={(values) => setSelectedMachineIds(values || [])}
+            options={[
+              { label: 'ALL', value: 'ALL' },
+              ...machines.map(m => ({ label: m.machine_name, value: m.machine_id }))
+            ]}
+          />
           <DatePicker
             value={oeeData.dateRange}
             onChange={handleDateChange}
@@ -518,6 +651,11 @@ const OEEDashboard = () => {
           <Button size="small" onClick={handleRefresh} icon={<RefreshCw size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }} loading={isLoadingOverallOEE || isLoadingShiftSummary || isLoadingMachines}>
             Refresh
           </Button>
+          {activeTab === '3' && (
+            <Button size="small" type={showFilters ? 'primary' : 'default'} onClick={() => setShowFilters(v => !v)} icon={<Filter size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+              Filters
+            </Button>
+          )}
         </div>
       </div>
 

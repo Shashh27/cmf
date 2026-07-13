@@ -1142,7 +1142,7 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
   font-size: 10pt;
   padding: 8px 6px;
   height: 8mm;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .ir-editor-root .ir-head-main th {
@@ -1205,7 +1205,7 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
 }
 
 .ir-editor-root .ir-sheet-table--consolidated .ir-head-main th {
-  white-space: nowrap;
+  white-space: normal;
   line-height: 1.25;
 }
 
@@ -1231,7 +1231,8 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .ir-editor-root .ir-data-row td.ir-text-left {

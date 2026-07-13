@@ -67,6 +67,9 @@ const Notifications = () => {
       .catch(() => setParts([]));
   };
 
+  const isOperatorAcknowledged = (record) =>
+    Boolean(record?.operator_acknowledged_at || record?.operator_acknowledged);
+
   const fetchNotifications = async () => {
     setLoading(true);
     try {
@@ -95,19 +98,16 @@ const Notifications = () => {
       const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
-        // Show logs that have been reviewed (supervisor_id, user_id/reviewer) and produced_quantity > 0
+        // Show logs reviewed by MC/supervisor (approved_quantity set)
         const supervisorRespondedLogs = (data || []).filter((log) => {
-          const hasReviewer =
-            (log.supervisor_id !== null && log.supervisor_id !== undefined) ||
-            (log.user_id !== null && log.user_id !== undefined) ||
-            Boolean(log.supervisor) ||
-            Boolean(log.reviewer);
-          return hasReviewer && (log.produced_quantity || 0) > 0;
+          const isReviewed = log.approved_quantity !== null && log.approved_quantity !== undefined;
+          const hasSubmission = (log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0;
+          return isReviewed && hasSubmission;
         });
         // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorRespondedLogs.sort((a, b) => {
-          const isAckA = a.operator_acknowledged_at || a.operator_acknowledged || a.acknowledged;
-          const isAckB = b.operator_acknowledged_at || b.operator_acknowledged || b.acknowledged;
+          const isAckA = isOperatorAcknowledged(a);
+          const isAckB = isOperatorAcknowledged(b);
           // Unacknowledged (false) comes before acknowledged (true)
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
@@ -401,43 +401,105 @@ const Notifications = () => {
       render: (text, record) => formatDateTime(record.to_date, record.to_time),
     },
     {
-      title: 'Produced\nQty',
+      title: 'Part\nQty',
+      key: 'partQuantity',
+      align: 'center',
+      width: 70,
+      render: (_, record) => {
+        const total = record.operation?.part?.quantity || 0;
+        const remaining = record.remaining_to_close;
+        return (
+          <div style={{ fontSize: 12 }}>
+            <div style={{ fontWeight: 'bold' }}>{total}</div>
+            {remaining !== null && remaining !== undefined && (
+              <div style={{ color: remaining === 0 ? '#52c41a' : '#1677ff', fontSize: 11 }}>
+                Left: {remaining}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'New\nProduced',
       dataIndex: 'produced_quantity',
       key: 'producedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text ?? 0}</span>
       ),
     },
     {
-      title: 'Approved\nQty',
+      title: 'Rework\nSubmit',
+      dataIndex: 'operator_rework_quantity',
+      key: 'operatorReworkQuantity',
+      align: 'center',
+      width: 70,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
+          {text ?? 0}
+        </span>
+      ),
+    },
+    {
+      title: 'Presented',
+      key: 'presented',
+      align: 'center',
+      width: 70,
+      render: (_, record) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>
+          {(record.produced_quantity || 0) + (record.operator_rework_quantity || 0)}
+        </span>
+      ),
+    },
+    {
+      title: 'Approved',
       dataIndex: 'approved_quantity',
       key: 'approvedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#52c41a' : undefined }}>
+          {text ?? '-'}
+        </span>
       ),
     },
     {
-      title: 'Rework\nQty',
+      title: 'Rework\n(rev.)',
       dataIndex: 'rework_quantity',
       key: 'reworkQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
+          {text ?? '-'}
+        </span>
       ),
     },
     {
-      title: 'Rejected\nQty',
+      title: 'Rejected',
       dataIndex: 'rejected_quantity',
       key: 'rejectedQuantity',
       align: 'center',
-      width: 80,
+      width: 70,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#ff4d4f' : undefined }}>
+          {text ?? '-'}
+        </span>
+      ),
+    },
+    {
+      title: 'Due',
+      key: 'ledgerDue',
+      align: 'center',
+      width: 80,
+      render: (_, record) => (
+        <div style={{ fontSize: 11 }}>
+          {(record.rework_due > 0) && <div style={{ color: '#FA8C16' }}>Rw: {record.rework_due}</div>}
+          {(record.reject_due > 0) && <div style={{ color: '#ff4d4f' }}>Rej: {record.reject_due}</div>}
+          {!record.rework_due && !record.reject_due && <span>-</span>}
+        </div>
       ),
     },
     {
@@ -513,7 +575,7 @@ const Notifications = () => {
           icon={<CheckOutlined />}
           size="small"
           onClick={() => handleAcknowledge(record.id)}
-          disabled={record.operator_acknowledged_at || record.operator_acknowledged || record.acknowledged || acknowledgingIds.has(record.id)}
+          disabled={isOperatorAcknowledged(record) || acknowledgingIds.has(record.id)}
         >
           Acknowledge
         </Button>

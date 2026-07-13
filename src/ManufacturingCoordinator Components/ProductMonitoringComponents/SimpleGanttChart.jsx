@@ -380,8 +380,6 @@ const SimpleGanttChart = ({
         // Group configuration
         groupOrder: 'order',
         groupHeightMode: 'fixed',
-        groupMinHeight: 30,  // Reduced height for more compact view
-        groupMaxHeight: 30,
         
         // Scrolling
         horizontalScroll: true,

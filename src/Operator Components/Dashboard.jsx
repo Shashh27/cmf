@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Row, Col, Typography, Button, Tag, Space, DatePicker, Select, Input, Tabs, Badge, Modal } from 'antd';
+import { Card, Row, Col, Typography, Button, Tag, Space, DatePicker, Select, Input, Tabs, Badge, Modal, Tooltip } from 'antd';
 import { DashboardOutlined, ClockCircleOutlined, ProfileOutlined, ContainerOutlined, SettingOutlined, FileTextOutlined, DownloadOutlined, WarningOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import PokaYokeChecklist from './PokaYokeChecklist';
 import ReportIssue from './ReportIssue';
@@ -14,6 +14,61 @@ const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 const { TabPane } = Tabs;
+
+const EMPTY_PRODUCTION_STATS = {
+  totalProduced: 0,
+  totalRework: 0,
+  totalApproved: 0,
+  totalRejected: 0,
+  latestProduced: 0,
+  latestApproved: null,
+  latestRework: 0,
+  latestRejected: 0,
+  latestOperatorRework: 0,
+  latestRemarks: '',
+  hasRework: false,
+  reworkRemarks: '',
+  operatorStatus: null,
+  activationTime: null,
+  remainingToClose: null,
+  reworkDue: 0,
+  rejectDue: 0,
+  reviewLocked: false,
+};
+
+const buildProductionStatsFromLogs = (logs) => {
+  if (!logs?.length) return { ...EMPTY_PRODUCTION_STATS };
+
+  const sortedLogs = [...logs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const latestLog = sortedLogs[0];
+  const totalProducedSum = logs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
+  const totalReworkSum = logs.reduce((sum, log) => sum + (log.rework_quantity || 0), 0);
+  const totalApprovedSum = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+  const totalRejectedSum = logs.reduce((sum, log) => sum + (log.rejected_quantity || 0), 0);
+
+  return {
+    totalProduced: totalProducedSum,
+    totalRework: totalReworkSum,
+    totalApproved: totalApprovedSum,
+    totalRejected: totalRejectedSum,
+    latestProduced: latestLog.produced_quantity || 0,
+    latestApproved: latestLog.approved_quantity ?? null,
+    latestRework: latestLog.rework_quantity || 0,
+    latestRejected: latestLog.rejected_quantity || 0,
+    latestOperatorRework: latestLog.operator_rework_quantity || 0,
+    latestRemarks: latestLog.remarks || '',
+    hasRework: (latestLog.rework_due || 0) > 0 || (latestLog.reject_due || 0) > 0,
+    reworkRemarks: latestLog.remarks || '',
+    operatorStatus: latestLog.operator_status,
+    activationTime: latestLog.from_date && latestLog.from_time
+      ? `${latestLog.from_date} ${latestLog.from_time}`
+      : null,
+    remainingToClose: latestLog.remaining_to_close ?? null,
+    reworkDue: latestLog.rework_due || 0,
+    rejectDue: latestLog.reject_due || 0,
+    reviewLocked: Boolean(latestLog.review_locked),
+  };
+};
 
 const isRejectedCheckpoint = (item) =>
   item?.needs_resubmit === true
@@ -153,8 +208,23 @@ const formatFrequency = (item) => {
   return item.frequency_type ?? item.frequency ?? '—';
 };
 
+const MACHINE_STATUS_STYLE = {
+  PRODUCTION: { dot: '#22c55e', label: 'Production' },
+  RUNNING: { dot: '#22c55e', label: 'Production' },
+  ON: { dot: '#f59e0b', label: 'Idle' },
+  IDLE: { dot: '#f59e0b', label: 'Idle' },
+  OFF: { dot: '#94a3b8', label: 'Off' },
+  OFFLINE: { dot: '#94a3b8', label: 'Off' },
+};
+
+const getMachineStatusStyle = (status) => {
+  const key = String(status ?? '').trim().toUpperCase();
+  if (key === 'ON') return MACHINE_STATUS_STYLE.IDLE;
+  return MACHINE_STATUS_STYLE[key] || MACHINE_STATUS_STYLE.OFF;
+};
+
 const Dashboard = () => {
-  const [machineStatus] = useState('ON');
+  const [liveMachineStatus, setLiveMachineStatus] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [machineName, setMachineName] = useState('');
   const [docFilter, setDocFilter] = useState('All Documents');
@@ -168,13 +238,7 @@ const Dashboard = () => {
   const [rejectedChecklists, setRejectedChecklists] = useState([]);
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
-  const [productionStats, setProductionStats] = useState({
-    totalProduced: 0,
-    totalRework: 0,
-    totalApproved: 0,
-    hasRework: false,
-    reworkRemarks: ''
-  });
+  const [productionStats, setProductionStats] = useState({ ...EMPTY_PRODUCTION_STATS });
   const [jobStatsMap, setJobStatsMap] = useState({});
   const [latestHelpReply, setLatestHelpReply] = useState(null);
 
@@ -205,6 +269,7 @@ const Dashboard = () => {
   }, []);
 
   const checklistStatusFetchedRef = useRef(false);
+  const liveStatusFetchedRef = useRef(false);
 
   const fetchLatestReply = async (mId) => {
     if (!mId) return;
@@ -241,48 +306,26 @@ const Dashboard = () => {
 
   const fetchReworkData = async (operationId) => {
     if (!operationId) {
-      setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+      setProductionStats({ ...EMPTY_PRODUCTION_STATS });
       return;
     }
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
         const logs = await response.json();
-        const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const latestLog = sortedLogs.length > 0 ? sortedLogs[0] : null;
-        const totalProducedSum = logs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
-        const totalReworkSum = logs.reduce((sum, log) => sum + (log.rework_quantity || 0), 0);
-        const totalApprovedSum = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+        const stats = buildProductionStatsFromLogs(logs);
+        setProductionStats(stats);
 
-        if (latestLog) {
-          const stats = {
-            totalProduced: totalProducedSum,
-            totalRework: totalReworkSum,
-            totalApproved: totalApprovedSum,
-            latestProduced: latestLog.produced_quantity || 0,
-            latestApproved: latestLog.approved_quantity || 0,
-            latestRework: latestLog.rework_quantity || 0,
-            latestRejected: latestLog.rejected_quantity || 0,
-            latestRemarks: latestLog.remarks || '',
-            hasRework: (latestLog.rework_quantity || 0) > 0 || (latestLog.rejected_quantity || 0) > 0,
-            reworkRemarks: latestLog.remarks || '',
-            operatorStatus: latestLog.operator_status,
-            activationTime: latestLog.from_date && latestLog.from_time ? `${latestLog.from_date} ${latestLog.from_time}` : null
-          };
-          setProductionStats(stats);
-          const opStatus = latestLog.operator_status?.toString().toUpperCase();
-          if (opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS') {
-            setIsActivated(true);
-          }
-        } else {
-          setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+        const opStatus = stats.operatorStatus?.toString().toUpperCase();
+        if (opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS') {
+          setIsActivated(true);
         }
       } else {
-        setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+        setProductionStats({ ...EMPTY_PRODUCTION_STATS });
       }
     } catch (error) {
       console.error('Error fetching production stats:', error);
-      setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+      setProductionStats({ ...EMPTY_PRODUCTION_STATS });
     }
   };
 
@@ -340,6 +383,38 @@ const Dashboard = () => {
       setMachineId(null);
     }
   }, []);
+
+  useEffect(() => {
+    if (!machineId || liveStatusFetchedRef.current) {
+      if (!machineId) setLiveMachineStatus(null);
+      return undefined;
+    }
+
+    liveStatusFetchedRef.current = true;
+    let cancelled = false;
+
+    const fetchLiveMachineStatus = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/monitoring/live`, {
+          headers: { accept: 'application/json' },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.machines ?? data?.data ?? []);
+        const match = list.find((m) => String(m.machine_id) === String(machineId));
+        if (!cancelled) {
+          setLiveMachineStatus(match?.status ?? 'OFF');
+        }
+      } catch (error) {
+        console.error('Error fetching live machine status:', error);
+      }
+    };
+
+    fetchLiveMachineStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [machineId]);
 
   useEffect(() => {
     if (!machineId) return;
@@ -574,10 +649,25 @@ const Dashboard = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <DashboardOutlined style={{ color: '#1677FF', fontSize: 20 }} />
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
               {machineName || 'CNCM-DMU-60T'}
             </Title>
+            {machineId && (
+              <Tooltip title={getMachineStatusStyle(liveMachineStatus).label}>
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    backgroundColor: getMachineStatusStyle(liveMachineStatus).dot,
+                    display: 'inline-block',
+                    flexShrink: 0,
+                    boxShadow: '0 0 0 1px rgba(0,0,0,0.06)',
+                  }}
+                />
+              </Tooltip>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -773,6 +863,7 @@ const Dashboard = () => {
             onActivate={() => setIsActivated(true)}
             completedQuantity={completedQuantity}
             productionStats={productionStats}
+            onProductionSubmit={handleProductionSubmit}
           />
         </Col>
       </Row>

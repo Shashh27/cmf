@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Tabs, Card, DatePicker, Space, Button, Badge, Typography } from 'antd';
-import { ShoppingCartOutlined, ToolOutlined, AppstoreOutlined, ExperimentOutlined, BellOutlined } from '@ant-design/icons';
+import { ShoppingCartOutlined, ToolOutlined, AppstoreOutlined, ExperimentOutlined, BellOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 import OrderNotifications from './Notification Components/OrderNotifications';
@@ -12,6 +13,7 @@ import ToolIssuesNotifications from './Notification Components/ToolIssuesNotific
 import ComponentIssuesNotifications from './Notification Components/ComponentIssuesNotifications';
 import MachineCalibrationNotifications from './Notification Components/MachineCalibrationNotifications';
 import PokayokeOperationNotification from './Notification Components/PokayokeOperationNotification';
+import ProductionLogNotification from './Notification Components/ProductionLogNotification';
 import config from '../Config/config';
 
 const Notification = () => {
@@ -19,18 +21,19 @@ const Notification = () => {
   const navigate = useNavigate();
   const [dateRange, setDateRange] = useState([null, null]);
   const [activeKey, setActiveKey] = useState('1');
-  const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0, pokayoke: 0 });
+  const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0, pokayoke: 0, productionLogs: 0 });
   const setOrdersCount = useCallback((n) => setCounts((c) => ({ ...c, orders: n })), []);
   const setMachinesCount = useCallback((n) => setCounts((c) => ({ ...c, machines: n })), []);
   const setToolsCount = useCallback((n) => setCounts((c) => ({ ...c, tools: n })), []);
   const setComponentsCount = useCallback((n) => setCounts((c) => ({ ...c, components: n })), []);
   const setCalibrationsCount = useCallback((n) => setCounts((c) => ({ ...c, calibrations: n })), []);
   const setPokayokeCount = useCallback((n) => setCounts((c) => ({ ...c, pokayoke: n })), []);
+  const setProductionLogsCount = useCallback((n) => setCounts((c) => ({ ...c, productionLogs: n })), []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t && ['1','2','3','4','5','6'].includes(t)) {
+    if (t && ['1','2','3','4','5','6','7'].includes(t)) {
       setActiveKey(t);
     }
   }, [location.search]);
@@ -171,6 +174,18 @@ const Notification = () => {
         </span>
       ),
       children: <PokayokeOperationNotification onUnacknowledgedCountChange={setPokayokeCount} />
+    },
+    {
+      key: '7',
+      label: (
+        <span>
+          <HistoryOutlined />
+          <Badge count={counts.productionLogs} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+            <span>Production Logs</span>
+          </Badge>
+        </span>
+      ),
+      children: <ProductionLogNotification onCount={setProductionLogsCount} />
     }
   ];
 

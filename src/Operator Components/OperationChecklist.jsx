@@ -349,7 +349,7 @@ const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
         {usingDefaultGeneral && (
           <div style={{ marginBottom: 12, padding: 10, backgroundColor: '#e6f4ff', border: '1px solid #91caff', borderRadius: 4 }}>
             <Text style={{ color: '#0958d9', fontSize: 12 }}>
-              Showing default general checklists. Manufacturing Coordinator has not assigned operation-specific checklists yet.
+              Showing default general checklists.
             </Text>
           </div>
         )}

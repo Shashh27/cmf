@@ -20,6 +20,44 @@ import {
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+const DOC_TYPE_OPTIONS = ['General', 'Other'];
+
+const parseApiError = (errorData, status) => {
+  if (!errorData) return `Request failed (${status})`;
+  const { detail } = errorData;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || item.message || JSON.stringify(item)).join(', ');
+  }
+  return `Request failed (${status})`;
+};
+
+const getDocumentPreviewUrl = (document, apiBaseUrl) => {
+  if (document.doc_source_type === 'general-folder') {
+    return `${apiBaseUrl}/general-documents/documents/${document.id}/preview`;
+  }
+  return document.url;
+};
+
+const resolveDownloadFilename = (response, document, getFileExtension) => {
+  const disposition = response.headers.get('Content-Disposition');
+  if (disposition) {
+    const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/i);
+    if (utf8Match) return decodeURIComponent(utf8Match[1]);
+    const match = disposition.match(/filename="?([^";\n]+)"?/i);
+    if (match) return match[1].trim();
+  }
+
+  const name = document.file_name || document.document_name || 'document';
+  const versionSuffix = document.version ? `_v${document.version}` : '';
+  const dotIndex = name.lastIndexOf('.');
+  if (dotIndex > 0) {
+    return `${name.slice(0, dotIndex)}${versionSuffix}${name.slice(dotIndex)}`;
+  }
+  const ext = getFileExtension(document.url);
+  return ext ? `${name}${versionSuffix}.${ext}` : `${name}${versionSuffix}`;
+};
+
 const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, documentsRefreshKey = 0 }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -92,7 +130,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addFileList, setAddFileList] = useState([]);
   const [addUploading, setAddUploading] = useState(false);
-  const [addDocType, setAddDocType] = useState('CNC');
+  const [addDocType, setAddDocType] = useState('General');
   const [customDocType, setCustomDocType] = useState('');
 
   useEffect(() => {
@@ -370,6 +408,16 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       },
     },
     {
+      title: 'Uploaded By',
+      key: 'uploaded_by',
+      minWidth: 120,
+      align: 'center',
+      render: (_, record) => {
+        const userName = record.user_name || record.uploaded_by || '-';
+        return userName;
+      },
+    },
+    {
       title: 'Actions',
       key: 'actions',
       align: 'center',
@@ -445,12 +493,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
 
   const getPreviewContent = (document) => {
     const ext = getFileExtension(document.url);
+    const previewUrl = getDocumentPreviewUrl(document, config.API_BASE_URL);
     
     if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) {
       return (
         <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
           <img 
-            src={document.url} 
+            src={previewUrl} 
             alt={document.file_name} 
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
           />
@@ -459,7 +508,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     } else if (ext === 'pdf') {
       return (
         <iframe
-          src={`${document.url}#toolbar=0`}
+          src={`${previewUrl}#toolbar=0`}
           title={document.file_name}
           width="100%"
           height="100%"
@@ -563,27 +612,24 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       downloadUrl = `${config.API_BASE_URL}/operation-documents/${document.id}/download`;
     } else if (document.doc_source_type === 'folder') {
       downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
-    } else if (document.doc_source_type === 'machine-folder') {
-      downloadUrl = document.url;
-    } else if (document.doc_source_type === 'machine') {
+    } else if (document.doc_source_type === 'machine-folder' || document.doc_source_type === 'machine') {
       downloadUrl = document.url;
     }
 
     if (downloadUrl) {
-      // Force download by fetching the file and creating a blob
       fetch(downloadUrl)
-        .then(response => response.blob())
-        .then(blob => {
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Download failed (${response.status})`);
+          }
+          const filename = resolveDownloadFilename(response, document, getFileExtension);
+          return response.blob().then((blob) => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
           const url = window.URL.createObjectURL(blob);
           const link = window.document.createElement('a');
           link.href = url;
-          
-          // Get proper filename with extension
-          const fileName = document.file_name || document.document_name || 'document';
-          const fileExtension = downloadUrl.split('.').pop()?.split('?')[0] || '';
-          const fullFileName = fileExtension ? `${fileName}.${fileExtension}` : fileName;
-          
-          link.download = fullFileName;
+          link.download = filename;
           link.style.display = 'none';
           window.document.body.appendChild(link);
           link.click();
@@ -591,11 +637,9 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           window.URL.revokeObjectURL(url);
           message.success('Download started');
         })
-        .catch(error => {
+        .catch((error) => {
           console.error('Download error:', error);
-          // Fallback to opening in new tab if blob download fails
-          window.open(downloadUrl, '_blank');
-          message.warning('Download started in new tab');
+          message.error(error.message || 'Failed to download document');
         });
     } else {
       message.error('Download URL not found');
@@ -738,7 +782,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         } catch {
           errorData = { detail: errorText };
         }
-        throw new Error(errorData.detail || `Failed to upload version: ${response.status}`);
+        throw new Error(parseApiError(errorData, response.status));
       }
 
       message.success('New version uploaded successfully');
@@ -765,19 +809,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       return;
     }
 
-    // Validate custom document type if "Other" is selected
-    if (selectedNode?.type === 'operation-folder' && addDocType === 'Other' && !customDocType.trim()) {
+    const needsCustomType = ['operation-folder', 'general-folder', 'machine-folder', 'machine'].includes(selectedNode?.type);
+    if (needsCustomType && addDocType === 'Other' && !customDocType.trim()) {
       message.error('Please enter a custom document type');
       return;
     }
 
-    const formData = new FormData();
-    
-    // Add all files to FormData with 'files' key for multiple upload
-    addFileList.forEach((fileObj) => {
-      const file = fileObj.originFileObj || fileObj;
-      formData.append('files', file, file.name);
-    });
+    const resolvedDocType = addDocType === 'Other' ? customDocType.trim() : addDocType;
 
     try {
       const userId = getUserId();
@@ -786,14 +824,59 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         return;
       }
       setAddUploading(true);
+
+      if (selectedNode.type === 'general-folder') {
+        for (const fileObj of addFileList) {
+          const file = fileObj.originFileObj || fileObj;
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          formData.append('folder_id', selectedNode.folderId.toString());
+          formData.append('file_name', file.name);
+          formData.append('user_id', userId.toString());
+          if (resolvedDocType) {
+            formData.append('document_type', resolvedDocType);
+          }
+
+          const response = await fetch(`${config.API_BASE_URL}/general-documents/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            let errorData;
+            try {
+              errorData = JSON.parse(errorText);
+            } catch {
+              errorData = { detail: errorText };
+            }
+            throw new Error(parseApiError(errorData, response.status));
+          }
+        }
+
+        message.success(
+          addFileList.length > 1
+            ? `${addFileList.length} documents uploaded successfully`
+            : 'Document added successfully',
+        );
+        setAddModalVisible(false);
+        setAddFileList([]);
+        setCustomDocType('');
+        setAddDocType('General');
+        fetchDocuments();
+        notifyDocumentsChange();
+        return;
+      }
+
+      const formData = new FormData();
+      addFileList.forEach((fileObj) => {
+        const file = fileObj.originFileObj || fileObj;
+        formData.append('files', file, file.name);
+      });
+
       let url = '';
       
-      if (selectedNode.type === 'general-folder') {
-        url = `${config.API_BASE_URL}/general-documents/upload`;
-        formData.append('folder_id', selectedNode.folderId.toString());
-        formData.append('file_name', addFileList[0].originFileObj.name);
-        formData.append('user_id', userId.toString());
-      } else if (selectedNode.type === 'common-folder') {
+      if (selectedNode.type === 'common-folder') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
@@ -814,20 +897,16 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
+        if (resolvedDocType) {
+          formData.append('document_type', resolvedDocType);
+        }
       } else if (selectedNode.type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents directly to machine:', {
-          url,
-          machineId: selectedNode.machineId,
-          fileCount: addFileList.length
-        });
+        if (resolvedDocType) {
+          formData.append('document_type', resolvedDocType);
+        }
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         // For part-category, still use single file upload as it expects 'document_name'
@@ -838,11 +917,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_type', selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 'other');
         formData.append('document_version', '1.0');
         formData.append('part_id', selectedNode.partId);
+        formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/upload/`;
         formData.append('operation_id', selectedNode.operationId);
         formData.append('document_type', addDocType === 'Other' ? customDocType : addDocType);
         formData.append('document_version', '1.0');
+        formData.append('user_id', userId.toString());
         // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
         // Remove the existing 'files' and add them with proper naming
         const files = formData.getAll('files');
@@ -880,7 +961,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         } catch {
           errorData = { detail: errorText };
         }
-        throw new Error(errorData.detail || `Failed to add document: ${response.status} ${response.statusText}`);
+        throw new Error(parseApiError(errorData, response.status));
       }
 
       const responseData = await response.json();
@@ -890,6 +971,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       setAddModalVisible(false);
       setAddFileList([]);
       setCustomDocType('');
+      setAddDocType(
+        selectedNode.type === 'operation-folder'
+          ? 'CNC'
+          : (selectedNode.type === 'general-folder' ? 'General' : 'General'),
+      );
       fetchDocuments();
       
       // Notify parent of document change
@@ -1038,6 +1124,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
               icon={<UploadOutlined />}
               onClick={() => {
                 setAddFileList([]);
+                setAddDocType(
+                  selectedNode.type === 'operation-folder'
+                    ? 'CNC'
+                    : (selectedNode.type === 'general-folder' ? 'General' : 'General'),
+                );
+                setCustomDocType('');
                 setAddModalVisible(true);
               }}
             >
@@ -1198,6 +1290,34 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         confirmLoading={addUploading}
         width={600}
       >
+        {['general-folder', 'machine-folder', 'machine'].includes(selectedNode?.type) && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Document Type:
+            </label>
+            <Select
+              style={{ width: '100%' }}
+              value={addDocType}
+              onChange={(value) => {
+                setAddDocType(value);
+                if (value !== 'Other') setCustomDocType('');
+              }}
+            >
+              {DOC_TYPE_OPTIONS.map((type) => (
+                <Option key={type} value={type}>{type}</Option>
+              ))}
+            </Select>
+            {addDocType === 'Other' && (
+              <Input
+                style={{ width: '100%', marginTop: '8px' }}
+                placeholder="Enter custom document type"
+                value={customDocType}
+                onChange={(e) => setCustomDocType(e.target.value)}
+              />
+            )}
+          </div>
+        )}
+
         {selectedNode?.type === 'operation-folder' && (
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
@@ -1208,15 +1328,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
               value={addDocType}
               onChange={(value) => {
                 setAddDocType(value);
-                if (value !== 'Other') {
-                  setCustomDocType('');
-                }
+                if (value !== 'Other') setCustomDocType('');
               }}
             >
-              <Option value="IPID">IPID</Option>
-              <Option value="CNC">CNC</Option>
-              <Option value="Image">Image</Option>
-              <Option value="Other">Other</Option>
+              {['IPID', 'CNC', 'Image', 'Other'].map((type) => (
+                <Option key={type} value={type}>{type}</Option>
+              ))}
             </Select>
             {addDocType === 'Other' && (
               <Input

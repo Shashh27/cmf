@@ -139,6 +139,7 @@ const InspectorBOCTable = ({
   const [editingInstrumentRowId, setEditingInstrumentRowId] = React.useState(null);
   const [localColCount, setLocalColCount] = React.useState(null);
   const [tableBodyHeight, setTableBodyHeight] = useState(320);
+  const [tableViewportHeight, setTableViewportHeight] = useState(360);
   const [instrumentModalOpen, setInstrumentModalOpen] = useState(false);
   const [instrumentModalRows, setInstrumentModalRows] = useState([]);
   const [instrumentSaving, setInstrumentSaving] = useState(false);
@@ -168,16 +169,28 @@ const InspectorBOCTable = ({
     if (!wrap) return;
 
     const measure = () => {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const availableHeight = Math.max(
+        120,
+        Math.floor(viewportHeight - wrap.getBoundingClientRect().top),
+      );
       const header = wrap.querySelector('.ant-table-header');
       const headerH = header?.getBoundingClientRect().height ?? 39;
-      const next = Math.floor(wrap.clientHeight - headerH);
+      const next = Math.floor(availableHeight - headerH);
+      setTableViewportHeight(availableHeight);
       if (next > 80) setTableBodyHeight(next);
     };
 
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
+    if (wrap.parentElement) ro.observe(wrap.parentElement);
+    window.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+    };
   }, [dataSource.length, measureMode, measurementCount]);
 
   useEffect(() => {
@@ -559,7 +572,7 @@ const InspectorBOCTable = ({
               {selectedIds.length} selected
             </Tag>
           )}
-          {measureMode && (
+          {measureMode && !operatorMeasureMode && (
             <Space size={4}>
               <Button size="small" type="dashed" onClick={handleAddColumn} style={{ fontSize: 10, height: 22, padding: '0 8px' }}>+ Add Column</Button>
               <Button size="small" type="dashed" danger onClick={handleRemoveColumn} disabled={measurementCount <= 1} style={{ fontSize: 10, height: 22, padding: '0 8px' }}>- Remove Column</Button>
@@ -589,11 +602,22 @@ const InspectorBOCTable = ({
               Set instrument{editableSelectedCount > 1 ? ` (${editableSelectedCount})` : ''}
             </Button>
           )}
-          {typeof onDeleteSelected === 'function' && !planEditLocked && <Button size="small" danger disabled={!selectedIds.length} onClick={onDeleteSelected} style={{ fontSize: '9px' }}>Delete</Button>}
+          {typeof onDeleteSelected === 'function' && !planEditLocked && !operatorMeasureMode && <Button size="small" danger disabled={!selectedIds.length} onClick={onDeleteSelected} style={{ fontSize: '9px' }}>Delete</Button>}
           <Popover content={filterContent} title="Filter" trigger="click" placement="bottomRight"><Button size="small" type={filterActive ? 'primary' : 'text'} icon={<FilterOutlined style={{ fontSize: 14, color: filterActive ? undefined : '#64748b' }} />} /></Popover>
         </Space>
       </div>
-      <div ref={tableScrollRef} className="qms-boc-table-wrap" style={{ flex: 1, minHeight: 0, overflow: 'hidden', overscrollBehavior: 'contain', cursor: measureMode ? 'grab' : 'default' }}>
+      <div
+        ref={tableScrollRef}
+        className="qms-boc-table-wrap"
+        style={{
+          height: tableViewportHeight,
+          flex: '0 0 auto',
+          minHeight: 0,
+          overflow: 'hidden',
+          overscrollBehavior: 'contain',
+          cursor: measureMode ? 'grab' : 'default',
+        }}
+      >
         <style>{`
           .qms-boc-table-wrap .ant-spin-nested-loading,
           .qms-boc-table-wrap .ant-spin-container,
@@ -601,9 +625,35 @@ const InspectorBOCTable = ({
           .qms-boc-table-wrap .ant-table-container {
             height: 100%;
           }
+          .qms-boc-table-wrap .ant-table-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+          }
+          .qms-boc-table-wrap .ant-table-header {
+            flex: 0 0 auto;
+          }
           .qms-boc-table-wrap .ant-table-body {
-            overflow-y: auto !important;
+            overflow-y: scroll !important;
             overflow-x: auto !important;
+            scrollbar-width: thin;
+            scrollbar-color: #94a3b8 #f1f5f9;
+          }
+          .qms-boc-table-wrap .ant-table-body::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+          }
+          .qms-boc-table-wrap .ant-table-body::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 5px;
+          }
+          .qms-boc-table-wrap .ant-table-body::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 5px;
+            border: 2px solid #f1f5f9;
+          }
+          .qms-boc-table-wrap .ant-table-body::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
           }
           .qms-boc-table-wrap .qms-measure-row-pass > td {
             background-color: #f0fdf4 !important;

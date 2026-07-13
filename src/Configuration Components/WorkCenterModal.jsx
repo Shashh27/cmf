@@ -3,7 +3,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, Checkbox, Button, message } from "antd";
 
-const workcenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
+const WorkCenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -129,4 +129,4 @@ const workcenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
   );
 };
 
-export default workcenterModal;
+export default WorkCenterModal;

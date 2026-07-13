@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { Card } from 'antd';
 import ProductionCompletion from '../Supervisor Components/ProductionCompletion';
-import AssetsAvailability from '../Supervisor Components/AssetsAvailability';
+import AssetsAvailability from '../Supervisor Components/Assets Availability';
 import PreventiveMaintenance from '../Supervisor Components/PreventiveMaintenance';
 import PokaYokeOperationChecklist from '../Supervisor Components/PokaYokeOperationChecklist';
 
