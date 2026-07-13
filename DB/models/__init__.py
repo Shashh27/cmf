@@ -47,7 +47,7 @@ from .documents import (
     CommonDocument
 )
 from .monitoring import MachineLiveStatus
-from .production import ShiftSummary, OEEIssue as ProductionOEEIssue
+from .production import ShiftSummary
 
 __all__ = [
     "Product",
@@ -89,6 +89,5 @@ __all__ = [
     "CommonDocument",
     "MachineLiveStatus",
     "ShiftSummary",
-    "ProductionOEEIssue",
     "Base"
 ]

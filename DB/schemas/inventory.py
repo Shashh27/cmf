@@ -609,13 +609,15 @@ class InventoryRequestBase(BaseModel):
 
     part_id: int
 
-    operation_id: int
+    operation_id: Optional[int] = None
 
     quantity: int
 
     purpose_of_use: Optional[str] = None
 
     status: Optional[str] = "pending"
+
+    inventory_supervisor_id: Optional[int] = None
 
 
 
@@ -631,7 +633,7 @@ class InventoryRequestCreate(BaseModel):
 
     part_id: int
 
-    operation_id: int
+    operation_id: Optional[int] = None
 
     quantity: int
 

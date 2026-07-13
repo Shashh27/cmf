@@ -22,7 +22,11 @@ from sqlalchemy import (
 
     func,
 
-    JSON
+    JSON,
+
+    Index,
+
+    text,
 
 )
 
@@ -37,10 +41,25 @@ from ..database import Base
 
 class Category(Base):
     __tablename__ = "categories"
-    __table_args__ = {'schema': 'inventory'}
+    __table_args__ = (
+        Index(
+            'uq_categories_name_root',
+            'name',
+            unique=True,
+            postgresql_where=text('parent_id IS NULL'),
+        ),
+        Index(
+            'uq_categories_name_parent',
+            'name',
+            'parent_id',
+            unique=True,
+            postgresql_where=text('parent_id IS NOT NULL'),
+        ),
+        {'schema': 'inventory'},
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    name = Column(String(100), nullable=False, unique=True)
+    name = Column(String(100), nullable=False)
     parent_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)
     
     # Self-referential relationship for hierarchy

@@ -4,7 +4,7 @@ from sqlalchemy import select, func, text, cast, DateTime as SQLAlchemyDateTime
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from DB.database import get_db
-from DB.models.production import ShiftSummary, OEEIssue
+from DB.models.production import ShiftSummary
 from DB.models.monitoring import MachineLiveStatus
 from DB.models.configuration import Machine, workcenter
 from DB.models.oms import Operation, Part
@@ -53,6 +53,123 @@ def get_correct_shift(timestamp, db):
         else:
             return 3
 
+def build_machine_display_name(machine: Optional[Machine]) -> str:
+    if not machine:
+        return ""
+    make_model = f"{machine.make or ''} {machine.model or ''}".strip()
+    return make_model or machine.type or f"Machine {machine.id}"
+
+def build_empty_machine_oee(machine_id: int, machine_name: str) -> MachineOEE:
+    return MachineOEE(
+        machine_id=machine_id,
+        machine_name=machine_name,
+        oee=None,
+        availability=None,
+        performance=None,
+        quality=None,
+        total_parts=None,
+        good_parts=None,
+        bad_parts=None,
+        losses=None,
+    )
+
+def build_empty_detailed_summary(
+    machine_id: int,
+    machine_name: str,
+    analysis_date: datetime,
+    shift_label: str,
+) -> DetailedShiftSummary:
+    return DetailedShiftSummary(
+        date=analysis_date.strftime("%Y-%m-%d"),
+        shift=shift_label,
+        machine_name=machine_name,
+        machine_id=machine_id,
+        production_time=None,
+        idle_time=None,
+        off_time=None,
+        total_parts=None,
+        good_parts=None,
+        bad_parts=None,
+        oee_metrics=None,
+        updatedate=None,
+    )
+
+def build_machine_breakdown_from_data(
+    db: Session,
+    all_machines: List[Machine],
+    machine_data: Dict[int, Dict[str, Any]],
+) -> List[MachineOEE]:
+    breakdown = []
+    for machine in all_machines:
+        mid = machine.id
+        m_name = build_machine_display_name(machine)
+        data = machine_data.get(mid)
+        if not data:
+            breakdown.append(build_empty_machine_oee(mid, m_name))
+            continue
+
+        count = data["count"]
+        m_avail = data["avail"] / count
+        m_perf = data["perf"] / count
+        m_qual = data["qual"] / count
+        breakdown.append(MachineOEE(
+            machine_id=mid,
+            machine_name=m_name,
+            oee=data["oee"] / count,
+            availability=m_avail,
+            performance=m_perf,
+            quality=m_qual,
+            total_parts=data["t_parts"],
+            good_parts=data["g_parts"],
+            bad_parts=data["b_parts"],
+            losses=OEELosses(
+                availability_loss=100 - m_avail,
+                performance_loss=100 - m_perf,
+                quality_loss=100 - m_qual,
+            ),
+        ))
+    return breakdown
+
+def build_detailed_summaries_from_data(
+    all_machines: List[Machine],
+    machine_data: Dict[int, Dict[str, Any]],
+    analysis_date: datetime,
+    shift_label: str,
+) -> List[DetailedShiftSummary]:
+    summaries = []
+    for machine in all_machines:
+        mid = machine.id
+        m_name = build_machine_display_name(machine)
+        data = machine_data.get(mid)
+        if not data:
+            summaries.append(build_empty_detailed_summary(mid, m_name, analysis_date, shift_label))
+            continue
+
+        count = data["count"]
+        m_avail = data["avail"] / count
+        m_perf = data["perf"] / count
+        m_qual = data["qual"] / count
+        summaries.append(DetailedShiftSummary(
+            date=analysis_date.strftime("%Y-%m-%d"),
+            shift=shift_label,
+            machine_name=m_name,
+            machine_id=mid,
+            production_time=480,
+            idle_time=(100 - m_avail) / 100 * 480,
+            off_time=0,
+            total_parts=data["t_parts"],
+            good_parts=data["g_parts"],
+            bad_parts=data["b_parts"],
+            oee_metrics={
+                "oee": data["oee"] / count,
+                "availability": m_avail,
+                "performance": m_perf,
+                "quality": m_qual,
+            },
+            updatedate=analysis_date,
+        ))
+    return summaries
+
 @router.get("/overall-oee-analytics/", response_model=OverallOEEAnalysis)
 def get_overall_oee_analytics(
     date_str: Optional[str] = Query(None, alias="date", description="Date for analysis (YYYY-MM-DD)"),
@@ -92,8 +209,18 @@ def get_overall_oee_analytics(
                 raise HTTPException(status_code=400, detail="Shift must be '1', '2', '3', or 'all'")
 
         summaries = query.all()
+        all_machines = db.query(Machine).order_by(Machine.id).all()
+        shift_label = shift if shift and shift.lower() != 'all' else 'all'
 
         if not summaries:
+            machine_breakdown = [
+                build_empty_machine_oee(m.id, build_machine_display_name(m))
+                for m in all_machines
+            ]
+            detailed_summaries = [
+                build_empty_detailed_summary(m.id, build_machine_display_name(m), analysis_date, shift_label)
+                for m in all_machines
+            ]
             return OverallOEEAnalysis(
                 period_start=start_date,
                 period_end=end_date,
@@ -102,8 +229,8 @@ def get_overall_oee_analytics(
                 overall_performance=0.0,
                 overall_quality=0.0,
                 shift_breakdown=[],
-                machine_breakdown=[],
-                detailed_summaries=[],
+                machine_breakdown=machine_breakdown,
+                detailed_summaries=detailed_summaries,
                 daily_trends=[],
                 losses=OEELosses(
                     availability_loss=0.0,
@@ -113,7 +240,7 @@ def get_overall_oee_analytics(
                 total_production=0,
                 total_good_parts=0,
                 total_bad_parts=0,
-                machine_count=0
+                machine_count=len(all_machines)
             )
 
         # Calculate metrics
@@ -128,7 +255,7 @@ def get_overall_oee_analytics(
         total_quality = sum(s.quality or 0 for s in summaries)
 
         unique_machines = set(s.machine_id for s in summaries)
-        machine_count = len(unique_machines)
+        machine_count = len(all_machines)
 
         avg_oee = total_oee / record_count
         avg_availability = total_availability / record_count
@@ -140,16 +267,14 @@ def get_overall_oee_analytics(
         avg_performance_loss = 100 - avg_performance
         avg_quality_loss = 100 - avg_quality
 
-        # Calculate machine-wise breakdown
-        machine_breakdown = []
-        detailed_summaries = []
+        # Aggregate per-machine metrics from shift summaries
         machine_data = {}
         for s in summaries:
             if s.machine_id not in machine_data:
                 machine_data[s.machine_id] = {
-                    "oee": 0, "avail": 0, "perf": 0, "qual": 0, 
+                    "oee": 0, "avail": 0, "perf": 0, "qual": 0,
                     "count": 0, "t_parts": 0, "g_parts": 0, "b_parts": 0,
-                    "a_loss": 0, "p_loss": 0, "q_loss": 0
+                    "a_loss": 0, "p_loss": 0, "q_loss": 0,
                 }
             md = machine_data[s.machine_id]
             md["oee"] += s.oee or 0
@@ -163,53 +288,12 @@ def get_overall_oee_analytics(
             md["a_loss"] += s.availability_loss or 0
             md["p_loss"] += s.performance_loss or 0
             md["q_loss"] += s.quality_loss or 0
-        
-        for mid, data in machine_data.items():
-            machine = db.query(Machine).filter(Machine.id == mid).first()
-            m_name = f"{machine.make or ''} {machine.model or ''}".strip() if machine else f"Machine {mid}"
-            count = data["count"]
-            
-            m_avail = data["avail"] / count
-            m_perf = data["perf"] / count
-            m_qual = data["qual"] / count
-            
-            machine_breakdown.append(MachineOEE(
-                machine_id=mid,
-                machine_name=m_name,
-                oee=data["oee"] / count,
-                availability=m_avail,
-                performance=m_perf,
-                quality=m_qual,
-                total_parts=data["t_parts"],
-                good_parts=data["g_parts"],
-                bad_parts=data["b_parts"],
-                losses=OEELosses(
-                    availability_loss=100 - m_avail,
-                    performance_loss=100 - m_perf,
-                    quality_loss=100 - m_qual
-                )
-            ))
 
-            # Add to detailed summaries
-            detailed_summaries.append(DetailedShiftSummary(
-                date=analysis_date.strftime("%Y-%m-%d"),
-                shift="all",
-                machine_name=m_name,
-                machine_id=mid,
-                production_time=480,
-                idle_time=(100 - m_avail) / 100 * 480,
-                off_time=0,
-                total_parts=data["t_parts"],
-                good_parts=data["g_parts"],
-                bad_parts=data["b_parts"],
-                oee_metrics={
-                    "oee": data["oee"] / count,
-                    "availability": m_avail,
-                    "performance": m_perf,
-                    "quality": m_qual
-                },
-                updatedate=analysis_date
-            ))
+        # Calculate machine-wise breakdown (includes all configured machines)
+        machine_breakdown = build_machine_breakdown_from_data(db, all_machines, machine_data)
+        detailed_summaries = build_detailed_summaries_from_data(
+            all_machines, machine_data, analysis_date, shift_label
+        )
 
         shift_breakdown = []
         if shift and shift.lower() == 'all':

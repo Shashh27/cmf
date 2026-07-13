@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta, timezone
@@ -35,14 +36,14 @@ def create_inventory_return_request(
     inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == return_request.requested_id).first()
     if not inventory_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory request with id {return_request.requested_id} not found"
         )
     
     # Verify inventory request is approved (can only return approved items)
     if inventory_request.status != 'approved':
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Can only create return request for approved inventory requests"
         )
     
@@ -50,7 +51,7 @@ def create_inventory_return_request(
     operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
     if not operator:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operator with id {return_request.operator_id} not found"
         )
     
@@ -74,20 +75,20 @@ def create_inventory_return_request(
     # Validate the new return quantity
     if return_request.returned_qty <= 0:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Returned quantity must be greater than 0"
         )
     
     if return_request.returned_qty > remaining_qty:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot return {return_request.returned_qty} items. Only {remaining_qty} items remaining to be returned"
         )
     
     # Validate status - allow "pending" or "collected" for initial creation
     if return_request.status not in ['pending', 'collected']:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Status must be either 'pending' or 'collected' for initial return request"
         )
     
@@ -189,7 +190,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
     return_request = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.id == return_request_id).first()
     if not return_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory return request with id {return_request_id} not found"
         )
     
@@ -233,6 +234,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
             "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
             "operation_name": operation.operation_name if operation else None,
             "operation_number": operation.operation_number if operation else None
         }
@@ -265,7 +267,7 @@ def update_inventory_return_request(
     db_return_request = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.id == return_request_id).first()
     if not db_return_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory return request with id {return_request_id} not found"
         )
     
@@ -298,7 +300,7 @@ def update_inventory_return_request(
     if 'returned_qty' in update_data:
         if update_data['returned_qty'] > db_return_request.total_requested_qty:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=f"Returned quantity cannot exceed total requested quantity. Max: {db_return_request.total_requested_qty}"
             )
     
@@ -314,15 +316,15 @@ def update_inventory_return_request(
 def update_inventory_return_request_status(
     return_request_id: int,
     inventory_supervisor_id: int,  # This will come from authentication/session
-    status: str,    # "pending" or "collected"
+    request_status: str = Query(..., alias="status"),    # "pending" or "collected"
     table_id: int = None,  # Additional parameter to track table ID
     db: Session = Depends(get_db)
 ):
     """Update inventory return request status (inventory supervisor action)"""
     # Validate status
-    if status not in ['pending', 'collected']:
+    if request_status not in ['pending', 'collected']:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Status must be either 'pending' or 'collected'"
         )
     
@@ -330,23 +332,23 @@ def update_inventory_return_request_status(
     db_return_request = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.id == return_request_id).first()
     if not db_return_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory return request with id {return_request_id} not found"
         )
     
     # Verify request can be updated (pending or collected)
     # Allow toggling between pending and collected
-    if db_return_request.status not in ['pending', 'collected'] and db_return_request.status != status:
+    if db_return_request.status not in ['pending', 'collected'] and db_return_request.status != request_status:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot {status} return request with status '{db_return_request.status}'"
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot {request_status} return request with status '{db_return_request.status}'"
         )
     
     # Verify inventory supervisor exists
     inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_supervisor_id).first()
     if not inventory_supervisor:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory Supervisor with id {inventory_supervisor_id} not found"
         )
     
@@ -358,11 +360,11 @@ def update_inventory_return_request_status(
         if tool:
             
             # Handle inventory quantity based on status change - ONE-WAY LOGIC
-            if status == 'collected':
+            if request_status == 'collected':
                 # Can only mark as collected from pending status
                 if db_return_request.status != 'pending':
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=http_status.HTTP_400_BAD_REQUEST,
                         detail=f"Cannot mark return request as collected that is already {db_return_request.status}. Status can only change from pending to collected."
                     )
                 # Restore tool quantity when collected
@@ -370,10 +372,10 @@ def update_inventory_return_request_status(
                 tool.quantity += db_return_request.returned_qty
                 print(f"DEBUG: New tool quantity after adding: {tool.quantity}")
             
-            elif status == 'pending':
+            elif request_status == 'pending':
                 # Cannot change back to pending once collected
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Cannot change collected return request back to pending. Status change is one-way only: pending → collected."
                 )
             
@@ -381,9 +383,9 @@ def update_inventory_return_request_status(
             print(f"DEBUG: Final tool quantity after commit: {tool.quantity}")
     
     # Update the return request with inventory_supervisor_id, status, and updated_at
-    if status == 'collected':
+    if request_status == 'collected':
         db_return_request.inventory_supervisor_id = inventory_supervisor_id
-    db_return_request.status = status
+    db_return_request.status = request_status
     db_return_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
     db.commit()
@@ -395,7 +397,7 @@ def update_inventory_return_request_status(
         inventory_supervisor_user = db.query(AccessUser).filter(AccessUser.id == inventory_supervisor_id).first()
         inventory_supervisor_name = inventory_supervisor_user.user_name if inventory_supervisor_user else None
     
-    action = "collected" if status == 'collected' else "marked as pending"
+    action = "collected" if request_status == 'collected' else "marked as pending"
     return {
         "message": f"Inventory return request {action} successfully", 
         "request": db_return_request,
@@ -409,7 +411,7 @@ def delete_inventory_return_request(return_request_id: int, db: Session = Depend
     db_return_request = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.id == return_request_id).first()
     if not db_return_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory return request with id {return_request_id} not found"
         )
     
@@ -463,7 +465,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
                 "part_id": inventory_request.part_id,
                 "operation_id": inventory_request.operation_id,
                 "quantity": inventory_request.quantity,
-                "supervisor_id": inventory_request.inventory_supervisor_id,
+                "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
@@ -472,7 +474,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
                 "tool_range": tool.range if tool else None,
                 "identification_code": tool.identification_code if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
-                "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
+                "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
                 "part_name": part.part_name if part else None,
                 "part_number": part.part_number if part else None,
@@ -492,7 +494,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "supervisor_name": supervisor.user_name if supervisor else None,
+            "inventory_supervisor_name": supervisor.user_name if supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
@@ -500,10 +502,13 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
     return result
 
 
-@router.get("/by-status/{status}", response_model=List[InventoryReturnRequestWithDetailsSchema])
-def get_inventory_return_requests_by_status(status: str, db: Session = Depends(get_db)):
+@router.get("/by-status/{request_status}", response_model=List[InventoryReturnRequestWithDetailsSchema])
+def get_inventory_return_requests_by_status(
+    request_status: str,
+    db: Session = Depends(get_db),
+):
     """Get inventory return requests by status"""
-    return_requests = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.status == status).all()
+    return_requests = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.status == request_status).all()
     
     result = []
     for ret_req in return_requests:
@@ -535,7 +540,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
                 "part_id": inventory_request.part_id,
                 "operation_id": inventory_request.operation_id,
                 "quantity": inventory_request.quantity,
-                "supervisor_id": inventory_request.inventory_supervisor_id,
+                "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
@@ -544,7 +549,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
                 "tool_range": tool.range if tool else None,
                 "identification_code": tool.identification_code if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
-                "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
+                "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
                 "part_name": part.part_name if part else None,
                 "part_number": part.part_number if part else None,
@@ -564,7 +569,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "supervisor_name": supervisor.user_name if supervisor else None,
+            "inventory_supervisor_name": supervisor.user_name if supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))

@@ -38,13 +38,13 @@ def create_inventory_request(
     tool = db.query(ToolsList).filter(ToolsList.id == request_data.tool_id).first()
     if not tool:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Tool with id {request_data.tool_id} not found"
         )
     
     if tool.quantity < request_data.quantity:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"Insufficient quantity. Available: {tool.quantity}, Requested: {request_data.quantity}"
         )
     
@@ -52,7 +52,7 @@ def create_inventory_request(
     operator = db.query(AccessUser).filter(AccessUser.id == request_data.operator_id).first()
     if not operator:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operator with id {request_data.operator_id} not found"
         )
     
@@ -60,7 +60,7 @@ def create_inventory_request(
     project = db.query(Order).filter(Order.id == request_data.project_id).first()
     if not project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Project with id {request_data.project_id} not found"
         )
     
@@ -68,7 +68,7 @@ def create_inventory_request(
     part = db.query(Part).filter(Part.id == request_data.part_id).first()
     if not part:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {request_data.part_id} not found"
         )
     
@@ -76,7 +76,7 @@ def create_inventory_request(
     operation = db.query(Operation).filter(Operation.id == request_data.operation_id).first()
     if not operation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {request_data.operation_id} not found"
         )
     
@@ -147,7 +147,7 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
     request = db.query(InventoryRequest).filter(InventoryRequest.id == request_id).first()
     if not request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory request with id {request_id} not found"
         )
     
@@ -201,7 +201,7 @@ def update_inventory_request(
     db_inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == request_id).first()
     if not db_inventory_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Inventory request with id {request_id} not found"
         )
     
@@ -219,7 +219,7 @@ def update_inventory_request(
         tool = db.query(ToolsList).filter(ToolsList.id == update_data['tool_id']).first()
         if not tool:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Tool with id {update_data['tool_id']} not found"
             )
     
@@ -227,7 +227,7 @@ def update_inventory_request(
         operator = db.query(AccessUser).filter(AccessUser.id == update_data['operator_id']).first()
         if not operator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Operator with id {update_data['operator_id']} not found"
             )
     
@@ -235,7 +235,7 @@ def update_inventory_request(
         project = db.query(Order).filter(Order.id == update_data['project_id']).first()
         if not project:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Project with id {update_data['project_id']} not found"
             )
     
@@ -243,7 +243,7 @@ def update_inventory_request(
         part = db.query(Part).filter(Part.id == update_data['part_id']).first()
         if not part:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Part with id {update_data['part_id']} not found"
             )
     
@@ -251,7 +251,7 @@ def update_inventory_request(
         operation = db.query(Operation).filter(Operation.id == update_data['operation_id']).first()
         if not operation:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Operation with id {update_data['operation_id']} not found"
             )
     
@@ -259,7 +259,7 @@ def update_inventory_request(
     if 'quantity' in update_data:
         if update_data['quantity'] <= 0:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Quantity must be greater than 0"
             )
         
@@ -271,7 +271,7 @@ def update_inventory_request(
             if quantity_diff > 0:  # Increasing quantity
                 if tool.quantity < quantity_diff:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=http_status.HTTP_400_BAD_REQUEST,
                         detail=f"Insufficient quantity for increase. Available: {tool.quantity}, Needed: {quantity_diff}"
                     )
                 tool.quantity -= quantity_diff
@@ -323,7 +323,7 @@ def update_inventory_request_status(
     tool = db.query(ToolsList).filter(ToolsList.id == db_inventory_request.tool_id).first()
     if not tool:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Tool with id {db_inventory_request.tool_id} not found"
         )
     

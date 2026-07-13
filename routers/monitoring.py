@@ -3,14 +3,14 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import text
 from typing import List
 from datetime import datetime
 from DB.database import SessionLocal, get_db
 from DB.models.configuration import Machine
 from DB.models.monitoring import MachineLiveStatus, MachineLiveHistory
-from DB.models.oms import Order, Part, Operation
-from DB.schemas.monitoring import LiveMonitoringDisplay, MachineLiveStatusCreate, MachineLiveHistory
+from DB.schemas.monitoring import LiveMonitoringDisplay, MachineLiveHistory
+
 
 router = APIRouter(
     prefix="/monitoring",
@@ -27,12 +27,53 @@ def normalize_display_status(raw_status: str | None) -> str:
     return normalized
 
 
+def get_operation_quantity_totals(db: Session, operation_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Sum produced, approved, and rejected quantities across all logs per operation."""
+    if not operation_ids:
+        return {}
+
+    rows = db.execute(
+        text("""
+            SELECT
+                operation_id,
+                COALESCE(SUM(produced_quantity), 0) AS produced_qty,
+                COALESCE(SUM(approved_quantity), 0) AS approved_qty,
+                COALESCE(SUM(rejected_quantity), 0) AS rejected_qty
+            FROM scheduling.production_logs
+            WHERE operation_id = ANY(:operation_ids)
+            GROUP BY operation_id
+        """),
+        {"operation_ids": operation_ids},
+    ).mappings().all()
+
+    return {
+        row["operation_id"]: {
+            "produced_qty": int(row["produced_qty"] or 0),
+            "approved_qty": int(row["approved_qty"] or 0),
+            "rejected_qty": int(row["rejected_qty"] or 0),
+        }
+        for row in rows
+    }
+
+
 def build_live_monitoring_snapshot(db: Session):
     machines = db.query(Machine).all()
+    live_statuses = {
+        status.machine_id: status
+        for status in db.query(MachineLiveStatus).all()
+    }
+
+    operation_ids = [
+        status.current_operation_id
+        for status in live_statuses.values()
+        if status.current_operation_id is not None
+    ]
+    quantity_totals = get_operation_quantity_totals(db, operation_ids)
+
     results = []
 
     for machine in machines:
-        live_status = db.query(MachineLiveStatus).filter(MachineLiveStatus.machine_id == machine.id).first()
+        live_status = live_statuses.get(machine.id)
 
         display_data = {
             "machine_id": machine.id,
@@ -51,8 +92,10 @@ def build_live_monitoring_snapshot(db: Session):
             "part_number": None,
             "operation_name": None,
             "operation_number": None,
-            "completed_qty": 0,
-            "target_qty": 0
+            "part_qty": 0,
+            "produced_qty": 0,
+            "approved_qty": 0,
+            "rejected_qty": 0,
         }
 
         if live_status:
@@ -64,19 +107,16 @@ def build_live_monitoring_snapshot(db: Session):
 
             if live_status.part:
                 display_data["part_number"] = live_status.part.part_number
-                display_data["target_qty"] = live_status.part.qty if live_status.part.qty else 0
+                display_data["part_qty"] = live_status.part.qty if live_status.part.qty else 0
 
             if live_status.operation:
                 display_data["operation_name"] = live_status.operation.operation_name
                 display_data["operation_number"] = live_status.operation.operation_number
 
-                completed_query = text("""
-                    SELECT COALESCE(SUM(approved_quantity), 0)
-                    FROM scheduling.production_logs
-                    WHERE operation_id = :op_id
-                """)
-                completed = db.execute(completed_query, {"op_id": live_status.current_operation_id}).scalar() or 0
-                display_data["completed_qty"] = int(completed) if completed else 0
+                totals = quantity_totals.get(live_status.current_operation_id, {})
+                display_data["produced_qty"] = totals.get("produced_qty", 0)
+                display_data["approved_qty"] = totals.get("approved_qty", 0)
+                display_data["rejected_qty"] = totals.get("rejected_qty", 0)
 
         results.append(display_data)
 
@@ -104,38 +144,7 @@ async def live_monitoring_websocket(websocket: WebSocket):
     except WebSocketDisconnect:
         return
 
-@router.post("/update-status")
-def update_machine_status(status_data: MachineLiveStatusCreate, db: Session = Depends(get_db)):
-    db_status = db.query(MachineLiveStatus).filter(MachineLiveStatus.machine_id == status_data.machine_id).first()
-    normalized_status = normalize_display_status(status_data.status)
-    
-    if db_status:
-        # Save current state to history BEFORE updating
-        history_record = MachineLiveHistory(
-            machine_id=db_status.machine_id,
-            status=db_status.status,
-            last_updated=db_status.last_updated,
-            current_order_id=db_status.current_order_id,
-            current_part_id=db_status.current_part_id,
-            current_operation_id=db_status.current_operation_id
-        )
-        db.add(history_record)
-        
-        # Now update the current status
-        db_status.status = normalized_status
-        db_status.current_order_id = status_data.current_order_id
-        db_status.current_part_id = status_data.current_part_id
-        db_status.current_operation_id = status_data.current_operation_id
-    else:
-        # Create new status record
-        status_dict = status_data.dict()
-        status_dict["status"] = normalized_status
-        db_status = MachineLiveStatus(**status_dict)
-        db.add(db_status)
-    
-    db.commit()
-    db.refresh(db_status)
-    return db_status
+
 
 @router.get("/history/{machine_id}", response_model=List[MachineLiveHistory])
 def get_machine_history(machine_id: int, limit: int = 100, db: Session = Depends(get_db)):

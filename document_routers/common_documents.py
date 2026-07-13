@@ -169,6 +169,7 @@ async def get_common_folder(
         id=folder.id,
         folder_name=folder.folder_name,
         parent_id=folder.parent_id,
+        user_id=folder.user_id,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         children=children,

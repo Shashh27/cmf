@@ -111,6 +111,19 @@ def build_machine_folder_tree(db: Session, parent_id: Optional[int] = None, mach
 # MACHINE FOLDER MANAGEMENT
 # =======================
 
+def format_machine_display_name(machine: MachineModel) -> str:
+    """Build a display name from make/model since Machine has no machine_name column."""
+    make = (machine.make or '').strip()
+    model = (machine.model or '').strip()
+    if make and model:
+        return f"{make} {model}"
+    if make:
+        return make
+    if model:
+        return model
+    machine_type = (machine.type or '').strip()
+    return machine_type or f"Machine {machine.id}"
+
 @router.get("/machines", response_model=List[MachineWithFolders])
 async def get_machines_with_folders(db: Session = Depends(get_db)):
     """Get all machines with their folder structures"""
@@ -124,8 +137,8 @@ async def get_machines_with_folders(db: Session = Depends(get_db)):
         
         result.append(MachineWithFolders(
             id=machine.id,
-            machine_name=machine.machine_name,
-            machine_code=getattr(machine, 'machine_code', None),
+            machine_name=format_machine_display_name(machine),
+            machine_code=getattr(machine, 'machine_code', None) or machine.type,
             folders=machine_folders
         ))
     
@@ -221,7 +234,9 @@ async def get_machine_folder(
     return MachineFolderWithChildren(
         id=folder.id,
         folder_name=folder.folder_name,
+        machine_id=folder.machine_id,
         parent_id=folder.parent_id,
+        user_id=folder.user_id,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         children=children,

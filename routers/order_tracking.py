@@ -214,26 +214,26 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
             # 3. Pending otherwise
             
             if required_qty > 0 and total_approved >= required_qty:
-                status = "Completed"
+                op_status = "Completed"
             elif status_info["has_in_progress"]:
-                status = "In Progress"
+                op_status = "In Progress"
             elif len(logs) > 0:
                 # If there are logs but not completed or specifically "In Progress",
                 # it might be in progress if there's production but not enough for completion
-                status = "In Progress"
+                op_status = "In Progress"
             else:
-                status = "Pending"
+                op_status = "Pending"
             
-            if status == "Completed":
+            if op_status == "Completed":
                 completed_operations_count += 1
             
             operation_tracking_list.append(OperationTrackingStatus(
                 operation_id=op.id,
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
-                status=status,
+                status=op_status,
                 started_at=status_info["first_started"],
-                completed_at=status_info["last_completed"] if status == "Completed" else None,
+                completed_at=status_info["last_completed"] if op_status == "Completed" else None,
                 operator_id=status_info["operator_id"],
                 operator_name=operator_map.get(status_info["operator_id"]),
                 production_logs=logs,
@@ -401,24 +401,24 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
             total_approved = status_info["total_approved"]
             
             if required_qty > 0 and total_approved >= required_qty:
-                status = "Completed"
+                op_status = "Completed"
             elif status_info["has_in_progress"]:
-                status = "In Progress"
+                op_status = "In Progress"
             elif len(logs) > 0:
-                status = "In Progress"
+                op_status = "In Progress"
             else:
-                status = "Pending"
+                op_status = "Pending"
             
-            if status == "Completed":
+            if op_status == "Completed":
                 completed_operations_count += 1
             
             operation_tracking_list.append(OperationTrackingStatus(
                 operation_id=op.id,
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
-                status=status,
+                status=op_status,
                 started_at=status_info["first_started"],
-                completed_at=status_info["last_completed"] if status == "Completed" else None,
+                completed_at=status_info["last_completed"] if op_status == "Completed" else None,
                 operator_id=status_info["operator_id"],
                 operator_name=None,
                 machine_id=op.machine_id,
@@ -597,24 +597,24 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
         total_approved = status_info["total_approved"]
         
         if required_qty > 0 and total_approved >= required_qty:
-            status = "Completed"
+            op_status = "Completed"
         elif status_info["has_in_progress"]:
-            status = "In Progress"
+            op_status = "In Progress"
         elif len(logs) > 0:
-            status = "In Progress"
+            op_status = "In Progress"
         else:
-            status = "Pending"
+            op_status = "Pending"
         
-        if status == "Completed":
+        if op_status == "Completed":
             completed_operations_count += 1
         
         operation_tracking_list.append(OperationTrackingStatus(
             operation_id=op.id,
             operation_number=op.operation_number,
             operation_name=op.operation_name,
-            status=status,
+            status=op_status,
             started_at=status_info["first_started"],
-            completed_at=status_info["last_completed"] if status == "Completed" else None,
+            completed_at=status_info["last_completed"] if op_status == "Completed" else None,
             operator_id=status_info["operator_id"],
             operator_name=operator_map.get(status_info["operator_id"]),
             production_logs=logs,

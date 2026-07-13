@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, time
 
 class OEELosses(BaseModel):
     availability_loss: float
@@ -27,27 +27,87 @@ class ShiftOEE(BaseModel):
 class MachineOEE(BaseModel):
     machine_id: int
     machine_name: str
-    oee: float
-    availability: float
-    performance: float
-    quality: float
-    total_parts: int
-    good_parts: int
-    bad_parts: int
-    losses: OEELosses
+    oee: Optional[float] = None
+    availability: Optional[float] = None
+    performance: Optional[float] = None
+    quality: Optional[float] = None
+    total_parts: Optional[int] = None
+    good_parts: Optional[int] = None
+    bad_parts: Optional[int] = None
+    losses: Optional[OEELosses] = None
+
+
+class ShiftSummaryBase(BaseModel):
+    machine_id: int
+    shift: int
+    timestamp: datetime
+    off_time: Optional[time] = None
+    idle_time: Optional[time] = None
+    production_time: Optional[time] = None
+    total_parts: int = 0
+    good_parts: int = 0
+    bad_parts: int = 0
+    availability: float = 0.0
+    performance: float = 0.0
+    quality: float = 0.0
+    availability_loss: float = 0.0
+    performance_loss: float = 0.0
+    quality_loss: float = 0.0
+    oee: float = 0.0
+
+
+class ShiftSummaryCreate(ShiftSummaryBase):
+    updatedate: Optional[datetime] = None
+
+
+class ShiftSummaryUpdate(BaseModel):
+    machine_id: Optional[int] = None
+    shift: Optional[int] = None
+    timestamp: Optional[datetime] = None
+    updatedate: Optional[datetime] = None
+    off_time: Optional[time] = None
+    idle_time: Optional[time] = None
+    production_time: Optional[time] = None
+    total_parts: Optional[int] = None
+    good_parts: Optional[int] = None
+    bad_parts: Optional[int] = None
+    availability: Optional[float] = None
+    performance: Optional[float] = None
+    quality: Optional[float] = None
+    availability_loss: Optional[float] = None
+    performance_loss: Optional[float] = None
+    quality_loss: Optional[float] = None
+    oee: Optional[float] = None
+
+
+class ShiftSummary(ShiftSummaryBase):
+    id: int
+    updatedate: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 
 class DetailedShiftSummary(BaseModel):
     date: str
     shift: str
     machine_name: str
     machine_id: int
-    production_time: int
-    idle_time: float
-    off_time: int
-    total_parts: int
-    good_parts: int
-    bad_parts: int
-    oee_metrics: dict
+    timestamp: Optional[datetime] = None
+    production_time: Optional[time] = None
+    idle_time: Optional[time] = None
+    off_time: Optional[time] = None
+    total_parts: Optional[int] = None
+    good_parts: Optional[int] = None
+    bad_parts: Optional[int] = None
+    availability: Optional[float] = None
+    performance: Optional[float] = None
+    quality: Optional[float] = None
+    availability_loss: Optional[float] = None
+    performance_loss: Optional[float] = None
+    quality_loss: Optional[float] = None
+    oee: Optional[float] = None
+    oee_metrics: Optional[dict] = None
     updatedate: Optional[datetime] = None
 
 class OverallOEEAnalysis(BaseModel):

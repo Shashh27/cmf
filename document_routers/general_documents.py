@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 import os
 from datetime import datetime
 import io
+import hashlib
 import mimetypes
 
 from DB.database import get_db
@@ -152,6 +154,7 @@ def get_folder(folder_id: int, db: Session = Depends(get_db)):
         id=folder.id,
         folder_name=folder.folder_name,
         parent_id=folder.parent_id,
+        user_id=folder.user_id,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         children=children,
@@ -249,6 +252,72 @@ def delete_folder(folder_id: int, db: Session = Depends(get_db)):
 # DOCUMENT MANAGEMENT
 # =======================
 
+def build_download_filename(file_name: str, version: float) -> str:
+    """Build a download filename without duplicating the extension."""
+    base, ext = os.path.splitext(file_name)
+    if not ext:
+        return f"{file_name}_v{version}"
+    return f"{base}_v{version}{ext}"
+
+def compute_content_hash(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+def get_family_root_id(db: Session, parent_id: int) -> int:
+    parent_doc = db.query(GeneralDocument).filter(GeneralDocument.id == parent_id).first()
+    if not parent_doc:
+        return parent_id
+    return parent_doc.parent_id or parent_doc.id
+
+def get_existing_content_hash(doc: GeneralDocument, minio_client) -> Optional[str]:
+    if getattr(doc, 'content_hash', None):
+        return doc.content_hash
+    try:
+        object_name = doc.url.split(f"/{minio_client.bucket_name}/")[1]
+        existing_data = minio_client.download_file(object_name)
+        return compute_content_hash(existing_data)
+    except Exception:
+        return None
+
+def assert_unique_file_content(
+    db: Session,
+    minio_client,
+    folder_id: int,
+    file_content: bytes,
+    parent_id: Optional[int],
+) -> None:
+    content_hash = compute_content_hash(file_content)
+
+    if parent_id is None:
+        folder_docs = db.query(GeneralDocument).filter(
+            GeneralDocument.general_folder_id == folder_id,
+        ).all()
+        for doc in folder_docs:
+            existing_hash = doc.content_hash or get_existing_content_hash(doc, minio_client)
+            if existing_hash and existing_hash == content_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "This file already exists in this folder. "
+                        "Use 'Upload New Version' to add a new revision."
+                    ),
+                )
+        return
+
+    root_id = get_family_root_id(db, parent_id)
+    family_docs = db.query(GeneralDocument).filter(
+        (GeneralDocument.id == root_id) | (GeneralDocument.parent_id == root_id),
+    ).all()
+    for doc in family_docs:
+        existing_hash = doc.content_hash or get_existing_content_hash(doc, minio_client)
+        if existing_hash and existing_hash == content_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"This file is identical to an existing version (v{doc.version}). "
+                    "Upload a modified file for the new version."
+                ),
+            )
+
 @router.post("/upload", response_model=GeneralDocumentSchema, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
@@ -256,6 +325,7 @@ async def upload_document(
     file_name: str = Form(...),
     parent_id: Optional[int] = Form(None),
     user_id: int = Form(...),
+    document_type: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -277,11 +347,43 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
+
+    # Prevent duplicate uploads in the same folder (new documents only)
+    if parent_id is None:
+        existing = db.query(GeneralDocument).filter(
+            GeneralDocument.general_folder_id == folder_id,
+            GeneralDocument.parent_id.is_(None),
+            func.lower(GeneralDocument.file_name) == file.filename.lower(),
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "A document with this filename already exists in this folder. "
+                    "Use 'Upload New Version' to add a new revision."
+                ),
+            )
+    else:
+        parent_doc = db.query(GeneralDocument).filter(GeneralDocument.id == parent_id).first()
+        if not parent_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Parent document with id {parent_id} not found",
+            )
+        if parent_doc.general_folder_id != folder_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parent document does not belong to the selected folder",
+            )
     
     try:
-        # Get MinIO client
         minio_client = get_minio_client()
-        
+
+        # Read file content once for hash check and upload
+        file_content = await file.read()
+        assert_unique_file_content(db, minio_client, folder_id, file_content, parent_id)
+        content_hash = compute_content_hash(file_content)
+
         # Determine version
         version = get_next_version(db, parent_id)
         
@@ -290,8 +392,6 @@ async def upload_document(
         file_extension = get_file_extension(file.filename)
         object_name = f"general_documents/{folder_id}/{timestamp}_{file_name}_{version}{file_extension}"
         
-        # Read file content
-        file_content = await file.read()
         file_stream = io.BytesIO(file_content)
         
         # Determine content type
@@ -320,7 +420,9 @@ async def upload_document(
             version=version,
             general_folder_id=folder_id,
             parent_id=parent_id,
-            user_id=user_id
+            user_id=user_id,
+            document_type=document_type or 'General',
+            content_hash=content_hash,
         )
         
         db.add(db_document)
@@ -329,6 +431,9 @@ async def upload_document(
         
         return db_document
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -485,8 +590,7 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
         file_data = minio_client.download_file(object_name)
         
         # Get file extension for proper filename
-        file_extension = get_file_extension(document.file_name)
-        filename = f"{document.file_name}_v{document.version}{file_extension}"
+        filename = build_download_filename(document.file_name, document.version)
         
         # Return file as streaming response
         return StreamingResponse(

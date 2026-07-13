@@ -46,6 +46,8 @@ class GeneralDocument(Base):
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    document_type = Column(String(50), nullable=True)
+    content_hash = Column(String(64), nullable=True)
 
     # Relationship with user
     user = relationship("AccessUser")

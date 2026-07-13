@@ -15,6 +15,7 @@ class GeneralDocumentBase(BaseModel):
     general_folder_id: int
     parent_id: Optional[int] = None
     user_id: int
+    document_type: Optional[str] = None
 
 # Response schemas
 class GeneralFolder(GeneralFolderBase):
