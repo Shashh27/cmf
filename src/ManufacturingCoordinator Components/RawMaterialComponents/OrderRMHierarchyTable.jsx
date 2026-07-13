@@ -489,10 +489,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const getMaterialSelectOptions = (row) => {
     const optionMap = new Map();
     const selectedId = getSelectedMaterialId(row);
+    const isSaved = !!savedRows[row.key];
 
     (row.materialRecommendations || []).forEach((rec) => {
       const recId = Number(rec.id);
-      const isPlanned = selectedId != null && recId === Number(selectedId);
+      const isPlanned = isSaved && selectedId != null && recId === Number(selectedId);
       optionMap.set(recId, {
         value: recId,
         label: isPlanned
@@ -504,9 +505,12 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     if (selectedId && !optionMap.has(selectedId)) {
       const material = rawMaterialsList.find((rm) => Number(rm.id) === selectedId);
       if (material) {
+        const rec = row.materialRecommendations?.find((m) => Number(m.id) === selectedId);
         optionMap.set(selectedId, {
           value: selectedId,
-          label: `${material.material_name} (planned)`,
+          label: isSaved
+            ? `${material.material_name} (planned)`
+            : formatMaterialMatchLabel(material.material_name, rec?.match_type),
         });
       }
     }
@@ -1173,7 +1177,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           <div style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: isMobile ? 8 : 9, color: '#666', marginBottom: 4 }}>
                               Extracted: <strong>{row.rmName}</strong>
-                              {getSelectedMaterialLabel(row, true) && (
+                              {savedRows[row.key] && getSelectedMaterialLabel(row, true) && (
                                 <span>
                                   {' → Planned: '}
                                   <strong>{getSelectedMaterialLabel(row, true)}</strong>

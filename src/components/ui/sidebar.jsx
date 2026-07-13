@@ -18,6 +18,8 @@ import { API_BASE_URL } from '../../Config/auth';
 
 import { QUALITY_API_BASE_URL } from '../../Config/qualityconfig';
 
+import { filterOwnCreatedNotifications, getStoredUser } from '../../utils/notificationFilters';
+
 
 
 const { Sider } = Layout;
@@ -385,10 +387,12 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.is_ack).length : 0);
 
       const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
+      const currentUser = getStoredUser();
+      const visibleOrders = filterOwnCreatedNotifications(orders, currentUser);
 
       setNotificationCount(
 
-        countPending(orders) +
+        countPending(visibleOrders) +
 
         countPending(machines) +
 
@@ -474,7 +478,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.mc_is_ack).length : 0);
 
-
+      const currentUser = getStoredUser();
+      const visibleOrders = filterOwnCreatedNotifications(orders, currentUser);
 
       let productionCount = 0;
 
@@ -532,7 +537,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       setNotificationCount(
 
-        countPending(orders) +
+        countPending(visibleOrders) +
 
         countPending(machines) +
 

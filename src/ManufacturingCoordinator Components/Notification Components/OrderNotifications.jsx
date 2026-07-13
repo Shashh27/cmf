@@ -3,6 +3,7 @@ import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
 import dayjs from 'dayjs';
+import { filterOwnCreatedNotifications, getStoredUser } from '../../utils/notificationFilters';
 
 const OrderNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -69,8 +70,10 @@ const OrderNotifications = ({ dateRange, onCount }) => {
         throw new Error('Failed to fetch notifications');
       }
       const data = await response.json();
-      setNotifications(data);
-      if (onCount) onCount(Array.isArray(data) ? data.filter(n => !n.is_ack).length : 0);
+      const currentUser = getStoredUser();
+      const filteredData = filterOwnCreatedNotifications(data, currentUser);
+      setNotifications(filteredData);
+      if (onCount) onCount(Array.isArray(filteredData) ? filteredData.filter(n => !n.is_ack).length : 0);
     } catch (error) {
       message.error(error.message);
     } finally {

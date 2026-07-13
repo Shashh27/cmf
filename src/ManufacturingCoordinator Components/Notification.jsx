@@ -15,6 +15,7 @@ import MachineCalibrationNotifications from './Notification Components/MachineCa
 import PokayokeOperationNotification from './Notification Components/PokayokeOperationNotification';
 import ProductionLogNotification from './Notification Components/ProductionLogNotification';
 import config from '../Config/config';
+import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 
 const Notification = () => {
   const location = useLocation();
@@ -45,21 +46,16 @@ const Notification = () => {
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
       
       // Add role-based filtering based on user's role
-      const storedUser = localStorage.getItem('user');
+      const user = getStoredUser();
       let userRole = '';
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          userRole = (user.role || user.user_role || '').toLowerCase();
-          if (userRole.includes('manufacturing') || userRole === 'mc') {
-            if (user.id) params.set('mc_id', user.id);
-          } else if (userRole.includes('project') || userRole === 'pc') {
-            if (user.id) params.set('pc_id', user.id);
-          } else if (userRole.includes('admin')) {
-            if (user.id) params.set('admin_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage', e);
+      if (user) {
+        userRole = (user.role || user.user_role || '').toLowerCase();
+        if (userRole.includes('manufacturing') || userRole === 'mc') {
+          if (user.id) params.set('mc_id', user.id);
+        } else if (userRole.includes('project') || userRole === 'pc') {
+          if (user.id) params.set('pc_id', user.id);
+        } else if (userRole.includes('admin')) {
+          if (user.id) params.set('admin_id', user.id);
         }
       }
       
@@ -75,6 +71,8 @@ const Notification = () => {
         endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
       );
       
+      const visibleOrders = filterOwnCreatedNotifications(orders, user);
+
       // Count pending notifications based on role-specific acknowledgment status
       const countPending = (notifications) => {
         if (!Array.isArray(notifications)) return 0;
@@ -87,7 +85,7 @@ const Notification = () => {
       };
       
       setCounts({
-        orders: countPending(orders),
+        orders: countPending(visibleOrders),
         machines: countPending(machines),
         tools: countPending(tools),
         components: countPending(components),

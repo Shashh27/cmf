@@ -22,6 +22,7 @@ import ToolIssuesNotifications from '../Notification Components/ToolIssuesNotifi
 import ComponentIssuesNotifications from '../Notification Components/ComponentIssuesNotifications';
 import MachineCalibrationNotifications from '../Notification Components/MachineCalibrationNotifications';
 import config from '../Config/config';
+import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 
 const Notification = () => {
   const location = useLocation();
@@ -90,8 +91,10 @@ const Notification = () => {
         `${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`,
       );
       const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
+      const storedUser = getStoredUser();
+      const visibleOrders = filterOwnCreatedNotifications(orders, storedUser);
       setCounts({
-        orders: Array.isArray(orders) ? orders.filter((n) => !n.is_ack).length : 0,
+        orders: Array.isArray(visibleOrders) ? visibleOrders.filter((n) => !n.is_ack).length : 0,
         machines: Array.isArray(machines) ? machines.filter((n) => !n.is_ack).length : 0,
         tools: Array.isArray(tools) ? tools.filter((n) => !n.is_ack).length : 0,
         components: Array.isArray(components) ? components.filter((n) => !n.is_ack).length : 0,

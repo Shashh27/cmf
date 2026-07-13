@@ -495,7 +495,7 @@ export default function ShopFloor() {
               status={st}
               count={getHeaderStatusCount(st, stats.counts)}
               isActive={statusFilter === st}
-              onClick={() => setStatusFilter(prev => (prev === st ? 'ALL' : st))}
+              onClick={() => setStatusFilter(st)}
             />
           ))}
         </div>

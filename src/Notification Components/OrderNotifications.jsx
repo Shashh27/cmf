@@ -3,6 +3,7 @@ import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../Config/config';
 import dayjs from 'dayjs';
+import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 
 const OrderNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -62,11 +63,8 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       }
       const data = await response.json();
 
-      // Filter out notifications created by the current user
-      const currentUser = getCurrentUser();
-      const filteredData = currentUser.username
-        ? data.filter(n => n.created_by?.toLowerCase() !== currentUser.username.toLowerCase())
-        : data;
+      const currentUser = getStoredUser();
+      const filteredData = filterOwnCreatedNotifications(data, currentUser);
 
       setNotifications(filteredData);
       if (onCount) onCount(Array.isArray(filteredData) ? filteredData.filter(n => !n.is_ack).length : 0);
