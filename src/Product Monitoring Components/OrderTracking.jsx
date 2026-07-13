@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
 import { Card, Table, Spin, message, Typography, Tag, Select, Empty, Space } from 'antd';
-import { Card, Table, Spin, message, Typography, Tag, Select, Empty, Space } from 'antd';
 import { 
   SyncOutlined,
   CheckCircleOutlined,

@@ -1006,16 +1006,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       {
 
-        key: `${prefix}/production-log`,
-
-        label: <Link to={`${prefix}/production-log`} onClick={() => setMobileDrawerOpen(false)}>Production Log</Link>,
-
-        icon: <HistoryOutlined />,
-
-      },
-
-      {
-
         key: 'pps',
 
         label: 'PPS',
@@ -1051,6 +1041,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
 
           { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link> },
+
+          { key: `${prefix}/product-monitoring/production-log`, label: <Link to={`${prefix}/product-monitoring/production-log`} onClick={() => setMobileDrawerOpen(false)}>Production Log</Link> },
 
         ],
 

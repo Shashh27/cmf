@@ -104,10 +104,34 @@ const ProductionLog = () => {
     visible: false, log: null, approvedQty: 0, reworkQty: 0, rejectedQty: 0, remark: '',
   });
 
+  const mcMeta = useMemo(() => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        return {
+          name: user.user_name || user.name || user.username || 'N/A',
+          id: user.id ?? user.user_id ?? user.userId ?? null,
+        };
+      }
+    } catch { /* ignore */ }
+    const fallbackId = localStorage.getItem('user_id');
+    return { name: 'N/A', id: fallbackId ? Number(fallbackId) : null };
+  }, []);
+
+  const mcId = mcMeta.id;
+
   const fetchLogs = useCallback(async () => {
+    if (!mcId) {
+      message.error('User not found in session. Please log in again.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`);
+      const response = await fetch(
+        `${SCHEDULING_API_BASE_URL}/production-logs/?manufacturing_coordinator_id=${mcId}`
+      );
       if (!response.ok) throw new Error('Failed to fetch production logs');
       const allLogs = await response.json();
 
@@ -146,14 +170,16 @@ const ProductionLog = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [mcId]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
   useEffect(() => {
+    if (!mcId) return;
+
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await fetch(`${API_BASE_URL}/orders/?manufacturing_coordinator_id=${mcId}`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -163,24 +189,7 @@ const ProductionLog = () => {
       }
     };
     fetchOrders();
-  }, []);
-
-  const mcMeta = useMemo(() => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        return {
-          name: user.user_name || user.name || user.username || 'N/A',
-          id: user.id ?? user.user_id ?? user.userId ?? null,
-        };
-      }
-    } catch { /* ignore */ }
-    const fallbackId = localStorage.getItem('user_id');
-    return { name: 'N/A', id: fallbackId ? Number(fallbackId) : null };
-  }, []);
-
-  const mcId = mcMeta.id;
+  }, [mcId]);
 
   const hasActiveFilters = useMemo(() => (
     selectedMachines.length > 0 ||

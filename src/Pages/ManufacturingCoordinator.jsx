@@ -16,8 +16,6 @@ import MCShopFloorDashboard from "../ManufacturingCoordinator Components/ShopFlo
 import MCDocument from "../ManufacturingCoordinator Components/Document";
 import MCNotification from "../ManufacturingCoordinator Components/Notification";
 import MCAccessControl from "../ManufacturingCoordinator Components/AccessControl";
-import ProductionLog from "../ManufacturingCoordinator Components/ProductMonitoringComponents/ProductionLog";
-import { Card } from "antd";
 
 const ManufacturingCoordinator = () => {
   const location = useLocation();
@@ -40,21 +38,6 @@ const ManufacturingCoordinator = () => {
   }
   if (path.startsWith("/manufacturing_coordinator/pps")) {
     return <MCPPS />;
-  }
-  if (path.startsWith("/manufacturing_coordinator/production-log")) {
-    return (
-      <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-        <Card
-          bordered={false}
-          style={{
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-          }}
-        >
-          <ProductionLog />
-        </Card>
-      </div>
-    );
   }
   if (path.startsWith("/manufacturing_coordinator/product-monitoring")) {
     return <MCProductionMonitoring />;

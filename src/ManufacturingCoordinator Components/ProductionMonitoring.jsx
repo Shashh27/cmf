@@ -6,6 +6,7 @@ import LiveMonitoring from './ProductMonitoringComponents/LiveMonitoring';
 import OEEDashboard from './ProductMonitoringComponents/OEEDashboard';
 import PlannedVsActual from './ProductMonitoringComponents/PlannedVsActual';
 import OrderTracking from './ProductMonitoringComponents/OrderTracking';
+import ProductionLog from './ProductMonitoringComponents/ProductionLog';
 
 const { Title } = Typography;
 
@@ -26,6 +27,9 @@ const ProductionMonitoring = () => {
     if (path.includes('/product-monitoring/order-tracking')) {
       return <OrderTracking />;
     }
+    if (path.includes('/product-monitoring/production-log')) {
+      return <ProductionLog />;
+    }
     return <LiveMonitoring />;
   };
 
@@ -34,6 +38,7 @@ const ProductionMonitoring = () => {
     if (path.includes('/product-monitoring/oee-overview')) return 'OEE Overview';
     if (path.includes('/product-monitoring/planned-vs-actual')) return 'Planned vs Actual';
     if (path.includes('/product-monitoring/order-tracking')) return 'Order Tracking';
+    if (path.includes('/product-monitoring/production-log')) return 'Production Log';
     return 'Production Monitoring';
   })();
 
