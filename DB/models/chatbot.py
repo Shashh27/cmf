@@ -5,6 +5,10 @@ from typing import List, Dict, Any, Optional
 class ChatRequest(BaseModel):
     question: str = Field(..., description="User's question in natural language")
     session_id: str = Field(..., description="Session ID for chat history")
+    user_id: Optional[int] = Field(None, description="Logged-in user id from accesscontrol.access_users")
+    user_name: Optional[str] = Field(None, description="Logged-in user display name")
+    role: Optional[str] = Field(None, description="User role e.g. Operator, Manufacturing Coordinator")
+    center: Optional[str] = Field(None, description="User work center if applicable")
 
 
 class ChatResponse(BaseModel):

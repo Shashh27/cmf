@@ -45,9 +45,13 @@ INTENT_KEYWORDS: Dict[str, List[str]] = {
     ],
     "orders": ["order", "orders", "saleorder", "sale", "job", "workorder", "customer", "product"],
     "parts": ["part", "parts", "component", "components", "bom", "assembly", "assemblies", "piece"],
+    "materials": [
+        "stock", "stocks", "material", "materials", "raw", "barstock", "dimension", "dimensions",
+        "diameter", "unit", "units", "quantity", "en8", "en9", "en19", "en24",
+    ],
+    "tools": ["tool", "tools", "consumable", "cutter", "insert"],
     "inventory": [
-        "stock", "stocks", "inventory", "material", "materials", "raw", "tool", "tools",
-        "vendor", "vendors", "supplier", "consumable",
+        "inventory", "vendor", "vendors", "supplier",
     ],
     "machines": [
         "machine", "machines", "cnc", "workcenter", "workcentre", "calibration", "shopfloor", "oee",
@@ -55,8 +59,8 @@ INTENT_KEYWORDS: Dict[str, List[str]] = {
     "scheduling": [
         "schedule", "scheduling", "scheduled", "planned", "plan", "gantt", "reschedule", "downtime",
     ],
-    "quality": ["quality", "inspection", "inspections", "dimension", "tolerance", "boc"],
-    "maintenance": ["breakdown", "breakdowns", "maintenance", "repair", "component", "issue"],
+    "quality": ["quality", "inspection", "inspections", "tolerance", "boc", "measured"],
+    "maintenance": ["breakdown", "breakdowns", "maintenance", "repair", "breakdownissue"],
     "operators": ["operator", "operators", "worker", "workers", "supervisor", "leave", "absent", "user", "users"],
     "energy": ["energy", "power", "ems", "electricity", "kwh", "consumption"],
     "documents": ["document", "documents", "folder", "upload"],
@@ -80,10 +84,7 @@ def fuzzy_intent_for_token(token: str) -> Optional[str]:
         for kw in keywords:
             if tl == kw or tl in kw or kw in tl:
                 return intent
-            if len(tl) >= 4 and len(kw) >= 4 and tl[:4] == kw[:4]:
-                score = 0.8
-            else:
-                score = difflib.SequenceMatcher(None, tl, kw).ratio()
+            score = difflib.SequenceMatcher(None, tl, kw).ratio()
             if score > best_score:
                 best_score = score
                 best_intent = intent
@@ -165,6 +166,9 @@ NOTIFICATIONS_LIST_SQL = """
     LIMIT 50
 """
 
+from chatbot.material_sql import all_material_stock_sql, is_material_query, is_tool_query
+from chatbot.tool_sql import TOOLS_FOR_SCHEDULED_OPERATIONS_SQL, all_tools_sql
+
 INTENT_LIST_SQL: Dict[str, str] = {
     "notifications": NOTIFICATIONS_LIST_SQL,
     "orders": """
@@ -183,12 +187,9 @@ INTENT_LIST_SQL: Dict[str, str] = {
         WHERE COALESCE(p.recycle_bin, false) = false
         ORDER BY p.part_name LIMIT 50
     """,
-    "inventory": """
-        SELECT rm.material_name, rms.form_type, rms.quantity, rms.status, rms.location
-        FROM inventory.raw_material_stock rms
-        JOIN inventory.raw_materials rm ON rm.id = rms.material_id
-        ORDER BY rm.material_name LIMIT 50
-    """,
+    "materials": all_material_stock_sql(100),
+    "tools": all_tools_sql(50),
+    "inventory": all_material_stock_sql(100),
     "machines": """
         SELECT m.type, m.make, m.model, wc.work_center_name, m.calibration_due_date
         FROM configuration.machines m

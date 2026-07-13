@@ -415,7 +415,7 @@ class ToolWithPart(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
+    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id", ondelete="CASCADE"), nullable=False)
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
 
@@ -711,6 +711,8 @@ class DocumentExtractedData(Base):
     planned_inner_diameter = Column(Float, nullable=True)
 
     planned_outer_diameter = Column(Float, nullable=True)
+
+    planned_raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)
 
     planned_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 

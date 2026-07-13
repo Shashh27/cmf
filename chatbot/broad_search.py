@@ -68,9 +68,14 @@ def _term_clause(alias: str, terms: List[str]) -> str:
     return " OR ".join(f"{alias} ILIKE '%{t}%'" for t in terms)
 
 
-def build_broad_search_sql(terms: List[str]) -> Optional[str]:
+def build_broad_search_sql(terms: List[str], question: str = "") -> Optional[str]:
     if not terms:
         return None
+
+    from chatbot.material_sql import is_material_query, is_tool_query
+
+    material_only = is_material_query(question)
+    tool_only = is_tool_query(question)
 
     tc = _term_clause
     operator_blob = "CONCAT_WS(' ', u.user_name, u.role, u.center, u.\"group\")"
@@ -160,6 +165,11 @@ def build_broad_search_sql(terms: List[str]) -> Optional[str]:
         """,
     ]
 
+    if material_only:
+        blocks = [blocks[6]]
+    elif tool_only:
+        blocks = [blocks[7]]
+
     return f"""
         SELECT * FROM (
             {" UNION ALL ".join(blocks)}
@@ -170,7 +180,7 @@ def build_broad_search_sql(terms: List[str]) -> Optional[str]:
 
 def try_broad_search(question: str) -> Tuple[Optional[str], List]:
     terms = extract_search_terms(question)
-    sql = build_broad_search_sql(terms)
+    sql = build_broad_search_sql(terms, question)
     if not sql:
         return None, []
     return sql, terms

@@ -46,6 +46,12 @@ class StockRecommendationRequest(BaseModel):
     min_score: float = 0.3
     max_recommendations: int = 10
     required_length: Optional[float] = None
+    material_id: Optional[int] = None
+
+
+class MaterialRecommendRequest(BaseModel):
+    material_name: str
+    max_recommendations: int = 10
 
 
 class BatchStockRecommendationRequest(BaseModel):
@@ -938,27 +944,18 @@ def get_raw_material_stock(
     )
     
     if material_name is not None:
-        # Normalize material name by removing spaces to match variations like "EN8", "EN 8", "EN+8"
-        normalized_material_name = material_name.replace(" ", "").replace("+", "").replace("-", "").replace("_", "").lower()
-        
-        # Get all materials and filter by normalized name
-        all_materials = db.query(RawMaterialModel).all()
-        matching_material_ids = []
-        
-        for material in all_materials:
-            normalized_db_name = material.material_name.replace(" ", "").replace("-", "").replace("_", "").lower()
-            if normalized_material_name in normalized_db_name or normalized_db_name in normalized_material_name:
-                matching_material_ids.append(material.id)
-        
+        matching_material_ids = StockRecommendationService.find_matching_material_ids(
+            db, material_name, material_id=material_id
+        )
+
         if matching_material_ids:
             query = query.filter(RawMaterialStockModel.material_id.in_(matching_material_ids))
         else:
-            # Fallback to original ilike if no matches found
             query = query.join(RawMaterialModel).filter(
                 RawMaterialModel.material_name.ilike(f"%{material_name}%")
             )
-    
-    if material_id is not None:
+
+    if material_id is not None and material_name is None:
         query = query.filter(RawMaterialStockModel.material_id == material_id)
     
     if source_type is not None:
@@ -987,6 +984,26 @@ def get_raw_material_stock_item(stock_id: int, db: Session = Depends(get_db)):
     return _stock_with_details(stock, db)
 
 
+@router.post("/recommend-materials")
+def recommend_materials(request: MaterialRecommendRequest, db: Session = Depends(get_db)):
+    """
+    Recommend master raw materials for an extracted material name.
+    Uses fuzzy/partial matching — e.g. '20MnCr5' matches '20MnCr5 - DIN 17210'.
+    """
+    recommendations = StockRecommendationService.find_matching_materials(
+        db=db,
+        extracted_material_name=request.material_name,
+        max_recommendations=request.max_recommendations,
+    )
+    return {
+        "success": True,
+        "extracted_material_name": request.material_name,
+        "recommendations": recommendations,
+        "total": len(recommendations),
+        "has_match": len(recommendations) > 0,
+    }
+
+
 @router.post("/recommend-stocks")
 def recommend_stocks(request: StockRecommendationRequest, db: Session = Depends(get_db)):
     """
@@ -1002,6 +1019,7 @@ def recommend_stocks(request: StockRecommendationRequest, db: Session = Depends(
         min_score=request.min_score,
         max_recommendations=request.max_recommendations,
         required_length=request.required_length,
+        material_id=request.material_id,
     )
 
     return {
@@ -1027,6 +1045,7 @@ def recommend_stocks_batch(request: BatchStockRecommendationRequest, db: Session
             min_score=req.min_score,
             max_recommendations=req.max_recommendations,
             required_length=req.required_length,
+            material_id=req.material_id,
         )
         results[idx] = {
             "success": True,
@@ -1070,20 +1089,14 @@ def debug_recommend(request: StockRecommendationRequest, db: Session = Depends(g
     normalized_name = StockRecommendationService.normalize_material_name(request.material_name)
     extracted_dims, form_type = StockRecommendationService.parse_extracted_dimensions(request.dimensions_str)
 
-    all_materials = db.query(RawMaterialModel).all()
-    matching_materials = []
-    for material in all_materials:
-        if StockRecommendationService.normalize_material_name(material.material_name) == normalized_name:
-            matching_materials.append({
-                "id": material.id,
-                "material_name": material.material_name,
-                "normalized": StockRecommendationService.normalize_material_name(material.material_name)
-            })
+    matching_materials = StockRecommendationService.find_matching_materials(
+        db, request.material_name, max_recommendations=20
+    )
 
     stocks = db.query(RawMaterialStockModel).filter(
         RawMaterialStockModel.material_id.in_([m["id"] for m in matching_materials]),
         RawMaterialStockModel.source_type == "general"
-    ).all()
+    ).all() if matching_materials else []
 
     stock_details = []
     for stock in stocks:

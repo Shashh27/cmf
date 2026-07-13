@@ -352,7 +352,7 @@ class InventoryRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
 
-    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
+    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id", ondelete="CASCADE"), nullable=False)
 
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
 
@@ -458,7 +458,7 @@ class ToolIssue(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
 
-    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
+    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id", ondelete="CASCADE"), nullable=False)
 
     request_id = Column(Integer, ForeignKey("inventory.inventory_requests.id", ondelete="CASCADE"), nullable=False)
 

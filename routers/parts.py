@@ -101,6 +101,7 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, unit_map: dict,
         "vendor_name": vendor_map.get(part.vendor_id) if part.vendor_id else None,
         "created_at": part.created_at,
         "updated_at": part.updated_at,
+        "recycle_bin": part.recycle_bin,
     }
 
 

@@ -1,5 +1,15 @@
 """Fast-path SQL patterns — zero LLM calls for common question shapes."""
 
+from chatbot.material_sql import all_material_stock_sql, material_stock_by_name_sql
+from chatbot.part_sql import part_stock_by_term_sql
+from chatbot.tool_sql import (
+    SCHEDULED_STOCK_AVAILABILITY_SQL,
+    TOOLS_FOR_SCHEDULED_OPERATIONS_SQL,
+    all_tools_sql,
+    is_scheduled_stock_check_query,
+    is_scheduled_tools_query,
+)
+
 import re
 from typing import Callable, List, Tuple
 
@@ -200,7 +210,8 @@ QUICK_SQL_PATTERNS: List[Pattern] = [
         """,
     ),
     (
-        r"(?:order|so)[\s\-#]*([A-Za-z0-9][\w\-/]+)|sale\s*order\s*(?:number\s*)?([A-Za-z0-9][\w\-/]+)",
+        r"^(?:show|get|find|display)\s+(?:order|so)\s*[\s\-#]*([A-Za-z0-9][\w\-/]+)\s*$|"
+        r"^order\s+([A-Za-z0-9][\w\-/]+)\s*$",
         lambda m: f"""
             SELECT o.id, o.sale_order_number, o.project_name, o.status, o.approval_status,
                    o.quantity, o.due_date, c.company_name AS customer, pr.product_name
@@ -316,6 +327,13 @@ QUICK_SQL_PATTERNS: List[Pattern] = [
             JOIN oms.products pr ON pr.id = o.product_id
             ORDER BY o.created_at DESC LIMIT 50
         """,
+    ),
+
+    # ── PART STOCK (before generic parts list)
+    (
+        r"(?:stock|inventory|quantity|level).*\bpart\b.*\b([A-Za-z0-9][\w\-/]+)\b|"
+        r"\bpart\b.*(?:no\.?|number|#)?\s*([A-Za-z0-9][\w\-/]+).*\b(?:stock|inventory|quantity|level)\b",
+        lambda m: part_stock_by_term_sql(_text_group(m)),
     ),
 
     # ── PARTS / ASSEMBLIES
@@ -620,25 +638,16 @@ QUICK_SQL_PATTERNS: List[Pattern] = [
     ),
     (
         r"(?:all\s+)?raw\s*material\s*stock|stock.*raw\s*material|show\s+(?:all\s+)?(?:raw\s+)?(?:material\s+)?stock|list\s+(?:all\s+)?stock|^(?:show|list)\s+stock\s*$",
-        lambda _: """
-            SELECT rm.material_name, rms.form_type, rms.diameter, rms.length,
-                   rms.quantity, rms.available_quantity, rms.allocated_quantity, rms.status
-            FROM inventory.raw_material_stock rms
-            JOIN inventory.raw_materials rm ON rm.id = rms.material_id
-            ORDER BY rm.material_name, rms.status LIMIT 100
-        """,
+        lambda _: all_material_stock_sql(100),
     ),
     (
         r"(?:stock|quantity|available)\s+(?:of|for)\s+([A-Za-z0-9][\w\-/]+(?:\s+[A-Za-z0-9\-/]+){0,2})\s*$|"
         r"^([A-Za-z0-9][\w\-/]+(?:\s+[A-Za-z0-9\-/]+){0,2})\s+(?:stock|quantity|available)\s*$",
-        lambda m: f"""
-            SELECT rm.material_name, rms.form_type, rms.diameter, rms.length,
-                   rms.quantity, rms.available_quantity, rms.allocated_quantity, rms.status
-            FROM inventory.raw_material_stock rms
-            JOIN inventory.raw_materials rm ON rm.id = rms.material_id
-            WHERE rm.material_name ILIKE '%{_search_term(m)}%'
-            ORDER BY rms.status LIMIT 50
-        """,
+        lambda m: material_stock_by_name_sql(_search_term(m)),
+    ),
+    (
+        r"\b(?:material|raw\s*material).*(?:dimension|unit|stock)|(?:dimension|unit|stock).*(?:material|raw\s*material)",
+        lambda _: all_material_stock_sql(100),
     ),
     (
         r"\braw\s*material(?!.*stock)|material.*\blist",
@@ -647,12 +656,27 @@ QUICK_SQL_PATTERNS: List[Pattern] = [
             ORDER BY material_name LIMIT 50
         """,
     ),
+    # ── SCHEDULED STOCK CHECK (tools + parts/materials availability)
     (
-        r"\btools?\s+list|list\s+tools?",
-        lambda _: """
-            SELECT item_description, identification_code, make, quantity, location, type, category
-            FROM inventory.tools_list ORDER BY item_description LIMIT 50
-        """,
+        r"(?:stock|in\s+stock|available).*(?:tool|part|material).*(?:schedule|scheduled|operation)|"
+        r"(?:tool|part|material).*(?:stock|in\s+stock|available).*(?:schedule|scheduled|operation)|"
+        r"are\s+(?:all\s+)?(?:the\s+)?(?:required\s+)?(?:tools?|parts?).*(?:stock|available).*(?:schedule|operation)",
+        lambda _: SCHEDULED_STOCK_AVAILABILITY_SQL,
+    ),
+
+    # ── TOOLS (scheduled operations on machines — before generic tools list)
+    (
+        r"tools?\s+(?:required|needed|for).*(?:operation|schedule|machine)|"
+        r"(?:operation|schedule|machine).*(?:tools?\s+(?:required|needed))|"
+        r"which\s+tools?.*(?:operation|machine|schedule)|"
+        r"tools?.*scheduled.*machine",
+        lambda _: TOOLS_FOR_SCHEDULED_OPERATIONS_SQL,
+    ),
+
+    # ── TOOLS LIST
+    (
+        r"\btools?\s+list|list\s+tools?|^(?:show\s+)?(?:all\s+)?tools?\s*$",
+        lambda _: all_tools_sql(50),
     ),
 
     # ── MASTER DATA

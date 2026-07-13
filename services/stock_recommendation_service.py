@@ -1,3 +1,4 @@
+import re
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Tuple
 from DB.models.inventory import (
@@ -13,12 +14,108 @@ class StockRecommendationService:
     @staticmethod
     def normalize_material_name(material_name: str) -> str:
         """
-        Normalize material name by removing spaces and converting to lowercase
-        Example: "EN 8" -> "en8", "EN8" -> "en8"
+        Normalize material name: strip non-alphanumeric chars, lowercase.
+        Example: "20MnCr5 - DIN 17210" -> "20mncr5din17210", "EN 8" -> "en8"
         """
         if not material_name:
             return ""
-        return material_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+        return re.sub(r"[^a-zA-Z0-9]", "", material_name).lower()
+
+    @staticmethod
+    def _material_match_rank(extracted_normalized: str, db_normalized: str) -> Optional[int]:
+        """
+        Return match rank (lower is better) or None if no match.
+        0 = exact, 1 = extracted substring of db, 2 = db substring of extracted
+        """
+        if not extracted_normalized or not db_normalized:
+            return None
+        if extracted_normalized == db_normalized:
+            return 0
+        if extracted_normalized in db_normalized:
+            return 1
+        if db_normalized in extracted_normalized:
+            return 2
+        return None
+
+    @staticmethod
+    def find_matching_materials(
+        db: Session,
+        extracted_material_name: str,
+        max_recommendations: int = 10,
+    ) -> List[Dict]:
+        """
+        Find raw materials matching extracted name using fuzzy/partial logic.
+        e.g. extracted "20MnCr5" matches DB "20MnCr5 - DIN 17210"
+        """
+        if not extracted_material_name:
+            return []
+
+        extracted_normalized = StockRecommendationService.normalize_material_name(extracted_material_name)
+        if not extracted_normalized:
+            return []
+
+        all_materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
+        matches = []
+
+        for material in all_materials:
+            if not material.material_name:
+                continue
+            db_normalized = StockRecommendationService.normalize_material_name(material.material_name)
+            rank = StockRecommendationService._material_match_rank(extracted_normalized, db_normalized)
+            if rank is None:
+                continue
+            suffix_len = len(db_normalized) - len(extracted_normalized) if rank == 1 else 0
+            matches.append({
+                "id": material.id,
+                "material_name": material.material_name,
+                "match_type": "exact" if rank == 0 else "partial",
+                "match_rank": rank,
+                "suffix_length": suffix_len,
+            })
+
+        matches.sort(
+            key=lambda m: (
+                m["match_rank"],
+                0 if m["material_name"].strip().lower() == extracted_material_name.strip().lower() else 1,
+                m["suffix_length"],
+                len(m["material_name"]),
+            )
+        )
+        return matches[:max_recommendations]
+
+    @staticmethod
+    def find_best_material_by_name(
+        db: Session,
+        extracted_material_name: str,
+    ) -> Optional[RawMaterialModel]:
+        """Return the single best master-list match for an extracted material name."""
+        matches = StockRecommendationService.find_matching_materials(
+            db, extracted_material_name, max_recommendations=1
+        )
+        if not matches:
+            return None
+        return db.query(RawMaterialModel).filter(RawMaterialModel.id == matches[0]["id"]).first()
+
+    @staticmethod
+    def materials_match(extracted_name: str, db_name: str) -> bool:
+        """True when two names match using the canonical normalize + substring rules."""
+        extracted_normalized = StockRecommendationService.normalize_material_name(extracted_name)
+        db_normalized = StockRecommendationService.normalize_material_name(db_name)
+        return StockRecommendationService._material_match_rank(extracted_normalized, db_normalized) is not None
+
+    @staticmethod
+    def find_matching_material_ids(
+        db: Session,
+        extracted_material_name: str,
+        material_id: Optional[int] = None,
+    ) -> List[int]:
+        """Resolve material IDs for stock lookup — explicit ID or fuzzy name match."""
+        if material_id is not None:
+            material = db.query(RawMaterialModel).filter(RawMaterialModel.id == material_id).first()
+            return [material.id] if material else []
+
+        matches = StockRecommendationService.find_matching_materials(db, extracted_material_name)
+        return [m["id"] for m in matches]
 
     @staticmethod
     def calculate_dimension_match_score(
@@ -313,6 +410,7 @@ class StockRecommendationService:
         min_score: float = 0.3,
         max_recommendations: int = 10,
         required_length: Optional[float] = None,
+        material_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Recommend stocks based on extracted raw material dimensions.
@@ -320,22 +418,19 @@ class StockRecommendationService:
         When required_length is provided (planned cut length), recommendations only
         include stocks that have at least one unit with remaining_length >= required_length.
         Cross-section dimensions still must match; length is validated on live units.
-        """
-        # Normalize material name for matching
-        normalized_material_name = StockRecommendationService.normalize_material_name(extracted_material_name)
 
+        material_id: optional planned_raw_material_id — used directly when set.
+        Otherwise fuzzy-matches extracted_material_name against the master list.
+        """
         # Parse extracted dimensions
         extracted_dims, form_type = StockRecommendationService.parse_extracted_dimensions(extracted_dimensions_str)
 
         if not extracted_dims:
             return []
 
-        # Get all raw materials with matching name (case-insensitive, space-agnostic)
-        all_materials = db.query(RawMaterialModel).all()
-        matching_materials = []
-        for material in all_materials:
-            if StockRecommendationService.normalize_material_name(material.material_name) == normalized_material_name:
-                matching_materials.append(material.id)
+        matching_materials = StockRecommendationService.find_matching_material_ids(
+            db, extracted_material_name, material_id=material_id
+        )
 
         if not matching_materials:
             return []
@@ -392,10 +487,18 @@ class StockRecommendationService:
                 if not usable_units:
                     continue
 
-            nearest_fit = StockRecommendationService._nearest_fit_distance(extracted_dims, stock_dims, form_type)
+            cross_section_excess = StockRecommendationService._nearest_fit_distance(
+                extracted_dims, stock_dims, form_type
+            )
             available_units = len(usable_units)
-            best_remaining = min((unit.remaining_length for unit in usable_units), default=0)
             max_remaining_length = max((unit.remaining_length for unit in usable_units), default=0)
+            length_excess_mm = 0.0
+            if use_unit_length_check and effective_required_length:
+                length_excess_mm = max(0.0, max_remaining_length - effective_required_length)
+            elif extracted_dims.get("length"):
+                length_excess_mm = max(0.0, max_remaining_length - extracted_dims["length"])
+
+            sort_fit = length_excess_mm if use_unit_length_check else cross_section_excess
 
             recommendations.append({
                 "stock_id": stock.id,
@@ -404,11 +507,14 @@ class StockRecommendationService:
                 "form_type": stock.form_type,
                 "dimensions": stock_dims,
                 "match_score": score,
-                "nearest_fit": nearest_fit,
+                "match_score_percent": round(score * 100, 1),
+                "nearest_fit": sort_fit,
+                "length_excess_mm": length_excess_mm,
+                "cross_section_excess_mm": cross_section_excess,
                 "available_quantity": stock.available_quantity,
                 "available_units": available_units,
                 "usable_units": len(usable_units),
-                "best_remaining_length": best_remaining,
+                "best_remaining_length": max_remaining_length,
                 "max_remaining_length": max_remaining_length,
                 "required_length": effective_required_length,
                 "stock_size": f"{stock.diameter if stock.diameter else stock.breadth or stock.inner_diameter}x{stock.length}" if stock.length else "",

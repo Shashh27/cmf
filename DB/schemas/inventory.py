@@ -277,6 +277,8 @@ class RawMaterialStockWithDetails(RawMaterialStock):
 
     total_cost: Optional[float] = None     # cost * quantity
 
+    stock_dimensions: Optional[str] = None  # Computed dimensions string (e.g. "Ø50.0 × 1000.0mm")
+
 
 
 # =======================

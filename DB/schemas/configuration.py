@@ -59,7 +59,21 @@ class MachineBase(BaseModel):
 
 
 class MachineCreate(MachineBase):
-    pass
+    @field_validator('calibration_date', 'calibration_frequency')
+    @classmethod
+    def validate_calibration_fields(cls, v, info):
+        calibration_date = info.data.get('calibration_date')
+        calibration_frequency = info.data.get('calibration_frequency')
+        
+        # If calibration_date is provided, calibration_frequency must also be provided
+        if calibration_date and not calibration_frequency:
+            raise ValueError('Calibration frequency must be provided when calibration date is specified')
+        
+        # If calibration_frequency is provided, calibration_date must also be provided
+        if calibration_frequency and not calibration_date:
+            raise ValueError('Calibration date must be provided when calibration frequency is specified')
+        
+        return v
 
 
 class MachineUpdate(BaseModel):
@@ -77,6 +91,22 @@ class MachineUpdate(BaseModel):
     calibration_frequency: Optional[str] = None
     password: Optional[str] = None
     user_id: Optional[int] = None
+
+    @field_validator('calibration_date', 'calibration_frequency')
+    @classmethod
+    def validate_calibration_fields(cls, v, info):
+        calibration_date = info.data.get('calibration_date')
+        calibration_frequency = info.data.get('calibration_frequency')
+        
+        # If calibration_date is provided, calibration_frequency must also be provided
+        if calibration_date and not calibration_frequency:
+            raise ValueError('Calibration frequency must be provided when calibration date is specified')
+        
+        # If calibration_frequency is provided, calibration_date must also be provided
+        if calibration_frequency and not calibration_date:
+            raise ValueError('Calibration date must be provided when calibration frequency is specified')
+        
+        return v
 
 
 class Machine(MachineBase):

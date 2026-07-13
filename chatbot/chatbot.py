@@ -21,11 +21,41 @@ from chatbot.schema_knowledge import OUT_OF_SCOPE_MESSAGE, build_system_prompt
 from chatbot.intent import get_intent_hints
 from chatbot.broad_search import is_clearly_off_topic, try_broad_search, extract_search_terms
 from chatbot.intent_queries import try_intent_query, has_cmf_signal
+from chatbot.material_sql import try_material_query
+from chatbot.user_context import (
+    UserContext,
+    try_user_scoped_query,
+    personalized_greeting,
+    get_role_suggestions,
+    get_user_intent_hints,
+)
 from chatbot.query_patterns import (
     PARTS_FOR_ORDER_SQL,
     OPERATIONS_FOR_ORDER_SQL,
     try_quick_pattern,
 )
+from chatbot.part_sql import (
+    is_part_stock_query,
+    part_by_term_sql,
+    part_stock_by_term_sql,
+    try_part_lookup_query,
+    try_part_stock_query,
+)
+from chatbot.question_classifier import (
+    classify_question,
+    clarification_message,
+    is_off_topic_classification,
+    needs_classification,
+    route_by_classification,
+)
+from chatbot.schema_driven_sql import generate_sql_from_schema
+from chatbot.result_validator import (
+    filter_results_for_question,
+    results_look_wrong,
+)
+from chatbot.order_sql import try_order_query
+from chatbot.context_resolver import resolve_follow_up_question, try_machines_for_order_query
+from chatbot.groq_client import groq_follow_ups, is_groq_enabled
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -140,12 +170,15 @@ class HistoryService:
             self.enabled = False
             return []
 
-    def save(self, session_id: str, question: str, answer: str):
+    def save(self, session_id: str, question: str, answer: str, data: Optional[List[Dict]] = None):
         if not self.enabled or self.r is None:
             return
         key = f"chat:{session_id}"
         try:
-            self.r.lpush(key, json_dumps({"role": "assistant", "content": answer}))
+            payload = {"role": "assistant", "content": answer}
+            if data:
+                payload["data"] = data[:5]
+            self.r.lpush(key, json_dumps(payload))
             self.r.lpush(key, json_dumps({"role": "user", "content": question}))
             self.r.ltrim(key, 0, 19)
             self.r.expire(key, 86400)
@@ -175,25 +208,23 @@ def is_greeting_only(question: str) -> bool:
     return bool(GREETING_RE.match(normalize_question(question)))
 
 
-def build_scope_guidance(question: str) -> Optional[Dict[str, Any]]:
+def build_scope_guidance(question: str, ctx: Optional[UserContext] = None) -> Optional[Dict[str, Any]]:
     q = normalize_question(question)
+    ctx = ctx or UserContext()
+    role_prompts = get_role_suggestions(ctx)
     if not q:
         return {
             "answer": "Ask a question about your CMF data. For example: *show all orders* or *parts for SO-001*.",
             "sql": "",
             "data": [],
-            "suggestions": ["Show all orders", "List all machines", "Stock for EN8"],
+            "suggestions": role_prompts[:3],
         }
     if is_greeting_only(q):
         return {
-            "answer": (
-                "Hi! I can help with your CMF manufacturing data.\n\n"
-                "Ask about orders, parts, operations, schedules, machines, inventory, "
-                "quality, customers, vendors, or operators."
-            ),
+            "answer": personalized_greeting(ctx),
             "sql": "",
             "data": [],
-            "suggestions": ["Show all orders", "Parts for SO-001", "Machine status"],
+            "suggestions": role_prompts[:3],
         }
     if is_clearly_off_topic(q):
         return {
@@ -215,7 +246,18 @@ def get_context_preamble(question: str, data: List[Dict]) -> str:
         return ""
     
     q = question.lower()
+
+    if re.search(r"\b(stock|inventory|quantity|level|available)\b", q) and re.search(
+        r"\b(schedule|scheduled|planned|operation)\b", q
+    ):
+        return "Stock availability for scheduled operations (tools and materials):"
+    if re.search(r"\b(due\s*date|expected\s+date|completion|deadline)\b", q) and "order" in q:
+        return "Here is the due date for your order:"
+    if re.search(r"\bstock\b", q) and "order" in q:
+        return "Here is the material stock for parts on this order:"
     
+    if 'order' in q and 'machine' in q:
+        return "Here are the machines assigned to your order:"
     if 'order' in q and ('part' in q or 'component' in q or 'bom' in q):
         return "Here are the parts belonging to your order:"
     if 'order' in q and 'operation' in q:
@@ -231,6 +273,8 @@ def get_context_preamble(question: str, data: List[Dict]) -> str:
     if 'work center' in q or 'workcenter' in q:
         return "Here are the work centers:"
     if 'tool' in q:
+        if 'schedule' in q or 'machine' in q or 'operation' in q:
+            return "Here are the tools required for scheduled operations on machines:"
         return "Here are the tools:"
     if 'operator' in q or 'worker' in q:
         return "Here are the operators:"
@@ -239,6 +283,8 @@ def get_context_preamble(question: str, data: List[Dict]) -> str:
     if 'product' in q:
         return "Here are the products:"
     if 'material' in q or 'stock' in q:
+        if 'part' in q:
+            return "Here is the stock level for your part:"
         return "Here is the material stock:"
     if 'vendor' in q or 'supplier' in q:
         return "Here are the vendors:"
@@ -272,73 +318,15 @@ def get_context_preamble(question: str, data: List[Dict]) -> str:
     return "Here are the results:"
 
 
-def get_follow_up_suggestions(question: str, data: List[Dict]) -> List[str]:
-    """Generate follow-up suggestions based on query type and data context."""
-    q = question.lower()
-
-    if not data:
-        from chatbot.suggestions import get_dynamic_suggestions
-        dynamic = get_dynamic_suggestions()
-        hints = []
-        if "stock" in q or "material" in q:
-            hints = [p for p in dynamic["from_database"] if "stock" in p.lower()][:2]
-            hints += ["Show all raw material stock", "List all raw materials"]
-        elif "operation" in q:
-            hints = ["In-progress operations", "Production logs", "Planned schedule"]
-        elif "order" in q:
-            hints = [p for p in dynamic["from_database"] if "order" in p.lower()][:3]
-        else:
-            hints = dynamic["prompts"][:3]
-        return hints[:3]
-
-    suggestions = []
-    
-    # Extract context from first row for more specific suggestions
-    first_row = data[0] if data else {}
-    
-    if 'order' in q:
-        # Get the order identifier (sale_order_number or id)
-        order_id = first_row.get('sale_order_number') or first_row.get('id')
-        if order_id:
-            suggestions.append(f"Show parts for order {order_id}")
-            suggestions.append(f"Show operations for order {order_id}")
-            suggestions.append(f"Show schedule status for order {order_id}")
-        else:
-            suggestions.append("Show parts for this order")
-            suggestions.append("Show operations for this order")
-            suggestions.append("Show schedule status for this order")
-    if 'part' in q or 'component' in q:
-        part_name = first_row.get('part_name') or first_row.get('name')
-        if part_name:
-            suggestions.append(f"Show operations for {part_name}")
-            suggestions.append(f"Show raw materials for {part_name}")
-        else:
-            suggestions.append("Show operations for these parts")
-            suggestions.append("Show raw materials for these parts")
-    if 'operation' in q:
-        suggestions.append("Show production logs for these operations")
-        suggestions.append("Show machine status")
-    if 'machine' in q:
-        suggestions.append("Show work centers")
-        suggestions.append("Show machine breakdowns")
-    if 'operator' in q or 'worker' in q:
-        operator_name = first_row.get('user_name') or first_row.get('name')
-        if operator_name:
-            suggestions.append(f"Show leaves for {operator_name}")
-            suggestions.append(f"Show tools issued to {operator_name}")
-        else:
-            suggestions.append("Show operator leaves")
-            suggestions.append("Show tools issued to operators")
-    if 'material' in q or 'stock' in q:
-        material_name = first_row.get('material_name') or first_row.get('name')
-        if material_name:
-            suggestions.append(f"Show stock for {material_name}")
-            suggestions.append("Show all raw materials")
-        else:
-            suggestions.append("Show all raw materials")
-            suggestions.append("Show vendors")
-    
-    return suggestions[:3]  # Limit to 3 suggestions
+def get_follow_up_suggestions(
+    question: str, data: List[Dict], ctx: Optional[UserContext] = None,
+) -> List[str]:
+    from chatbot.follow_ups import build_follow_up_suggestions
+    if is_groq_enabled() and data:
+        ai_suggestions = groq_follow_ups(question, data)
+        if len(ai_suggestions) >= 2:
+            return ai_suggestions[:3]
+    return build_follow_up_suggestions(question, data, ctx)
 
 
 def format_answer(question: str, data: List[Dict], *, broad: bool = False) -> str:
@@ -410,7 +398,7 @@ def get_llm():
     if _LLM is None:
         _LLM = ChatOllama(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            model=os.getenv("OLLAMA_MODEL", "codellama"),
+            model=os.getenv("OLLAMA_MODEL", "llama3.2:latest"),
             temperature=0,
             num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "8192")),
             stop=["Human:", "User:"],
@@ -418,11 +406,27 @@ def get_llm():
     return _LLM
 
 
-def invoke_llm(question: str, history: List[Dict]) -> str:
-    """Call Ollama with a timeout so the API never hangs forever."""
-    msgs = build_messages(question, history)
-    timeout = int(os.getenv("OLLAMA_TIMEOUT_SEC", "8"))
+def invoke_llm(question: str, history: List[Dict], ctx: Optional[UserContext] = None) -> str:
+    """Generate SQL via Groq when configured, otherwise Ollama."""
+    msgs = build_messages(question, history, ctx)
 
+    if is_groq_enabled():
+        groq_msgs = []
+        for m in msgs:
+            if isinstance(m, SystemMessage):
+                groq_msgs.append({"role": "system", "content": m.content})
+            elif isinstance(m, HumanMessage):
+                groq_msgs.append({"role": "user", "content": m.content})
+            elif isinstance(m, AIMessage):
+                groq_msgs.append({"role": "assistant", "content": m.content})
+        raw = groq_chat(groq_msgs, max_tokens=900)
+        if raw:
+            return raw
+        raise RuntimeError(
+            "Groq API did not respond. Check GROQ_API_KEY and rate limits at console.groq.com."
+        )
+
+    timeout = int(os.getenv("OLLAMA_TIMEOUT_SEC", "8"))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(get_llm().invoke, msgs)
         try:
@@ -437,35 +441,61 @@ def invoke_llm(question: str, history: List[Dict]) -> str:
 def finish_response(
     question: str, sql: str, data: List[Dict], session_id: str,
     *, broad: bool = False, history: HistoryService = None,
+    ctx: Optional[UserContext] = None,
 ) -> Dict:
     answer = format_answer(question, data, broad=broad)
-    suggestions = get_follow_up_suggestions(question, data)
+    suggestions = get_follow_up_suggestions(question, data, ctx)
     if history:
-        history.save(session_id, question, answer)
+        history.save(session_id, question, answer, data=data)
     return {"answer": answer, "sql": sql, "data": data, "suggestions": suggestions}
 
 
-def no_data_response(question: str, session_id: str, history: HistoryService) -> Dict:
+def clarify_response(
+    question: str,
+    session_id: str,
+    history: HistoryService,
+    ctx: Optional[UserContext] = None,
+    clf=None,
+) -> Dict:
+    """Ask user to rephrase instead of returning wrong table data."""
+    from chatbot.question_classifier import QuestionClassification
+
+    clf = clf or QuestionClassification()
+    answer = clarification_message(question, clf)
+    suggestions = get_follow_up_suggestions(question, [], ctx)
+    if history:
+        history.save(session_id, question, answer)
+    return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
+
+
+def no_data_response(
+    question: str, session_id: str, history: HistoryService,
+    ctx: Optional[UserContext] = None,
+) -> Dict:
     """Fast friendly reply when nothing matched — no LLM wait."""
     from chatbot.intent_queries import detect_fuzzy_intents
 
+    ctx = ctx or UserContext()
     intents = detect_fuzzy_intents(question)
     if intents:
         answer = (
             f"No {intents[0]} records found in the database right now.\n\n"
             "Try a different keyword or one of the suggested questions below."
         )
-        suggestions = get_follow_up_suggestions(question, [])
+        suggestions = get_follow_up_suggestions(question, [], ctx)
     else:
         answer = OUT_OF_SCOPE_MESSAGE
-        suggestions = ["Show all orders", "Pending operations", "Show all customers"]
+        suggestions = get_role_suggestions(ctx)[:3]
 
     history.save(session_id, question, answer)
     return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
 
 
-def build_messages(question: str, history: List[Dict]) -> list:
+def build_messages(question: str, history: List[Dict], ctx: Optional[UserContext] = None) -> list:
     hints = get_intent_hints(question)
+    user_hints = get_user_intent_hints(ctx or UserContext())
+    if user_hints:
+        hints = f"{hints}\n{user_hints}"
     system = build_system_prompt(question, hints)
     msgs = [SystemMessage(content=system)]
     for h in history:
@@ -507,7 +537,7 @@ def execute_sql(sql: str) -> Tuple[List[Dict], str]:
 
 # Words that signal the question is about "parts of an order" — used to trigger
 # the safety-net retry when the LLM's SQL returns 0 rows.
-PARTS_KEYWORDS = ("part", "component", "item", "bom", "piece", "material")
+PARTS_KEYWORDS = ("part", "component", "item", "bom", "piece")
 OPS_KEYWORDS = ("operation", "step", "process", "machining")
 ORDER_ID_RE = re.compile(r"order\s*#?(\d+)", re.IGNORECASE)
 
@@ -559,23 +589,143 @@ def maybe_retry_with_fallback(question: str, sql: str, data: List[Dict]) -> Tupl
     return sql, data, False
 
 
+def try_schema_driven_query(question: str, clf=None) -> Tuple[Optional[str], List[Dict]]:
+    """Groq + live DB schema — portable across different PostgreSQL databases."""
+    intents = [clf.intent] if clf and getattr(clf, "intent", None) not in (None, "unknown", "off_topic") else None
+    sql = generate_sql_from_schema(question, intents)
+    if not sql:
+        return None, []
+    ok, _ = SQLValidator.validate(sql)
+    if not ok:
+        return None, []
+    data, err = execute_sql(sql)
+    if err or not data:
+        return None, []
+    filtered = filter_results_for_question(question, data)
+    return sql, filtered if filtered is not None else data
+
+
+def apply_result_validation(
+    question: str,
+    sql: str,
+    data: List[Dict],
+    clf=None,
+) -> Tuple[str, List[Dict], bool]:
+    """
+    Filter rows to match user's specific terms.
+    If results look wrong, retry with schema-driven SQL.
+    Returns (sql, data, used_schema_retry).
+    """
+    if not data:
+        return sql, data, False
+
+    if results_look_wrong(question, data):
+        alt_sql, alt_data = try_schema_driven_query(question, clf)
+        if alt_data:
+            return alt_sql, alt_data, True
+        filtered = filter_results_for_question(question, data)
+        return sql, filtered or [], False
+
+    filtered = filter_results_for_question(question, data)
+    if filtered is not None:
+        return sql, filtered, False
+    return sql, data, False
+
+
 class ChatService:
     def __init__(self):
         self.history = HistoryService()
 
-    def process(self, question: str, session_id: str) -> Dict:
+    def process(self, question: str, session_id: str, ctx: Optional[UserContext] = None) -> Dict:
+        ctx = ctx or UserContext()
+        try:
+            return self._process(question, session_id, ctx)
+        except Exception:
+            import logging
+            logging.exception("Chatbot processing failed for: %s", question)
+            answer = (
+                "Sorry, I could not process that question right now.\n\n"
+                "Please try again with a clear keyword — e.g. *show all raw material stock*, "
+                "*parts for order SO-001*, or *stock for EN8*."
+            )
+            suggestions = get_role_suggestions(ctx)[:3]
+            self.history.save(session_id, question, answer)
+            return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
+
+    def _process(self, question: str, session_id: str, ctx: UserContext) -> Dict:
+        hist = self.history.get(session_id)
         question = normalize_question(question)
-        guidance = build_scope_guidance(question)
+        question = resolve_follow_up_question(question, hist)
+        guidance = build_scope_guidance(question, ctx)
         if guidance:
             self.history.save(session_id, question, guidance["answer"])
             return guidance
 
-        sql, matched = try_quick_pattern(question)
+        clf = None
+        if is_groq_enabled():
+            clf = classify_question(question)
+            if is_off_topic_classification(clf):
+                answer = clarification_message(question, clf)
+                suggestions = get_follow_up_suggestions(question, [], ctx)
+                self.history.save(session_id, question, answer)
+                return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
+            if clf.confidence >= 0.7:
+                sql, matched = route_by_classification(question, clf)
+                if matched:
+                    data, err = execute_sql(sql)
+                    if not err and data:
+                        sql, data, _ = apply_result_validation(question, sql, data, clf)
+                        if data:
+                            return finish_response(
+                                question, sql, data, session_id,
+                                history=self.history, ctx=ctx,
+                            )
+
+        sql, matched = try_user_scoped_query(question, ctx)
         fast_path = matched
+
+        if not matched:
+            sql, matched = try_order_query(question)
+            fast_path = matched
+
+        if not matched:
+            sql, matched = try_machines_for_order_query(question)
+            fast_path = matched
+
+        if not matched:
+            sql, matched = try_quick_pattern(question)
+            fast_path = matched
+
+        if not matched:
+            sql, matched = try_part_stock_query(question)
+            fast_path = matched
+
+        if not matched:
+            sql, matched = try_tool_query(question)
+            fast_path = matched
+
+        if not matched:
+            sql, matched = try_material_query(question)
+            fast_path = matched
+            if matched and needs_classification(question):
+                clf = classify_question(question)
+                if clf.confidence >= 0.65 and clf.intent not in ("materials", "inventory", "unknown"):
+                    alt_sql, alt_matched = route_by_classification(question, clf)
+                    if alt_matched:
+                        sql, matched = alt_sql, True
+                elif clf.confidence < 0.5 or clf.intent == "unknown":
+                    return clarify_response(question, session_id, self.history, ctx, clf)
 
         if not matched:
             sql, matched = try_intent_query(question)
             fast_path = matched
+            if matched and needs_classification(question):
+                clf = classify_question(question)
+                if clf.confidence < 0.55:
+                    return clarify_response(question, session_id, self.history, ctx, clf)
+                alt_sql, alt_matched = route_by_classification(question, clf)
+                if alt_matched and clf.confidence >= 0.65:
+                    sql, matched = alt_sql, True
 
         # Fast path — pattern/intent matched: run SQL immediately, skip LLM entirely
         if fast_path and sql:
@@ -586,9 +736,24 @@ class ChatService:
                     sql=sql,
                 )
             if not data:
-                return no_data_response(question, session_id, self.history)
+                alt_sql, alt_data = try_schema_driven_query(question, clf)
+                if alt_data:
+                    return finish_response(
+                        question, alt_sql, alt_data, session_id,
+                        history=self.history, ctx=ctx,
+                    )
+                return no_data_response(question, session_id, self.history, ctx)
+            sql, data, _ = apply_result_validation(question, sql, data, clf)
+            if not data:
+                alt_sql, alt_data = try_schema_driven_query(question, clf)
+                if alt_data:
+                    return finish_response(
+                        question, alt_sql, alt_data, session_id,
+                        history=self.history, ctx=ctx,
+                    )
+                return no_data_response(question, session_id, self.history, ctx)
             return finish_response(
-                question, sql, data, session_id, history=self.history,
+                question, sql, data, session_id, history=self.history, ctx=ctx,
             )
 
         data: List[Dict] = []
@@ -596,25 +761,48 @@ class ChatService:
 
         if not matched:
             # Gibberish / no CMF keywords — instant reply, never call LLM
-            if not has_cmf_signal(question):
-                return no_data_response(question, session_id, self.history)
+            if not has_cmf_signal(question) and not is_groq_enabled():
+                return no_data_response(question, session_id, self.history, ctx)
+
+            if clf is None:
+                clf = classify_question(question)
+            if is_off_topic_classification(clf):
+                return clarify_response(question, session_id, self.history, ctx, clf)
+            if clf.confidence >= 0.65:
+                sql, matched = route_by_classification(question, clf)
+                if matched:
+                    data, err = execute_sql(sql)
+                    if not err and data:
+                        return finish_response(
+                            question, sql, data, session_id,
+                            history=self.history, ctx=ctx,
+                        )
+            if clf.confidence < 0.5 or clf.intent == "unknown":
+                return clarify_response(question, session_id, self.history, ctx, clf)
+
+            alt_sql, alt_data = try_schema_driven_query(question, clf)
+            if alt_data:
+                return finish_response(
+                    question, alt_sql, alt_data, session_id,
+                    history=self.history, ctx=ctx,
+                )
 
             broad_sql, broad_data = run_broad_search(question)
             if broad_data:
                 return finish_response(
                     question, broad_sql, broad_data, session_id,
-                    broad=True, history=self.history,
+                    broad=True, history=self.history, ctx=ctx,
                 )
 
             hist = self.history.get(session_id)
             try:
-                raw = invoke_llm(question, hist)
+                raw = invoke_llm(question, hist, ctx)
             except TimeoutError as e:
                 broad_sql, broad_data = run_broad_search(question)
                 if broad_data:
                     return finish_response(
                         question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history,
+                        broad=True, history=self.history, ctx=ctx,
                     )
                 return make_error_response(str(e))
             except Exception:
@@ -622,10 +810,12 @@ class ChatService:
                 if broad_data:
                     return finish_response(
                         question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history,
+                        broad=True, history=self.history, ctx=ctx,
                     )
                 return make_error_response(
-                    "The chatbot model is not available right now. "
+                    "Groq API is not responding. Check GROQ_API_KEY and rate limits at console.groq.com."
+                    if is_groq_enabled()
+                    else "The chatbot model is not available right now. "
                     "Please check whether Ollama is running and the configured model is installed."
                 )
 
@@ -634,9 +824,9 @@ class ChatService:
                 if broad_data:
                     return finish_response(
                         question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history,
+                        broad=True, history=self.history, ctx=ctx,
                     )
-                return no_data_response(question, session_id, self.history)
+                return no_data_response(question, session_id, self.history, ctx)
 
             sql = SQLValidator.extract(raw)
 
@@ -662,21 +852,12 @@ class ChatService:
                 sql, data, used_broad = broad_sql, broad_data, True
 
         if not data:
-            return no_data_response(question, session_id, self.history)
+            return no_data_response(question, session_id, self.history, ctx)
 
         return finish_response(
             question, sql, data, session_id,
-            broad=used_broad, history=self.history,
+            broad=used_broad, history=self.history, ctx=ctx,
         )
-
-    async def stream(self, question: str, session_id: str) -> AsyncGenerator[str, None]:
-
-        def sse(payload: dict) -> str:
-            return f"data: {json_dumps(payload)}\n\n"
-
-        result = self.process(question, session_id)
-        yield sse({"type": "final", **result})
-        yield "data: [DONE]\n\n"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -695,26 +876,51 @@ def get_svc():
     return _svc
 
 
+def _ctx_from_body(body: ChatRequest) -> UserContext:
+    return UserContext(
+        user_id=body.user_id,
+        user_name=body.user_name,
+        role=body.role,
+        center=body.center,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
 async def chat(request: Request, body: ChatRequest):
     try:
+        ctx = _ctx_from_body(body)
         result = await asyncio.to_thread(
-            get_svc().process, body.question, body.session_id,
+            get_svc().process, body.question, body.session_id, ctx,
         )
         return ChatResponse(**result)
     except RateLimitExceeded:
         raise HTTPException(429, "Too many requests.")
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except Exception:
+        import logging
+        logging.exception("Chatbot API error")
+        ctx = _ctx_from_body(body)
+        from chatbot.user_context import get_role_suggestions
+        return ChatResponse(
+            answer=(
+                "Sorry, something went wrong on the server.\n\n"
+                "Please rephrase your question or try: *show all raw material stock*, "
+                "*list all orders*, *pending operations*."
+            ),
+            sql="",
+            data=[],
+            suggestions=get_role_suggestions(ctx)[:3],
+        )
 
 
 @router.post("/chat/stream")
 @limiter.limit("30/minute")
 async def chat_stream(request: Request, body: ChatRequest):
+    ctx = _ctx_from_body(body)
+
     async def generate():
         result = await asyncio.to_thread(
-            get_svc().process, body.question, body.session_id,
+            get_svc().process, body.question, body.session_id, ctx,
         )
         yield f"data: {json_dumps({'type': 'final', **result})}\n\n"
         yield "data: [DONE]\n\n"
@@ -733,9 +939,15 @@ async def clear_history(session_id: str):
 
 
 @router.get("/suggestions")
-async def suggestions():
+async def suggestions(
+    user_id: Optional[int] = None,
+    user_name: Optional[str] = None,
+    role: Optional[str] = None,
+    center: Optional[str] = None,
+):
     from chatbot.suggestions import get_dynamic_suggestions
-    return await asyncio.to_thread(get_dynamic_suggestions)
+    ctx = UserContext(user_id=user_id, user_name=user_name, role=role, center=center)
+    return await asyncio.to_thread(get_dynamic_suggestions, ctx)
 
 
 @router.get("/health")
@@ -749,7 +961,8 @@ async def health():
         table_count = 0
     return {
         "status": "ok",
-        "model": os.getenv("OLLAMA_MODEL", "codellama"),
+        "ai_provider": "groq" if is_groq_enabled() else "ollama",
+        "model": os.getenv("GROQ_MODEL", os.getenv("OLLAMA_MODEL", "llama3.2:latest")),
         "patterns": len(__import__("chatbot.query_patterns", fromlist=["QUICK_SQL_PATTERNS"]).QUICK_SQL_PATTERNS),
         "schema_tables": table_count,
     }

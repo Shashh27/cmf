@@ -8,6 +8,7 @@ from datetime import time
 import os
 import io
 import csv
+import re
 from pydantic import BaseModel
 import pdfplumber
 from docx import Document as DocxDocument
@@ -64,6 +65,38 @@ def _match_column(header: str) -> Optional[str]:
     return None
 
 
+def _sanitize_singleline_text(value) -> str:
+    """Flatten cell text for op number, times, names, etc."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\(cid:\d+\)", " ", text)
+    text = re.sub(r"_x000d_", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"_x000a_", " ", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text.replace("\r", " ").replace("\n", " ")).strip()
+
+
+def _sanitize_multiline_text(value) -> Optional[str]:
+    """
+    Preserve line breaks for work instructions / notes.
+    Handles PDF (cid:13)/(cid:10), Excel _x000d_/_x000a_, and normal CR/LF.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    text = re.sub(r"\(cid:10\)", "\n", text)
+    text = re.sub(r"\(cid:13\)", "\n", text)
+    text = re.sub(r"_x000d_", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"_x000a_", "\n", text, flags=re.IGNORECASE)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Collapse blank lines left by double PDF/Excel line-break markers
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip() or None
+
+
 def _find_header_row(rows: list) -> int:
     """
     Scan rows top-to-bottom and return the index of the first row
@@ -103,10 +136,11 @@ def _parse_rows(rows: list) -> List[OperationPreview]:
 
     result: List[OperationPreview] = []
     for row in rows[header_idx + 1:]:
-        # Pad row to at least the length of the header
-        cells = [(str(c) if c is not None else "").strip() for c in row]
-        while len(cells) <= max(header_map.values()):
-            cells.append("")
+        raw_cells = [str(c) if c is not None else "" for c in row]
+        while len(raw_cells) <= max(header_map.values()):
+            raw_cells.append("")
+
+        cells = [_sanitize_singleline_text(c) for c in raw_cells]
 
         # Skip completely empty rows and meta/note rows that slip through
         if not "".join(cells).strip():
@@ -124,8 +158,8 @@ def _parse_rows(rows: list) -> List[OperationPreview]:
             "operation_name":    op_name,
             "setup_time":        cells[header_map["setup_time"]]        if "setup_time"        in header_map else None,
             "cycle_time":        cells[header_map["cycle_time"]]        if "cycle_time"        in header_map else None,
-            "work_instructions": cells[header_map["work_instructions"]] if "work_instructions" in header_map else None,
-            "notes":             cells[header_map["notes"]]             if "notes"             in header_map else None,
+            "work_instructions": _sanitize_multiline_text(raw_cells[header_map["work_instructions"]]) if "work_instructions" in header_map else None,
+            "notes":             _sanitize_multiline_text(raw_cells[header_map["notes"]])             if "notes"             in header_map else None,
         }
         # Replace empty strings with None for optional fields
         for k in ("setup_time", "cycle_time", "work_instructions", "notes"):

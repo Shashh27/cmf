@@ -725,6 +725,7 @@ class DocumentExtractedDataBase(BaseModel):
     planned_height: Optional[float] = None
     planned_inner_diameter: Optional[float] = None
     planned_outer_diameter: Optional[float] = None
+    planned_raw_material_id: Optional[int] = None
     planned_by: Optional[int] = None
 
 
@@ -749,6 +750,7 @@ class DocumentExtractedDataUpdate(BaseModel):
     planned_height: Optional[float] = None
     planned_inner_diameter: Optional[float] = None
     planned_outer_diameter: Optional[float] = None
+    planned_raw_material_id: Optional[int] = None
     planned_by: Optional[int] = None
 
 

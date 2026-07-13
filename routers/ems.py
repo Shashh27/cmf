@@ -136,6 +136,58 @@ def _machine_dict(db: Session):
     return {m.id: m.make for m in db.query(Machine).all()}
 
 
+def _mean(*values):
+    nums = [v for v in values if v is not None]
+    return round(sum(nums) / len(nums), 4) if nums else None
+
+
+def _live_row_parameters(row):
+    """Map MachineEMSLive row to API payload using only DB columns + derived averages."""
+    return {
+        "machine_id": row.machine_id,
+        "status": row.status,
+        "timestamp": row.timestamp.isoformat(),
+        "phase_a_voltage": row.phase_a_voltage,
+        "phase_b_voltage": row.phase_b_voltage,
+        "phase_c_voltage": row.phase_c_voltage,
+        "avg_phase_voltage": _mean(row.phase_a_voltage, row.phase_b_voltage, row.phase_c_voltage),
+        "line_ab_voltage": None,
+        "line_bc_voltage": None,
+        "line_ca_voltage": None,
+        "avg_line_voltage": None,
+        "phase_a_current": row.phase_a_current,
+        "phase_b_current": row.phase_b_current,
+        "phase_c_current": row.phase_c_current,
+        "avg_three_phase_current": _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current),
+        "power_factor": None,
+        "frequency": row.frequency,
+        "total_instantaneous_power": row.total_instantaneous_power,
+        "active_energy_delivered": row.active_energy_delivered,
+    }
+
+
+def _history_row_payload(row):
+    avg_current = _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current)
+    avg_voltage = _mean(row.phase_a_voltage, row.phase_b_voltage, row.phase_c_voltage)
+    return {
+        "timestamp": row.timestamp.isoformat(),
+        "current": avg_current,
+        "power": row.total_instantaneous_power,
+        "energy": row.active_energy_delivered,
+        "avg_three_phase_current": avg_current,
+        "total_instantaneous_power": row.total_instantaneous_power,
+        "active_energy_delivered": row.active_energy_delivered,
+        "phase_a_voltage": row.phase_a_voltage,
+        "phase_b_voltage": row.phase_b_voltage,
+        "phase_c_voltage": row.phase_c_voltage,
+        "avg_phase_voltage": avg_voltage,
+        "phase_a_current": row.phase_a_current,
+        "phase_b_current": row.phase_b_current,
+        "phase_c_current": row.phase_c_current,
+        "frequency": row.frequency,
+    }
+
+
 def _all_statuses(db: Session):
     md = _machine_dict(db)
     return [
@@ -155,26 +207,8 @@ def _all_parameters(db: Session):
     md = _machine_dict(db)
     return [
         {
-            "machine_id": r.machine_id,
             "machine_name": md.get(r.machine_id, f"Machine-{r.machine_id}"),
-            "status": r.status,
-            "timestamp": r.timestamp.isoformat(),
-            "phase_a_voltage": r.phase_a_voltage,
-            "phase_b_voltage": r.phase_b_voltage,
-            "phase_c_voltage": r.phase_c_voltage,
-            "avg_phase_voltage": r.avg_phase_voltage,
-            "line_ab_voltage": r.line_ab_voltage,
-            "line_bc_voltage": r.line_bc_voltage,
-            "line_ca_voltage": r.line_ca_voltage,
-            "avg_line_voltage": r.avg_line_voltage,
-            "phase_a_current": r.phase_a_current,
-            "phase_b_current": r.phase_b_current,
-            "phase_c_current": r.phase_c_current,
-            "avg_three_phase_current": r.avg_three_phase_current,
-            "power_factor": r.power_factor,
-            "frequency": r.frequency,
-            "total_instantaneous_power": r.total_instantaneous_power,
-            "active_energy_delivered": r.active_energy_delivered,
+            **_live_row_parameters(r),
         }
         for r in db.query(MachineEMSLive).all()
     ]
@@ -187,17 +221,9 @@ def _single_machine_params(db: Session, machine_id: int):
     if not row:
         return {"machine_id": machine_id, "machine_name": name, "status": "OFFLINE", "timestamp": datetime.now().isoformat()}
     return {
-        "machine_id": machine_id, "machine_name": name, "status": row.status,
-        "timestamp": row.timestamp.isoformat(),
-        "phase_a_voltage": row.phase_a_voltage, "phase_b_voltage": row.phase_b_voltage,
-        "phase_c_voltage": row.phase_c_voltage, "avg_phase_voltage": row.avg_phase_voltage,
-        "line_ab_voltage": row.line_ab_voltage, "line_bc_voltage": row.line_bc_voltage,
-        "line_ca_voltage": row.line_ca_voltage, "avg_line_voltage": row.avg_line_voltage,
-        "phase_a_current": row.phase_a_current, "phase_b_current": row.phase_b_current,
-        "phase_c_current": row.phase_c_current, "avg_three_phase_current": row.avg_three_phase_current,
-        "power_factor": row.power_factor, "frequency": row.frequency,
-        "total_instantaneous_power": row.total_instantaneous_power,
-        "active_energy_delivered": row.active_energy_delivered,
+        "machine_id": machine_id,
+        "machine_name": name,
+        **_live_row_parameters(row),
     }
 
 
@@ -390,6 +416,7 @@ def list_machines(db: Session = Depends(get_db)):
 
 
 @router.get("/live_recent")
+@router.get("/live_recent/")
 def live_recent(machine_id: int, db: Session = Depends(get_db)):
     row = db.query(MachineEMSLive).filter(MachineEMSLive.machine_id == machine_id).first()
     if not row:
@@ -400,23 +427,21 @@ def live_recent(machine_id: int, db: Session = Depends(get_db)):
         "machine_name": machine.make if machine else f"Machine-{machine_id}",
         "power": row.total_instantaneous_power,
         "energy": row.active_energy_delivered,
-        "power_factor": row.power_factor,
         "frequency": row.frequency,
         "timestamp": row.timestamp.isoformat(),
         "status": row.status,
         "phase_a_voltage": row.phase_a_voltage,
         "phase_b_voltage": row.phase_b_voltage,
         "phase_c_voltage": row.phase_c_voltage,
-        "line_ab_voltage": row.line_ab_voltage,
-        "line_bc_voltage": row.line_bc_voltage,
-        "line_ca_voltage": row.line_ca_voltage,
         "phase_a_current": row.phase_a_current,
         "phase_b_current": row.phase_b_current,
         "phase_c_current": row.phase_c_current,
+        "avg_three_phase_current": _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current),
     }
 
 
 @router.get("/all_machine_states")
+@router.get("/all_machine_states/")
 def all_machine_states(db: Session = Depends(get_db)):
     # Fetch status from production_monitoring.machine_live_status
     query = text("""
@@ -457,15 +482,7 @@ def get_machine_history(
         .order_by(MachineEMSHistory.timestamp.asc())
         .all()
     )
-    return [
-        {
-            "timestamp": r.timestamp.isoformat(),
-            "current": r.avg_three_phase_current,
-            "power": r.total_instantaneous_power,
-            "energy": r.active_energy_delivered,
-        }
-        for r in rows
-    ]
+    return [_history_row_payload(r) for r in rows]
 
 
 @router.get("/get_production_data")

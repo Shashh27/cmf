@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from typing import List
 from DB.database import get_db
 from DB.models.configuration import Customer
+from DB.models.oms import Order as OrderModel
 from DB.schemas.configuration import Customer as CustomerResponse, CustomerCreate, CustomerUpdate
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -52,6 +53,17 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Check if customer has existing orders
+    existing_orders = db.query(OrderModel).filter(
+        OrderModel.customer_id == customer_id
+    ).first()
+    if existing_orders:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete customer '{customer.company_name}' — they have existing orders. "
+                   "Remove or reassign those orders first."
+        )
     
     db.delete(customer)
     db.commit()

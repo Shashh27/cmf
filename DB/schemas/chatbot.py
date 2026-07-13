@@ -18,17 +18,28 @@ class SchemaService:
     @classmethod
     def load_schema(cls) -> Dict[str, Dict[str, List[str]]]:
         """
-        Load table definitions from application PostgreSQL schemas only.
-        Skips system catalogs to avoid regtype/regrole SAWarnings.
+        Load table definitions from the connected PostgreSQL database.
+        Auto-discovers application schemas — not hardcoded to one CMF install.
         """
         if cls._schema_cache is not None:
             return cls._schema_cache
         
         inspector = inspect(engine)
         schema_info = {}
+        system_schemas = {"pg_catalog", "information_schema", "pg_toast"}
+
+        available = [
+            s for s in inspector.get_schema_names()
+            if s not in system_schemas
+        ]
+        # Prefer known CMF schemas first, then any other schemas in the DB
+        schemas_to_load = list(RELEVANT_SCHEMAS)
+        for s in available:
+            if s not in schemas_to_load:
+                schemas_to_load.append(s)
         
-        for schema in RELEVANT_SCHEMAS:
-            if schema not in inspector.get_schema_names():
+        for schema in schemas_to_load:
+            if schema not in available:
                 continue
             schema_info[schema] = {}
             tables = inspector.get_table_names(schema=schema)

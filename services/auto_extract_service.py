@@ -9,6 +9,7 @@ from DB.models.inventory import (
 )
 from DB.models.oms import Part as PartModel, Order as OrderModel
 from services.raw_material_calculations import RawMaterialCalculationService
+from services.stock_recommendation_service import StockRecommendationService
 
 
 class AutoExtractService:
@@ -117,27 +118,8 @@ class AutoExtractService:
     
     @staticmethod
     def find_material_by_name(db: Session, material_name: str) -> Optional[RawMaterialModel]:
-        """Find material by name (case-insensitive, ignores spaces and special characters)"""
-        import re
-        # Normalize the search term: remove spaces, special characters, convert to lowercase
-        normalized_search = re.sub(r'[^a-zA-Z0-9]', '', material_name).lower()
-        
-        # Get all materials and normalize their names for comparison
-        all_materials = db.query(RawMaterialModel).all()
-        for material in all_materials:
-            if material.material_name:
-                normalized_db_name = re.sub(r'[^a-zA-Z0-9]', '', material.material_name).lower()
-                if normalized_search == normalized_db_name:
-                    return material
-        
-        # Fallback to partial match if exact normalized match fails
-        for material in all_materials:
-            if material.material_name:
-                normalized_db_name = re.sub(r'[^a-zA-Z0-9]', '', material.material_name).lower()
-                if normalized_search in normalized_db_name or normalized_db_name in normalized_search:
-                    return material
-        
-        return None
+        """Find material by name — delegates to StockRecommendationService (single canonical matcher)."""
+        return StockRecommendationService.find_best_material_by_name(db, material_name)
     
     @staticmethod
     def check_general_stock_availability(

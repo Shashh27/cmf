@@ -54,7 +54,9 @@ inventory.raw_material_stock(material_id, form_type, process_type, diameter, len
 inventory.raw_material_units(stock_id, total_length, remaining_length, status)
 inventory.raw_material_usage(raw_material_unit_id, part_id, used_length)
 inventory.vendors(id, company_name)  -- ONLY company_name
-inventory.tools_list(id, item_description, identification_code, make, quantity, location, type, category, sub_category)
+inventory.tools_list(id, item_description, identification_code, make, quantity, location, type, category_id, sub_category_id)
+inventory.categories(id, name, parent_id)  -- join for category name: category_id, sub_category_id
+oms.tools_with_part(tool_id, part_id, operation_id)  -- tools required per operation
 inventory.inventory_requests(tool_id, operator_id, project_id, part_id, operation_id, quantity, status)
 inventory.inventory_return_requests(requested_id, operator_id, returned_qty, status)
 inventory.tool_issues(tool_id, request_id, tool_issue_qty, operator_id, status, issue_category)

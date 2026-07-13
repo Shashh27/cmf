@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
 from DB.database import get_db
-from DB.models.oms import DocumentExtractedData as DocumentExtractedDataModel
+from DB.models.oms import DocumentExtractedData as DocumentExtractedDataModel, Part as PartModel
 from DB.schemas.oms import DocumentExtractedDataUpdate
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, RawMaterialUnit as RawMaterialUnitModel
 from services.stock_recommendation_service import StockRecommendationService
@@ -23,10 +23,112 @@ class PlannedRawMaterialRequest(BaseModel):
     planned_height: Optional[float] = None
     planned_inner_diameter: Optional[float] = None
     planned_outer_diameter: Optional[float] = None
+    planned_raw_material_id: Optional[int] = None
     user_id: int
 
 class BatchGetRequest(BaseModel):
     extracted_data_ids: List[int]
+
+class MaterialRecommendRequest(BaseModel):
+    material_name: str
+    max_recommendations: int = 10
+
+
+def _part_has_stock_assignment(db: Session, part_id: int) -> bool:
+    """True when part is linked to general stock unit or order (procured) stock."""
+    part = db.query(PartModel).filter(PartModel.id == part_id).first()
+    if not part:
+        return False
+    if part.raw_material_unit_id:
+        return True
+
+    order_stocks = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.source_type == "order",
+        RawMaterialStockModel.part_id.isnot(None),
+    ).all()
+    for stock in order_stocks:
+        if not stock.part_id:
+            continue
+        linked_part_ids = [
+            int(pid.strip()) for pid in stock.part_id.split(",") if pid.strip().isdigit()
+        ]
+        if part_id in linked_part_ids:
+            return True
+    return False
+
+
+def _ensure_planned_rm_editable(db: Session, extracted_entry: DocumentExtractedDataModel) -> None:
+    if _part_has_stock_assignment(db, extracted_entry.part_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change planned raw material because stock is already assigned or procured. Unlink stock first.",
+        )
+
+
+def _apply_planned_rm_fields(
+    extracted_entry: DocumentExtractedDataModel,
+    request: PlannedRawMaterialRequest,
+) -> None:
+    """Apply planned fields and clear dimensions not used by the selected form type."""
+    if request.planned_form_type is not None:
+        extracted_entry.planned_form_type = request.planned_form_type
+
+    extracted_entry.planned_diameter = None
+    extracted_entry.planned_breadth = None
+    extracted_entry.planned_height = None
+    extracted_entry.planned_inner_diameter = None
+    extracted_entry.planned_outer_diameter = None
+    extracted_entry.planned_length = None
+
+    form_type = request.planned_form_type or extracted_entry.planned_form_type
+    if form_type == "Round":
+        extracted_entry.planned_diameter = request.planned_diameter
+        extracted_entry.planned_length = request.planned_length
+    elif form_type == "Square":
+        extracted_entry.planned_breadth = request.planned_breadth
+        extracted_entry.planned_height = request.planned_height
+        extracted_entry.planned_length = request.planned_length
+    elif form_type == "Pipe":
+        extracted_entry.planned_inner_diameter = request.planned_inner_diameter
+        extracted_entry.planned_outer_diameter = request.planned_outer_diameter
+        extracted_entry.planned_length = request.planned_length
+    else:
+        if request.planned_diameter is not None:
+            extracted_entry.planned_diameter = request.planned_diameter
+        if request.planned_length is not None:
+            extracted_entry.planned_length = request.planned_length
+        if request.planned_breadth is not None:
+            extracted_entry.planned_breadth = request.planned_breadth
+        if request.planned_height is not None:
+            extracted_entry.planned_height = request.planned_height
+        if request.planned_inner_diameter is not None:
+            extracted_entry.planned_inner_diameter = request.planned_inner_diameter
+        if request.planned_outer_diameter is not None:
+            extracted_entry.planned_outer_diameter = request.planned_outer_diameter
+
+    if request.planned_raw_material_id is not None:
+        extracted_entry.planned_raw_material_id = request.planned_raw_material_id
+    if request.user_id is not None:
+        extracted_entry.planned_by = request.user_id
+
+@router.post("/recommend-materials")
+def recommend_materials(
+    request: MaterialRecommendRequest,
+    db: Session = Depends(get_db)
+):
+    """Recommend master raw materials for an extracted material name (fuzzy/partial match)."""
+    recommendations = StockRecommendationService.find_matching_materials(
+        db=db,
+        extracted_material_name=request.material_name,
+        max_recommendations=request.max_recommendations,
+    )
+    return {
+        "success": True,
+        "extracted_material_name": request.material_name,
+        "recommendations": recommendations,
+        "total": len(recommendations),
+        "has_match": len(recommendations) > 0,
+    }
 
 @router.post("/batch-get")
 def batch_get_planned_raw_materials(
@@ -41,9 +143,11 @@ def batch_get_planned_raw_materials(
     
     result = []
     for entry in extracted_entries:
-        # Get material name from the entry
+        # Fetch stock recommendations using planned material when set
+        recommendations = []
         material_name = entry.material if entry.material else None
-        
+        resolved_material_id = entry.planned_raw_material_id
+
         # Build dimension string from planned dimensions
         dimension_str = ""
         if entry.planned_form_type == "Round" and entry.planned_diameter and entry.planned_length:
@@ -52,9 +156,15 @@ def batch_get_planned_raw_materials(
             dimension_str = f"{entry.planned_breadth}x{entry.planned_height}x{entry.planned_length}"
         elif entry.planned_form_type == "Pipe" and entry.planned_outer_diameter and entry.planned_inner_diameter and entry.planned_length:
             dimension_str = f"{entry.planned_outer_diameter}x{entry.planned_inner_diameter}x{entry.planned_length}"
-        
-        # Fetch stock recommendations
-        recommendations = []
+
+        material_recommendations = []
+        if material_name:
+            material_recommendations = StockRecommendationService.find_matching_materials(
+                db=db,
+                extracted_material_name=material_name,
+                max_recommendations=10,
+            )
+
         if material_name and dimension_str:
             recommendations = StockRecommendationService.recommend_stocks(
                 db=db,
@@ -63,10 +173,13 @@ def batch_get_planned_raw_materials(
                 min_score=0.3,
                 max_recommendations=5,
                 required_length=entry.planned_length,
+                material_id=resolved_material_id,
             )
-        
+
         result.append({
             "id": entry.id,
+            "material": entry.material,
+            "planned_raw_material_id": entry.planned_raw_material_id,
             "planned_form_type": entry.planned_form_type,
             "planned_diameter": entry.planned_diameter,
             "planned_length": entry.planned_length,
@@ -76,6 +189,7 @@ def batch_get_planned_raw_materials(
             "planned_outer_diameter": entry.planned_outer_diameter,
             "planned_by": entry.planned_by,
             "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+            "material_recommendations": material_recommendations,
             "recommendations": recommendations
         })
     
@@ -98,24 +212,20 @@ def create_planned_raw_material(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Extracted data entry not found"
         )
-    
-    # Update the extracted data entry with planned raw material fields
-    if request.planned_form_type is not None:
-        extracted_entry.planned_form_type = request.planned_form_type
-    if request.planned_diameter is not None:
-        extracted_entry.planned_diameter = request.planned_diameter
-    if request.planned_length is not None:
-        extracted_entry.planned_length = request.planned_length
-    if request.planned_breadth is not None:
-        extracted_entry.planned_breadth = request.planned_breadth
-    if request.planned_height is not None:
-        extracted_entry.planned_height = request.planned_height
-    if request.planned_inner_diameter is not None:
-        extracted_entry.planned_inner_diameter = request.planned_inner_diameter
-    if request.planned_outer_diameter is not None:
-        extracted_entry.planned_outer_diameter = request.planned_outer_diameter
-    if request.user_id is not None:
-        extracted_entry.planned_by = request.user_id
+
+    _ensure_planned_rm_editable(db, extracted_entry)
+
+    if request.planned_raw_material_id is not None:
+        material = db.query(RawMaterialModel).filter(
+            RawMaterialModel.id == request.planned_raw_material_id
+        ).first()
+        if not material:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Raw material with id {request.planned_raw_material_id} not found"
+            )
+
+    _apply_planned_rm_fields(extracted_entry, request)
     
     # Update timestamp
     extracted_entry.updated_at = datetime.utcnow()
@@ -136,6 +246,7 @@ def create_planned_raw_material(
                 "planned_height": extracted_entry.planned_height,
                 "planned_inner_diameter": extracted_entry.planned_inner_diameter,
                 "planned_outer_diameter": extracted_entry.planned_outer_diameter,
+                "planned_raw_material_id": extracted_entry.planned_raw_material_id,
                 "planned_by": extracted_entry.planned_by,
                 "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None
             }
@@ -166,24 +277,20 @@ def update_planned_raw_material(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Extracted data entry not found"
         )
-    
-    # Update planned raw material fields
-    if request.planned_form_type is not None:
-        extracted_entry.planned_form_type = request.planned_form_type
-    if request.planned_diameter is not None:
-        extracted_entry.planned_diameter = request.planned_diameter
-    if request.planned_length is not None:
-        extracted_entry.planned_length = request.planned_length
-    if request.planned_breadth is not None:
-        extracted_entry.planned_breadth = request.planned_breadth
-    if request.planned_height is not None:
-        extracted_entry.planned_height = request.planned_height
-    if request.planned_inner_diameter is not None:
-        extracted_entry.planned_inner_diameter = request.planned_inner_diameter
-    if request.planned_outer_diameter is not None:
-        extracted_entry.planned_outer_diameter = request.planned_outer_diameter
-    if request.user_id is not None:
-        extracted_entry.planned_by = request.user_id
+
+    _ensure_planned_rm_editable(db, extracted_entry)
+
+    if request.planned_raw_material_id is not None:
+        material = db.query(RawMaterialModel).filter(
+            RawMaterialModel.id == request.planned_raw_material_id
+        ).first()
+        if not material:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Raw material with id {request.planned_raw_material_id} not found"
+            )
+
+    _apply_planned_rm_fields(extracted_entry, request)
     
     # Update timestamp
     extracted_entry.updated_at = datetime.utcnow()
@@ -204,6 +311,7 @@ def update_planned_raw_material(
                 "planned_height": extracted_entry.planned_height,
                 "planned_inner_diameter": extracted_entry.planned_inner_diameter,
                 "planned_outer_diameter": extracted_entry.planned_outer_diameter,
+                "planned_raw_material_id": extracted_entry.planned_raw_material_id,
                 "planned_by": extracted_entry.planned_by,
                 "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None
             }
@@ -235,6 +343,8 @@ def get_planned_raw_material(
     
     return {
         "id": extracted_entry.id,
+        "material": extracted_entry.material,
+        "planned_raw_material_id": extracted_entry.planned_raw_material_id,
         "planned_form_type": extracted_entry.planned_form_type,
         "planned_diameter": extracted_entry.planned_diameter,
         "planned_length": extracted_entry.planned_length,
