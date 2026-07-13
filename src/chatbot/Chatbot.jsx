@@ -15,6 +15,33 @@ import './chatbot.css';
 const { TextArea } = Input;
 const CHATBOT_ICON = '/chatbot.png';
 
+function getLoggedInUser() {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw) return {};
+    const u = JSON.parse(raw);
+    return {
+      user_id: u.id ?? null,
+      user_name: u.user_name ?? u.username ?? null,
+      role: u.role ?? null,
+      center: u.center ?? null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function buildUserQuery() {
+  const u = getLoggedInUser();
+  const params = new URLSearchParams();
+  if (u.user_id) params.set('user_id', String(u.user_id));
+  if (u.user_name) params.set('user_name', u.user_name);
+  if (u.role) params.set('role', u.role);
+  if (u.center) params.set('center', u.center);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 const useChatStore = create((set) => ({
   messages: [],
   loading: false,
@@ -75,12 +102,25 @@ const useChatStore = create((set) => ({
   clear: () => set({ messages: [], sessionId: uuidv4(), loading: false }),
 }));
 
-const FALLBACK_PROMPTS = [
-  'Show all orders',
-  'Show all raw material stock',
-  'Pending operations',
-  'Machine live status',
-];
+function flattenPrompts(apiPrompts, categories, dbPrompts, rolePrompts) {
+  if (apiPrompts?.length) {
+    return apiPrompts.slice(0, 6);
+  }
+  const seen = new Set();
+  const out = [];
+  const add = (p) => {
+    if (p && !seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  };
+  for (const p of dbPrompts || []) add(p);
+  for (const p of rolePrompts || []) add(p);
+  for (const cat of categories || []) {
+    for (const p of cat.prompts || []) add(p);
+  }
+  return out.slice(0, 6);
+}
 
 const mdComponents = {
   p: ({ children }) => <p>{children}</p>,
@@ -154,26 +194,6 @@ function useViewport() {
   return viewport;
 }
 
-function flattenPrompts(categories, dbPrompts) {
-  const seen = new Set();
-  const out = [];
-  for (const cat of categories || []) {
-    for (const p of cat.prompts || []) {
-      if (!seen.has(p)) {
-        seen.add(p);
-        out.push(p);
-      }
-    }
-  }
-  for (const p of dbPrompts || []) {
-    if (!seen.has(p)) {
-      seen.add(p);
-      out.push(p);
-    }
-  }
-  return out.length ? out.slice(0, 6) : FALLBACK_PROMPTS;
-}
-
 export default function ChatPanel() {
   const store = useChatStore();
   const { messages, loading, sessionId } = store;
@@ -197,9 +217,12 @@ export default function ChatPanel() {
   }, [fabOffset]);
   const [promptCategories, setPromptCategories] = useState([]);
   const [dbPrompts, setDbPrompts] = useState([]);
+  const [rolePrompts, setRolePrompts] = useState([]);
+  const [apiPrompts, setApiPrompts] = useState([]);
+  const [promptsLoading, setPromptsLoading] = useState(true);
   const [showIdeas, setShowIdeas] = useState(false);
 
-  const quickPrompts = flattenPrompts(promptCategories, dbPrompts);
+  const quickPrompts = flattenPrompts(apiPrompts, promptCategories, dbPrompts, rolePrompts);
   const lastBotIndex = messages.reduce((idx, m, i) => (m.role === 'bot' ? i : idx), -1);
 
   // Reset FAB to bottom-right corner on resize, rotate, or refresh
@@ -215,18 +238,26 @@ export default function ChatPanel() {
   }, []);
 
   const loadSuggestions = useCallback(async () => {
+    setPromptsLoading(true);
     try {
-      const res = await fetch(`${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}`);
+      const res = await fetch(
+        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}${buildUserQuery()}`,
+      );
       if (!res.ok) return;
       const data = await res.json();
+      setApiPrompts(data.prompts || []);
       setPromptCategories(data.categories || []);
       setDbPrompts(data.from_database || []);
-    } catch { /* use fallbacks */ }
+      setRolePrompts(data.role_prompts || []);
+    } catch { /* backend suggestions unavailable */ }
+    finally {
+      setPromptsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (open) loadSuggestions();
-  }, [open, loadSuggestions]);
+    loadSuggestions();
+  }, [loadSuggestions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -322,7 +353,11 @@ export default function ChatPanel() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q, session_id: sessionId }),
+          body: JSON.stringify({
+            question: q,
+            session_id: sessionId,
+            ...getLoggedInUser(),
+          }),
           signal: ctrl.signal,
         },
       );
@@ -445,17 +480,23 @@ export default function ChatPanel() {
               Search orders, parts, operations, machines, stock, and operators using plain language.
             </p>
             <div className="cmf-empty-prompts">
-              {quickPrompts.slice(0, 4).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className="cmf-empty-prompt"
-                  disabled={loading}
-                  onClick={() => send(c)}
-                >
-                  {c}
-                </button>
-              ))}
+              {promptsLoading ? (
+                <p className="cmf-empty-loading">Loading suggestions from your data…</p>
+              ) : quickPrompts.length ? (
+                quickPrompts.slice(0, 4).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className="cmf-empty-prompt"
+                    disabled={loading}
+                    onClick={() => send(c)}
+                  >
+                    {c}
+                  </button>
+                ))
+              ) : (
+                <p className="cmf-empty-loading">Type your question below.</p>
+              )}
             </div>
           </div>
         ) : (

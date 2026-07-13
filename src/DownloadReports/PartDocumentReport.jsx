@@ -18,20 +18,21 @@ Font.registerHyphenationCallback(word => {
 });
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 32, paddingBottom: 32, paddingHorizontal: 24, fontSize: 9, fontFamily: 'Helvetica' },
-  header: { marginBottom: 16, borderBottomWidth: 1, borderBottomColor: '#d1d5db', paddingBottom: 8, alignItems: 'center' },
-  title: { fontSize: 16, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', textAlign: 'center' },
-  subtitle: { fontSize: 10, color: '#6b7280', textAlign: 'center' },
+  page: { paddingTop: 20, paddingBottom: 20, paddingHorizontal: 15, fontSize: 8, fontFamily: 'Helvetica' },
+  header: { marginBottom: 12, borderBottomWidth: 2, borderBottomColor: '#1E40AF', paddingBottom: 8, alignItems: 'center' },
+  title: { fontSize: 14, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', textAlign: 'center', color: '#1E40AF' },
+  subtitle: { fontSize: 9, color: '#6b7280', textAlign: 'center' },
   metaRow: { marginTop: 8, flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
-  metaText: { fontSize: 8, color: '#4b5563' },
-  sectionTitle: { fontSize: 12, fontWeight: 700, marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 4 },
-  table: { borderWidth: 1, borderColor: '#e5e7eb', width: '100%', marginBottom: 10 },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#f3f4f6', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', alignItems: 'center', minHeight: 24 },
-  headerCell: { padding: 5, fontWeight: 'bold', borderRightWidth: 1, borderRightColor: '#e5e7eb', textAlign: 'center', height: '100%' },
-  row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f3f4f6', alignItems: 'flex-start', minHeight: 20 },
-  cell: { padding: 4, borderRightWidth: 1, borderRightColor: '#f3f4f6', textAlign: 'left', height: '100%' },
-  textCell: { padding: 4, borderRightWidth: 1, borderRightColor: '#f3f4f6', textAlign: 'left', height: '100%', flexWrap: 'wrap', wordBreak: 'break-word' },
-  footer: { position: 'absolute', bottom: 32, left: 24, right: 24, fontSize: 7, color: '#9ca3af', textAlign: 'right' },
+  metaText: { fontSize: 7, color: '#4b5563' },
+  sectionTitle: { fontSize: 10, fontWeight: 700, marginTop: 12, marginBottom: 6, borderBottomWidth: 1, borderBottomColor: '#1E40AF', paddingBottom: 3, color: '#1E40AF' },
+  table: { display: 'flex', flexDirection: 'column', width: '100%', borderWidth: 1, borderColor: '#000000', marginBottom: 8 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#1E40AF', borderBottomWidth: 1, borderBottomColor: '#000000', alignItems: 'center', minHeight: 20 },
+  headerCell: { padding: 4, fontWeight: 'bold', borderRightWidth: 1, borderRightColor: '#FFFFFF', textAlign: 'center', height: '100%', color: '#FFFFFF', fontSize: 8 },
+  row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#000000', alignItems: 'flex-start', minHeight: 18 },
+  cell: { padding: 3, borderRightWidth: 1, borderRightColor: '#000000', textAlign: 'left', height: '100%', fontSize: 7 },
+  cellCenter: { padding: 3, borderRightWidth: 1, borderRightColor: '#000000', textAlign: 'center', height: '100%', fontSize: 7 },
+  textCell: { padding: 3, borderRightWidth: 1, borderRightColor: '#000000', textAlign: 'left', height: '100%', fontSize: 7 },
+  footer: { position: 'absolute', bottom: 15, left: 15, right: 15, fontSize: 7, color: '#9ca3af', textAlign: 'center' },
 });
 
 const PartReportPdfDocument = ({ partData }) => {
@@ -77,99 +78,91 @@ const PartReportPdfDocument = ({ partData }) => {
 
         <Text style={styles.sectionTitle}>Raw Materials</Text>
         <View style={styles.table}>
-          <TableHeader
-            headers={[
-              { label: 'Material Name', width: '50%' },
-              { label: 'Status', width: '50%' },
-            ]}
-          />
+          <View style={styles.tableHeader}>
+            <Text style={[styles.headerCell, { width: 200 }]}>Material Name</Text>
+            <Text style={[styles.headerCell, { flex: 1 }]}>Status</Text>
+          </View>
           {partData.rawMaterials?.map((item, i) => (
             <View key={i} style={styles.row}>
-              <View style={[styles.cell, { width: '50%' }]}><Text>{item.material_name || '-'}</Text></View>
-              <View style={[styles.cell, { width: '50%' }]}><Text>{item.material_status || '-'}</Text></View>
+              <Text style={[styles.cell, { width: 200 }]}>{item.material_name || '-'}</Text>
+              <Text style={[styles.cell, { flex: 1 }]}>{item.material_status || '-'}</Text>
             </View>
           ))}
           {(!partData.rawMaterials || partData.rawMaterials.length === 0) && (
             <View style={styles.row}>
-              <View style={[styles.cell, { width: '100%' }]}><Text>No raw materials linked</Text></View>
+              <Text style={[styles.cell, { width: '100%' }]}>No raw materials linked</Text>
             </View>
           )}
         </View>
 
         <Text style={styles.sectionTitle}>Process Plan (Operations)</Text>
         <View style={styles.table}>
-          <TableHeader
-            headers={[
-              { label: 'Op #', width: '5%' },
-              { label: 'Operation Name', width: '12%' },
-              { label: 'Setup Time', width: '8%' },
-              { label: 'Cycle Time', width: '8%' },
-              { label: 'workcenter', width: '10%' },
-              { label: 'Machine', width: '10%' },
-              { label: 'Op Type', width: '8%' },
-              { label: 'From Date', width: '8%' },
-              { label: 'To Date', width: '8%' },
-              { label: 'Work Instructions', width: '16%' },
-              { label: 'Notes', width: '17%' },
-            ]}
-          />
+          <View style={styles.tableHeader}>
+            <Text style={[styles.headerCell, { width: 30 }]}>Op #</Text>
+            <Text style={[styles.headerCell, { width: 70 }]}>Operation Name</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>Setup Time</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>Cycle Time</Text>
+            <Text style={[styles.headerCell, { width: 60 }]}>workcenter</Text>
+            <Text style={[styles.headerCell, { width: 60 }]}>Machine</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>Op Type</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>From Date</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>To Date</Text>
+            <Text style={[styles.headerCell, { width: 100 }]}>Work Instructions</Text>
+            <Text style={[styles.headerCell, { flex: 1 }]}>Notes</Text>
+          </View>
           {partData.operations?.map((item, i) => (
             <View key={i} style={styles.row}>
-              <View style={[styles.cell, { width: '5%' }]}><Text>{item.operation_number}</Text></View>
-              <View style={[styles.cell, { width: '12%' }]}><Text>{item.operation_name}</Text></View>
-              <View style={[styles.cell, { width: '8%' }]}><Text>{item.setup_time}</Text></View>
-              <View style={[styles.cell, { width: '8%' }]}><Text>{item.cycle_time}</Text></View>
-              <View style={[styles.cell, { width: '10%' }]}><Text>{item.work_center_name || item.workcenter_id || '-'}</Text></View>
-              <View style={[styles.cell, { width: '10%' }]}><Text>{item.machine_name || item.machine_id || '-'}</Text></View>
-              <View style={[styles.cell, { width: '8%' }]}><Text>{item.part_type_name || 'IN-House'}</Text></View>
-              <View style={[styles.cell, { width: '8%' }]}><Text>{item.from_date ? new Date(item.from_date).toLocaleDateString() : '-'}</Text></View>
-              <View style={[styles.cell, { width: '8%' }]}><Text>{item.to_date ? new Date(item.to_date).toLocaleDateString() : '-'}</Text></View>
-              <View style={[styles.textCell, { width: '16%' }]}><Text>{truncateText(item.work_instructions)}</Text></View>
-              <View style={[styles.textCell, { width: '17%' }]}><Text>{truncateText(item.notes)}</Text></View>
+              <Text style={[styles.cellCenter, { width: 30 }]}>{item.operation_number}</Text>
+              <Text style={[styles.cell, { width: 70 }]}>{item.operation_name}</Text>
+              <Text style={[styles.cellCenter, { width: 50 }]}>{item.setup_time}</Text>
+              <Text style={[styles.cellCenter, { width: 50 }]}>{item.cycle_time}</Text>
+              <Text style={[styles.cell, { width: 60 }]}>{item.work_center_name || item.workcenter_id || '-'}</Text>
+              <Text style={[styles.cell, { width: 60 }]}>{item.machine_name || item.machine_id || '-'}</Text>
+              <Text style={[styles.cell, { width: 50 }]}>{item.part_type_name || 'IN-House'}</Text>
+              <Text style={[styles.cellCenter, { width: 50 }]}>{item.from_date ? new Date(item.from_date).toLocaleDateString() : '-'}</Text>
+              <Text style={[styles.cellCenter, { width: 50 }]}>{item.to_date ? new Date(item.to_date).toLocaleDateString() : '-'}</Text>
+              <Text style={[styles.textCell, { width: 100 }]}>{truncateText(item.work_instructions)}</Text>
+              <Text style={[styles.textCell, { flex: 1 }]}>{truncateText(item.notes)}</Text>
             </View>
           ))}
         </View>
 
         <Text style={styles.sectionTitle}>Part Documents</Text>
         <View style={styles.table}>
-          <TableHeader
-            headers={[
-              { label: 'Document Name', width: '35%' },
-              { label: 'Type', width: '15%' },
-              { label: 'Version', width: '10%' },
-              { label: 'Document URL', width: '40%' },
-            ]}
-          />
+          <View style={styles.tableHeader}>
+            <Text style={[styles.headerCell, { width: 150 }]}>Document Name</Text>
+            <Text style={[styles.headerCell, { width: 80 }]}>Type</Text>
+            <Text style={[styles.headerCell, { width: 50 }]}>Version</Text>
+            <Text style={[styles.headerCell, { flex: 1 }]}>Document URL</Text>
+          </View>
           {partData.documents?.map((item, i) => (
             <View key={i} style={styles.row}>
-              <View style={[styles.cell, { width: '35%' }]}><Text>{item.document_name}</Text></View>
-              <View style={[styles.cell, { width: '15%' }]}><Text>{item.document_type}</Text></View>
-              <View style={[styles.cell, { width: '10%' }]}><Text>{item.document_version}</Text></View>
-              <View style={[styles.textCell, { width: '40%' }]}><Text>{item.document_url || '-'}</Text></View>
+              <Text style={[styles.cell, { width: 150 }]}>{item.document_name}</Text>
+              <Text style={[styles.cell, { width: 80 }]}>{item.document_type}</Text>
+              <Text style={[styles.cellCenter, { width: 50 }]}>{item.document_version}</Text>
+              <Text style={[styles.textCell, { flex: 1 }]}>{item.document_url || '-'}</Text>
             </View>
           ))}
         </View>
         
         <Text style={styles.sectionTitle}>Tools Required</Text>
         <View style={styles.table}>
-          <TableHeader
-            headers={[
-              { label: 'Op Name', width: '20%' },
-              { label: 'Tool Name', width: '30%' },
-              { label: 'Code', width: '15%' },
-              { label: 'Make', width: '15%' },
-              { label: 'Specification', width: '20%' },
-            ]}
-          />
+          <View style={styles.tableHeader}>
+            <Text style={[styles.headerCell, { width: 80 }]}>Op Name</Text>
+            <Text style={[styles.headerCell, { width: 120 }]}>Tool Name</Text>
+            <Text style={[styles.headerCell, { width: 60 }]}>Code</Text>
+            <Text style={[styles.headerCell, { width: 60 }]}>Make</Text>
+            <Text style={[styles.headerCell, { flex: 1 }]}>Specification</Text>
+          </View>
           {allTools.map((item, i) => {
             const toolInfo = item.tool || item;
             return (
               <View key={i} style={styles.row}>
-                <View style={[styles.cell, { width: '20%' }]}><Text>{item.opName}</Text></View>
-                <View style={[styles.cell, { width: '30%' }]}><Text>{toolInfo.item_description || '-'}</Text></View>
-                <View style={[styles.cell, { width: '15%' }]}><Text>{toolInfo.identification_code || '-'}</Text></View>
-                <View style={[styles.cell, { width: '15%' }]}><Text>{toolInfo.make || '-'}</Text></View>
-                <View style={[styles.cell, { width: '20%' }]}><Text>{toolInfo.range || '-'}</Text></View>
+                <Text style={[styles.cell, { width: 80 }]}>{item.opName}</Text>
+                <Text style={[styles.cell, { width: 120 }]}>{toolInfo.item_description || '-'}</Text>
+                <Text style={[styles.cell, { width: 60 }]}>{toolInfo.identification_code || '-'}</Text>
+                <Text style={[styles.cell, { width: 60 }]}>{toolInfo.make || '-'}</Text>
+                <Text style={[styles.cell, { flex: 1 }]}>{toolInfo.range || '-'}</Text>
               </View>
             );
           })}
@@ -188,6 +181,12 @@ const PartDocumentReport = ({ partData, open, onCancel }) => {
     (partData.rawMaterials && partData.rawMaterials.length > 0)
   );
 
+  // Normalize line endings so re-uploaded Excel does not contain _x000d_ artifacts
+  const normalizeMultiline = (text) => {
+    if (!text || typeof text !== 'string') return text || '-';
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  };
+
   const handleDownloadExcel = () => {
     const wb = XLSX.utils.book_new();
 
@@ -202,8 +201,8 @@ const PartDocumentReport = ({ partData, open, onCancel }) => {
       "Op Type": op.part_type_name || 'IN-House',
       "From Date": op.from_date ? new Date(op.from_date).toLocaleDateString() : '-',
       "To Date": op.to_date ? new Date(op.to_date).toLocaleDateString() : '-',
-      "Work Instructions": op.work_instructions || '-',
-      "Notes": op.notes || '-'
+      "Work Instructions": normalizeMultiline(op.work_instructions),
+      "Notes": normalizeMultiline(op.notes)
     }));
 
     // Map Documents to clean format

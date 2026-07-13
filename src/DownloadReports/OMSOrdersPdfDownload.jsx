@@ -1,404 +1,348 @@
 import React, { useState } from "react";
-import { Button, Tooltip, Modal, Space } from "antd";
-import { FilePdfOutlined, FileExcelOutlined, DownloadOutlined } from "@ant-design/icons";
-import {
-  PDFDownloadLink,
-  Document,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-  Font,
-} from "@react-pdf/renderer";
-import * as XLSX from "xlsx";
+import { Button, Dropdown, message } from "antd";
+import { DownloadOutlined, FilePdfOutlined, FileExcelOutlined } from "@ant-design/icons";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import ExcelJS from "exceljs";
 
-Font.registerHyphenationCallback((word) => [word]);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const styles = StyleSheet.create({
-  page: {
-    paddingTop: 32,
-    paddingBottom: 32,
-    paddingHorizontal: 24,
-    fontSize: 9,
-    fontFamily: "Helvetica",
-  },
-  header: {
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d1d5db",
-    borderBottomStyle: "solid",
-    paddingBottom: 8,
-    alignItems: "center",
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: 700,
-    marginBottom: 4,
-    textTransform: "uppercase",
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 10,
-    color: "#6b7280",
-    textAlign: "center",
-  },
-  metaRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  metaText: {
-    fontSize: 8,
-    color: "#4b5563",
-  },
-  table: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderStyle: "solid",
-    width: "100%",
-  },
-  tableHeader: {
-    flexDirection: "row",
-    backgroundColor: "#f3f4f6",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    borderBottomStyle: "solid",
-  },
-  headerCell: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#e5e7eb",
-    borderRightStyle: "solid",
-    fontWeight: 700,
-  },
-  row: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    borderBottomStyle: "solid",
-  },
-  cell: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#f3f4f6",
-    borderRightStyle: "solid",
-  },
-  footer: {
-    marginTop: 16,
-    fontSize: 7,
-    color: "#9ca3af",
-    textAlign: "right",
-  },
-});
+const fmt = (val) => (val == null || val === "" ? "—" : String(val));
 
-const columnWidths = {
-  slNo: 25,
-  projectNumber: 70,
-  projectName: 120,
-  customer: 100,
-  product: 100,
-  qty: 30,
-  orderDate: 65,
-  dueDate: 65,
-  status: 55,
-  coordinator: 80,
+const formatDate = (dateStr) => {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
-const OMSOrdersPdfDocument = ({
-  orders,
-  formatDate,
-}) => {
+const COLUMNS = [
+  "SL NO",
+  "Project Number",
+  "Project Name",
+  "Customer",
+  "Qty",
+  "Created By",
+  "Order Date",
+  "Due Date",
+  "Status",
+  "Project Coordinator",
+  "Mfg Coordinator",
+  "Approval Status",
+  "Approval Remarks",
+  "Approved At",
+];
+
+// ---------------------------------------------------------------------------
+// PDF Export
+// ---------------------------------------------------------------------------
+
+const exportPDF = (orders, label) => {
+  if (!orders || orders.length === 0) {
+    message.warning("No data to export");
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
   const generatedAt = new Date().toLocaleString();
-  const totalOrders = orders.length;
 
-  return (
-    <Document>
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            CMF DIGITIZATION - CMTI
-          </Text>
-          <Text style={styles.subtitle}>
-            Order Management System – Orders Summary Report
-          </Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total orders: {totalOrders}</Text>
-            <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
-          </View>
-        </View>
+  const drawHeader = () => {
+    doc.setFillColor(30, 64, 175);
+    doc.rect(margin, 8, pageW - margin * 2, 10, "F");
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text("ORDER MANAGEMENT SYSTEM - ORDERS REPORT", pageW / 2, 14.5, { align: "center" });
 
-        <View style={styles.table}>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { width: columnWidths.slNo }]}>
-              SL NO
-            </Text>
-            <Text
-              style={[styles.headerCell, { width: columnWidths.projectNumber }]}
-            >
-              PROJECT NO
-            </Text>
-            <Text
-              style={[styles.headerCell, { width: columnWidths.projectName }]}
-            >
-              PROJECT NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: columnWidths.customer }]}>
-              CUSTOMER
-            </Text>
-            <Text style={[styles.headerCell, { width: columnWidths.product }]}>
-              PRODUCT
-            </Text>
-            <Text style={[styles.headerCell, { width: columnWidths.qty }]}>
-              QTY
-            </Text>
-            <Text
-              style={[styles.headerCell, { width: columnWidths.orderDate }]}
-            >
-              ORDER DATE
-            </Text>
-            <Text style={[styles.headerCell, { width: columnWidths.dueDate }]}>
-              DUE DATE
-            </Text>
-            <Text style={[styles.headerCell, { width: columnWidths.status }]}>
-              STATUS
-            </Text>
-            <Text
-              style={[styles.headerCell, { width: columnWidths.coordinator }]}
-            >
-              COORDINATOR
-            </Text>
-          </View>
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated: ${generatedAt}`, margin, 22);
+    doc.text(`Total Orders: ${orders.length}  |  ${label}`, pageW / 2, 22, { align: "center" });
+    doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
 
-          {orders.map((order, index) => (
-            <View key={order.id || index} style={styles.row}>
-              <Text style={[styles.cell, { width: columnWidths.slNo }]}>
-                {index + 1}
-              </Text>
-              <Text
-                style={[styles.cell, { width: columnWidths.projectNumber }]}
-              >
-                {order.sale_order_number || "-"}
-              </Text>
-              <Text
-                style={[styles.cell, { width: columnWidths.projectName }]}
-              >
-                {order.product_name || order.product || order.project_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.customer }]}>
-                {order.customer_name || order.customer || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.product }]}>
-                {order.product_name || order.product || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.qty }]}>
-                {order.quantity != null ? String(order.quantity) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.orderDate }]}>
-                {order.order_date ? formatDate(order.order_date) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.dueDate }]}>
-                {order.due_date ? formatDate(order.due_date) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.status }]}>
-                {(order.status || "-").toUpperCase()}
-              </Text>
-              <Text style={[styles.cell, { width: columnWidths.coordinator }]}>
-                {order.user_name || order.user_id || "-"}
-              </Text>
-            </View>
-          ))}
-        </View>
+    doc.setDrawColor(30, 64, 175);
+    doc.setLineWidth(0.3);
+    doc.line(margin, 24, pageW - margin, 24);
+  };
 
-        <Text style={styles.footer}>
-          Generated by CMF Digitization OMS module
-        </Text>
-      </Page>
-    </Document>
-  );
+  drawHeader();
+
+  const body = orders.map((order, index) => [
+    index + 1,
+    fmt(order.sale_order_number),
+    fmt(order.product_name || order.project_name),
+    fmt(order.customer_name || order.company_name),
+    fmt(order.quantity),
+    fmt(order.user_name),
+    formatDate(order.order_date),
+    formatDate(order.due_date),
+    fmt(order.status),
+    fmt(order.project_coordinator_name || order.project_coordinator_id),
+    fmt(order.manufacturing_coordinator_name || order.manufacturing_coordinator_id),
+    fmt(order.approval_status),
+    fmt(order.approval_remarks),
+    formatDate(order.approved_at),
+  ]);
+
+  const colW = [12, 25, 35, 25, 10, 20, 18, 18, 15, 22, 22, 25, 25, 18];
+  const totalW = colW.reduce((a, b) => a + b, 0);
+  const leftMargin = (pageW - totalW) / 2;
+
+  autoTable(doc, {
+    startY: 27,
+    head: [COLUMNS],
+    body,
+    styles: {
+      fontSize: 6.5,
+      cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+      valign: "middle",
+      overflow: "linebreak",
+      lineColor: [209, 213, 219],
+      lineWidth: 0.2,
+      textColor: [30, 30, 30],
+    },
+    headStyles: {
+      fillColor: [30, 64, 175],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 6.5,
+      lineColor: [255, 255, 255],
+      lineWidth: 0.3,
+    },
+    alternateRowStyles: { fillColor: [239, 246, 255] },
+    bodyStyles: { halign: "left" },
+    columnStyles: Object.fromEntries(
+      colW.map((w, idx) => [
+        idx,
+        {
+          cellWidth: w,
+          halign: [0, 5, 6, 7, 8, 12, 13].includes(idx) ? "center" : "left",
+        },
+      ]),
+    ),
+    didParseCell: (d) => {
+      if (d.section !== "body") return;
+      const v = d.cell.raw;
+      const text = typeof v === "object" && v !== null ? v.content : v;
+      if (d.column.index === 8) {
+        // Status column
+        if (text === "PENDING") {
+          d.cell.styles.textColor = [249, 115, 22];
+          d.cell.styles.fontStyle = "bold";
+        } else if (text === "IN PROGRESS") {
+          d.cell.styles.textColor = [37, 99, 235];
+        } else if (text === "COMPLETED") {
+          d.cell.styles.textColor = [22, 163, 74];
+          d.cell.styles.fontStyle = "bold";
+        }
+      }
+      if (d.column.index === 11) {
+        // Approval Status column
+        if (text === "APPROVED" || text === "CREATED BY ADMIN" || text === "AUTO-APPROVED") {
+          d.cell.styles.textColor = [22, 163, 74];
+          d.cell.styles.fontStyle = "bold";
+        } else if (text === "REJECTED") {
+          d.cell.styles.textColor = [239, 68, 68];
+          d.cell.styles.fontStyle = "bold";
+        } else if (text === "PENDING APPROVAL") {
+          d.cell.styles.textColor = [249, 115, 22];
+        }
+      }
+    },
+    margin: { left: leftMargin, right: leftMargin, top: 27, bottom: 18 },
+    didDrawPage: (d) => {
+      if (d.pageNumber > 1) drawHeader();
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(156, 163, 175);
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.2);
+      doc.line(margin, pageH - 10, pageW - margin, pageH - 10);
+      doc.text(`Page ${d.pageNumber} of ${doc.internal.getNumberOfPages()}`, pageW / 2, pageH - 6, { align: "center" });
+      doc.text("CMF Digitization — Confidential", margin, pageH - 6);
+    },
+  });
+
+  doc.save(`OMS_Orders_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
-const OMSOrdersPdfDownload = ({
-  orders,
-  orderCount,
-  getOrdersForExport,
-  formatDate,
-  fileName = "oms-orders-report.pdf",
-}) => {
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [exportOrders, setExportOrders] = useState([]);
+// ---------------------------------------------------------------------------
+// Excel Export
+// ---------------------------------------------------------------------------
 
-  const resolvedOrderCount = orderCount ?? orders?.length ?? 0;
+const exportExcel = async (orders, label) => {
+  if (!orders || orders.length === 0) {
+    message.warning("No data to export");
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CMF Digitization";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Orders Report", { pageSetup: { orientation: "landscape" } });
+
+  ws.mergeCells(1, 1, 1, COLUMNS.length);
+  const t = ws.getCell("A1");
+  t.value = "ORDER MANAGEMENT SYSTEM - ORDERS REPORT";
+  t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
+  t.alignment = { horizontal: "center", vertical: "middle" };
+  t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+  ws.getRow(1).height = 28;
+
+  ws.mergeCells(2, 1, 2, COLUMNS.length);
+  const s = ws.getCell("A2");
+  s.value = `Generated: ${new Date().toLocaleString()}   |   ${label}   |   Records: ${orders.length}`;
+  s.font = { size: 9, italic: true, color: { argb: "FF6B7280" } };
+  s.alignment = { horizontal: "center" };
+  ws.getRow(2).height = 16;
+
+  ws.addRow([]);
+
+  const hdr = ws.addRow(COLUMNS);
+  hdr.height = 20;
+  hdr.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E40AF" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FF93C5FD" } },
+      bottom: { style: "thin", color: { argb: "FF93C5FD" } },
+      left: { style: "thin", color: { argb: "FF93C5FD" } },
+      right: { style: "thin", color: { argb: "FF93C5FD" } },
+    };
+  });
+
+  const dataStartRow = 5;
+  orders.forEach((order, idx) => {
+    const values = [
+      idx + 1,
+      fmt(order.sale_order_number),
+      fmt(order.product_name || order.project_name),
+      fmt(order.customer_name || order.company_name),
+      fmt(order.quantity),
+      fmt(order.user_name),
+      formatDate(order.order_date),
+      formatDate(order.due_date),
+      fmt(order.status),
+      fmt(order.project_coordinator_name || order.project_coordinator_id),
+      fmt(order.manufacturing_coordinator_name || order.manufacturing_coordinator_id),
+      fmt(order.approval_status),
+      fmt(order.approval_remarks),
+      formatDate(order.approved_at),
+    ];
+    const dr = ws.addRow(values);
+    dr.height = 18;
+    const isAlt = idx % 2 === 1;
+    dr.eachCell((cell, colNum) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: isAlt ? "FFEFF6FF" : "FFFFFFFF" };
+      cell.border = {
+        top: { style: "hair", color: { argb: "FFD1D5DB" } },
+        bottom: { style: "hair", color: { argb: "FFD1D5DB" } },
+        left: { style: "hair", color: { argb: "FFD1D5DB" } },
+        right: { style: "hair", color: { argb: "FFD1D5DB" } },
+      };
+      const colName = COLUMNS[colNum - 1];
+      const val = cell.value;
+      if (colName === "Status") {
+        if (val === "PENDING") cell.font = { color: { argb: "FFF97316" }, bold: true };
+        else if (val === "IN PROGRESS") cell.font = { color: { argb: "FF2563EB" } };
+        else if (val === "COMPLETED") cell.font = { color: { argb: "FF16A34A" }, bold: true };
+      }
+      if (colName === "Approval Status") {
+        if (val === "APPROVED" || val === "CREATED BY ADMIN" || val === "AUTO-APPROVED") {
+          cell.font = { color: { argb: "FF16A34A" }, bold: true };
+        } else if (val === "REJECTED") {
+          cell.font = { color: { argb: "FFDC2626" }, bold: true };
+        } else if (val === "PENDING APPROVAL") {
+          cell.font = { color: { argb: "FFF97316" } };
+        }
+      }
+    });
+  });
+
+  const colWidths = [8, 18, 28, 22, 10, 18, 16, 16, 14, 20, 20, 22, 22, 16];
+  COLUMNS.forEach((_, i) => {
+    ws.getColumn(i + 1).width = colWidths[i] || 14;
+  });
+
+  ws.views = [{ state: "frozen", ySplit: 4 }];
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: COLUMNS.length } };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `OMS_Orders_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+const OMSOrdersPdfDownload = ({ orders, orderCount, getOrdersForExport, label = "All Records" }) => {
+  const [loading, setLoading] = useState("");
 
   const resolveExportOrders = () => {
     if (getOrdersForExport) return getOrdersForExport();
     return orders || [];
   };
 
-  const handleOpenModal = () => {
-    setExportOrders(resolveExportOrders());
-    setIsModalVisible(true);
-  };
+  const resolvedOrderCount = orderCount ?? orders?.length ?? 0;
 
-  const handleDownloadExcel = () => {
-    if (!exportOrders || exportOrders.length === 0) return;
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([]);
-
-    XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CMTI"],
-      ["Order Management System – Orders Summary Report"],
-      [],
-      [`Total Orders: ${exportOrders.length}`],
-      [`Generated on: ${new Date().toLocaleString()}`],
-      []
-    ], { origin: "A1" });
-
-    const headers = [
-      "SL NO",
-      "PROJECT NO",
-      "PROJECT NAME",
-      "CUSTOMER",
-      "PRODUCT",
-      "QTY",
-      "ORDER DATE",
-      "DUE DATE",
-      "STATUS",
-      "COORDINATOR"
-    ];
-
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } }
-    ];
-
-    if (ws['A1']) ws['A1'].s = { font: { sz: 16, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A2']) ws['A2'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A4']) ws['A4'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A5']) ws['A5'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-
-    XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A7" });
-
-    for (let i = 0; i < headers.length; i++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: 6, c: i });
-      if (ws[cellAddress]) {
-        ws[cellAddress].s = {
-          font: { bold: true },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F3F4F6" } }
-        };
-      }
+  const handlePDF = async () => {
+    const exportOrders = resolveExportOrders();
+    if (!exportOrders?.length) {
+      message.warning("No data to export");
+      return;
     }
-
-    const excelData = exportOrders.map((order, index) => [
-      index + 1,
-      order.sale_order_number || "-",
-      order.product_name || order.product || order.project_name || "-",
-      order.customer_name || order.customer || "-",
-      order.product_name || order.product || "-",
-      order.quantity != null ? order.quantity : "-",
-      order.order_date ? formatDate(order.order_date) : "-",
-      order.due_date ? formatDate(order.due_date) : "-",
-      (order.status || "-").toUpperCase(),
-      order.user_name || order.user_id || "-"
-    ]);
-
-    XLSX.utils.sheet_add_aoa(ws, excelData, { origin: "A8" });
-
-    ws['!cols'] = [
-      { wch: 8 },
-      { wch: 15 },
-      { wch: 25 },
-      { wch: 20 },
-      { wch: 20 },
-      { wch: 8 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 15 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, "Orders Report");
-
-    const excelFileName = fileName.replace('.pdf', '.xlsx');
-    XLSX.writeFile(wb, excelFileName);
-
-    setIsModalVisible(false);
+    setLoading("pdf");
+    try {
+      exportPDF(exportOrders, label);
+    } catch (e) {
+      message.error("PDF export failed");
+    } finally {
+      setLoading("");
+    }
   };
 
-  if (resolvedOrderCount === 0) {
-    return (
-      <Tooltip title="No orders available for export">
-        <Button icon={<DownloadOutlined />} disabled>
-          Download Orders
-        </Button>
-      </Tooltip>
-    );
-  }
+  const handleExcel = async () => {
+    const exportOrders = resolveExportOrders();
+    if (!exportOrders?.length) {
+      message.warning("No data to export");
+      return;
+    }
+    setLoading("excel");
+    try {
+      await exportExcel(exportOrders, label);
+    } catch (e) {
+      message.error("Excel export failed");
+    } finally {
+      setLoading("");
+    }
+  };
+
+  const menuItems = [
+    { key: "pdf", label: "Download PDF", icon: <FilePdfOutlined style={{ color: "#ef4444" }} />, onClick: handlePDF },
+    { key: "excel", label: "Download Excel", icon: <FileExcelOutlined style={{ color: "#16a34a" }} />, onClick: handleExcel },
+  ];
 
   return (
-    <>
-      <Button
-        icon={<DownloadOutlined />}
-        onClick={handleOpenModal}
-        type="default"
-      >
+    <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading || resolvedOrderCount === 0}>
+      <Button icon={<DownloadOutlined />} loading={!!loading} size="small" style={{ fontSize: 11 }}>
         Download Orders
       </Button>
-
-      <Modal
-        title="Download Orders Report"
-        open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        footer={null}
-        centered
-        width={400}
-        destroyOnHidden
-      >
-        {isModalVisible && exportOrders.length > 0 && (
-          <div style={{ padding: "20px 0" }}>
-            <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
-              Choose your preferred download format:
-            </p>
-
-            <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-              <PDFDownloadLink
-                document={<OMSOrdersPdfDocument orders={exportOrders} formatDate={formatDate} />}
-                fileName={fileName}
-                style={{ textDecoration: "none", width: "100%" }}
-              >
-                {({ loading }) => (
-                  <Button
-                    icon={<FilePdfOutlined />}
-                    size="large"
-                    style={{ width: "100%", height: "50px" }}
-                    type="default"
-                  >
-                    {loading ? "Preparing PDF..." : "Download PDF"}
-                  </Button>
-                )}
-              </PDFDownloadLink>
-
-              <Button
-                icon={<FileExcelOutlined />}
-                size="large"
-                style={{ width: "100%", height: "50px" }}
-                type="default"
-                onClick={handleDownloadExcel}
-              >
-                Download Excel
-              </Button>
-            </Space>
-          </div>
-        )}
-      </Modal>
-    </>
+    </Dropdown>
   );
 };
 

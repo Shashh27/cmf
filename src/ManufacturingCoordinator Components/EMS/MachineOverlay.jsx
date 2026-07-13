@@ -135,7 +135,7 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
   useEffect(() => {
     const fetchParameters = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent/?machine_id=${machineId}`);
+        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
         const data = await response.json();
         setMachineParameters(data);
         setIsLoading(false);

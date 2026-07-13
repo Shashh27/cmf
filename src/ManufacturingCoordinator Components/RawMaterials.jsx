@@ -42,7 +42,11 @@ const RawMaterialsContent = () => {
 
   const fetchSharedRawMaterials = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, {
+        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
+      });
       const data = response.data;
       setSharedRawMaterials(Array.isArray(data) ? data : []);
     } catch (error) {

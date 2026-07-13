@@ -131,14 +131,15 @@ const OMS = () => {
 
   const getApprovalStatusBadge = (approvalStatus) => {
     const statusConfig = {
-      'Pending Approval': { color: "orange", text: "Pending Approval" },
-      'Approved': { color: "green", text: "Approved" },
-      'Rejected': { color: "red", text: "Rejected" },
-      'Auto-Approved': { color: "blue", text: "Auto-Approved" },
+      'Pending Approval': { color: "orange" },
+      'Approved': { color: "green" },
+      'Rejected': { color: "red" },
+      'Auto-Approved': { color: "blue" },
+      'Created by Admin': { color: "blue" },
     };
 
-    const config = statusConfig[approvalStatus] || { color: "default", text: approvalStatus };
-    return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
+    const config = statusConfig[approvalStatus] || { color: "default" };
+    return <Tag color={config.color}>{approvalStatus?.toUpperCase() || "-"}</Tag>;
   };
 
   const handleCreateOrder = () => {
@@ -390,8 +391,47 @@ const OMS = () => {
       .sort()
       .map((v) => ({ text: v, value: v }));
 
-    return { coordinatorFilters, mfgCoordinatorFilters };
-  }, [orders]);
+    const approvalStatusFilters = Array.from(
+      new Set(
+        orders
+          .map((o) => o.approval_status)
+          .filter(Boolean)
+      )
+    )
+      .sort()
+      .map((v) => ({ text: v, value: v }));
+
+    const statusFilters = Array.from(
+      new Set(
+        orders
+          .map((o) => o.status)
+          .filter(Boolean)
+      )
+    )
+      .sort()
+      .map((v) => ({ text: v, value: v }));
+
+    const createdByFilters = Array.from(
+      new Set(
+        orders
+          .map((o) => o.user_name)
+          .filter(Boolean)
+      )
+    )
+      .sort()
+      .map((v) => ({ text: v, value: v }));
+
+    const customerFilters = Array.from(
+      new Set(
+        orders.map((o) => getCustomerName(o.customer_id, o))
+          .filter(Boolean)
+      )
+    )
+      .sort()
+      .map((v) => ({ text: v, value: v }));
+
+    return { coordinatorFilters, mfgCoordinatorFilters, approvalStatusFilters, statusFilters, createdByFilters, customerFilters };
+  }, [orders, customers]);
 
   const kpiStats = useMemo(() => {
     let pending = 0;
@@ -416,28 +456,33 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">SL NO</span>,
       dataIndex: "serial",
       key: "serial",
-      width: 80,
+      width: 70,
+      fixed: 'left',
       render: (_, __, index) => {
         const { current, pageSize } = ordersPagination;
-        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
+        return <span className="text-gray-500 font-mono text-xs">{(current - 1) * pageSize + index + 1}</span>;
       },
     },
     {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
       dataIndex: "sale_order_number",
       key: "sale_order_number",
-      render: (text) => <span className="font-medium text-gray-800">{text}</span>,
+      width: 130,
+      ellipsis: true,
+      render: (text) => <span className="font-medium text-gray-800 text-xs">{text}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_id",
       key: "product_id",
+      width: 150,
+      ellipsis: true,
       render: (productId, record) => (
         record.approval_status === "Rejected" ? (
           <Tooltip title="Order rejected - cannot access project">
-            <Space className="text-gray-400">
-              <AppstoreOutlined />
-              <span className="font-medium">{getProductName(productId, record)}</span>
+            <Space className="text-gray-400" size={2}>
+              <AppstoreOutlined className="text-xs" />
+              <span className="font-medium text-xs truncate">{getProductName(productId, record)}</span>
             </Space>
           </Tooltip>
         ) : (
@@ -449,9 +494,9 @@ const OMS = () => {
               navigate(`/admin/pdm/${productId}?from=oms&orderId=${record.id}`);
             }}
           >
-            <Space className="text-gray-700">
-              <AppstoreOutlined className="text-blue-500" />
-              <span className="underline">{getProductName(productId, record)}</span>
+            <Space className="text-gray-700" size={2}>
+              <AppstoreOutlined className="text-blue-500 text-xs" />
+              <span className="underline text-xs truncate">{getProductName(productId, record)}</span>
             </Space>
           </Button>
         )
@@ -461,17 +506,36 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Qty</span>,
       dataIndex: "quantity",
       key: "quantity",
-      width: 80,
-      render: (text) => <span className="font-mono text-gray-700">{text}</span>,
+      width: 60,
+      render: (text) => <span className="font-mono text-gray-700 text-xs">{text}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
+      width: 150,
+      ellipsis: true,
+      filters: tableColumnFilters.customerFilters,
+      onFilter: (value, record) => getCustomerName(record.customer_id, record) === value,
       render: (customerId, record) => (
-        <Space>
-            <UserOutlined className="text-gray-400" />
-            <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
+        <Space size={2}>
+            <UserOutlined className="text-gray-400 text-xs" />
+            <span className="text-gray-700 text-xs truncate">{getCustomerName(customerId, record)}</span>
+        </Space>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Created By</span>,
+      dataIndex: "user_name",
+      key: "user_name",
+      width: 120,
+      ellipsis: true,
+      filters: tableColumnFilters.createdByFilters,
+      onFilter: (value, record) => record.user_name === value,
+      render: (userName, record) => (
+        <Space size={2}>
+          <UserOutlined className="text-gray-400 text-xs" />
+          <span className="text-gray-700 text-xs truncate">{userName || "-"}</span>
         </Space>
       ),
     },
@@ -479,11 +543,12 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Order Date</span>,
       dataIndex: "order_date",
       key: "order_date",
+      width: 100,
       sorter: (a, b) => dayjs(a.order_date || 0).unix() - dayjs(b.order_date || 0).unix(),
       render: (date) => (
-        <Space className="text-gray-500">
-            <CalendarOutlined />
-            {formatDate(date)}
+        <Space className="text-gray-500" size={2}>
+            <CalendarOutlined className="text-xs" />
+            <span className="text-xs">{formatDate(date)}</span>
         </Space>
       ),
     },
@@ -491,11 +556,12 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Due Date</span>,
       dataIndex: "due_date",
       key: "due_date",
+      width: 100,
       sorter: (a, b) => dayjs(a.due_date || 0).unix() - dayjs(b.due_date || 0).unix(),
       render: (date) => (
-        <Space className="text-gray-500">
-            <CalendarOutlined />
-            {formatDate(date)}
+        <Space className="text-gray-500" size={2}>
+            <CalendarOutlined className="text-xs" />
+            <span className="text-xs">{formatDate(date)}</span>
         </Space>
       ),
     },
@@ -503,12 +569,14 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
       dataIndex: "project_coordinator_name",
       key: "project_coordinator_name",
+      width: 140,
+      ellipsis: true,
       filters: tableColumnFilters.coordinatorFilters,
       onFilter: (value, record) => (record.project_coordinator_name || record.project_coordinator_id || record.admin_name || record.admin_id) === value,
       render: (text, record) => (
-        <Space>
-          <UserOutlined className="text-gray-400" />
-          <span className="text-gray-700">
+        <Space size={2}>
+          <UserOutlined className="text-gray-400 text-xs" />
+          <span className="text-gray-700 text-xs truncate">
             {text || record.project_coordinator_id || record.admin_name || record.admin_id || "-"}
           </span>
         </Space>
@@ -518,12 +586,14 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Mfg Coordinator</span>,
       dataIndex: "manufacturing_coordinator_name",
       key: "manufacturing_coordinator_name",
+      width: 140,
+      ellipsis: true,
       filters: tableColumnFilters.mfgCoordinatorFilters,
       onFilter: (value, record) => (record.manufacturing_coordinator_name || record.manufacturing_coordinator_id) === value,
       render: (text, record) => (
-        <Space>
-          <UserOutlined className="text-gray-400" />
-          <span className="text-gray-700">
+        <Space size={2}>
+          <UserOutlined className="text-gray-400 text-xs" />
+          <span className="text-gray-700 text-xs truncate">
             {text || record.manufacturing_coordinator_id || "-"}
           </span>
         </Space>
@@ -533,7 +603,8 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: "status",
       key: "status",
-      filters: ['Pending', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
+      width: 110,
+      filters: tableColumnFilters.statusFilters,
       onFilter: (value, record) => record.status === value,
       render: (status) => getStatusBadge(status),
     },
@@ -541,7 +612,8 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Approval Status</span>,
       dataIndex: "approval_status",
       key: "approval_status",
-      filters: ['Pending Approval', 'Approved', 'Rejected', 'Auto-Approved'].map(s => ({ text: s, value: s })),
+      width: 140,
+      filters: tableColumnFilters.approvalStatusFilters,
       onFilter: (value, record) => record.approval_status === value,
       render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
     },
@@ -550,8 +622,10 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Approval Remarks</span>,
       dataIndex: "approval_remarks",
       key: "approval_remarks",
+      width: 150,
+      ellipsis: true,
       render: (remarks) => (
-        <span className="text-gray-600 text-sm">
+        <span className="text-gray-600 text-xs truncate" title={remarks}>
           {remarks || "-"}
         </span>
       ),
@@ -560,8 +634,9 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Approved At</span>,
       dataIndex: "approved_at",
       key: "approved_at",
+      width: 110,
       render: (date) => (
-        <span className="text-gray-600 text-sm">
+        <span className="text-gray-600 text-xs">
           {date ? formatDate(date) : "-"}
         </span>
       ),
@@ -569,9 +644,10 @@ const OMS = () => {
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
-      width: 200,
+      width: 140,
+      fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={4}>
           {record.approval_status === "Pending Approval" && record.user_role !== 'admin' && (
             <>
               <Tooltip title="Approve Order">
@@ -651,12 +727,15 @@ const OMS = () => {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
           font-weight: 600;
           border-bottom: 2px solid #1890ff;
+          padding: 8px 12px;
+          font-size: 12px;
         }
         .modern-table .ant-table-tbody > tr:hover > td {
           background: #f0f8ff !important;
         }
         .modern-table .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f0f0f0;
+          padding: 6px 12px;
         }
         .ant-card-head {
             border-bottom: 1px solid #f0f0f0;
@@ -679,15 +758,50 @@ const OMS = () => {
         .ant-input-search:hover .ant-input-group-addon .anticon {
           color: white !important;
         }
+        .modern-table .ant-table-cell {
+          font-size: 12px;
+        }
+        .modern-table .ant-table-cell .ant-tag {
+          font-size: 11px;
+          padding: 0 6px;
+          line-height: 18px;
+        }
+        /* Filter dropdown responsive styles */
+        .ant-dropdown-menu {
+          max-height: 300px;
+          overflow-y: auto;
+          max-width: 250px;
+        }
+        .ant-dropdown-menu-item {
+          padding: 6px 12px;
+          font-size: 12px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .ant-table-filter-dropdown {
+          max-width: 280px;
+        }
+        .ant-table-filter-dropdown-btns {
+          padding: 8px 12px;
+        }
         @media (max-width: 768px) {
-          .ant-table {
-            font-size: 12px;
+          .modern-table .ant-table-thead > tr > th {
+            padding: 6px 8px;
+            font-size: 11px;
           }
-          .ant-table-thead > tr > th {
-            padding: 8px 4px;
+          .modern-table .ant-table-tbody > tr > td {
+            padding: 4px 8px;
           }
-          .ant-table-tbody > tr > td {
-            padding: 8px 4px;
+          .modern-table .ant-table-cell {
+            font-size: 11px;
+          }
+          .ant-dropdown-menu {
+            max-height: 200px;
+            max-width: 200px;
+          }
+          .ant-table-filter-dropdown {
+            max-width: 220px;
           }
         }
       `}</style>
@@ -828,8 +942,8 @@ const OMS = () => {
             </div>
         </div>
       </div>
-      <Card 
-        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
+      <Card
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100"
         styles={{ body: { padding: 0 } }}
       >
         <Table
@@ -845,6 +959,7 @@ const OMS = () => {
                 pageSizeOptions: ['10', '20', '50', '100'],
                 placement: 'bottom',
                 responsive: true,
+                simple: window.innerWidth < 768,
             }}
             onChange={(paginationConfig) => {
                 setOrdersPagination({
@@ -856,7 +971,7 @@ const OMS = () => {
             bordered
             className="modern-table"
             locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
-            scroll={{ x: 1200 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         />
       </Card>
 

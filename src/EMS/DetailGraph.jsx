@@ -44,9 +44,9 @@ const DetailGraph = ({ machineId }) => {
       
       if (Array.isArray(data)) {
         setDetailData({
-          current: data.map(item => ({ timestamp: item.timestamp, value: item.avg_three_phase_current })),
-          power: data.map(item => ({ timestamp: item.timestamp, value: item.total_instantaneous_power })),
-          energy: data.map(item => ({ timestamp: item.timestamp, value: item.active_energy_delivered }))
+          current: data.map(item => ({ timestamp: item.timestamp, value: item.current ?? item.avg_three_phase_current })),
+          power: data.map(item => ({ timestamp: item.timestamp, value: item.power ?? item.total_instantaneous_power })),
+          energy: data.map(item => ({ timestamp: item.timestamp, value: item.energy ?? item.active_energy_delivered }))
         });
       }
     } catch (err) {

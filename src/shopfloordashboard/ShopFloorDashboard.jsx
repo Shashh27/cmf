@@ -88,8 +88,8 @@ const ShopFloorDashboard = ({ onBack }) => {
     } catch { return null; }
   };
 
-  const fetchShopFloorData = async () => {
-    setLoading(true);
+  const fetchShopFloorData = async ({ background = false } = {}) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       const userId = getCurrentAdminId();
@@ -127,17 +127,21 @@ const ShopFloorDashboard = ({ onBack }) => {
       
       setError(errorMessage);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
   const handleViewModeChange = async (value) => {
     const nextMode = value;
-    if (nextMode === 'analytics' && !data) {
+    if (nextMode === 'analytics' && !data && !loading) {
       await fetchShopFloorData();
     }
     setViewMode(nextMode);
   };
+
+  useEffect(() => {
+    fetchShopFloorData({ background: true });
+  }, []);
 
   useEffect(() => {
     let socket;

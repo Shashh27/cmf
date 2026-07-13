@@ -1,14 +1,33 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Button, Modal, Tag, Descriptions } from 'antd'
 import * as THREE from 'three'
 import FactoryScene from './FactoryScene'
-import MachineGrid from './MachineGrid'
+import MachineGrid from '../../shopfloordashboard/MachineGrid'
+import { applyOverviewCamera, clampOrbitCamera, computeCameraPreset } from '../../shopfloordashboard/shopFloorCamera'
+import '../../shopfloordashboard/shopFloor.css'
 import { API_BASE_URL } from '../../Config/auth'
 
-const STATUS_ORDER = ['PRODUCTION', 'ON', 'IDLE', 'OFF', 'MAINTENANCE']
+/** Always visible in header — show 0 when no machines in that state */
+const HEADER_STATUS_PILLS = ['PRODUCTION', 'IDLE', 'OFF']
+
+function getMachineStatus(machine) {
+  return machine.status || machine.machine_state || 'OFF'
+}
+
+function getHeaderStatusCount(status, counts) {
+  if (status === 'IDLE') return (counts.IDLE || 0) + (counts.ON || 0)
+  return counts[status] || 0
+}
+
+function matchesStatusFilter(machine, filter) {
+  const status = getMachineStatus(machine)
+  if (filter === 'ALL') return true
+  if (filter === 'IDLE') return status === 'IDLE' || status === 'ON'
+  return status === filter
+}
 
 const STATUS_CONFIG = {
   PRODUCTION:  { color: '#22c55e', label: 'Production' },
@@ -18,14 +37,12 @@ const STATUS_CONFIG = {
   MAINTENANCE: { color: '#ef4444', label: 'Maintenance' },
 }
 
-const WORKCENTER_COLORS = {
-  MILLING: '#3b82f6',
-  TURNING: '#f97316',
-  GRINDING: '#06b6d4',
-  'DIE SINKING': '#8b5cf6',
-  CNC: '#6366f1',
-  VMC: '#0ea5e9',
-  HMC: '#14b8a6',
+// Spread hues evenly so every work center gets a visually distinct flag colour.
+function workCenterColorAt(index) {
+  const hue = Math.round((index * 137.508) % 360)
+  const lightness = 40 + (index % 3) * 5
+  const saturation = 78 + (index % 2) * 12
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
 }
 
 const COL_SPACING = 4.5
@@ -37,41 +54,41 @@ const BAY_GAP_Z = 3
 const MACHINE_PAD = 3.5
 
 // Match FactoryScene hall size — keep camera inside the shop floor
-const FLOOR_HALF_W = 38       // FW/2 minus margin
-const FLOOR_HALF_D = 30       // FD/2 minus margin
-const FLOOR_MAX_H = 22        // below roof, above machines
-const CAM_MIN_Y = 1.5
-const CAM_MIN_DIST = 3          // close-up on a single machine
-const CAM_MAX_DIST = 95         // full hall overview (FW=80, FD=64, fov=50)
+const CAM_MIN_DIST = 5
+const CAM_MAX_DIST = 110
 
-function getMachinesWsUrl() {
-  const url = new URL(`${API_BASE_URL}/machines/ws`)
+function getMonitoringWsUrl() {
+  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }
 
-function BoundedOrbitControls({ controlsRef }) {
+function SceneCameraRig({ preset, machines, zones, controlsRef, layoutKey, frameRef }) {
+  const { camera, size } = useThree()
+  const framedKeyRef = useRef('')
+
+  const frameScene = useCallback(() => {
+    if (!machines.length) return
+    camera.aspect = size.width / Math.max(size.height, 1)
+    applyOverviewCamera(camera, controlsRef.current, machines, zones)
+    framedKeyRef.current = layoutKey
+  }, [camera, controlsRef, layoutKey, machines, size.height, size.width, zones])
+
+  useLayoutEffect(() => {
+    if (!machines.length || framedKeyRef.current === layoutKey) return
+    frameScene()
+  }, [frameScene, layoutKey, machines.length])
+
+  useEffect(() => {
+    frameRef.current = frameScene
+  }, [frameRef, frameScene])
+
+  return null
+}
+
+function BoundedOrbitControls({ controlsRef, initialTarget }) {
   const clampCamera = useCallback(() => {
-    const controls = controlsRef.current
-    if (!controls) return
-
-    const target = controls.target
-    target.x = THREE.MathUtils.clamp(target.x, -FLOOR_HALF_W, FLOOR_HALF_W)
-    target.y = THREE.MathUtils.clamp(target.y, 1, FLOOR_MAX_H)
-    target.z = THREE.MathUtils.clamp(target.z, -FLOOR_HALF_D, FLOOR_HALF_D)
-
-    const camera = controls.object
-    camera.position.y = Math.max(camera.position.y, CAM_MIN_Y)
-
-    const offset = camera.position.clone().sub(target)
-    const dist = offset.length()
-    if (dist > CAM_MAX_DIST) {
-      offset.multiplyScalar(CAM_MAX_DIST / dist)
-      camera.position.copy(target).add(offset)
-    } else if (dist < CAM_MIN_DIST) {
-      offset.multiplyScalar(CAM_MIN_DIST / Math.max(dist, 0.001))
-      camera.position.copy(target).add(offset)
-    }
+    clampOrbitCamera(controlsRef.current)
   }, [controlsRef])
 
   return (
@@ -90,7 +107,7 @@ function BoundedOrbitControls({ controlsRef }) {
       maxPolarAngle={Math.PI / 2.05}
       minDistance={CAM_MIN_DIST}
       maxDistance={CAM_MAX_DIST}
-      target={[0, 2, 0]}
+      target={initialTarget || [0, 2, 0]}
       dampingFactor={0.08}
       enableDamping
       onChange={clampCamera}
@@ -108,19 +125,33 @@ function useClock() {
 }
 
 function useStats(machines) {
-  const counts = {}
-  machines.forEach(m => { counts[m.status] = (counts[m.status] || 0) + 1 })
-  return { total: machines.length, counts }
+  return useMemo(() => {
+    const counts = {}
+    machines.forEach(m => {
+      const status = m.status || m.machine_state || 'OFF'
+      counts[status] = (counts[status] || 0) + 1
+    })
+    return { total: machines.length, counts }
+  }, [machines])
 }
 
-function StatusPill({ status, count }) {
+function StatusPill({ status, count, isActive, onClick }) {
   const s = STATUS_CONFIG[status] || { color: '#64748b', label: status }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: s.color + '12', borderRadius: 6, padding: '6px 12px', border: `1px solid ${s.color}33` }}>
-      <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
-      <span style={{ color: '#1e293b', fontSize: 11, fontWeight: 600 }}>{s.label}</span>
-      <span style={{ color: s.color, fontSize: 12, fontWeight: 700 }}>{count}</span>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shop-floor-pill shop-floor-status-pill${isActive ? ' is-active' : ''}`}
+      style={{
+        background: isActive ? s.color + '28' : s.color + '12',
+        borderColor: isActive ? s.color : s.color + '44',
+        color: '#1e293b',
+      }}
+    >
+      <span className="pill-dot" style={{ background: s.color }} />
+      <span>{s.label}</span>
+      <span className="pill-count" style={{ color: s.color }}>{count}</span>
+    </button>
   )
 }
 
@@ -155,7 +186,10 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
 
   const stateCfg = STATUS_CONFIG[machine.status] || { color: '#64748b', label: machine.status || 'Unknown' }
   const wcCfg = workCenters[machine.workCenter] || { color: '#64748b', label: machine.workCenter }
-  const displayName = [machine.make, machine.model].filter(Boolean).join(' ').trim() || 'Machine details'
+  const displayName = [machine.make, machine.model].filter(Boolean).join(' ').trim() || 'Live Order Details'
+  const hasOrderInfo = Boolean(
+    machine.saleOrderNumber || machine.partNumber || machine.operationName || machine.operationNumber
+  )
 
   return (
     <Modal
@@ -178,22 +212,28 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
         <Descriptions.Item label="Status">
           <Tag color={stateCfg.color} style={{ margin: 0 }}>{stateCfg.label}</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="Type">{machine.type || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Make">{machine.make || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Model">{machine.model || '—'}</Descriptions.Item>
-        <Descriptions.Item label="CNC controller">{machine.cncController || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Year installed">{machine.yearOfInstallation || '—'}</Descriptions.Item>
-        {machine.mhr != null && machine.mhr !== '' && (
-          <Descriptions.Item label="MHR">{machine.mhr}</Descriptions.Item>
-        )}
+        <Descriptions.Item label="Last updated">
+          {machine.lastUpdated
+            ? new Date(machine.lastUpdated).toLocaleString('en-IN')
+            : '—'}
+        </Descriptions.Item>
       </Descriptions>
-      {machine.remarks && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Remarks</div>
-          <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-            {machine.remarks}
-          </div>
-        </div>
+      {hasOrderInfo && (
+        <Descriptions
+          bordered
+          size="small"
+          column={1}
+          style={{ marginTop: 12 }}
+          title="Live Order Details"
+          styles={{ label: { width: 140, background: '#fafafa' } }}
+        >
+          <Descriptions.Item label="Sale order">{machine.saleOrderNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Part number">{machine.partNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Operation">{machine.operationName || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Operation no.">{machine.operationNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Completed qty">{machine.completedQty ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="Target qty">{machine.targetQty ?? 0}</Descriptions.Item>
+        </Descriptions>
       )}
     </Modal>
   )
@@ -206,20 +246,18 @@ function buildWorkCenters(apiMachines) {
 
   const workCenters = {}
   names.forEach((name, i) => {
-    const upper = name.toUpperCase()
-    const color = WORKCENTER_COLORS[upper] || WORKCENTER_COLORS[name] || `hsl(${i * 67}, 62%, 48%)`
-    workCenters[name] = { label: name, color }
+    workCenters[name] = { label: name, color: workCenterColorAt(i) }
   })
   return workCenters
 }
 
-function buildLayout(apiMachines, filterWorkCenter = 'ALL') {
-  const workCenters = buildWorkCenters(apiMachines)
+function buildLayout(apiMachines, filterWorkCenter = 'ALL', workCenterColorMap = null) {
+  const workCenters = workCenterColorMap || buildWorkCenters(apiMachines)
 
   const wcNames = (filterWorkCenter === 'ALL'
-    ? Object.keys(workCenters)
+    ? [...new Set(apiMachines.map(m => (m.work_center_name || 'Unassigned').trim()))]
     : [filterWorkCenter]
-  ).sort()
+  ).sort((a, b) => a.localeCompare(b))
 
   const groups = wcNames
     .map(name => ({
@@ -290,18 +328,24 @@ function buildLayout(apiMachines, filterWorkCenter = 'ALL') {
           const z = startZ + row * ROW_SPACING
 
           machines.push({
-            id: machine.id.toString(),
-            type: (machine.type || '').trim().toUpperCase(),
+            id: (machine.machine_id ?? machine.id).toString(),
+            type: (machine.machine_type || machine.type || '').trim().toUpperCase(),
             workCenter: bay.name,
-            workCenterId: machine.work_center_id,
             position: { x, y: 0, z },
-            status: machine.machine_state || 'OFF',
+            status: getMachineStatus(machine),
             make: machine.make,
             model: machine.model,
             cncController: machine.cnc_controller,
             yearOfInstallation: machine.year_of_installation,
             mhr: machine.mhr,
             remarks: machine.remarks,
+            lastUpdated: machine.last_updated,
+            saleOrderNumber: machine.sale_order_number,
+            partNumber: machine.part_number,
+            operationName: machine.operation_name,
+            operationNumber: machine.operation_number,
+            completedQty: machine.completed_qty,
+            targetQty: machine.target_qty,
           })
         })
 
@@ -320,17 +364,64 @@ export default function ShopFloor() {
   const [showLegend, setShowLegend] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [allMachines, setAllMachines] = useState([])
-  const [machines, setMachines] = useState([])
-  const [workCenters, setWorkCenters] = useState({})
-  const [workCenterZones, setWorkCenterZones] = useState([])
   const [selectedWorkCenter, setSelectedWorkCenter] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState('ALL')
   const [loading, setLoading] = useState(true)
   const controlsRef = useRef()
+  const frameSceneRef = useRef(() => {})
   const time = useClock()
-  const stats = useStats(machines)
+
+  const scopedMachines = useMemo(() => {
+    if (selectedWorkCenter === 'ALL') return allMachines
+    return allMachines.filter(
+      (m) => (m.work_center_name || 'Unassigned').trim() === selectedWorkCenter,
+    )
+  }, [allMachines, selectedWorkCenter])
+
+  const allWorkCenters = useMemo(() => buildWorkCenters(allMachines), [allMachines])
+
+  const { machines: layoutMachines, zones: workCenterZones } = useMemo(
+    () => buildLayout(scopedMachines, selectedWorkCenter, allWorkCenters),
+    [scopedMachines, selectedWorkCenter, allWorkCenters],
+  )
+
+  const visibleMachines = useMemo(() => {
+    if (statusFilter === 'ALL') return layoutMachines
+    return layoutMachines.filter((m) => matchesStatusFilter(m, statusFilter))
+  }, [layoutMachines, statusFilter])
+
+  const stats = useStats(scopedMachines)
+
+  const workCenterCounts = useMemo(() => {
+    const counts = {}
+    allMachines.forEach((m) => {
+      const name = (m.work_center_name || 'Unassigned').trim()
+      counts[name] = (counts[name] || 0) + 1
+    })
+    return counts
+  }, [allMachines])
+
+  const cameraLayoutKey = `${selectedWorkCenter}:${statusFilter}:${visibleMachines.length}:${workCenterZones.length}`
+
+  const cameraPreset = useMemo(
+    () => computeCameraPreset(
+      visibleMachines,
+      workCenterZones,
+      typeof window !== 'undefined' ? window.innerWidth / Math.max(window.innerHeight, 1) : 1,
+    ),
+    [cameraLayoutKey, visibleMachines, workCenterZones],
+  )
 
   useEffect(() => {
-    const handler = e => { if ((e.key === 'r' || e.key === 'R') && controlsRef.current) controlsRef.current.reset() }
+    setSelected((prev) => (prev && layoutMachines.some((m) => m.id === prev) ? prev : null))
+  }, [layoutMachines])
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.key === 'r' || e.key === 'R') && frameSceneRef.current) {
+        frameSceneRef.current()
+      }
+    }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
@@ -341,7 +432,7 @@ export default function ShopFloor() {
     let closed = false
 
     const connectSocket = () => {
-      socket = new WebSocket(getMachinesWsUrl())
+      socket = new WebSocket(getMonitoringWsUrl())
 
       socket.onmessage = event => {
         try {
@@ -350,7 +441,7 @@ export default function ShopFloor() {
           setAllMachines(normalized)
           setLoading(false)
         } catch (error) {
-          console.error('Failed to parse machines websocket payload:', error)
+          console.error('Failed to parse monitoring websocket payload:', error)
           setLoading(false)
         }
       }
@@ -376,51 +467,61 @@ export default function ShopFloor() {
   }, [])
 
   useEffect(() => {
-    if (!allMachines.length) return
-    const { machines: laidOut, workCenters: wcMap, zones } = buildLayout(allMachines, selectedWorkCenter)
-    setWorkCenters(wcMap)
-    setWorkCenterZones(zones)
-    setMachines(laidOut)
-    setSelected(prev => (prev && laidOut.some(m => m.id === prev) ? prev : null))
-  }, [selectedWorkCenter, allMachines])
+    setSelected(null)
+  }, [selectedWorkCenter, statusFilter])
 
   const handleSelect = useCallback(id => setSelected(prev => prev === id ? null : id), [])
-  const selectedMachine = machines.find(m => m.id === selected)
+  const selectedMachine = layoutMachines.find(m => m.id === selected)
+  const hasVisibleMachines = visibleMachines.length > 0
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#475569', fontSize: 14, background: '#f5f5f5' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px', color: '#475569', fontSize: 14, background: '#f5f5f5' }}>
         Loading shop floor data...
       </div>
     )
   }
 
   return (
-    <div style={{ width: '100%', height: '100vh', overflow: 'hidden', position: 'relative', background: '#f5f5f5', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: '#ffffff', borderBottom: '1px solid #e5e7eb', padding: '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, minHeight: 45, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-          <div style={{ color: '#475569', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            MACHINES: <span style={{ color: '#1e293b' }}>{stats.total}</span>
-          </div>
-          {STATUS_ORDER.filter(st => stats.counts[st] > 0).map(st => <StatusPill key={st} status={st} count={stats.counts[st]} />)}
+    <div className="shop-floor-root shop-floor-root--embedded">
+      <div className="shop-floor-header">
+        <div className="shop-floor-header-filters">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ALL')}
+            className={`shop-floor-pill shop-floor-pill-all${statusFilter === 'ALL' ? ' is-active' : ''}`}
+          >
+            <span className="pill-label-long">MACHINES: <span style={{ color: 'inherit' }}>{stats.total}</span></span>
+            <span className="pill-label-short">ALL: {stats.total}</span>
+          </button>
+          {HEADER_STATUS_PILLS.map(st => (
+            <StatusPill
+              key={st}
+              status={st}
+              count={getHeaderStatusCount(st, stats.counts)}
+              isActive={statusFilter === st}
+              onClick={() => setStatusFilter(prev => (prev === st ? 'ALL' : st))}
+            />
+          ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          <Button onClick={() => navigate('/manufacturing_coordinator/shop-floor')} type="primary">
+        <div className="shop-floor-header-actions">
+          <Button size="small" onClick={() => navigate('/manufacturing_coordinator/shop-floor')} type="primary">
             Shop Floor
           </Button>
-          <div style={{ color: '#1e293b', fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          <span className="shop-floor-clock">
             {time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </div>
-          <Button onClick={() => setShowLogoutConfirm(true)} danger>
+          </span>
+          <Button size="small" onClick={() => setShowLogoutConfirm(true)} danger>
             Logout
           </Button>
         </div>
       </div>
 
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div className="shop-floor-canvas-wrap">
+        {layoutMachines.length > 0 ? (
         <Canvas
           shadows
-          camera={{ position: [0, 9, 26], fov: 50, near: 0.1, far: 300 }}
+          camera={{ position: cameraPreset.position, fov: cameraPreset.fov, near: 0.1, far: 320 }}
           style={{ width: '100%', height: '100%' }}
           gl={{
             antialias: true,
@@ -432,17 +533,37 @@ export default function ShopFloor() {
         >
           <FactoryScene />
           <MachineGrid
-            machines={machines}
+            machines={layoutMachines}
             selected={selected}
             onSelect={handleSelect}
-            workCenters={workCenters}
+            workCenters={allWorkCenters}
             workCenterZones={workCenterZones}
+            statusFilter={statusFilter}
           />
-          <BoundedOrbitControls controlsRef={controlsRef} />
+          <SceneCameraRig
+            preset={cameraPreset}
+            machines={visibleMachines}
+            zones={workCenterZones}
+            controlsRef={controlsRef}
+            layoutKey={cameraLayoutKey}
+            frameRef={frameSceneRef}
+          />
+          <BoundedOrbitControls controlsRef={controlsRef} initialTarget={cameraPreset.target} />
         </Canvas>
+        ) : (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            color: '#64748b',
+            fontSize: 14,
+          }}>
+            {hasVisibleMachines ? 'No machines match the selected filter.' : 'No machines in this work center.'}
+          </div>
+        )}
 
-        {/* Work center filter */}
-        <div style={{ position: 'absolute', top: 14, left: 14, background: '#ffffff', borderRadius: 10, padding: '12px 14px', border: '1px solid #e5e7eb', minWidth: 170, maxWidth: 220, zIndex: 9, opacity: showLegend ? 1 : 0, pointerEvents: showLegend ? 'auto' : 'none', transition: 'opacity 0.2s', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+        <div className={`shop-floor-wc-panel${showLegend ? '' : ' is-hidden'}`}>
           <div style={{ color: '#475569', fontSize: 9, fontWeight: 700, marginBottom: 8, letterSpacing: '0.06em' }}>WORK CENTERS</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <WorkCenterChip
@@ -452,25 +573,30 @@ export default function ShopFloor() {
               isActive={selectedWorkCenter === 'ALL'}
               onClick={() => setSelectedWorkCenter('ALL')}
             />
-            {Object.keys(workCenters).map(k => (
+            {Object.keys(allWorkCenters).map(k => (
               <WorkCenterChip
                 key={k}
                 workCenterKey={k}
-                count={allMachines.filter(m => (m.work_center_name || 'Unassigned').trim() === k).length}
-                workCenters={workCenters}
+                count={workCenterCounts[k] || 0}
+                workCenters={allWorkCenters}
                 isActive={selectedWorkCenter === k}
                 onClick={() => setSelectedWorkCenter(k)}
               />
             ))}
           </div>
         </div>
-        <button onClick={() => setShowLegend(v => !v)} style={{ position: 'absolute', top: 14, left: showLegend ? 198 : 14, background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 10px', color: '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer', zIndex: 10, transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <button
+          type="button"
+          onClick={() => setShowLegend(v => !v)}
+          className="shop-floor-wc-toggle"
+          style={{ left: showLegend ? 'min(230px, calc(100% - 120px))' : 10 }}
+        >
           {showLegend ? '◀ Hide' : 'Work Centers ▶'}
         </button>
 
         <SelectedMachineModal
           machine={selectedMachine}
-          workCenters={workCenters}
+          workCenters={allWorkCenters}
           open={Boolean(selectedMachine)}
           onClose={() => setSelected(null)}
         />

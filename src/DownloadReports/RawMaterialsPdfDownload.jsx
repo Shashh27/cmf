@@ -1,231 +1,22 @@
 import React, { useState } from "react";
-import { Button, Tooltip, Modal, Space } from "antd";
+import { Button, Dropdown, message } from "antd";
 import { FilePdfOutlined, FileExcelOutlined, DownloadOutlined } from "@ant-design/icons";
-import {
-  PDFDownloadLink,
-  Document,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-  Font,
-} from "@react-pdf/renderer";
-import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import ExcelJS from "exceljs";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
-Font.registerHyphenationCallback((word) => [word]);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const styles = StyleSheet.create({
-  page: {
-    paddingTop: 32,
-    paddingBottom: 32,
-    paddingHorizontal: 24,
-    fontSize: 9,
-    fontFamily: "Helvetica",
-  },
-  header: {
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d1d5db",
-    borderBottomStyle: "solid",
-    paddingBottom: 8,
-    alignItems: "center",
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: 700,
-    marginBottom: 4,
-    textTransform: "uppercase",
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 10,
-    color: "#6b7280",
-    textAlign: "center",
-  },
-  metaRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  metaText: {
-    fontSize: 8,
-    color: "#4b5563",
-  },
-  table: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderStyle: "solid",
-    width: "100%",
-  },
-  tableHeader: {
-    flexDirection: "row",
-    backgroundColor: "#f3f4f6",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    borderBottomStyle: "solid",
-  },
-  headerCell: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#e5e7eb",
-    borderRightStyle: "solid",
-    fontWeight: 700,
-  },
-  row: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    borderBottomStyle: "solid",
-  },
-  cell: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#f3f4f6",
-    borderRightStyle: "solid",
-  },
-  footer: {
-    marginTop: 16,
-    fontSize: 7,
-    color: "#9ca3af",
-    textAlign: "right",
-  },
-  stockHeader: {
-    flexDirection: "row",
-    backgroundColor: "#f9fafb",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    borderBottomStyle: "solid",
-    borderTopWidth: 1,
-    borderTopColor: "#d1d5db",
-    borderTopStyle: "solid",
-  },
-  stockHeaderCell: {
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-    borderRightWidth: 1,
-    borderRightColor: "#e5e7eb",
-    borderRightStyle: "solid",
-    fontWeight: 600,
-    fontSize: 7,
-  },
-  stockRow: {
-    flexDirection: "row",
-    borderBottomWidth: 0.5,
-    borderBottomColor: "#f3f4f6",
-    borderBottomStyle: "solid",
-  },
-  stockCell: {
-    paddingVertical: 3,
-    paddingHorizontal: 2,
-    borderRightWidth: 0.5,
-    borderRightColor: "#f3f4f6",
-    borderRightStyle: "solid",
-    fontSize: 7,
-  },
-});
-
-const inventoryColumnWidths = {
-  slNo: 40,
-  name: 150,
-  density: 80,
-  cost: 80,
-  status: 80,
-};
-
-
-const statusColumnWidths = {
-  slNo: 25,
-  projectNumber: 75,
-  partNumber: 80,
-  material: 100,
-  formType: 70,
-  quantity: 50,
-  mass: 60,
-  weight: 60,
-  cost: 110,
-  vendor: 90,
-  status: 80,
-  orderStatus: 90,
-};
-
-const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
-  const generatedAt = new Date().toLocaleString();
-  const total = rawMaterials.length;
-
-  return (
-    <Document>
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            CMF DIGITIZATION 
-          </Text>
-          <Text style={styles.subtitle}>
-            Raw Materials Inventory Report
-          </Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total materials: {total}</Text>
-            <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
-          </View>
-        </View>
-
-        <View style={styles.table}>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.slNo }]}>
-              SL NO
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.name }]}>
-              MATERIAL NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.density }]}>
-              DENSITY(kg/m³)
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.cost }]}>
-              COST(₹/kg)
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.status }]}>
-              STATUS
-            </Text>
-          </View>
-
-          {rawMaterials.map((m, index) => {
-            const hasAvailableStock = m.has_available_stock;
-            const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
-            
-            return (
-              <View key={m.id || index} style={styles.row}>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.slNo }]}>
-                  {index + 1}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.name }]}>
-                  {m.material_name || "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
-                  {m.density != null ? String(m.density) : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.cost }]}>
-                  {m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
-                  {statusText}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-
-        <Text style={styles.footer}>
-          Generated by CMF Digitization Raw Materials module
-        </Text>
-      </Page>
-    </Document>
-  );
-};
+const fmt = (val) => (val == null || val === "" ? "—" : String(val));
+const fmtCost = (val) =>
+  val != null
+    ? `Rs.${Number(val).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : "—";
+const fmtNum = (val, dec = 3) => (val != null ? parseFloat(val).toFixed(dec) : "—");
 
 const groupLinkedMaterials = (linkedMaterials) => {
   const groupedMap = {};
@@ -264,288 +55,467 @@ const groupLinkedMaterials = (linkedMaterials) => {
   return groupedData;
 };
 
-const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
-  const generatedAt = new Date().toLocaleString();
-  const groupedData = groupLinkedMaterials(linkedMaterials);
-  const total = groupedData.length;
+const formatStatus = (status) => {
+  if (!status) return "-";
+  const value = String(status).toLowerCase();
+  if (value === "available") return "AVAILABLE";
+  if (value === "purchase order") return "PURCHASE ORDER";
+  if (value === "purchase request") return "PURCHASE REQUEST";
+  return status;
+};
 
-  const formatStatus = (status) => {
-    if (!status) return "-";
-    const value = String(status).toLowerCase();
-    if (value === "available") return "AVAILABLE";
-    if (value === "purchase order") return "PURCHASE ORDER";
-    if (value === "purchase request") return "PURCHASE REQUEST";
-    return status;
+// ---------------------------------------------------------------------------
+// PDF Export - Raw Materials Inventory
+// ---------------------------------------------------------------------------
+
+const exportInventoryPDF = (rawMaterials) => {
+  if (!rawMaterials || rawMaterials.length === 0) {
+    message.warning("No raw materials available");
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const generatedAt = new Date().toLocaleString();
+
+  const drawHeader = () => {
+    doc.setFillColor(30, 64, 175);
+    doc.rect(margin, 8, pageW - margin * 2, 10, "F");
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text("RAW MATERIALS INVENTORY REPORT", pageW / 2, 14.5, { align: "center" });
+
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated: ${generatedAt}`, margin, 22);
+    doc.text(`Total Materials: ${rawMaterials.length}`, pageW / 2, 22, { align: "center" });
+    doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
+
+    doc.setDrawColor(30, 64, 175);
+    doc.setLineWidth(0.3);
+    doc.line(margin, 24, pageW - margin, 24);
   };
 
-  return (
-    <Document>
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            CMF DIGITIZATION 
-          </Text>
-          <Text style={styles.subtitle}>
-            Parts with Raw Materials Status Report
-          </Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total records: {total}</Text>
-            <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
-          </View>
-        </View>
+  drawHeader();
 
-        <View style={styles.table}>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.slNo }]}>
-              SL NO
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.projectNumber }]}>
-              PROJECT NO
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.partNumber }]}>
-              PART NO
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.material }]}>
-              MATERIAL
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.formType }]}>
-              FORM TYPE
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.quantity }]}>
-              QTY
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.mass }]}>
-              MASS (KG)
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.weight }]}>
-              WEIGHT (N)
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.cost }]}>
-              COST
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.vendor }]}>
-              VENDOR
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.status }]}>
-              STATUS
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.orderStatus }]}>
-              ORDER STATUS
-            </Text>
-          </View>
+  const headers = ["SL NO", "MATERIAL NAME", "DENSITY(kg/m³)", "COST(₹/kg)", "STATUS"];
+  const body = rawMaterials.map((m, index) => {
+    const hasAvailableStock = m.has_available_stock;
+    const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
+    return [
+      index + 1,
+      m.material_name || "-",
+      m.density != null ? String(m.density) : "-",
+      m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-",
+      statusText,
+    ];
+  });
 
-          {groupedData.map((row, index) => (
-            <View key={row.id || index} style={styles.row}>
-              <Text style={[styles.cell, { width: statusColumnWidths.slNo }]}>
-                {index + 1}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.projectNumber }]}>
-                {row.sale_order_number || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.partNumber }]}>
-                {row.part_number || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.material }]}>
-                {row.material_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.formType }]}>
-                {row.form_type || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.quantity }]}>
-                {row.quantity != null ? String(row.quantity) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.mass }]}>
-                {row.mass != null ? String(row.mass) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.weight }]}>
-                {row.weight != null ? String(row.weight) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.cost }]}>
-                {row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.vendor }]}>
-                {row.vendor || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.status }]}>
-                {formatStatus(row.material_status)}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.orderStatus }]}>
-                {row.order_status || "-"}
-              </Text>
-            </View>
-          ))}
-        </View>
+  autoTable(doc, {
+    startY: 27,
+    head: [headers],
+    body,
+    styles: {
+      fontSize: 7,
+      cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+      valign: "middle",
+      overflow: "linebreak",
+      lineColor: [209, 213, 219],
+      lineWidth: 0.2,
+      textColor: [30, 30, 30],
+    },
+    headStyles: {
+      fillColor: [30, 64, 175],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 7,
+    },
+    alternateRowStyles: { fillColor: [239, 246, 255] },
+    columnStyles: {
+      0: { cellWidth: "auto", halign: "center" },
+      1: { cellWidth: "auto" },
+      2: { cellWidth: "auto", halign: "center" },
+      3: { cellWidth: "auto", halign: "center" },
+      4: { cellWidth: "auto", halign: "center" },
+    },
+    tableWidth: "auto",
+    margin: { left: margin, right: margin, top: 27, bottom: 10 },
+    didDrawPage: (d) => {
+      if (d.pageNumber > 1) drawHeader();
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(156, 163, 175);
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.2);
+      doc.line(margin, pageH - 10, pageW - margin, pageH - 10);
+      doc.text(`Page ${d.pageNumber} of ${doc.internal.getNumberOfPages()}`, pageW / 2, pageH - 6, { align: "center" });
+      doc.text("CMF Digitization — Confidential", margin, pageH - 6);
+    },
+  });
 
-        <Text style={styles.footer}>
-          Generated by CMF Digitization Raw Materials module
-        </Text>
-      </Page>
-    </Document>
-  );
+  doc.save(`RawMaterialsInventory_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
+
+// ---------------------------------------------------------------------------
+// PDF Export - Parts with Raw Materials Status
+// ---------------------------------------------------------------------------
+
+const exportStatusPDF = (linkedMaterials) => {
+  const groupedData = groupLinkedMaterials(linkedMaterials);
+  if (!groupedData.length) {
+    message.warning("No status records available");
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const generatedAt = new Date().toLocaleString();
+
+  const drawHeader = () => {
+    doc.setFillColor(30, 64, 175);
+    doc.rect(margin, 8, pageW - margin * 2, 10, "F");
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text("PARTS WITH RAW MATERIALS STATUS REPORT", pageW / 2, 14.5, { align: "center" });
+
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated: ${generatedAt}`, margin, 22);
+    doc.text(`Total Records: ${groupedData.length}`, pageW / 2, 22, { align: "center" });
+    doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
+
+    doc.setDrawColor(30, 64, 175);
+    doc.setLineWidth(0.3);
+    doc.line(margin, 24, pageW - margin, 24);
+  };
+
+  drawHeader();
+
+  const headers = ["SL NO", "PROJECT NO", "PART NO", "MATERIAL", "FORM TYPE", "QTY", "MASS (KG)", "WEIGHT (N)", "COST", "VENDOR", "STATUS", "ORDER STATUS"];
+  const body = groupedData.map((row, index) => [
+    index + 1,
+    row.sale_order_number || "-",
+    row.part_number || "-",
+    row.material_name || "-",
+    row.form_type || "-",
+    row.quantity != null ? String(row.quantity) : "-",
+    row.mass != null ? String(row.mass) : "-",
+    row.weight != null ? String(row.weight) : "-",
+    row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-",
+    row.vendor || "-",
+    formatStatus(row.material_status),
+    row.order_status || "-",
+  ]);
+
+  autoTable(doc, {
+    startY: 27,
+    head: [headers],
+    body,
+    styles: {
+      fontSize: 6,
+      cellPadding: { top: 1, bottom: 1, left: 1, right: 1 },
+      valign: "middle",
+      overflow: "linebreak",
+      lineColor: [209, 213, 219],
+      lineWidth: 0.2,
+      textColor: [30, 30, 30],
+    },
+    headStyles: {
+      fillColor: [30, 64, 175],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 6,
+    },
+    alternateRowStyles: { fillColor: [239, 246, 255] },
+    columnStyles: {
+      0: { cellWidth: "auto", halign: "center" },
+      1: { cellWidth: "auto" },
+      2: { cellWidth: "auto" },
+      3: { cellWidth: "auto" },
+      4: { cellWidth: "auto" },
+      5: { cellWidth: "auto", halign: "center" },
+      6: { cellWidth: "auto", halign: "center" },
+      7: { cellWidth: "auto", halign: "center" },
+      8: { cellWidth: "auto", halign: "center" },
+      9: { cellWidth: "auto" },
+      10: { cellWidth: "auto" },
+      11: { cellWidth: "auto" },
+    },
+    tableWidth: "auto",
+    margin: { left: margin, right: margin, top: 27, bottom: 10 },
+    didDrawPage: (d) => {
+      if (d.pageNumber > 1) drawHeader();
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(156, 163, 175);
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.2);
+      doc.line(margin, pageH - 10, pageW - margin, pageH - 10);
+      doc.text(`Page ${d.pageNumber} of ${doc.internal.getNumberOfPages()}`, pageW / 2, pageH - 6, { align: "center" });
+      doc.text("CMF Digitization — Confidential", margin, pageH - 6);
+    },
+  });
+
+  doc.save(`PartsRawMaterialStatus_${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
+// ---------------------------------------------------------------------------
+// Excel Export - Raw Materials Inventory
+// ---------------------------------------------------------------------------
+
+const exportInventoryExcel = async (rawMaterials) => {
+  if (!rawMaterials || rawMaterials.length === 0) {
+    message.warning("No raw materials available");
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CMF Digitization";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Raw Materials Inventory", { pageSetup: { orientation: "landscape" } });
+
+  const headers = ["SL NO", "MATERIAL NAME", "DENSITY(kg/m³)", "COST(₹/kg)", "STATUS"];
+
+  ws.mergeCells(1, 1, 1, headers.length);
+  const t = ws.getCell("A1");
+  t.value = "CMF DIGITIZATION - RAW MATERIALS INVENTORY REPORT";
+  t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
+  t.alignment = { horizontal: "center", vertical: "middle" };
+  t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+  ws.getRow(1).height = 28;
+
+  ws.mergeCells(2, 1, 2, headers.length);
+  const s = ws.getCell("A2");
+  s.value = `Total Materials: ${rawMaterials.length} | Generated: ${new Date().toLocaleString()}`;
+  s.font = { size: 9, italic: true, color: { argb: "FF6B7280" } };
+  s.alignment = { horizontal: "center" };
+  ws.getRow(2).height = 16;
+
+  ws.addRow([]);
+
+  const hdr = ws.addRow(headers);
+  hdr.height = 20;
+  hdr.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E40AF" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FF93C5FD" } },
+      bottom: { style: "thin", color: { argb: "FF93C5FD" } },
+      left: { style: "thin", color: { argb: "FF93C5FD" } },
+      right: { style: "thin", color: { argb: "FF93C5FD" } },
+    };
+  });
+
+  rawMaterials.forEach((m, index) => {
+    const hasAvailableStock = m.has_available_stock;
+    const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
+    const values = [
+      index + 1,
+      m.material_name || "-",
+      m.density != null ? m.density : "-",
+      m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-",
+      statusText,
+    ];
+    const dr = ws.addRow(values);
+    dr.height = 15;
+    dr.eachCell((cell) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
+      cell.border = {
+        top: { style: "hair", color: { argb: "FFD1D5DB" } },
+        bottom: { style: "hair", color: { argb: "FFD1D5DB" } },
+        left: { style: "hair", color: { argb: "FFD1D5DB" } },
+        right: { style: "hair", color: { argb: "FFD1D5DB" } },
+      };
+    });
+  });
+
+  const colWidths = [8, 25, 15, 15, 15];
+  headers.forEach((_, i) => {
+    ws.getColumn(i + 1).width = colWidths[i] || 14;
+  });
+
+  ws.views = [{ state: "frozen", ySplit: 4 }];
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: headers.length } };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `RawMaterialsInventory_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Excel Export - Parts with Raw Materials Status
+// ---------------------------------------------------------------------------
+
+const exportStatusExcel = async (linkedMaterials) => {
+  const groupedData = groupLinkedMaterials(linkedMaterials);
+  if (!groupedData.length) {
+    message.warning("No status records available");
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CMF Digitization";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Parts with Raw Materials Status", { pageSetup: { orientation: "landscape" } });
+
+  const headers = ["SL NO", "PROJECT NO", "PART NO", "MATERIAL", "FORM TYPE", "QTY", "MASS (KG)", "WEIGHT (N)", "COST", "VENDOR", "STATUS", "ORDER STATUS"];
+
+  ws.mergeCells(1, 1, 1, headers.length);
+  const t = ws.getCell("A1");
+  t.value = "CMF DIGITIZATION - PARTS WITH RAW MATERIALS STATUS REPORT";
+  t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
+  t.alignment = { horizontal: "center", vertical: "middle" };
+  t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+  ws.getRow(1).height = 28;
+
+  ws.mergeCells(2, 1, 2, headers.length);
+  const s = ws.getCell("A2");
+  s.value = `Total Records: ${groupedData.length} | Generated: ${new Date().toLocaleString()}`;
+  s.font = { size: 9, italic: true, color: { argb: "FF6B7280" } };
+  s.alignment = { horizontal: "center" };
+  ws.getRow(2).height = 16;
+
+  ws.addRow([]);
+
+  const hdr = ws.addRow(headers);
+  hdr.height = 20;
+  hdr.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E40AF" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FF93C5FD" } },
+      bottom: { style: "thin", color: { argb: "FF93C5FD" } },
+      left: { style: "thin", color: { argb: "FF93C5FD" } },
+      right: { style: "thin", color: { argb: "FF93C5FD" } },
+    };
+  });
+
+  groupedData.forEach((row, index) => {
+    const values = [
+      index + 1,
+      row.sale_order_number || "-",
+      row.part_number || "-",
+      row.material_name || "-",
+      row.form_type || "-",
+      row.quantity != null ? row.quantity : "-",
+      row.mass != null ? row.mass : "-",
+      row.weight != null ? row.weight : "-",
+      row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-",
+      row.vendor || "-",
+      formatStatus(row.material_status),
+      row.order_status || "-",
+    ];
+    const dr = ws.addRow(values);
+    dr.height = 15;
+    dr.eachCell((cell) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
+      cell.border = {
+        top: { style: "hair", color: { argb: "FFD1D5DB" } },
+        bottom: { style: "hair", color: { argb: "FFD1D5DB" } },
+        left: { style: "hair", color: { argb: "FFD1D5DB" } },
+        right: { style: "hair", color: { argb: "FFD1D5DB" } },
+      };
+    });
+  });
+
+  const colWidths = [8, 15, 15, 20, 15, 8, 12, 12, 15, 15, 20, 20];
+  headers.forEach((_, i) => {
+    ws.getColumn(i + 1).width = colWidths[i] || 14;
+  });
+
+  ws.views = [{ state: "frozen", ySplit: 4 }];
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: headers.length } };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `PartsRawMaterialStatus_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
 
 export const RawMaterialsInventoryPdfDownload = ({
   rawMaterials,
   fileName = "raw-materials-inventory.pdf",
 }) => {
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [loading, setLoading] = useState("");
 
-  const handleDownloadExcel = () => {
-    if (!rawMaterials || rawMaterials.length === 0) return;
-
-    // Create workbook and worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([]);
-
-    // Add header information
-    XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION"],
-      ["Raw Materials Inventory Report"],
-      [],
-      [`Total Materials: ${rawMaterials.length}`],
-      [`Generated on: ${new Date().toLocaleString()}`],
-      []
-    ], { origin: "A1" });
-
-    // Add table headers for raw materials
-    const headers = [
-      "SL NO",
-      "MATERIAL NAME",
-      "DENSITY(kg/m³)",
-      "COST(₹/kg)",
-      "STATUS"
-    ];
-
-    // Merge cells for header titles and metadata
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } }
-    ];
-
-    // Apply styling to header cells
-    if (ws['A1']) ws['A1'].s = { font: { sz: 16, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A2']) ws['A2'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A4']) ws['A4'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A5']) ws['A5'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-
-    XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A7" });
-
-    // Apply styling to table headers
-    for (let i = 0; i < headers.length; i++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: 6, c: i });
-      if (ws[cellAddress]) {
-        ws[cellAddress].s = { 
-          font: { bold: true }, 
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F3F4F6" } }
-        };
-      }
+  const handlePDF = async () => {
+    if (!rawMaterials?.length) {
+      message.warning("No raw materials available");
+      return;
     }
-
-    // Prepare and add table data for raw materials
-    let currentRow = 8;
-    rawMaterials.forEach((m, index) => {
-      const hasAvailableStock = m.has_available_stock;
-      const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
-      
-      const rowData = [
-        index + 1,
-        m.material_name || "-",
-        m.density != null ? m.density : "-",
-        m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-",
-        statusText
-      ];
-      
-      XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${currentRow}` });
-      currentRow++;
-    });
-
-    // Set column widths
-    const colWidths = [
-      { wch: 8 },   // SL NO
-      { wch: 25 },  // MATERIAL NAME
-      { wch: 15 },  // DENSITY(kg/m³)
-      { wch: 15 },  // COST(₹/kg)
-      { wch: 15 }   // STATUS
-    ];
-    ws['!cols'] = colWidths;
-
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(wb, ws, "Raw Materials Inventory");
-
-    // Generate and download Excel file
-    const excelFileName = fileName.replace('.pdf', '.xlsx');
-    XLSX.writeFile(wb, excelFileName);
-    
-    setIsModalVisible(false);
+    setLoading("pdf");
+    try {
+      exportInventoryPDF(rawMaterials);
+    } catch (e) {
+      message.error("PDF export failed");
+    } finally {
+      setLoading("");
+    }
   };
+
+  const handleExcel = async () => {
+    if (!rawMaterials?.length) {
+      message.warning("No raw materials available");
+      return;
+    }
+    setLoading("excel");
+    try {
+      await exportInventoryExcel(rawMaterials);
+    } catch (e) {
+      message.error("Excel export failed");
+    } finally {
+      setLoading("");
+    }
+  };
+
+  const menuItems = [
+    { key: "pdf", label: "Download PDF", icon: <FilePdfOutlined style={{ color: "#ef4444" }} />, onClick: handlePDF },
+    { key: "excel", label: "Download Excel", icon: <FileExcelOutlined style={{ color: "#16a34a" }} />, onClick: handleExcel },
+  ];
 
   if (!rawMaterials || rawMaterials.length === 0) {
     return (
-      <Tooltip title="No raw materials available for export">
-        <Button icon={<DownloadOutlined />} size="middle" disabled>
-          Download Raw Materials
-        </Button>
-      </Tooltip>
+      <Button icon={<DownloadOutlined />} size="middle" disabled>
+        Download Raw Materials
+      </Button>
     );
   }
 
   return (
-    <>
-      <Button 
-        icon={<DownloadOutlined />} 
-        size="middle"
-        onClick={() => setIsModalVisible(true)}
-      >
+    <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading}>
+      <Button icon={<DownloadOutlined />} loading={!!loading} size="middle" style={{ fontSize: 11 }}>
         Download Raw Materials
       </Button>
-
-      <Modal
-        title="Download Raw Materials Report"
-        open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        footer={null}
-        centered
-        width={400}
-      >
-        <div style={{ padding: "20px 0" }}>
-          <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
-            Choose your preferred download format:
-          </p>
-          
-          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <PDFDownloadLink
-              document={<RawMaterialsInventoryPdfDocument rawMaterials={rawMaterials} />}
-              fileName={fileName}
-              style={{ textDecoration: "none", width: "100%" }}
-            >
-              {({ loading }) => (
-                <Button 
-                  icon={<FilePdfOutlined />} 
-                  size="large"
-                  style={{ width: "100%", height: "50px" }}
-                  type="default"
-                >
-                  {loading ? "Preparing PDF..." : "Download PDF"}
-                </Button>
-              )}
-            </PDFDownloadLink>
-
-            <Button 
-              icon={<FileExcelOutlined />} 
-              size="large"
-              style={{ width: "100%", height: "50px" }}
-              type="default"
-              onClick={handleDownloadExcel}
-            >
-              Download Excel
-            </Button>
-          </Space>
-        </div>
-      </Modal>
-    </>
+    </Dropdown>
   );
 };
 
@@ -553,225 +523,56 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
   linkedMaterials,
   fileName = "parts-with-raw-materials-status.pdf",
 }) => {
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [loading, setLoading] = useState("");
 
-  const handleDownloadExcel = () => {
-    if (!linkedMaterials || linkedMaterials.length === 0) return;
-
-    // Group linked materials like in the PDF document
-    const groupedMap = {};
-    (linkedMaterials || []).forEach((item) => {
-      if (!item) return;
-      const key = item.id || `${item.raw_material_id}-${item.order_id}-${item.part_number}`;
-
-      if (!groupedMap[key]) {
-        groupedMap[key] = {
-          id: key,
-          raw_material_id: item.raw_material_id,
-          order_id: item.order_id,
-          sale_order_number: item.source_order_number || item.sale_order_number,
-          project_name: item.project_name || item.product_name,
-          material_name: item.material_name,
-          part_number: item.part_numbers && item.part_numbers.length > 0 ? item.part_numbers.join(', ') : item.part_number,
-          form_type: item.form_type,
-          quantity: item.quantity || item.order_quantity,
-          mass: item.mass,
-          weight: item.weight,
-          cost: item.cost,
-          vendor: item.vendor_name || item.received_vendor_name,
-          material_status: item.material_status || item.status,
-          order_status: item.order_status,
-        };
-      }
-    });
-
-    const groupedData = Object.values(groupedMap).sort((a, b) => {
-      const aOrder = a.sale_order_number || '';
-      const bOrder = b.sale_order_number || '';
-      return aOrder.localeCompare(bOrder);
-    });
-
-    const formatStatus = (status) => {
-      if (!status) return "-";
-      const value = String(status).toLowerCase();
-      if (value === "available") return "AVAILABLE";
-      if (value === "purchase order") return "PURCHASE ORDER";
-      if (value === "purchase request") return "PURCHASE REQUEST";
-      return status;
-    };
-
-    // Create workbook and worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([]);
-
-    // Add header information
-    XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION"],
-      ["Parts with Raw Materials Status Report"],
-      [],
-      [`Total Records: ${groupedData.length}`],
-      [`Generated on: ${new Date().toLocaleString()}`],
-      []
-    ], { origin: "A1" });
-
-    // Add table headers
-    const headers = [
-      "SL NO",
-      "PROJECT NO",
-      "PART NO",
-      "MATERIAL",
-      "FORM TYPE",
-      "QTY",
-      "MASS (KG)",
-      "WEIGHT (N)",
-      "COST",
-      "VENDOR",
-      "STATUS",
-      "ORDER STATUS"
-    ];
-
-    // Merge cells for header titles and metadata
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } }
-    ];
-
-    // Apply styling to header cells
-    if (ws['A1']) ws['A1'].s = { font: { sz: 16, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A2']) ws['A2'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A4']) ws['A4'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A5']) ws['A5'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-
-    XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A7" });
-
-    // Apply styling to table headers
-    for (let i = 0; i < headers.length; i++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: 6, c: i });
-      if (ws[cellAddress]) {
-        ws[cellAddress].s = { 
-          font: { bold: true }, 
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F3F4F6" } }
-        };
-      }
+  const handlePDF = async () => {
+    if (!linkedMaterials?.length) {
+      message.warning("No status records available");
+      return;
     }
-
-    // Prepare and add table data - ensure exact alignment with headers
-    groupedData.forEach((row, index) => {
-      const rowData = [
-        index + 1,                                    // Column A: SL NO
-        row.sale_order_number || "-",                 // Column B: PROJECT NO
-        row.part_number || "-",                        // Column C: PART NO
-        row.material_name || "-",                       // Column D: MATERIAL
-        row.form_type || "-",                         // Column E: FORM TYPE
-        row.quantity != null ? row.quantity : "-",       // Column F: QTY
-        row.mass != null ? row.mass : "-",             // Column G: MASS (KG)
-        row.weight != null ? row.weight : "-",           // Column H: WEIGHT (N)
-        row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-",      // Column I: COST
-        row.vendor || "-",                            // Column J: VENDOR
-        formatStatus(row.material_status),                // Column K: STATUS
-        row.order_status || "-"                        // Column L: ORDER STATUS
-      ];
-      
-      // Write each row individually to ensure proper alignment
-      const rowNum = 8 + index; // Start from row 8 (after headers)
-      XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${rowNum}` });
-    });
-
-    // Set column widths
-    const colWidths = [
-      { wch: 8 },   // SL NO
-      { wch: 15 },  // PROJECT NO
-      { wch: 15 },  // PART NO
-      { wch: 20 },  // MATERIAL
-      { wch: 15 },  // FORM TYPE
-      { wch: 8 },   // QTY
-      { wch: 12 },  // MASS (KG)
-      { wch: 12 },  // WEIGHT (N)
-      { wch: 15 },  // COST
-      { wch: 15 },  // VENDOR
-      { wch: 20 },  // STATUS
-      { wch: 20 }   // ORDER STATUS
-    ];
-    ws['!cols'] = colWidths;
-
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(wb, ws, "Parts with Raw Materials Status");
-
-    // Generate and download Excel file
-    const excelFileName = fileName.replace('.pdf', '.xlsx');
-    XLSX.writeFile(wb, excelFileName);
-    
-    setIsModalVisible(false);
+    setLoading("pdf");
+    try {
+      exportStatusPDF(linkedMaterials);
+    } catch (e) {
+      message.error("PDF export failed");
+    } finally {
+      setLoading("");
+    }
   };
+
+  const handleExcel = async () => {
+    if (!linkedMaterials?.length) {
+      message.warning("No status records available");
+      return;
+    }
+    setLoading("excel");
+    try {
+      await exportStatusExcel(linkedMaterials);
+    } catch (e) {
+      message.error("Excel export failed");
+    } finally {
+      setLoading("");
+    }
+  };
+
+  const menuItems = [
+    { key: "pdf", label: "Download PDF", icon: <FilePdfOutlined style={{ color: "#ef4444" }} />, onClick: handlePDF },
+    { key: "excel", label: "Download Excel", icon: <FileExcelOutlined style={{ color: "#16a34a" }} />, onClick: handleExcel },
+  ];
 
   if (!linkedMaterials || linkedMaterials.length === 0) {
     return (
-      <Tooltip title="No status records available for export">
-        <Button icon={<DownloadOutlined />} size="middle" disabled>
-          Download Parts Raw Material
-        </Button>
-      </Tooltip>
+      <Button icon={<DownloadOutlined />} size="middle" disabled>
+        Download Parts Raw Material
+      </Button>
     );
   }
 
   return (
-    <>
-      <Button 
-        icon={<DownloadOutlined />} 
-        size="middle"
-        onClick={() => setIsModalVisible(true)}
-      >
+    <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading}>
+      <Button icon={<DownloadOutlined />} loading={!!loading} size="middle" style={{ fontSize: 11 }}>
         Download Parts Raw Material
       </Button>
-
-      <Modal
-        title="Download Status Report"
-        open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        footer={null}
-        centered
-        width={400}
-      >
-        <div style={{ padding: "20px 0" }}>
-          <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
-            Choose your preferred download format:
-          </p>
-          
-          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <PDFDownloadLink
-              document={
-                <PartsWithRawMaterialsStatusPdfDocument linkedMaterials={linkedMaterials} />
-              }
-              fileName={fileName}
-              style={{ textDecoration: "none", width: "100%" }}
-            >
-              {({ loading }) => (
-                <Button 
-                  icon={<FilePdfOutlined />} 
-                  size="large"
-                  style={{ width: "100%", height: "50px" }}
-                  type="default"
-                >
-                  {loading ? "Preparing PDF..." : "Download PDF"}
-                </Button>
-              )}
-            </PDFDownloadLink>
-
-            <Button 
-              icon={<FileExcelOutlined />} 
-              size="large"
-              style={{ width: "100%", height: "50px" }}
-              type="default"
-              onClick={handleDownloadExcel}
-            >
-              Download Excel
-            </Button>
-          </Space>
-        </div>
-      </Modal>
-    </>
+    </Dropdown>
   );
 };

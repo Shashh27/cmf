@@ -1,4 +1,4 @@
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useMemo, memo } from 'react'
 import { Html, useGLTF, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -13,9 +13,7 @@ const STATUS_CONFIG = {
 
 function MachineModel({ type, statusColor }) {
   const { scene } = useGLTF('/assets/shopfloor/cnc1.glb')
-  
-  // Clone the scene for each machine instance
-  const clonedScene = scene.clone()
+  const clonedScene = useMemo(() => scene.clone(true), [scene])
   
   return (
     <group position={[0, 0, 0]} scale={[1, 1, 1]}>
@@ -181,6 +179,11 @@ function WorkCenterFlag({ workCenter, color }) {
 }
 
 function WorkCenterZone({ workCenter, position, width, depth, color }) {
+  const borderGeometry = useMemo(
+    () => new THREE.EdgesGeometry(new THREE.PlaneGeometry(width, depth)),
+    [width, depth],
+  )
+
   return (
     <group position={[position.x, position.y, position.z]}>
       {/* floor pad for this work center */}
@@ -196,8 +199,7 @@ function WorkCenterZone({ workCenter, position, width, depth, color }) {
         />
       </mesh>
       {/* border outline */}
-      <lineSegments rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-        <edgesGeometry args={[new THREE.PlaneGeometry(width, depth)]} />
+      <lineSegments rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} geometry={borderGeometry}>
         <lineBasicMaterial color={color} transparent opacity={0.55} />
       </lineSegments>
 
@@ -218,15 +220,16 @@ function WorkCenterZone({ workCenter, position, width, depth, color }) {
   )
 }
 
-function Machine({ id, type, workCenter, position, status, make, model, isSelected, onClick, workCenters }) {
+const Machine = memo(function Machine({ id, type, workCenter, position, status, make, model, isSelected, visible, onClick, workCenters }) {
   const [hovered, setHovered] = useState(false)
   const s = STATUS_CONFIG[status] || STATUS_CONFIG.OFF
 
   // Convert position object to array to avoid read-only errors
-  const posArray = [position.x, position.y, position.z]
+  const posArray = useMemo(() => [position.x, position.y, position.z], [position.x, position.y, position.z])
 
   return (
     <group
+      visible={visible}
       position={posArray}
       onClick={e => { e.stopPropagation(); onClick() }}
       onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer' }}
@@ -275,10 +278,15 @@ function Machine({ id, type, workCenter, position, status, make, model, isSelect
       <MachineStateIcon status={status} isSelected={isSelected} />
     </group>
   )
+})
+
+function matchesMachineStatus(machine, filter) {
+  if (filter === 'ALL') return true
+  if (filter === 'IDLE') return machine.status === 'IDLE' || machine.status === 'ON'
+  return machine.status === filter
 }
 
-
-export default function MachineGrid({ machines, selected, onSelect, workCenters, workCenterZones = [] }) {
+export default function MachineGrid({ machines, selected, onSelect, workCenters, workCenterZones = [], statusFilter = 'ALL' }) {
   return (
     <group>
       {workCenterZones.map(zone => (
@@ -287,7 +295,8 @@ export default function MachineGrid({ machines, selected, onSelect, workCenters,
       {machines.map(m => (
         <Machine 
           key={m.id} 
-          {...m} 
+          {...m}
+          visible={matchesMachineStatus(m, statusFilter)}
           isSelected={selected === m.id} 
           onClick={() => onSelect(m.id)}
           workCenters={workCenters}

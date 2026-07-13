@@ -1,5 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { Card, Table, Tag, Space, Typography, Collapse, Empty, Alert, Row, Col, Statistic, DatePicker, Radio, Tooltip, Spin } from 'antd';
+import React, { useMemo, useState, useCallback } from 'react';
+import { Card, Table, Tag, Space, Typography, Collapse, Alert, Row, Col, Statistic, DatePicker, Radio, Tooltip, Empty } from 'antd';
+import {
+  buildMachineScheduleIndex,
+  getEmptyDayStatus,
+  MAX_CUSTOM_DAYS,
+  MONTH_HEADER_COLORS,
+  resolveCalendarRange,
+} from '../../shopfloordashboard/shopFloorCalendarUtils';
 import {
   CalendarOutlined,
   ClockCircleOutlined,
@@ -19,9 +26,48 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
   // Filter states for heatmap
   const [filterMode, setFilterMode] = useState('month'); // 'day', 'month', 'year', 'custom'
   const [selectedDate, setSelectedDate] = useState(dayjs());
-  const [customStartDate, setCustomStartDate] = useState(dayjs().startOf('month'));
-  const [customEndDate, setCustomEndDate] = useState(dayjs().endOf('month'));
-  const [isLoading, setIsLoading] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState(null);
+  const [customEndDate, setCustomEndDate] = useState(null);
+
+  const handleFilterModeChange = useCallback((mode) => {
+    setFilterMode(mode);
+    if (mode === 'custom') {
+      setCustomStartDate(null);
+      setCustomEndDate(null);
+    }
+  }, []);
+
+  const handleCustomStartChange = useCallback((date) => {
+    if (!date) {
+      setCustomStartDate(null);
+      setCustomEndDate(null);
+      return;
+    }
+    const start = date.startOf('day');
+    setCustomStartDate(start);
+    setCustomEndDate((prev) => {
+      if (!prev || prev.isBefore(start, 'day')) return null;
+      return prev;
+    });
+  }, []);
+
+  const handleCustomEndChange = useCallback((date) => {
+    if (!date) {
+      setCustomEndDate(null);
+      return;
+    }
+    if (!customStartDate) return;
+    const end = date.startOf('day');
+    if (end.isBefore(customStartDate, 'day')) return;
+    setCustomEndDate(end);
+  }, [customStartDate]);
+
+  const disableCustomEndDate = useCallback((current) => {
+    if (!customStartDate || !current) return true;
+    if (current.isBefore(customStartDate, 'day')) return true;
+    if (current.isAfter(customStartDate.add(MAX_CUSTOM_DAYS - 1, 'day'), 'day')) return true;
+    return false;
+  }, [customStartDate]);
 
   // Filter and process scheduled items
   const scheduledData = useMemo(() => {
@@ -125,117 +171,19 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
     };
   }, [scheduledData, availabilityGaps, machines.length]);
 
-  // Transform data for calendar heatmap view with filtering
-  const heatmapData = useMemo(() => {
-    setIsLoading(true);
-    const data = [];
-    const now = dayjs().startOf('day');
-    let startDate, endDate, daysCount;
+  const scheduleIndex = useMemo(() => buildMachineScheduleIndex(machines), [machines]);
 
-    if (filterMode === 'day') {
-      startDate = selectedDate.startOf('day');
-      endDate = selectedDate.endOf('day');
-      daysCount = 1;
-    } else if (filterMode === 'month') {
-      startDate = selectedDate.startOf('month');
-      endDate = selectedDate.endOf('month');
-      daysCount = selectedDate.daysInMonth();
-    } else if (filterMode === 'year') {
-      startDate = selectedDate.startOf('year');
-      endDate = selectedDate.endOf('year');
-      const year = selectedDate.year();
-      const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
-      daysCount = isLeap ? 366 : 365;
-    } else if (filterMode === 'custom') {
-      startDate = customStartDate.startOf('day');
-      endDate = customEndDate.endOf('day');
-      // Limit custom range to 60 days for performance
-      const maxDays = 60;
-      const actualDays = endDate.diff(startDate, 'day') + 1;
-      if (actualDays > maxDays) {
-        endDate = startDate.add(maxDays - 1, 'day');
-        daysCount = maxDays;
-      } else {
-        daysCount = actualDays;
-      }
-    }
+  const calendarRange = useMemo(
+    () => resolveCalendarRange(
+      filterMode,
+      selectedDate,
+      customStartDate,
+      customEndDate,
+    ),
+    [filterMode, selectedDate, customStartDate, customEndDate],
+  );
 
-    // Create data points for each machine and each day
-    machines.forEach(machine => {
-      const scheduledItems = machine.parts_operations
-        .filter(op => op.planned_schedule && op.planned_schedule.planned_start_time);
-
-      for (let i = 0; i < daysCount; i++) {
-        const currentDate = startDate.add(i, 'day');
-        const dateStr = currentDate.format('DD-MM-YYYY');
-        const isPastDate = currentDate.isBefore(now, 'day');
-        const isToday = currentDate.isSame(now, 'day');
-
-        // Check if machine has any scheduled operations on this day
-        const daySchedule = scheduledItems.filter(op => {
-          const opDate = dayjs(op.planned_schedule.planned_start_time);
-          return opDate.isSame(currentDate, 'day');
-        });
-
-        if (daySchedule.length > 0) {
-          daySchedule.forEach(op => {
-            data.push({
-              machine: `${machine.machine_make} ${machine.machine_model}`,
-              machineId: machine.machine_id,
-              date: dateStr,
-              dateObj: currentDate,
-              order: op.sale_order_number,
-              part: op.part_name,
-              partNumber: op.part_number,
-              operation: op.operation_name,
-              operationNumber: op.operation_number,
-              start: dayjs(op.planned_schedule.planned_start_time).format('HH:mm'),
-              end: dayjs(op.planned_schedule.planned_end_time).format('HH:mm'),
-              duration: ((new Date(op.planned_schedule.planned_end_time) - new Date(op.planned_schedule.planned_start_time)) / (1000 * 60 * 60)).toFixed(1),
-              quantity: op.total_quantity,
-              status: 'scheduled',
-              isPastDate,
-              isToday
-            });
-          });
-        } else {
-          // Determine status based on date
-          let status;
-          if (isPastDate) {
-            status = 'not_scheduled';
-          } else if (isToday) {
-            status = 'today_available';
-          } else {
-            status = 'available';
-          }
-
-          data.push({
-            machine: `${machine.machine_make} ${machine.machine_model}`,
-            machineId: machine.machine_id,
-            date: dateStr,
-            dateObj: currentDate,
-            order: null,
-            part: null,
-            partNumber: null,
-            operation: null,
-            operationNumber: null,
-            start: null,
-            end: null,
-            duration: 0,
-            quantity: 0,
-            status,
-            isPastDate,
-            isToday
-          });
-        }
-      }
-    });
-
-    // Clear loading after a short delay to allow UI to render
-    setTimeout(() => setIsLoading(false), 100);
-
-    return { data, daysCount, startDate };
-  }, [machines, filterMode, selectedDate, customStartDate, customEndDate]);
+  const calendarNow = useMemo(() => dayjs().startOf('day'), [calendarRange.daysCount, filterMode, selectedDate]);
 
 
   const formatDateTime = (dateTime) => {
@@ -439,7 +387,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
             <Space>
               <Radio.Group
                 value={filterMode}
-                onChange={(e) => setFilterMode(e.target.value)}
+                onChange={(e) => handleFilterModeChange(e.target.value)}
                 optionType="button"
                 buttonStyle="solid"
                 size="small"
@@ -462,7 +410,8 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                   <DatePicker
                     placeholder="Start Date"
                     value={customStartDate}
-                    onChange={(date) => date && setCustomStartDate(date)}
+                    onChange={handleCustomStartChange}
+                    allowClear
                     size="small"
                     style={{ width: 120 }}
                   />
@@ -470,7 +419,10 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                   <DatePicker
                     placeholder="End Date"
                     value={customEndDate}
-                    onChange={(date) => date && setCustomEndDate(date)}
+                    onChange={handleCustomEndChange}
+                    disabled={!customStartDate}
+                    disabledDate={disableCustomEndDate}
+                    allowClear
                     size="small"
                     style={{ width: 120 }}
                   />
@@ -481,26 +433,42 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
           style={{ marginBottom: '12px', borderRadius: '8px' }}
         >
 
-          <Spin spinning={isLoading} tip="Loading calendar data...">
-          <div style={{ overflowX: 'auto' }}>
+          {filterMode === 'custom' && calendarRange.rangeCapped && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={`Showing first ${MAX_CUSTOM_DAYS} days from start date. Pick a shorter range to see all days.`}
+            />
+          )}
+
+          {(filterMode === 'custom' && !calendarRange.isReady) ? (
+            <Empty
+              description={
+                !customStartDate
+                  ? 'Select start and end dates to view schedule'
+                  : 'Select end date to view schedule for your custom range'
+              }
+              style={{ padding: '48px 0' }}
+            />
+          ) : (
+          <>
+          <div style={{ overflowX: 'auto', height: '650px' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr style={{ background: '#fff' }}>
                   <th style={{ border: '1px solid #d9d9d9', padding: '2px 4px', background: '#fafafa', minWidth: '150px', fontSize: '10px' }}>Machine</th>
-                  {Array.from({ length: heatmapData.daysCount }, (_, i) => {
-                    const date = heatmapData.startDate.add(i, 'day');
-                    const isToday = date.isSame(dayjs(), 'day');
+                  {calendarRange.days.map((date) => {
+                    const isToday = date.isSame(calendarNow, 'day');
                     const isFirstDayOfMonth = date.date() === 1;
                     const monthIndex = date.month();
-                    const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
-                    const monthName = date.format('MMM');
-                    const isYearOrCustom = filterMode === 'year' || (filterMode === 'custom' && heatmapData.daysCount > 31);
+                    const isYearOrCustom = filterMode === 'year' || (filterMode === 'custom' && calendarRange.daysCount > 31);
                     return (
-                      <th key={i} style={{
+                      <th key={date.format('YYYY-MM-DD')} style={{
                         border: '1px solid #d9d9d9',
                         borderLeft: isFirstDayOfMonth ? '2px solid #262626' : '1px solid #d9d9d9',
                         padding: '2px',
-                        background: isYearOrCustom ? solidColors[monthIndex] : (isToday ? '#fff7e6' : '#fafafa'),
+                        background: isYearOrCustom ? MONTH_HEADER_COLORS[monthIndex] : (isToday ? '#fff7e6' : '#fafafa'),
                         minWidth: filterMode === 'year' ? '24px' : (filterMode === 'month' ? '32px' : '50px'),
                         fontSize: filterMode === 'year' ? '7px' : (filterMode === 'month' ? '8px' : '9px')
                       }}>
@@ -514,131 +482,96 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                 </tr>
               </thead>
               <tbody>
-                {machines.map(machine => {
-                  const machineSchedule = heatmapData.data.filter(d => d.machineId === machine.machine_id);
-                  return (
+                {machines.map(machine => (
                     <tr key={machine.machine_id} style={{ height: '22px' }}>
                       <td style={{ border: '1px solid #d9d9d9', padding: '1px 4px', fontWeight: 'bold', fontSize: '9px', background: '#fff', minWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {machine.machine_make} {machine.machine_model}
                       </td>
-                      {Array.from({ length: heatmapData.daysCount }, (_, i) => {
-                        const date = heatmapData.startDate.add(i, 'day');
-                        const allDayData = machineSchedule.filter(d => d.date === date.format('DD-MM-YYYY'));
-                        const scheduledOps = allDayData.filter(d => d.status === 'scheduled');
-                        const dayData = scheduledOps[0]; // First one for display
-                        const isToday = date.isSame(dayjs(), 'day');
+                      {calendarRange.days.map((date) => {
+                        const dayKey = date.format('YYYY-MM-DD');
+                        const scheduledOps = scheduleIndex.get(`${machine.machine_id}|${dayKey}`) || [];
+                        const isToday = date.isSame(calendarNow, 'day');
                         const isFirstDayOfMonth = date.date() === 1;
                         const baseBorderLeft = isFirstDayOfMonth ? '2px solid #262626' : '1px solid #d9d9d9';
+                        const dayData = scheduledOps[0];
 
                         if (scheduledOps.length > 0) {
-                          // Build tooltip with all operations
                           const tooltipContent = scheduledOps.map((op, idx) =>
                             `Op ${idx + 1}: ${op.operation}\nOrder: ${op.order}\nPart: ${op.part}\nTime: ${op.start} - ${op.end}\nDuration: ${op.duration} hrs\nQty: ${op.quantity}`
                           ).join('\n\n');
 
                           return (
                             <td
-                              key={i}
+                              key={dayKey}
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
                                 borderLeft: baseBorderLeft,
                                 padding: '1px',
                                 background: '#1890ff',
                                 cursor: 'pointer',
-                                transition: 'background 0.2s',
                                 height: '20px',
                                 textAlign: 'center'
                               }}
                               title={tooltipContent}
-                              onMouseEnter={(e) => e.target.style.background = '#40a9ff'}
-                              onMouseLeave={(e) => e.target.style.background = '#1890ff'}
                             >
                               <div style={{ fontSize: filterMode === 'year' ? '6px' : '8px', color: 'white', fontWeight: 'bold', lineHeight: '1' }}>
                                 {scheduledOps.length > 1 ? `${scheduledOps.length} ops` : (filterMode === 'year' ? '•' : dayData.start)}
                               </div>
                             </td>
                           );
-                        } else if (allDayData.length > 0 && allDayData[0].status === 'not_scheduled') {
+                        }
+
+                        const emptyStatus = getEmptyDayStatus(date, calendarNow);
+                        if (emptyStatus === 'not_scheduled') {
                           return (
                             <td
-                              key={i}
+                              key={dayKey}
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
                                 borderLeft: baseBorderLeft,
                                 padding: '1px',
-                                background: '#ff4d4f',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
+                                background: 'oklch(64.6% 0.222 41.116)',
                                 height: '20px'
                               }}
                               title="Not Scheduled (Past Date)"
-                              onMouseEnter={(e) => e.target.style.background = '#ff7875'}
-                              onMouseLeave={(e) => e.target.style.background = '#ff4d4f'}
                             >
                               <div style={{ fontSize: '7px', color: 'white', textAlign: 'center' }}>
                                 {filterMode !== 'year' ? 'NS' : ''}
                               </div>
                             </td>
                           );
-                        } else if (dayData && dayData.status === 'today_available') {
-                          return (
-                            <td
-                              key={i}
-                              style={{
-                                border: '2px solid #faad14',
-                                borderLeft: baseBorderLeft,
-                                padding: '1px',
-                                background: '#52c41a',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                                height: '20px'
-                              }}
-                              title="Today - Available for scheduling"
-                              onMouseEnter={(e) => e.target.style.background = '#73d13d'}
-                              onMouseLeave={(e) => e.target.style.background = '#52c41a'}
-                            >
-                            </td>
-                          );
-                        } else {
-                          return (
-                            <td
-                              key={i}
-                              style={{
-                                border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
-                                borderLeft: baseBorderLeft,
-                                padding: '1px',
-                                background: '#52c41a',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                                height: '20px'
-                              }}
-                              title="Available for scheduling"
-                              onMouseEnter={(e) => e.target.style.background = '#73d13d'}
-                              onMouseLeave={(e) => e.target.style.background = '#52c41a'}
-                            >
-                            </td>
-                          );
                         }
+
+                        return (
+                          <td
+                            key={dayKey}
+                            style={{
+                              border: emptyStatus === 'today_available' ? '2px solid #faad14' : (isToday ? '2px solid #faad14' : '1px solid #d9d9d9'),
+                              borderLeft: baseBorderLeft,
+                              padding: '1px',
+                              background: 'oklch(64.8% 0.2 131.684)',
+                              height: '20px'
+                            }}
+                            title={emptyStatus === 'today_available' ? 'Today - Available for scheduling' : 'Available for scheduling'}
+                          />
+                        );
                       })}
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>
-          </Spin>
           {filterMode === 'year' && (
             <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => {
-                const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
-                return (
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => (
                   <div key={month} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <div style={{ width: 16, height: 16, background: solidColors[idx], borderRadius: '3px', border: '1px solid #d9d9d9' }}></div>
+                    <div style={{ width: 16, height: 16, background: MONTH_HEADER_COLORS[idx], borderRadius: '3px', border: '1px solid #d9d9d9' }}></div>
                     <Text style={{ fontSize: '11px' }}>{month}</Text>
                   </div>
-                );
-              })}
+                ))}
             </div>
+          )}
+          </>
           )}
         </Card>
       )}

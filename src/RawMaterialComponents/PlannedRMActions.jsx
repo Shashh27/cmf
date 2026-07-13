@@ -11,6 +11,45 @@ import {
 
 const { Text } = Typography;
 
+const getApiErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail.map((item) => (typeof item === 'string' ? item : item?.msg)).filter(Boolean).join(', ');
+  }
+  const messageText = error?.response?.data?.message;
+  if (typeof messageText === 'string' && messageText.trim()) return messageText;
+  return fallback;
+};
+
+const formatMatchPercent = (rec) => {
+  if (rec?.match_score_percent != null) return rec.match_score_percent;
+  if (rec?.match_score != null) return Math.round(rec.match_score * 1000) / 10;
+  return null;
+};
+
+const formatLengthExcess = (rec) => rec?.length_excess_mm ?? rec?.nearest_fit ?? 0;
+
+const formatRecommendedStockSummary = (rec) => {
+  const parts = [rec.stock_size];
+  const matchPercent = formatMatchPercent(rec);
+  if (matchPercent != null) parts.push(`${matchPercent}% match`);
+  const excess = formatLengthExcess(rec);
+  if (rec?.required_length) {
+    parts.push(`+${excess} mm excess (${rec.required_length} mm planned)`);
+  } else {
+    parts.push(`+${excess} mm length excess`);
+  }
+  return parts.join(' — ');
+};
+
+const formatUnitLength = (value) => (value != null ? value : 'N/A');
+
+const getUnitUsedLength = (unit) => {
+  if (unit?.total_length == null || unit?.remaining_length == null) return 'N/A';
+  return (unit.total_length - unit.remaining_length).toFixed(2);
+};
+
 const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSaved, materialExists, linkedStock, isProcured, updateLinkedStock, onRefresh, onRefreshRecommendations }) => {
   const { message } = App.useApp();
   const [generalStock, setGeneralStock] = useState([]);
@@ -72,8 +111,8 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       setLoadingStock(true);
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
         params: {
-          material_name: rowData.rmName,
-          material_id: rowData.rmId,
+          material_name: rowData.resolvedMaterialName || rowData.rmName,
+          material_id: rowData.resolvedMaterialId || rowData.rmId,
           source_type: 'general'
         }
       });
@@ -126,7 +165,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           if (onRefresh) onRefresh();
           if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
-          message.error('Failed to unlink stock');
+          message.error(getApiErrorMessage(error, 'Failed to unlink stock'));
         } finally {
           setLoadingLink(false);
         }
@@ -193,7 +232,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           if (onRefresh) onRefresh();
           if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
-          message.error('Failed to link stock');
+          message.error(getApiErrorMessage(error, 'Failed to link stock'));
         } finally {
           setLoadingLink(false);
         }
@@ -251,7 +290,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       // Send form_type and dimensions directly to avoid re-parsing issues
       await axios.post(`${API_BASE_URL}/rawmaterials/auto-extract-process`, {
         part_id: rowData.partId,
-        material_name: rowData.rmName,
+        material_name: rowData.resolvedMaterialName || rowData.rmName,
         required_length: dimensions.length || plannedLength,
         process_type: selectedProcessType,
         user_id: userId,
@@ -265,7 +304,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       dispatchRMChanged();
       if (onRefresh) onRefresh();
     } catch (error) {
-      message.error(error.response?.data?.detail || 'Failed to create order material');
+      message.error(getApiErrorMessage(error, 'Failed to create order material'));
     } finally {
       setLoadingLink(false);
     }
@@ -353,9 +392,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           </Text>
           {eligibleRecommendations.slice(0, 3).map((rec, idx) => (
             <div key={idx} style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
-              {rec.stock_size}
-              {rec.nearest_fit != null ? ` (+${rec.nearest_fit} mm)` : ''}
-              {rec.best_remaining_length != null ? `, best remaining: ${rec.best_remaining_length} mm` : ''}
+              {formatRecommendedStockSummary(rec)}
             </div>
           ))}
           {eligibleRecommendations.length > 3 && (
@@ -422,7 +459,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         style={{ maxWidth: '900px', top: '3vh' }}
       >
         <div style={{ marginBottom: 16 }}>
-          <Text strong>Material:</Text> <Text>{rowData.rmName}</Text>
+          <Text strong>Material:</Text> <Text>{rowData.resolvedMaterialName || rowData.rmName}</Text>
         </div>
         <div style={{ marginBottom: 16 }}>
           <Text strong>Extracted Dimension:</Text> <Text>{rowData.dimension}</Text>
@@ -434,15 +471,17 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         {/* Recommended Stocks Section - show if not already assigned and recommendations exist with available units */}
         {!linkedStock && eligibleRecommendations.length > 0 && (
           <div style={{ marginBottom: 24, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
-            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (nearest fit, ≥ planned size):</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (nearest fit by length, ≥ planned size):</Text>
             <div style={{ marginTop: 8, maxHeight: '300px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, border: '1px solid #b3d9ff' }}>
                 <thead style={{ backgroundColor: '#e6f7ff' }}>
                   <tr>
                     <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Stock ID</th>
                     <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Stock Size</th>
-                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Excess (mm)</th>
-                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Best Remaining (mm)</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Match %</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Planned (mm)</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Available (mm)</th>
+                    <th style={{ padding: '6px', border: '1px solid #b3d9ff', textAlign: 'left' }}>Length Excess (mm)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -451,9 +490,13 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_id}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.stock_size}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>
-                        <Tag color="green" style={{ margin: 0 }}>{rec.nearest_fit ?? 0}</Tag>
+                        {formatMatchPercent(rec) != null ? `${formatMatchPercent(rec)}%` : '—'}
                       </td>
+                      <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.required_length ?? '—'}</td>
                       <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>{rec.best_remaining_length ?? rec.max_remaining_length ?? '—'}</td>
+                      <td style={{ padding: '6px', border: '1px solid #b3d9ff' }}>
+                        <Tag color="green" style={{ margin: 0 }}>{formatLengthExcess(rec)}</Tag>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -532,10 +575,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                                 </>
                               )}
                               <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>{unit.id}</td>
-                              <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>{unit.total_length || 'N/A'}</td>
-                              <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>{unit.remaining_length || 'N/A'}</td>
+                              <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>{formatUnitLength(unit.total_length)}</td>
+                              <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>{formatUnitLength(unit.remaining_length)}</td>
                               <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>
-                                {(unit.total_length && unit.remaining_length) ? (unit.total_length - unit.remaining_length).toFixed(2) : 'N/A'}
+                                {getUnitUsedLength(unit)}
                               </td>
                               <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>
                                 <Tag color={unit.status === 'available' ? 'green' : unit.status === 'partially_used' ? 'orange' : 'red'} style={{ fontSize: 8, margin: 0 }}>
@@ -550,7 +593,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                                     size="small"
                                     type="primary"
                                     onClick={() => handleLinkStock(stock.id, unit.id)}
-                                    disabled={unit.status === 'exhausted' || (plannedLength && unit.remaining_length < plannedLength) || (isAlreadyLinkedToGeneralStock && (!linkedStock || linkedStock.unitId !== unit.id))}
+                                    disabled={unit.status === 'exhausted' || (plannedLength != null && (unit.remaining_length ?? 0) < plannedLength) || (isAlreadyLinkedToGeneralStock && (!linkedStock || linkedStock.unitId !== unit.id))}
                                     style={{ fontSize: 9, padding: '1px 4px' }}
                                   >
                                     Assign
@@ -628,7 +671,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
             </thead>
             <tbody>
               <tr>
-                <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{rowData.rmName}</td>
+                <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{rowData.resolvedMaterialName || rowData.rmName}</td>
                 <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}><Tag color="blue">{getFormType()}</Tag></td>
                 {getDimensionsToShow().showDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.diameter} mm</td>}
                 {getDimensionsToShow().showLength && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.length} mm</td>}

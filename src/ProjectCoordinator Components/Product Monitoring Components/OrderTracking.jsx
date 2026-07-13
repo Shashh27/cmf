@@ -10,6 +10,11 @@ import {
   DatabaseOutlined,
   ToolOutlined
 } from '@ant-design/icons';
+import {
+  sortLogsByStage,
+  getOpQtyTotals,
+} from '../../utils/productionLogDisplay';
+import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 
 const { Title, Text } = Typography;
 
@@ -200,6 +205,15 @@ const OrderTracking = () => {
   const partsData = getPartsData(orderDetails, orderTrackingData);
   const selectedPart = partsData.find(p => p.part_id === selectedPartId);
 
+  const getTrackingOperation = (operationId) =>
+    orderTrackingData?.parts?.find((p) => p.part_id === selectedPartId)
+      ?.operations?.find((o) => o.operation_id === operationId);
+
+  const getOperationLogs = (operationId) =>
+    sortLogsByStage(getTrackingOperation(operationId)?.production_logs || []);
+
+  const operationsTableScrollX = 820;
+
   const totalParts = partsData.length;
   const completedParts = partsData.filter(p => p.status?.toLowerCase() === 'completed').length;
   const inProgressParts = partsData.filter(p => ['in progress', 'started'].includes(p.status?.toLowerCase())).length;
@@ -352,7 +366,7 @@ const OrderTracking = () => {
           bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           headStyle={{ padding: '0 16px', flexShrink: 0 }}
         >
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div className="ot-ops-scroll" style={{ flex: 1, overflow: 'auto' }}>
             {!selectedPartId ? (
               <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Empty description="Select a part to see operations" />
@@ -360,18 +374,17 @@ const OrderTracking = () => {
             ) : (
               <>
                 <Table
+                  className="ot-fit-table"
                   dataSource={selectedPart?.operations || []}
                   pagination={false}
                   size="small"
                   rowKey="id"
+                  scroll={{ x: operationsTableScrollX }}
                   expandable={{
                     expandRowByClick: true,
                     expandIconColumnWidth: 24,
                     expandedRowRender: (record) => {
-                      const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                      const operation = trackingOps?.find(o => o.operation_id === record.id);
-                      const logs = operation?.production_logs || [];
-
+                      const logs = getOperationLogs(record.id);
                       if (logs.length === 0) {
                         return (
                           <div style={{
@@ -384,172 +397,90 @@ const OrderTracking = () => {
                           </div>
                         );
                       }
-
-                      return (
-                        <div style={{
-                          padding: '16px',
-                          background: '#fafafa',
-                          borderRadius: '6px',
-                          margin: '0 8px 12px',
-                          border: '1px solid #e8e8e8'
-                        }}>
-                          <div style={{ marginBottom: '12px', fontWeight: 'bold', color: '#333' }}>
-                            Production Stages
-                          </div>
-                          {logs.map((log, index) => (
-                            <div key={log.id} style={{
-                              marginBottom: '8px',
-                              padding: '12px',
-                              background: '#fff',
-                              borderRadius: '4px',
-                              border: '1px solid #d9d9d9'
-                            }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                <span style={{ fontWeight: 'bold', color: '#333' }}>Stage {index + 1}</span>
-                                <Tag color={log.status === 'completed' ? 'green' : log.status === 'rework' ? 'orange' : 'blue'}>
-                                  {log.status}
-                                </Tag>
-                              </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
-                                <div>
-                                  <span style={{ color: '#666' }}>Produced: </span>
-                                  <span style={{ color: '#1677ff', fontWeight: 'bold' }}>{log.produced_quantity || 0}</span>
-                                </div>
-                                <div>
-                                  <span style={{ color: '#666' }}>Approved: </span>
-                                  <span style={{ color: '#52c41a', fontWeight: 'bold' }}>{log.approved_quantity || 0}</span>
-                                </div>
-                                <div>
-                                  <span style={{ color: '#666' }}>Rework: </span>
-                                  <span style={{ color: '#fa8c16', fontWeight: 'bold' }}>{log.rework_quantity || 0}</span>
-                                </div>
-                                <div>
-                                  <span style={{ color: '#666' }}>Rejected: </span>
-                                  <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>{log.rejected_quantity || 0}</span>
-                                </div>
-                              </div>
-                              <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-                                <div>From: {log.from_date} {log.from_time}</div>
-                                <div>To: {log.to_date} {log.to_time}</div>
-                                {log.notes && <div>Notes: {log.notes}</div>}
-                                {log.remarks && <div>Remarks: {log.remarks}</div>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
+                      return <ProductionStagesPanel logs={logs} />;
                     },
-                    rowExpandable: (record) => {
-                      const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                      const operation = trackingOps?.find(o => o.operation_id === record.id);
-                      const logs = operation?.production_logs || [];
-                      return logs && logs.length > 0;
-                    }
+                    rowExpandable: (record) => getOperationLogs(record.id).length > 0,
                   }}
                   columns={[
                     {
                       title: '#',
                       key: 'index',
-                      width: 50,
+                      width: 44,
                       align: 'center',
+                      fixed: 'left',
                       render: (_, __, index) => <Text style={{ fontSize: '11px', color: '#8c8c8c' }}>{index + 1}</Text>
                     },
                     {
-                      title: 'Operation Name',
+                      title: 'Operation',
                       dataIndex: 'operation_name',
                       key: 'operation_name',
-                      width: 150,
+                      width: 140,
                       ellipsis: true,
                       render: (text) => (
-                        <Text style={{ fontSize: '12px', color: '#333' }}>{text}</Text>
+                        <Text style={{ fontSize: '12px', color: '#333' }} title={text}>{text}</Text>
                       )
                     },
                     {
-                      title: 'Machine Name',
+                      title: 'Machine',
                       key: 'machine_name',
-                      width: 140,
-                      align: 'center',
+                      width: 130,
+                      ellipsis: true,
                       render: (_, opRecord) => {
-                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                        const operation = trackingOps?.find(o => o.operation_id === opRecord.id);
+                        const operation = getTrackingOperation(opRecord.id);
                         const machineName = operation?.machine_name || `M${opRecord.id}`;
 
                         return (
-                          <div style={{
-                            maxWidth: '140px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            <Tag
-                              color="blue"
-                              style={{
-                                fontSize: '10px',
-                                fontWeight: 500,
-                                borderRadius: '3px',
-                                padding: '2px 6px',
-                                margin: 0
-                              }}
-                            >
-                              {machineName}
-                            </Tag>
-                          </div>
+                          <Text style={{ fontSize: 11, color: '#1677ff' }} title={machineName} ellipsis>
+                            {machineName}
+                          </Text>
                         );
                       }
                     },
                     {
                       title: 'Required',
                       key: 'required',
-                      width: 73,
+                      width: 76,
                       align: 'center',
-                      render: (_, op) => <Text style={{ fontSize: '12px', fontWeight: 500 }}>{selectedPart?.qty || 1}</Text>
+                      render: () => <Text style={{ fontSize: '12px', fontWeight: 500 }}>{selectedPart?.qty || 1}</Text>
                     },
                     {
                       title: 'Produced',
                       key: 'produced',
-                      width: 80,
+                      width: 76,
                       align: 'center',
                       render: (_, op) => {
-                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                        const operation = trackingOps?.find(o => o.operation_id === op.id);
-                        const logs = operation?.production_logs || [];
-                        return <Text style={{ color: '#1890ff', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.produced_quantity || 0), 0)}</Text>;
+                        const { produced } = getOpQtyTotals(getOperationLogs(op.id));
+                        return <Text style={{ color: '#1890ff', fontWeight: 'bold', fontSize: '12px' }}>{produced}</Text>;
                       }
                     },
                     {
                       title: 'Approved',
                       key: 'approved',
-                      width: 80,
+                      width: 76,
                       align: 'center',
                       render: (_, op) => {
-                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                        const operation = trackingOps?.find(o => o.operation_id === op.id);
-                        const logs = operation?.production_logs || [];
-                        return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.approved_quantity || 0), 0)}</Text>;
+                        const { approved } = getOpQtyTotals(getOperationLogs(op.id));
+                        return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{approved}</Text>;
                       }
                     },
                     {
                       title: 'Rework',
                       key: 'rework',
-                      width: 75,
+                      width: 68,
                       align: 'center',
                       render: (_, op) => {
-                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                        const operation = trackingOps?.find(o => o.operation_id === op.id);
-                        const logs = operation?.production_logs || [];
-                        return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rework_quantity || 0), 0)}</Text>;
+                        const { rework } = getOpQtyTotals(getOperationLogs(op.id));
+                        return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: '12px' }}>{rework}</Text>;
                       }
                     },
                     {
                       title: 'Rejected',
                       key: 'rejected',
-                      width: 75,
+                      width: 76,
                       align: 'center',
                       render: (_, op) => {
-                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
-                        const operation = trackingOps?.find(o => o.operation_id === op.id);
-                        const logs = operation?.production_logs || [];
-                        return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rejected_quantity || 0), 0)}</Text>;
+                        const { rejected } = getOpQtyTotals(getOperationLogs(op.id));
+                        return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{rejected}</Text>;
                       }
                     },
                     {
@@ -602,13 +533,18 @@ const OrderTracking = () => {
         }
         .ant-table-small .ant-table-thead > tr > th {
           background-color: #fafafa;
-          padding: 8px 12px !important;
+          padding: 8px 10px !important;
           font-weight: 600;
-          font-size: 11px;
+          font-size: 12px;
+          white-space: nowrap;
         }
         .ant-table-small .ant-table-tbody > tr > td {
-          padding: 8px 12px !important;
+          padding: 8px 10px !important;
           vertical-align: middle;
+          font-size: 12px;
+        }
+        .ot-ops-scroll .ant-table-wrapper {
+          min-width: 0;
         }
         .ant-table-small .ant-table-row {
           height: 40px;

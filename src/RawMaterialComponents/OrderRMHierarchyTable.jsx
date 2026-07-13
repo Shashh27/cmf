@@ -5,6 +5,7 @@ import { Spin, Empty, Alert, Select, Modal, Button, Image, Input, message } from
 import { EyeOutlined, FileTextOutlined, PlusOutlined, SaveOutlined, CheckOutlined } from '@ant-design/icons';
 import PlannedRMActions from './PlannedRMActions';
 import PlanProcureRMDownload from '../DownloadReports/PlanProcureRMDownload';
+import { getMaterialMatchInfo, formatMaterialMatchLabel, stripMaterialMatchLabel } from './materialMatchUtils';
 const { Option } = Select;
 
 // ── Column filter dropdown ───────────────────────────────────────────────────
@@ -43,8 +44,12 @@ const FilterHeader = ({ label, options, value, onChange, style = {} }) => {
   );
 };
 
-const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) => {
+const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disabled = false }) => {
   const handleInputKeyDown = (e) => {
+    if (disabled) {
+      e.preventDefault();
+      return;
+    }
     if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) return;
     if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) return;
     if (e.key && !/^\d$/.test(e.key)) e.preventDefault();
@@ -58,7 +63,8 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
     borderRadius: '2px',
     textAlign: 'center',
     MozAppearance: 'textfield',
-    WebkitAppearance: 'none'
+    WebkitAppearance: 'none',
+    ...(disabled ? { backgroundColor: '#f5f5f5', color: '#999', cursor: 'not-allowed' } : {}),
   };
   const labelStyle = { fontSize: isMobile ? 9 : 10, color: '#333', fontWeight: 500, marginRight: 3 };
   const rowStyle = { display: 'flex', alignItems: 'center', gap: isMobile ? 5 : 8 };
@@ -82,6 +88,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('diameter', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
           <span style={labelStyle}>Len</span>
           <input
@@ -91,6 +98,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
         </div>
       </>
@@ -116,6 +124,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('breadth', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
           <span style={labelStyle}>Ht</span>
           <input
@@ -125,6 +134,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('height', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
           <span style={labelStyle}>Len</span>
           <input
@@ -134,6 +144,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
         </div>
       </>
@@ -159,6 +170,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('inner_diameter', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
           <span style={labelStyle}>OD</span>
           <input
@@ -168,6 +180,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('outer_diameter', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
           <span style={labelStyle}>Len</span>
           <input
@@ -177,6 +190,7 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile }) =>
             onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
             onKeyDown={handleInputKeyDown}
             placeholder="0"
+            disabled={disabled}
           />
         </div>
       </>
@@ -200,6 +214,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [plannedBasedRecommendations, setPlannedBasedRecommendations] = useState({});
   const [savedRows, setSavedRows] = useState({});
   const [loadingSave, setLoadingSave] = useState({});
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState({});
   const rawMaterialsList = rawMaterials || [];
   const [linkedStockMap, setLinkedStockMap] = useState({});
   const [procuredMap, setProcuredMap] = useState({});
@@ -211,6 +226,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [colSource, setColSource] = useState([]);
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = storedUser?.id;
+  const plannedRmFetchKeyRef = useRef('');
 
   useEffect(() => { fetchAllOrdersHierarchy(); }, []);
 
@@ -219,11 +235,22 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     if (refreshTrigger > 0) fetchAllOrdersHierarchy();
   }, [refreshTrigger]);
 
+  // Refresh when stock is unlinked/deleted from any tab (procurement, etc.)
+  useEffect(() => {
+    const handleRMChanged = () => fetchAllOrdersHierarchy();
+    window.addEventListener('rawMaterialChanged', handleRMChanged);
+    return () => window.removeEventListener('rawMaterialChanged', handleRMChanged);
+  }, []);
+
   const updateLinkedStockStatus = (partId, linkedStock) => {
     if (linkedStock) {
       setLinkedStockMap(prev => ({ ...prev, [partId]: linkedStock }));
     } else {
       setLinkedStockMap(prev => {
+        const { [partId]: _, ...rest } = prev;
+        return rest;
+      });
+      setProcuredMap(prev => {
         const { [partId]: _, ...rest } = prev;
         return rest;
       });
@@ -436,23 +463,167 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     return dimensions;
   };
 
-  const checkMaterialExists = (materialName) => {
-    if (!materialName || !rawMaterialsList || rawMaterialsList.length === 0) return false;
-    const normalizedExtracted = materialName.toLowerCase().replace(/\s+/g, '');
-    return rawMaterialsList.some(rm => rm.material_name?.toLowerCase().replace(/\s+/g, '') === normalizedExtracted);
+  const resolveRowMaterialMatch = (materialName, rowKey, plannedRawMaterialId = null, isSaved = false) => {
+    const selectedId = selectedMaterialIds[rowKey] ?? (isSaved ? plannedRawMaterialId : null) ?? null;
+    return getMaterialMatchInfo(materialName, rawMaterialsList, selectedId);
   };
 
-  const handlePlanningChange = (key, field, value) => {
-    setPlanningData(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [field]: value
+  const handleMaterialSelection = (rowKey, materialId) => {
+    setSelectedMaterialIds(prev => ({ ...prev, [rowKey]: materialId }));
+  };
+
+  const getDefaultMaterialId = (row) => {
+    const exact = row.materialRecommendations?.find((m) => m.match_type === 'exact');
+    return exact?.id ?? row.materialRecommendations?.[0]?.id ?? row.resolvedMaterialId ?? null;
+  };
+
+  const getSelectedMaterialId = (row) => {
+    if (selectedMaterialIds[row.key] != null) return Number(selectedMaterialIds[row.key]);
+    if (savedRows[row.key] && row.plannedRawMaterialId != null) return Number(row.plannedRawMaterialId);
+    const defaultId = getDefaultMaterialId(row);
+    return defaultId != null ? Number(defaultId) : undefined;
+  };
+
+  const getMaterialSelectOptions = (row) => {
+    const optionMap = new Map();
+    const selectedId = getSelectedMaterialId(row);
+
+    (row.materialRecommendations || []).forEach((rec) => {
+      const recId = Number(rec.id);
+      const isPlanned = selectedId != null && recId === Number(selectedId);
+      optionMap.set(recId, {
+        value: recId,
+        label: isPlanned
+          ? `${rec.material_name} (planned)`
+          : formatMaterialMatchLabel(rec.material_name, rec.match_type),
+      });
+    });
+
+    if (selectedId && !optionMap.has(selectedId)) {
+      const material = rawMaterialsList.find((rm) => Number(rm.id) === selectedId);
+      if (material) {
+        optionMap.set(selectedId, {
+          value: selectedId,
+          label: `${material.material_name} (planned)`,
+        });
       }
-    }));
+    }
+
+    return Array.from(optionMap.values());
   };
 
-  const fetchStockRecommendations = async (materialName, dimensionsStr, key) => {
+  const getSelectedMaterialLabel = (row, stripSuggested = false) => {
+    const selectedId = getSelectedMaterialId(row);
+    if (!selectedId) return null;
+    const option = getMaterialSelectOptions(row).find((opt) => opt.value === selectedId);
+    let label = option?.label;
+    if (!label) {
+      const material = rawMaterialsList.find((rm) => Number(rm.id) === selectedId);
+      label = material?.material_name || null;
+    }
+    if (label && stripSuggested) {
+      label = stripMaterialMatchLabel(label);
+    }
+    return label;
+  };
+
+  const getPlannedDimensionsSummary = (row) => {
+    const planning = planningData[row.key];
+    if (!planning?.formType || !planning?.dimensions) return null;
+    const dims = planning.dimensions;
+    if (planning.formType === 'Round' && dims.diameter && dims.length) {
+      return `${dims.diameter} DIA x ${dims.length} LENGTH`;
+    }
+    if (planning.formType === 'Square' && dims.breadth && dims.height && dims.length) {
+      return `${dims.breadth} x ${dims.height} x ${dims.length}`;
+    }
+    if (planning.formType === 'Pipe' && dims.outer_diameter && dims.inner_diameter && dims.length) {
+      return `${dims.outer_diameter} OD x ${dims.inner_diameter} ID x ${dims.length} LENGTH`;
+    }
+    return null;
+  };
+
+  const getPlannedSummaryLine = (row) => {
+    const materialName = getSelectedMaterialLabel(row, true);
+    const formType = planningData[row.key]?.formType;
+    const dimensions = getPlannedDimensionsSummary(row);
+    const parts = [];
+    if (materialName) parts.push(materialName);
+    if (formType) parts.push(formType);
+    if (dimensions) parts.push(dimensions);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  };
+
+  const getEffectiveRowMaterial = (row) => {
+    const materialId = getSelectedMaterialId(row);
+    return {
+      ...row,
+      resolvedMaterialId: materialId,
+      resolvedMaterialName: getSelectedMaterialLabel(row, true) ?? row.resolvedMaterialName,
+    };
+  };
+
+  const isPartStockLocked = (partId) => !!(linkedStockMap[partId] || procuredMap[partId]);
+
+  const hasDimensionValues = (dimensions = {}) =>
+    Object.values(dimensions).some((v) => v != null && v !== '' && !Number.isNaN(v));
+
+  const stashDimensionsForFormType = (planning, formType) => {
+    const dimensionsByFormType = { ...(planning?.dimensionsByFormType || {}) };
+    if (formType && planning?.dimensions) {
+      dimensionsByFormType[formType] = { ...planning.dimensions };
+    }
+    return dimensionsByFormType;
+  };
+
+  const handleFormTypeChange = (row, newFormType) => {
+    if (isPartStockLocked(row.partId)) return;
+
+    setPlanningData((prev) => {
+      const current = prev[row.key] || {};
+      const dimensionsByFormType = stashDimensionsForFormType(current, current.formType);
+
+      let dimensions = dimensionsByFormType[newFormType]
+        ? { ...dimensionsByFormType[newFormType] }
+        : {};
+
+      if (!hasDimensionValues(dimensions) && row.dimension) {
+        dimensions = parseDimensions(row.dimension, newFormType);
+      }
+
+      dimensionsByFormType[newFormType] = { ...dimensions };
+
+      return {
+        ...prev,
+        [row.key]: {
+          ...current,
+          formType: newFormType,
+          dimensions,
+          dimensionsByFormType,
+        },
+      };
+    });
+  };
+
+  const handleDimensionsChange = (key, formType, field, value) => {
+    setPlanningData((prev) => {
+      const current = prev[key] || {};
+      const dimensions = { ...(current.dimensions || {}), [field]: value };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          dimensions,
+          dimensionsByFormType: {
+            ...(current.dimensionsByFormType || {}),
+            ...(formType ? { [formType]: dimensions } : {}),
+          },
+        },
+      };
+    });
+  };
+
+  const fetchStockRecommendations = async (materialName, dimensionsStr, key, materialId = null) => {
     try {
       const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks`, {
         material_name: materialName,
@@ -460,6 +631,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         min_score: 0.3,
         max_recommendations: 5,
         required_length: planningData[key]?.dimensions?.length || null,
+        material_id: materialId,
       });
       setStockRecommendations(prev => ({
         ...prev,
@@ -480,6 +652,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           min_score: 0.3,
           max_recommendations: 5,
           required_length: planningData[row.key]?.dimensions?.length || null,
+          material_id: row.resolvedMaterialId || null,
         }));
 
       if (requests.length === 0) return;
@@ -503,33 +676,79 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     }
   };
 
+  const buildPlannedRMPayload = (row, planning, resolvedMaterialId) => {
+    const dimensions = planning.dimensions || {};
+    const payload = {
+      extracted_data_id: row.extractedDataId,
+      planned_form_type: planning.formType,
+      planned_raw_material_id: resolvedMaterialId,
+      user_id: userId,
+      planned_diameter: null,
+      planned_length: null,
+      planned_breadth: null,
+      planned_height: null,
+      planned_inner_diameter: null,
+      planned_outer_diameter: null,
+    };
+
+    if (planning.formType === 'Round') {
+      payload.planned_diameter = dimensions.diameter ?? null;
+      payload.planned_length = dimensions.length ?? null;
+    } else if (planning.formType === 'Square') {
+      payload.planned_breadth = dimensions.breadth ?? null;
+      payload.planned_height = dimensions.height ?? null;
+      payload.planned_length = dimensions.length ?? null;
+    } else if (planning.formType === 'Pipe') {
+      payload.planned_inner_diameter = dimensions.inner_diameter ?? null;
+      payload.planned_outer_diameter = dimensions.outer_diameter ?? null;
+      payload.planned_length = dimensions.length ?? null;
+    }
+
+    return payload;
+  };
+
   const savePlannedRM = async (row) => {
     try {
       setLoadingSave(prev => ({ ...prev, [row.key]: true }));
+
+      if (isPartStockLocked(row.partId)) {
+        message.error('Cannot change planned raw material — unlink general stock or delete procured material first.');
+        return;
+      }
+
+      const matchInfo = resolveRowMaterialMatch(
+        row.rmName,
+        row.key,
+        row.plannedRawMaterialId,
+        !!savedRows[row.key]
+      );
+      if (!matchInfo.materialExists) {
+        message.error('No matching raw material found in master list. Please create it first.');
+        return;
+      }
+
+      const resolvedMaterialId = getSelectedMaterialId(row);
+      if (!resolvedMaterialId) {
+        message.error('Please select a raw material from the suggestions.');
+        return;
+      }
       
       const planning = planningData[row.key] || {};
-      const dimensions = planning.dimensions || {};
-      
-      // Map dimensions based on form type
-      const updateData = {
-        extracted_data_id: row.extractedDataId,
-        planned_form_type: planning.formType,
-        planned_diameter: dimensions.diameter,
-        planned_length: dimensions.length,
-        planned_breadth: dimensions.breadth,
-        planned_height: dimensions.height,
-        planned_inner_diameter: dimensions.inner_diameter,
-        planned_outer_diameter: dimensions.outer_diameter,
-        user_id: userId
-      };
+      const updateData = buildPlannedRMPayload(row, planning, resolvedMaterialId);
 
-      await axios.post(`${API_BASE_URL}/planned-raw-materials/create`, updateData);
-      
+      const isUpdate = !!savedRows[row.key];
+      const saveRequest = isUpdate
+        ? axios.put(`${API_BASE_URL}/planned-raw-materials/update/${row.extractedDataId}`, updateData)
+        : axios.post(`${API_BASE_URL}/planned-raw-materials/create`, updateData);
+
+      await saveRequest;
+
+      setSelectedMaterialIds(prev => ({ ...prev, [row.key]: resolvedMaterialId }));
       setSavedRows(prev => ({ ...prev, [row.key]: true }));
-      message.success('Planned raw material saved successfully');
+      message.success(isUpdate ? 'Planned raw material updated successfully' : 'Planned raw material saved successfully');
       
       // Fetch stock recommendations based on planned dimensions
-      await fetchPlannedBasedRecommendations(row, planning);
+      await fetchPlannedBasedRecommendations({ ...row, resolvedMaterialId }, planning);
     } catch (err) {
       console.error('Failed to save planned RM:', err);
       message.error('Failed to save planned raw material');
@@ -563,6 +782,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           min_score: 0.3,
           max_recommendations: 5,
           required_length: dimensions.length || null,
+          material_id: row.resolvedMaterialId || null,
         }]
       });
       
@@ -575,11 +795,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     }
   };
 
-  const fetchExistingPlannedRM = async (rows) => {
+  const fetchExistingPlannedRM = async (rows, extractedDataIds) => {
     try {
-      const extractedDataIds = rows.filter(r => r.extractedDataId).map(r => r.extractedDataId);
       if (extractedDataIds.length === 0) return;
-      
+
       const response = await axios.post(`${API_BASE_URL}/planned-raw-materials/batch-get`, {
         extracted_data_ids: extractedDataIds
       });
@@ -587,32 +806,48 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       const plannedDataMap = {};
       const savedRowsMap = {};
       const recommendationsMap = {};
+      const selectedMaterialMap = {};
       
       response.data.forEach(item => {
         if (item.planned_form_type) {
-          // Use the extracted data ID to find the corresponding row key
           const row = rows.find(r => r.extractedDataId === item.id);
           if (row) {
+            const dimensions = {
+              diameter: item.planned_diameter,
+              length: item.planned_length,
+              breadth: item.planned_breadth,
+              height: item.planned_height,
+              inner_diameter: item.planned_inner_diameter,
+              outer_diameter: item.planned_outer_diameter
+            };
             plannedDataMap[row.key] = {
               formType: item.planned_form_type,
-              dimensions: {
-                diameter: item.planned_diameter,
-                length: item.planned_length,
-                breadth: item.planned_breadth,
-                height: item.planned_height,
-                inner_diameter: item.planned_inner_diameter,
-                outer_diameter: item.planned_outer_diameter
-              }
+              dimensions,
+              dimensionsByFormType: {
+                [item.planned_form_type]: { ...dimensions },
+              },
             };
             savedRowsMap[row.key] = true;
             recommendationsMap[row.key] = item.recommendations || [];
+            if (item.planned_raw_material_id) {
+              selectedMaterialMap[row.key] = item.planned_raw_material_id;
+            }
           }
         }
       });
       
-      setPlanningData(prev => ({ ...prev, ...plannedDataMap }));
-      setSavedRows(prev => ({ ...prev, ...savedRowsMap }));
-      setPlannedBasedRecommendations(prev => ({ ...prev, ...recommendationsMap }));
+      if (Object.keys(plannedDataMap).length > 0) {
+        setPlanningData(prev => ({ ...prev, ...plannedDataMap }));
+      }
+      if (Object.keys(savedRowsMap).length > 0) {
+        setSavedRows(prev => ({ ...prev, ...savedRowsMap }));
+      }
+      if (Object.keys(recommendationsMap).length > 0) {
+        setPlannedBasedRecommendations(prev => ({ ...prev, ...recommendationsMap }));
+      }
+      if (Object.keys(selectedMaterialMap).length > 0) {
+        setSelectedMaterialIds(prev => ({ ...prev, ...selectedMaterialMap }));
+      }
     } catch (err) {
       console.error('Failed to fetch existing planned RM:', err);
     }
@@ -654,15 +889,20 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         group.parts.forEach((part, i) => {
           const latest = getLatestExtractedData(part.extracted_data);
           const doc2D = getLatest2DDocument(part.documents);
-          const materialExists = checkMaterialExists(group.materialName);
           const key = `${order.id}-${group.materialName}-${part.part.id}`;
+          const matchInfo = getMaterialMatchInfo(group.materialName, rawMaterialsList);
           rows.push({
             key,
             orderId: order.id,
             orderName: order.sale_order_number,
             rmName: group.materialName,
-            rmId: part.part.raw_material_id,
-            materialExists,
+            rmId: matchInfo.resolvedMaterialId || part.part.raw_material_id,
+            materialExists: matchInfo.materialExists,
+            resolvedMaterialId: matchInfo.resolvedMaterialId,
+            resolvedMaterialName: matchInfo.resolvedMaterialName,
+            materialRecommendations: matchInfo.recommendations,
+            isPartialMatch: !matchInfo.exactMatch && matchInfo.materialExists,
+            plannedRawMaterialId: latest?.planned_raw_material_id,
             orderRowSpan: partIndex === 0 ? totalParts : 0,
             rmRowSpan: i === 0 ? group.parts.length : 0,
             partId: part.part.id,
@@ -692,6 +932,14 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     return rows;
   }, [ordersData, rawMaterials]);
 
+  const extractedDataIdsKey = useMemo(() => {
+    const ids = tableData
+      .map((row) => row.extractedDataId)
+      .filter(Boolean)
+      .sort((a, b) => a - b);
+    return ids.join(',');
+  }, [tableData]);
+
   const orderOptions = useMemo(() => [...new Set(tableData.map(r => r.orderName))], [tableData]);
   const rmOptions = useMemo(() => {
     const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
@@ -703,41 +951,45 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   }, [selectedOrder]);
 
   useEffect(() => {
-    // Auto-detect form type and pre-fill dimensions for all rows
-    tableData.forEach(row => {
-      if (row.rmName && row.dimension) {
-        // Auto-detect form type and pre-fill dimensions
-        const formType = detectFormTypeFromDimensions(row.dimension);
-        const parsedDims = parseDimensions(row.dimension, formType);
+    if (!tableData.length) return;
 
-        // Check if there's saved planned RM data
-        if (row.plannedFormType) {
-          setSavedRows(prev => ({ ...prev, [row.key]: true }));
-          setPlanningData(prev => ({
-            ...prev,
-            [row.key]: {
-              ...prev[row.key],
-              formType: row.plannedFormType,
-              dimensions: row.plannedDimensions || {}
-            }
-          }));
-        } else {
-          // Use auto-detected values if no saved data
-          setPlanningData(prev => ({
-            ...prev,
-            [row.key]: {
-              ...prev[row.key],
-              formType,
-              dimensions: parsedDims
-            }
-          }));
-        }
-      }
+    const planningUpdates = {};
+    tableData.forEach((row) => {
+      if (!row.rmName || !row.dimension || row.plannedFormType) return;
+      const formType = detectFormTypeFromDimensions(row.dimension);
+      const dimensions = parseDimensions(row.dimension, formType);
+      planningUpdates[row.key] = {
+        formType,
+        dimensions,
+        dimensionsByFormType: {
+          [formType]: { ...dimensions },
+        },
+      };
     });
-    
-    // Fetch existing planned RM data and load recommendations
-    fetchExistingPlannedRM(tableData);
+
+    if (Object.keys(planningUpdates).length > 0) {
+      setPlanningData((prev) => {
+        const next = { ...prev };
+        Object.entries(planningUpdates).forEach(([key, val]) => {
+          if (!next[key]?.formType) {
+            next[key] = { ...next[key], ...val };
+          }
+        });
+        return next;
+      });
+    }
   }, [tableData]);
+
+  useEffect(() => {
+    if (!extractedDataIdsKey) return;
+
+    const fetchKey = `${refreshTrigger}:${extractedDataIdsKey}`;
+    if (plannedRmFetchKeyRef.current === fetchKey) return;
+    plannedRmFetchKeyRef.current = fetchKey;
+
+    const extractedDataIds = extractedDataIdsKey.split(',').map(Number);
+    fetchExistingPlannedRM(tableData, extractedDataIds);
+  }, [extractedDataIdsKey, refreshTrigger, tableData]);
 
   const partNumberOptions = useMemo(() => {
     const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
@@ -883,11 +1135,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                       value={planningData[row.key]?.formType || undefined}
                       placeholder="Select"
                       style={{ width: isMobile ? 80 : 100, fontSize: isMobile ? 9 : 11 }}
-                      onChange={(val) => {
-                        handlePlanningChange(row.key, 'formType', val);
-                        // Clear dimensions when form type changes
-                        handlePlanningChange(row.key, 'dimensions', {});
-                      }}
+                      onChange={(val) => handleFormTypeChange(row, val)}
+                      disabled={isPartStockLocked(row.partId)}
                     >
                       <Option value="Round">Round</Option>
                       <Option value="Square">Square</Option>
@@ -897,46 +1146,67 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                   <td style={{ ...tdStyle, textAlign: 'left', minWidth: isMobile ? '150px' : '220px', verticalAlign: 'top' }}>
                     {/* Material Availability Status */}
                     {row.rmName !== '2D Document Not Uploaded' && (
-                      <div style={{ 
-                        marginBottom: 8, 
-                        padding: '4px 8px', 
-                        backgroundColor: row.materialExists ? '#f6ffed' : '#fff2f0',
-                        border: `1px solid ${row.materialExists ? '#b7eb8f' : '#ffccc7'}`,
-                        borderRadius: '2px',
-                        fontSize: isMobile ? 9 : 10,
-                        fontWeight: 600,
-                        color: row.materialExists ? '#52c41a' : '#ff4d4f',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}>
-                        <span style={{ fontSize: isMobile ? 10 : 12 }}>
-                          {row.materialExists ? '✓' : '✗'}
-                        </span>
-                        {row.materialExists ? 'Material Available' : 'Material Not Available - Create First'}
-                      </div>
+                      <>
+                        <div style={{ 
+                          marginBottom: 8, 
+                          padding: '4px 8px', 
+                          backgroundColor: row.materialExists ? '#f6ffed' : '#fff2f0',
+                          border: `1px solid ${row.materialExists ? '#b7eb8f' : '#ffccc7'}`,
+                          borderRadius: '2px',
+                          fontSize: isMobile ? 9 : 10,
+                          fontWeight: 600,
+                          color: row.materialExists ? '#52c41a' : '#ff4d4f',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}>
+                          <span style={{ fontSize: isMobile ? 10 : 12 }}>
+                            {row.materialExists ? '✓' : '✗'}
+                          </span>
+                          {row.materialExists
+                            ? (savedRows[row.key] ? 'Material planned' : 'Material Available')
+                            : 'Material Not Available - Create First'}
+                        </div>
+                        {row.materialExists && row.materialRecommendations?.length > 0 && (
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: isMobile ? 8 : 9, color: '#666', marginBottom: 4 }}>
+                              Extracted: <strong>{row.rmName}</strong>
+                              {getSelectedMaterialLabel(row, true) && (
+                                <span>
+                                  {' → Planned: '}
+                                  <strong>{getSelectedMaterialLabel(row, true)}</strong>
+                                </span>
+                              )}
+                            </div>
+                            <Select
+                              size="small"
+                              placeholder="Select raw material"
+                              style={{ width: '100%', fontSize: isMobile ? 9 : 10 }}
+                              value={getSelectedMaterialId(row)}
+                              onChange={(val) => handleMaterialSelection(row.key, Number(val))}
+                              options={getMaterialSelectOptions(row)}
+                              optionFilterProp="label"
+                              disabled={isPartStockLocked(row.partId)}
+                            />
+                            {isPartStockLocked(row.partId) ? (
+                              <div style={{ fontSize: isMobile ? 8 : 9, color: '#999', marginTop: 4 }}>
+                                Planning locked — unlink stock or delete procure to change material, form type, or dimensions
+                              </div>
+                            ) : savedRows[row.key] && (
+                              <div style={{ fontSize: isMobile ? 8 : 9, color: '#52c41a', marginTop: 4 }}>
+                                You can change material before assign/procure
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                     
-                    {savedRows[row.key] && planningData[row.key]?.formType && (
+                    {savedRows[row.key] && planningData[row.key]?.formType && getPlannedSummaryLine(row) && (
                       <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
-                        <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 600, color: '#1890ff', marginBottom: 2 }}>
-                          Planned: {planningData[row.key].formType}
+                        <div style={{ fontSize: isMobile ? 8 : 9, fontWeight: 600, color: '#1890ff', lineHeight: 1.4 }}>
+                          Planned: {getPlannedSummaryLine(row)}
                         </div>
-                        {planningData[row.key].formType === 'Round' && planningData[row.key].dimensions?.diameter && planningData[row.key].dimensions?.length && (
-                          <div style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
-                            {planningData[row.key].dimensions.diameter} DIA x {planningData[row.key].dimensions.length} LENGTH
-                          </div>
-                        )}
-                        {planningData[row.key].formType === 'Square' && planningData[row.key].dimensions?.breadth && planningData[row.key].dimensions?.height && planningData[row.key].dimensions?.length && (
-                          <div style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
-                            {planningData[row.key].dimensions.breadth} x {planningData[row.key].dimensions.height} x {planningData[row.key].dimensions.length}
-                          </div>
-                        )}
-                        {planningData[row.key].formType === 'Pipe' && planningData[row.key].dimensions?.outer_diameter && planningData[row.key].dimensions?.inner_diameter && planningData[row.key].dimensions?.length && (
-                          <div style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
-                            {planningData[row.key].dimensions.outer_diameter} OD x {planningData[row.key].dimensions.inner_diameter} ID x {planningData[row.key].dimensions.length} LENGTH
-                          </div>
-                        )}
                       </div>
                     )}
                     {planningData[row.key]?.formType && (
@@ -945,8 +1215,17 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           <CompactDimensionInputs
                             formType={planningData[row.key].formType}
                             dimensions={planningData[row.key].dimensions || {}}
-                            onChange={(field, value) => handlePlanningChange(row.key, 'dimensions', { ...planningData[row.key].dimensions, [field]: value })}
+                            onChange={(field, value) => {
+                              if (isPartStockLocked(row.partId)) return;
+                              handleDimensionsChange(
+                                row.key,
+                                planningData[row.key].formType,
+                                field,
+                                value
+                              );
+                            }}
                             isMobile={isMobile}
+                            disabled={isPartStockLocked(row.partId)}
                           />
                         </div>
                         <Button
@@ -954,7 +1233,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           type={savedRows[row.key] ? "default" : "primary"}
                           loading={loadingSave[row.key]}
                           onClick={() => savePlannedRM(row)}
-                          disabled={!row.materialExists || linkedStockMap[row.partId]}
+                          disabled={!row.materialExists || isPartStockLocked(row.partId)}
                           icon={savedRows[row.key] ? <CheckOutlined /> : <SaveOutlined />}
                           style={{ 
                             fontSize: isMobile ? 9 : 10, 
@@ -973,7 +1252,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left', minWidth: isMobile ? '120px' : '150px', verticalAlign: 'top' }}>
                     <PlannedRMActions 
-                      row={row} 
+                      row={getEffectiveRowMaterial(row)} 
                       recommendations={plannedBasedRecommendations[row.key] || []}
                       isMobile={isMobile}
                       planningData={planningData}

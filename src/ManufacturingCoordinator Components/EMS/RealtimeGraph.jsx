@@ -178,7 +178,7 @@ const RealtimeGraph = ({ machineId, machineName }) => {
     const fetchData = async () => {
       try {
         setApiError(null);
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent/?machine_id=${machineId}`);
+        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
         const data = await response.json();
         
         if (data) {

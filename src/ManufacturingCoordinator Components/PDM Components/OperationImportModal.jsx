@@ -138,12 +138,22 @@ const OperationImportModal = ({ open, onCancel, existingOperations = [], onUseOp
     {
       title: "Work Instructions",
       dataIndex: "work_instructions",
-      key: "work_instructions"
+      key: "work_instructions",
+      render: (text) => (
+        <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          {text || "-"}
+        </span>
+      ),
     },
     {
       title: "Notes",
       dataIndex: "notes",
-      key: "notes"
+      key: "notes",
+      render: (text) => (
+        <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          {text || "-"}
+        </span>
+      ),
     }
   ];
 

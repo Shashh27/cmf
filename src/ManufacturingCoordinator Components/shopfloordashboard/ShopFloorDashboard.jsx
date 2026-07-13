@@ -80,8 +80,8 @@ const ShopFloorDashboard = ({ onBack }) => {
     }
   };
 
-  const fetchShopFloorData = async () => {
-    setLoading(true);
+  const fetchShopFloorData = async ({ background = false } = {}) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       const manufacturingcoordinatorId = getCurrentmanufacturingcoordinatorId();
@@ -110,19 +110,21 @@ const ShopFloorDashboard = ({ onBack }) => {
       
       setError(errorMessage);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
-  const handleViewModeChange = async (checked) => {
-    const nextMode = checked ? 'analytics' : '2d';
-
-    if (nextMode === 'analytics' && !data) {
+  const handleViewModeChange = async (value) => {
+    const nextMode = value;
+    if (nextMode === 'analytics' && !data && !loading) {
       await fetchShopFloorData();
     }
-
     setViewMode(nextMode);
   };
+
+  useEffect(() => {
+    fetchShopFloorData({ background: true });
+  }, []);
 
   useEffect(() => {
     let socket;
@@ -244,7 +246,7 @@ const ShopFloorDashboard = ({ onBack }) => {
               <Col>
                 <Segmented
                   value={viewMode}
-                  onChange={(value) => handleViewModeChange(value === 'analytics')}
+                  onChange={handleViewModeChange}
                   options={[
                     {
                       label: (

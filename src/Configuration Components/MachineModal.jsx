@@ -79,11 +79,23 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
       onSave();
     } catch (error) {
       console.error("Error saving machine:", error);
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        "Failed to save machine. Please check your input.";
-      message.error(detail);
+      let errorMessage = "Failed to save machine. Please check your input.";
+      
+      if (error?.response?.data?.detail) {
+        const detail = error.response.data.detail;
+        if (Array.isArray(detail) && detail.length > 0) {
+          // Extract the message from Pydantic validation error array
+          let rawMessage = detail[0].msg || errorMessage;
+          // Remove "Value error," prefix for cleaner display
+          errorMessage = rawMessage.replace("Value error, ", "");
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        }
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
+      message.error(errorMessage);
     } finally {
       setLoading(false);
     }
