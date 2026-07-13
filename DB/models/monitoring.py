@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, func
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from ..database import Base
 
 class MachineLiveStatus(Base):
@@ -9,7 +10,7 @@ class MachineLiveStatus(Base):
     id = Column(Integer, primary_key=True, index=True)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), unique=True, nullable=False)
     status = Column(String, nullable=False, default="OFF")  # PRODUCTION, ON, OFF
-    last_updated = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    last_updated = Column(DateTime, default=datetime.now, nullable=False)
     
     # Current job info
     current_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
@@ -25,10 +26,12 @@ class MachineLiveHistory(Base):
     __tablename__ = "machine_live_history"
     __table_args__ = {'schema': 'production_monitoring'}
 
-    id = Column(Integer, primary_key=True, index=True)
+    
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
-    status = Column(String, nullable=False)  # PRODUCTION, ON, OFF
-    last_updated = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    
+    last_updated = Column(DateTime, primary_key=True, default=datetime.now)
+    
+    status = Column(String, nullable=False)
     
     # Job info at the time of history record
     current_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)

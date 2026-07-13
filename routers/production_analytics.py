@@ -4,7 +4,7 @@ from sqlalchemy import select, func, text, cast, DateTime as SQLAlchemyDateTime
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from DB.database import get_db
-from DB.models.production import ShiftSummary, OEEIssue
+from DB.models.production import ShiftSummary
 from DB.models.monitoring import MachineLiveStatus
 from DB.models.configuration import Machine, workcenter
 from DB.models.oms import Operation, Part
