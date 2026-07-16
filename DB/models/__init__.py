@@ -35,6 +35,7 @@ from .scheduling import (
 )
 
 from .access_control import AccessUser, OperatorLeave
+from .notifications import MachineOperatorAssignmentNotification
 
 __all__ = [
     "Product",
@@ -65,4 +66,5 @@ __all__ = [
     "OrderPartPriority",
     "PartScheduleStatus",
     "ProductionLog",
+    "MachineOperatorAssignmentNotification",
 ]

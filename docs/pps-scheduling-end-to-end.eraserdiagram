@@ -1,0 +1,124 @@
+bpmn-diagram
+typeface clean
+colorMode bold
+styleMode plain
+
+title CMF Production Planning & Scheduling (PPS) — End-to-End Block Diagram
+
+// ─── Swimlanes: roles + scheduling engine (each block uses lane color) ─────
+
+CMF_PPS [label: "CMF Production Planning & Scheduling (PPS)", color: blue] {
+
+  Administrator [color: lightblue] {
+    ProcessStart [type: event, color: lightblue, label: "Plant ready to plan"]
+    ConfigurePlant [color: lightblue, label: "Configure shifts & working calendar"]
+    MachineAssets [color: lightblue, label: "Register machines & work centres"]
+    OpAssignments [color: lightblue, label: "Assign operators to machines"]
+    BreakdownMgmt [color: lightblue, label: "Record machine breakdown ON / OFF"]
+    ActivateOrder [color: lightblue, label: "Activate sale order"]
+    ActivateParts [color: lightblue, label: "Activate in-house parts"]
+    PrereqCheck [type: gateway, color: lightblue, label: "Material & 2D drawing linked?"]
+    GenerateSchedule [color: lightblue, label: "Generate baseline schedule"]
+  }
+
+  Manufacturing_Coordinator [color: orange] {
+    SetPriority [color: orange, label: "Set global part priority"]
+    SimulateSwap [color: orange, label: "Simulate priority swap"]
+    CommitSwap [color: orange, label: "Commit priority swap (audited)"]
+    MC_ReviewLog [color: orange, label: "Approve production log (OR supervisor)"]
+    MC_OrderScope [color: orange, label: "View logs for assigned orders only"]
+  }
+
+  PPS_Engine [color: gray, label: "PPS Scheduling Engine"] {
+    SeedLivePlan [color: gray, label: "Seed live plan (job cards / Gantt)"]
+    EnforceGuards [color: gray, label: "Enforce activation & deactivation guards"]
+    DynamicReschedule [color: gray, label: "Dynamic reschedule remaining work"]
+    SplitReworkRemake [color: gray, label: "Plan rework (cycle) vs remake (setup+cycle)"]
+    UpdateLiveTimes [color: gray, label: "Update live start / end times"]
+    MarkPartComplete [color: gray, label: "Part status → completed in PPS"]
+    ClearPriority [color: gray, label: "Priority → 0, remove from queue"]
+    PartDone [type: event, color: gray, label: "Part completed in PPS"]
+  }
+
+  Operator [color: green] {
+    ViewJobCard [color: green, label: "Open job card (live plan)"]
+    ActivationGate [type: gateway, color: green, label: "Start allowed?"]
+    StartOperation [color: green, label: "Start operation on machine"]
+    RecordProduction [color: green, label: "Record produced + rework qty"]
+    SubmitForReview [color: green, label: "Submit log for review"]
+    AwaitReviewer [color: green, label: "Blocked until reviewer acts"]
+  }
+
+  Supervisor [color: yellow] {
+    ReviewQueue [color: yellow, label: "Open pending production logs"]
+    QualityDecision [type: gateway, color: yellow, label: "Approve / rework / reject?"]
+    SUP_ReviewLog [color: yellow, label: "First reviewer wins (exclusive lock)"]
+    NotifyOtherRole [color: yellow, label: "Alert other reviewer role"]
+  }
+}
+
+// ─── Phase 0–A: Plant configuration & order readiness ───────────────────────
+
+ProcessStart > ConfigurePlant
+ConfigurePlant > MachineAssets
+MachineAssets > OpAssignments
+OpAssignments > ActivateOrder
+ActivateOrder > ActivateParts
+ActivateParts > PrereqCheck
+PrereqCheck > SetPriority: Yes
+PrereqCheck --> ProcessStart: No — fix prerequisites
+
+// ─── Phase B: Baseline + live plan ──────────────────────────────────────────
+
+SetPriority > GenerateSchedule
+GenerateSchedule > SeedLivePlan
+SeedLivePlan > ViewJobCard
+
+// ─── Phase C: Shop floor execution ──────────────────────────────────────────
+
+ViewJobCard > ActivationGate
+ActivationGate > StartOperation: Guards pass
+ActivationGate --> ViewJobCard: Blocked (breakdown, pending review, prior op, etc.)
+StartOperation > RecordProduction
+RecordProduction > SubmitForReview
+SubmitForReview > AwaitReviewer
+AwaitReviewer -- ReviewQueue: Pending
+
+// ─── Phase C: Review (supervisor OR manufacturing coordinator) ─────────────
+
+ReviewQueue > QualityDecision
+QualityDecision > SUP_ReviewLog: Supervisor first
+QualityDecision > MC_ReviewLog: Coordinator first
+SUP_ReviewLog > NotifyOtherRole
+MC_ReviewLog > NotifyOtherRole
+SUP_ReviewLog > DynamicReschedule
+MC_ReviewLog > DynamicReschedule
+
+// ─── Phase D: Dynamic replan loop ───────────────────────────────────────────
+
+DynamicReschedule > SplitReworkRemake
+SplitReworkRemake > UpdateLiveTimes
+UpdateLiveTimes > EnforceGuards
+EnforceGuards > ActivationGate: More work on part
+BreakdownMgmt --> DynamicReschedule: Machine OFF / ON
+CommitSwap --> DynamicReschedule: Priority changed
+SimulateSwap > CommitSwap
+
+// ─── Phase E: Part completion in PPS ───────────────────────────────────────
+
+EnforceGuards > MarkPartComplete: All operations approved
+MarkPartComplete > ClearPriority
+ClearPriority > PartDone
+
+// ─── MC data scope ──────────────────────────────────────────────────────────
+
+MC_OrderScope - ReviewQueue: Filter by order assignment
+
+legend [position: bottom-left] {
+  [color: lightblue, label: Administrator — plant & activation]
+  [color: orange, label: Manufacturing Coordinator — priority & own orders]
+  [color: yellow, label: Supervisor — production review]
+  [color: green, label: Operator — job card execution]
+  [color: gray, label: PPS Engine — schedule & part status]
+  [connection: -->, label: Message / handoff between roles]
+}

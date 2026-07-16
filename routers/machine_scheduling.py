@@ -1,3 +1,4 @@
+import logging
 from bisect import insort_right
 from threading import active_count
 from fastapi import APIRouter, HTTPException, Depends
@@ -13,7 +14,7 @@ from sqlalchemy import exists, text, and_
 from DB.database import get_db
 
 from DB.models.oms import Order, Part, Product, Document
-from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus, Rescheduling
+from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus, Rescheduling, ProductionLog
 from DB.models.oms import Order, Part, Product
 from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority, OutSourceOperationStatus
@@ -26,6 +27,12 @@ from DB.schemas.machine_scheduling import (
     OutSourceOperationStatusResponse, OutSourceOperationWithDetails, SimulatePrioritySwapRequest
 )
 from DB.schemas.oms import OrderPartPrioritySwap
+from shift_assignment_helpers import validate_priority_changed_by, priority_changed_by_audit
+from machine_breakdown_helpers import (
+    get_job_card_activation_block_message,
+    get_machine_breakdown_block_message,
+)
+from production_log_helpers import get_operator_activation_block_reason
 
 from datetime import datetime, timedelta, timezone, time as dtime
 from typing import Optional, List, Dict, Tuple
@@ -36,6 +43,7 @@ import calendar
 
 
 router = APIRouter(prefix="/scheduling", tags=["scheduling"])
+logger = logging.getLogger(__name__)
 
 
 
@@ -126,6 +134,318 @@ def _check_part_has_2d_drawing(part_id: int, db: Session) -> tuple[bool, str]:
         return False, "Only 3D model uploaded. 2D drawing is required for activation"
     else:
         return False, "No 2D drawing uploaded for this part"
+
+
+_OPEN_PRODUCTION_LOG_STATUSES = ("pending", "inprogress", "rework", "rejected")
+
+
+def _production_logs_indicate_in_progress(logs: List[ProductionLog]) -> bool:
+    """True when an operator is working or a log awaits supervisor review."""
+    return any(
+        (log.operator_status == "inprogress" and log.to_time is None)
+        or (
+            log.operator_status == "completed"
+            and log.status in _OPEN_PRODUCTION_LOG_STATUSES
+        )
+        for log in logs
+    )
+
+
+def _operation_production_is_complete(logs: List[ProductionLog]) -> bool:
+    """True when the latest production run for the operation is fully approved/done."""
+    if not logs:
+        return False
+    last_log = max(logs, key=lambda log: log.id)
+    return (
+        last_log.status == "completed"
+        and (last_log.remaining_quantity_to_be_produced or 0) == 0
+    )
+
+
+def _is_part_fully_completed_by_logs(db: Session, part_id: int) -> bool:
+    """
+    True when every operation on the part has at least one supervisor-approved
+    production_log (status='completed'). Parts with zero operations are not completed.
+    """
+    op_ids = [
+        row[0] for row in db.query(Operation.id)
+        .filter(Operation.part_id == part_id).all()
+    ]
+    if not op_ids:
+        return False
+
+    completed_count = db.execute(
+        text("""
+            SELECT COUNT(DISTINCT operation_id)
+            FROM scheduling.production_logs
+            WHERE operation_id = ANY(:op_ids)
+              AND status = 'completed'
+        """),
+        {"op_ids": op_ids},
+    ).scalar() or 0
+    return completed_count == len(op_ids)
+
+
+def _part_is_schedule_completed(
+    db: Session, sale_order_id: int, part_id: int
+) -> bool:
+    """True when the part is retired from the live queue as completed."""
+    from production_log_helpers import part_has_production_log_history
+
+    # Cleared production history means stale 'completed' flags must not block
+    # deactivation or other schedule actions.
+    if not part_has_production_log_history(db, part_id):
+        return False
+
+    schedule_record = db.query(PartScheduleStatus).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.part_id == part_id,
+    ).first()
+    if schedule_record and schedule_record.status == "completed":
+        return True
+
+    priority_row = db.query(OrderPartPriority).filter(
+        OrderPartPriority.order_id == sale_order_id,
+        OrderPartPriority.part_id == part_id,
+    ).first()
+    if priority_row and priority_row.status == "completed":
+        return True
+
+    return _is_part_fully_completed_by_logs(db, part_id)
+
+
+def _get_completed_part_deactivation_blockers(
+    db: Session, sale_order_id: int, part_ids: List[int]
+) -> List[dict]:
+    """Return completed parts that must not be deactivated."""
+    blockers: List[dict] = []
+    for part_id in part_ids:
+        if not _part_is_schedule_completed(db, sale_order_id, part_id):
+            continue
+        part = db.query(Part).filter(Part.id == part_id).first()
+        blockers.append({
+            "part_id": part_id,
+            "part_number": part.part_number if part else str(part_id),
+            "part_name": part.part_name if part else None,
+            "block_reason": "Part production is completed — deactivation is not allowed",
+        })
+    return blockers
+
+
+def _classify_operation_production_block(
+    db: Session,
+    part_id: int,
+    op: Operation,
+    logs: List[ProductionLog],
+    part_has_started: bool,
+) -> Optional[dict]:
+    """
+    Return blocker fields when this operation blocks part deactivation, else None.
+    """
+    if logs and _operation_production_is_complete(logs):
+        return None
+
+    op_status = db.query(OperationStatus).filter(
+        OperationStatus.operation_id == op.id,
+        OperationStatus.part_id == part_id,
+    ).first()
+
+    if _production_logs_indicate_in_progress(logs):
+        active_log = next(
+            (log for log in logs if log.operator_status == "inprogress" and log.to_time is None),
+            None,
+        )
+        if active_log:
+            return {
+                "operation_started": True,
+                "production_stage": "in_progress",
+                "block_reason": (
+                    "Started — operator is actively working on this operation "
+                    f"(production log {active_log.id})"
+                ),
+            }
+        return {
+            "operation_started": True,
+            "production_stage": "awaiting_review",
+            "block_reason": (
+                "Started — production log submitted, awaiting supervisor approval"
+            ),
+        }
+
+    if op_status and op_status.status == "inprogress":
+        return {
+            "operation_started": True,
+            "production_stage": "job_card_active",
+            "block_reason": "Started — job card is activated",
+        }
+
+    if logs and not _operation_production_is_complete(logs):
+        last_log = max(logs, key=lambda log: log.id)
+        remaining = last_log.remaining_quantity_to_be_produced
+        remaining_label = str(remaining) if remaining is not None else "open"
+        return {
+            "operation_started": True,
+            "production_stage": "incomplete",
+            "block_reason": (
+                "Started — production incomplete "
+                f"({remaining_label} unit(s) remaining on this operation)"
+            ),
+        }
+
+    if not logs and part_has_started:
+        return {
+            "operation_started": False,
+            "production_stage": "not_started",
+            "block_reason": (
+                "Not started — production has not begun on this operation yet"
+            ),
+        }
+
+    return None
+
+
+def _get_part_production_blockers(db: Session, part_id: int) -> List[dict]:
+    """
+    Return operations on this part that are currently in production and block
+    deactivation. Uses the same rules as priority-swap in-production detection.
+
+    Also blocks when production has started on any operation but other operations
+    on the same part are not yet complete (e.g. 1 of 3 ops done).
+    """
+    from production_log_helpers import part_has_production_log_history
+
+    blockers: List[dict] = []
+    operations = (
+        db.query(Operation)
+        .filter(Operation.part_id == part_id)
+        .order_by(Operation.operation_number.asc(), Operation.id.asc())
+        .all()
+    )
+    part_has_started = part_has_production_log_history(db, part_id)
+
+    for op in operations:
+        logs = (
+            db.query(ProductionLog)
+            .filter(ProductionLog.operation_id == op.id)
+            .order_by(ProductionLog.created_at.asc())
+            .all()
+        )
+
+        block = _classify_operation_production_block(
+            db, part_id, op, logs, part_has_started
+        )
+        if not block:
+            continue
+
+        blockers.append({
+            "part_id": part_id,
+            "operation_id": op.id,
+            "operation_number": str(op.operation_number),
+            "operation_name": op.operation_name,
+            "operation_started": block["operation_started"],
+            "production_stage": block["production_stage"],
+            "block_reason": block["block_reason"],
+        })
+
+    return blockers
+
+
+def _get_order_production_blockers(db: Session, part_ids: List[int]) -> List[dict]:
+    """Aggregate in-production blockers for all parts on an order."""
+    blockers: List[dict] = []
+    for part_id in part_ids:
+        part_blockers = _get_part_production_blockers(db, part_id)
+        if not part_blockers:
+            continue
+        part = db.query(Part).filter(Part.id == part_id).first()
+        for entry in part_blockers:
+            entry["part_number"] = part.part_number if part else str(part_id)
+            entry["part_name"] = part.part_name if part else None
+        blockers.extend(part_blockers)
+    return blockers
+
+
+def _raise_deactivation_blocked(blockers: List[dict]) -> None:
+    """Raise a consistent 400 when deactivation is blocked by live production."""
+    if not blockers:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Cannot deactivate — production is in progress"},
+        )
+
+    part_ids = {b.get("part_id") for b in blockers}
+    not_started_count = sum(
+        1 for b in blockers if b.get("production_stage") == "not_started"
+    )
+    started_count = len(blockers) - not_started_count
+
+    if len(part_ids) == 1:
+        part_label = (
+            blockers[0].get("part_name")
+            or blockers[0].get("part_number")
+            or f"part {blockers[0].get('part_id')}"
+        )
+        message = f"Cannot deactivate part {part_label} — production is in progress"
+    else:
+        message = (
+            f"Cannot deactivate — production is in progress on "
+            f"{len(blockers)} operation(s) across {len(part_ids)} part(s)"
+        )
+
+    detail_parts: List[str] = []
+    if not_started_count:
+        op_word = "operation" if not_started_count == 1 else "operations"
+        detail_parts.append(f"{not_started_count} {op_word} yet to start")
+    if started_count:
+        op_word = "operation" if started_count == 1 else "operations"
+        detail_parts.append(f"{started_count} {op_word} in progress")
+    if detail_parts:
+        message = f"{message}, {', '.join(detail_parts)}"
+
+    summary_parts = []
+    for blocker in blockers[:5]:
+        op_num = blocker.get("operation_number", "?")
+        started = blocker.get("operation_started")
+        if started is True:
+            stage_label = "started"
+        elif started is False:
+            stage_label = "not started"
+        else:
+            stage_label = "in progress"
+        part_num = blocker.get("part_number")
+        prefix = f"Part {part_num} — " if part_num and len(part_ids) > 1 else ""
+        summary_parts.append(f"{prefix}Op {op_num} ({stage_label})")
+
+    suffix = f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else ""
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "message": message,
+            "blocking_operations": blockers,
+            "summary": ", ".join(summary_parts) + suffix,
+        },
+    )
+
+
+def _raise_completed_deactivation_blocked(
+    entity_label: str, blockers: List[dict]
+) -> None:
+    """Raise a consistent 400 when deactivation is blocked because parts are completed."""
+    summary_parts = []
+    for blocker in blockers[:5]:
+        part_num = blocker.get("part_number") or blocker.get("part_id")
+        summary_parts.append(f"Part {part_num}")
+
+    suffix = f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else ""
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "message": f"Cannot deactivate {entity_label} — part production is completed",
+            "block_reason": "completed_part",
+            "blocking_parts": blockers,
+            "summary": ", ".join(summary_parts) + suffix,
+        },
+    )
 
 
 # =========================================================
@@ -328,6 +648,21 @@ def set_order_status(
 
     if not parts:
         raise HTTPException(400, "No parts found for this order's product")
+
+    if status == "inactive":
+        part_ids = [part.id for part in parts]
+        completed_blockers = _get_completed_part_deactivation_blockers(
+            db, sale_order_id, part_ids
+        )
+        if completed_blockers:
+            _raise_completed_deactivation_blocked(
+                f"order {sale_order_id}",
+                completed_blockers,
+            )
+
+        production_blockers = _get_order_production_blockers(db, part_ids)
+        if production_blockers:
+            _raise_deactivation_blocked(production_blockers)
 
     now = datetime.now(timezone.utc)
 
@@ -879,6 +1214,52 @@ def update_part_status(
     
     part_type_name = part_type.type_name  # IN-House / Out-Source
 
+    if status == "inactive":
+        from production_log_helpers import revert_completed_parts_if_logs_cleared
+
+        revert_completed_parts_if_logs_cleared(db, {part_id})
+
+        if _part_is_schedule_completed(db, sale_order_id, part_id):
+            logger.warning(
+                "Part deactivation blocked",
+                extra={
+                    "event": "part_deactivation_blocked",
+                    "order_id": sale_order_id,
+                    "part_id": part_id,
+                    "part_number": part.part_number,
+                    "reason": "completed_part",
+                },
+            )
+            _raise_completed_deactivation_blocked(
+                f"part {part.part_number or part_id}",
+                [{
+                    "part_id": part_id,
+                    "part_number": part.part_number,
+                    "part_name": part.part_name,
+                    "block_reason": (
+                        "Part production is completed — deactivation is not allowed"
+                    ),
+                }],
+            )
+
+        production_blockers = _get_part_production_blockers(db, part_id)
+        if production_blockers:
+            logger.warning(
+                "Part deactivation blocked",
+                extra={
+                    "event": "part_deactivation_blocked",
+                    "order_id": sale_order_id,
+                    "part_id": part_id,
+                    "part_number": part.part_number,
+                    "reason": "active_production_or_pending_review",
+                    "blocking_operations": production_blockers,
+                },
+            )
+            for entry in production_blockers:
+                entry["part_number"] = part.part_number
+                entry["part_name"] = part.part_name
+            _raise_deactivation_blocked(production_blockers)
+
     # ----------------------------
     # Check pre-requisites for activation (raw material and 2D drawing)
     # ----------------------------
@@ -891,6 +1272,62 @@ def update_part_status(
     print(f"[DEBUG] Pre-requisite check for Part {part.part_name} (ID: {part_id}) in Order {sale_order_id}")
     
     if status == "active":
+        # ----------------------------
+        # Block reactivation while production history still exists
+        # A part that has already produced output (in-progress or completed)
+        # cannot simply be flipped back to 'active' — that would silently
+        # re-insert it into the live priority queue and scheduler while its
+        # production_logs still reflect the earlier run. Only allow activation
+        # when there are zero production_logs entries for this part's operations
+        # (i.e. it truly never started, or an admin has explicitly cleared the
+        # history first).
+        # ----------------------------
+        part_operation_ids = [
+            row[0] for row in db.query(Operation.id)
+            .filter(Operation.part_id == part_id).all()
+        ]
+        if part_operation_ids:
+            existing_log_count = db.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM scheduling.production_logs
+                    WHERE operation_id = ANY(:op_ids)
+                """),
+                {"op_ids": part_operation_ids}
+            ).scalar() or 0
+
+            if existing_log_count > 0:
+                logger.warning(
+                    "Part activation blocked",
+                    extra={
+                        "event": "part_activation_blocked",
+                        "order_id": sale_order_id,
+                        "part_id": part_id,
+                        "part_number": part.part_number,
+                        "reason": "production_history_exists",
+                        "existing_log_count": existing_log_count,
+                    },
+                )
+                return {
+                    "message": (
+                        "Cannot activate this part. It already has production history "
+                        "in production_logs — clear/reset the logs before reactivating."
+                    ),
+                    "sale_order_id": sale_order_id,
+                    "part_id": part_id,
+                    "part_name": part.part_name,
+                    "part_number": part.part_number,
+                    "part_type": part_type_name,
+                    "status": "Activation Blocked",
+                    "order_status": None,
+                    "will_be_scheduled": False,
+                    "note": (
+                        f"{existing_log_count} production_logs entries exist for this "
+                        f"part's operations. Activation is only allowed when there are "
+                        f"zero entries in production_logs for this part."
+                    )
+                }
+
         # Check raw material availability
         raw_material_usage_exists = db.query(RawMaterialUsage).filter(
             RawMaterialUsage.part_id == part_id
@@ -933,6 +1370,7 @@ def update_part_status(
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "part_name": part.part_name,
+                "part_number": part.part_number,
                 "part_type": part_type_name,
                 "status": "Activation Blocked",
                 "order_status": None,
@@ -968,6 +1406,8 @@ def update_part_status(
                 "message": f"Part already {status}",
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
+                "part_name": part.part_name,
+                "part_number": part.part_number,
                 "part_type": part_type_name,
                 "status": status,
                 "will_be_scheduled": part_type_name == "IN-House" and status == "active"
@@ -1146,6 +1586,7 @@ def update_part_status(
             "sale_order_id": sale_order_id,
             "part_id": part_id,
             "part_name": part.part_name,
+            "part_number": part.part_number,
             "part_type": part_type_name,
             "status": status,
             "will_be_scheduled": False,
@@ -1159,6 +1600,7 @@ def update_part_status(
             "sale_order_id": sale_order_id,
             "part_id": part_id,
             "part_name": part.part_name,
+            "part_number": part.part_number,
             "part_type": part_type_name,
             "status": status,
             "will_be_scheduled": True,
@@ -1172,6 +1614,7 @@ def update_part_status(
             "sale_order_id": sale_order_id,
             "part_id": part_id,
             "part_name": part.part_name,
+            "part_number": part.part_number,
             "part_type": part_type_name,
             "status": status,
             "will_be_scheduled": False
@@ -1191,7 +1634,12 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
 
     Example:
       A at 6, B at 1  => A becomes 1; items 1..5 shift to 2..6 (B ends at 6)
+
+  Requires priority_changed_by_id — must be an admin or manufacturing_coordinator.
     """
+    changer = validate_priority_changed_by(db, swap.priority_changed_by_id)
+    audit = priority_changed_by_audit(changer)
+
     record1 = (
         db.query(OrderPartPriority)
         .filter(OrderPartPriority.id == swap.id1)
@@ -1206,6 +1654,16 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     )
 
     if not record1 or not record2:
+        logger.warning(
+            "Priority swap blocked",
+            extra={
+                "event": "priority_swap_blocked",
+                "priority_record_id_1": swap.id1,
+                "priority_record_id_2": swap.id2,
+                "reason": "priority_record_not_found",
+                "changed_by_id": swap.priority_changed_by_id,
+            },
+        )
         raise HTTPException(status_code=404, detail="One or both priority records not found")
 
     # ── Check if parts are completed (block swap) ── #
@@ -1249,19 +1707,50 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     
     # Update completed parts status in order_part_priorities table
     def update_completed_parts_status(db: Session):
-        """Update status to 'completed' for parts where all operations are completed."""
+        """
+        Catch-up sync: for any part where all operations are completed but the
+        priority row still shows 'active' (e.g. the completion hook in
+        production_logs.py wasn't triggered), do the full retirement:
+          1. status -> 'completed', priority -> 0 (out of the active queue)
+          2. resequence remaining active rows to 1..N (no gaps)
+          3. PartScheduleStatus -> 'inactive' for that part/order
+        """
         from DB.models.oms import Part
-        
+        from DB.models.scheduling import PartScheduleStatus
+
         # Get all active priority records
         active_priorities = db.query(OrderPartPriority).filter(
             OrderPartPriority.status == "active"
         ).all()
-        
+
+        newly_completed_part_ids = []
         for priority_record in active_priorities:
             if is_part_completed(priority_record.part_id, db):
-                # Update status to completed
                 priority_record.status = "completed"
-        
+                priority_record.priority = 0
+                newly_completed_part_ids.append(
+                    (priority_record.part_id, priority_record.order_id)
+                )
+
+        if newly_completed_part_ids:
+            db.flush()
+            # Resequence whatever is left in the active queue
+            _resequence_active_order_part_priorities(db)
+
+            # Flip PartScheduleStatus to 'completed' for every part just retired.
+            # It only drops further to 'inactive' once its production_logs
+            # history is cleared (see _revert_completed_parts_to_inactive_if_logs_cleared
+            # in production_logs.py, run on log deletion).
+            for part_id, order_id in newly_completed_part_ids:
+                pps_record = db.query(PartScheduleStatus).filter(
+                    PartScheduleStatus.sale_order_id == order_id,
+                    PartScheduleStatus.part_id == part_id
+                ).first()
+                if pps_record and pps_record.status != "completed":
+                    pps_record.status = "completed"
+                    pps_record.updated_at = datetime.now(timezone.utc)
+                    pps_record.start_date = None
+
         db.commit()
     
     # Update completed parts status
@@ -1272,6 +1761,18 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     part2_completed = is_part_completed(record2.part_id, db)
     
     if part1_completed and part2_completed:
+        logger.warning(
+            "Priority swap blocked",
+            extra={
+                "event": "priority_swap_blocked",
+                "part_id_1": record1.part_id,
+                "part_id_2": record2.part_id,
+                "order_id_1": record1.order_id,
+                "order_id_2": record2.order_id,
+                "reason": "both_parts_completed",
+                "changed_by_id": swap.priority_changed_by_id,
+            },
+        )
         raise HTTPException(
             status_code=400, 
             detail="Cannot swap - All operations for both parts are completed"
@@ -1279,6 +1780,16 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     elif part1_completed:
         part1 = db.query(Part).filter(Part.id == record1.part_id).first()
         part_num = part1.part_number if part1 else str(record1.part_id)
+        logger.warning(
+            "Priority swap blocked",
+            extra={
+                "event": "priority_swap_blocked",
+                "part_id": record1.part_id,
+                "order_id": record1.order_id,
+                "reason": "part_completed",
+                "changed_by_id": swap.priority_changed_by_id,
+            },
+        )
         raise HTTPException(
             status_code=400, 
             detail=f"Cannot swap - All operations for part {part_num} are completed"
@@ -1286,6 +1797,16 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     elif part2_completed:
         part2 = db.query(Part).filter(Part.id == record2.part_id).first()
         part_num = part2.part_number if part2 else str(record2.part_id)
+        logger.warning(
+            "Priority swap blocked",
+            extra={
+                "event": "priority_swap_blocked",
+                "part_id": record2.part_id,
+                "order_id": record2.order_id,
+                "reason": "part_completed",
+                "changed_by_id": swap.priority_changed_by_id,
+            },
+        )
         raise HTTPException(
             status_code=400, 
             detail=f"Cannot swap - All operations for part {part_num} are completed"
@@ -1295,7 +1816,7 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     p2 = record2.priority
 
     if p1 == p2:
-        return {"message": "No change needed"}
+        return {"message": "No change needed", **audit}
 
     lo = min(p1, p2)
     hi = max(p1, p2)
@@ -1328,10 +1849,19 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
             continue
 
         # Check if operation is in progress
+        # NOTE: when an operator submits a log and it's awaiting supervisor
+        # approval, `status` stays "pending" (not "inprogress") — see
+        # activate_job_card's own re-activation guard, which explicitly
+        # checks operator_status='completed' AND status='pending' for this
+        # exact state. Must include "pending" here too, or a submitted-but-
+        # unapproved log (real, already-produced output) is invisible to
+        # this warning check.
         is_inprogress = any(
             (l.operator_status == "inprogress" and l.to_time is None)
-            or
-            (l.operator_status == "completed" and l.status == "inprogress")
+            or (
+                l.operator_status == "completed"
+                and l.status in _OPEN_PRODUCTION_LOG_STATUSES
+            )
             for l in logs
         )
 
@@ -1540,8 +2070,26 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     moved_part_impact    = _build_swap_specific_impact(record1, p1, p2)
     displaced_part_impact = _build_swap_specific_impact(record2, p2, displaced_new_priority)
 
+    logger.info(
+        "Priority swap committed",
+        extra={
+            "event": "priority_swap_committed",
+            "part_id_moved": record1.part_id,
+            "part_id_displaced": record2.part_id,
+            "order_id_moved": record1.order_id,
+            "order_id_displaced": record2.order_id,
+            "old_priority_moved": p1,
+            "new_priority_moved": p2,
+            "changed_by_id": swap.priority_changed_by_id,
+            "warnings_count": len(warnings),
+            "parts_benefiting": len(gains),
+            "parts_delayed": len(losses),
+        },
+    )
+
     return {
         "message": "Priorities shifted successfully",
+        **audit,
         "warnings": warnings,
         "impact_analysis": {
             "parts_benefiting":   len(gains),
@@ -1566,6 +2114,36 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
 # =============================================================================
 # Simulate Priority Swap — Dry Run Impact Analysis
 # =============================================================================
+
+def _op_schedule_times_changed(
+    current_times: Dict,
+    simulated_times: Dict,
+    threshold_minutes: float = 1.0,
+) -> bool:
+    """True when start or end differs by more than threshold_minutes."""
+    threshold_secs = threshold_minutes * 60
+
+    def _to_dt(value):
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    for field in ("start_time", "end_time"):
+        cur_dt = _to_dt(current_times.get(field))
+        sim_dt = _to_dt(simulated_times.get(field))
+        if cur_dt is None and sim_dt is None:
+            continue
+        if cur_dt is None or sim_dt is None:
+            return True
+        if abs((sim_dt - cur_dt).total_seconds()) > threshold_secs:
+            return True
+    return False
+
 
 @router.post("/part-priorities/simulate-swap")
 def simulate_priority_swap(
@@ -1606,6 +2184,53 @@ def simulate_priority_swap(
 
         if not record1 or not record2:
             raise HTTPException(404, "One or both priority records not found")
+
+        # ── Block simulation for parts that have already completed all operations ── #
+        # Mirrors the guard on the real /part-priorities/swap endpoint — a completed
+        # part is no longer in the live queue, so simulating a swap involving it is
+        # meaningless (and would report a schedule impact that can never happen).
+        def _sim_is_part_completed(part_id: int, db: Session) -> bool:
+            op_ids = [
+                row[0] for row in db.query(Operation.id)
+                .filter(Operation.part_id == part_id).all()
+            ]
+            if not op_ids:
+                return False
+            completed_count = db.execute(
+                text("""
+                    SELECT COUNT(DISTINCT operation_id)
+                    FROM scheduling.production_logs
+                    WHERE operation_id = ANY(:op_ids)
+                      AND status = 'completed'
+                """),
+                {"op_ids": op_ids}
+            ).scalar()
+            return (completed_count or 0) == len(op_ids)
+
+        part1_done = record1.status == "completed" or _sim_is_part_completed(record1.part_id, db)
+        part2_done = record2.status == "completed" or _sim_is_part_completed(record2.part_id, db)
+
+        if part1_done or part2_done:
+            done_part_ids = (
+                [record1.part_id] if part1_done else []
+            ) + ([record2.part_id] if part2_done else [])
+            done_parts = db.query(Part).filter(Part.id.in_(done_part_ids)).all()
+            done_numbers = ", ".join(p.part_number for p in done_parts) or str(done_part_ids)
+            logger.warning(
+                "Priority swap simulation blocked",
+                extra={
+                    "event": "priority_swap_blocked",
+                    "part_id_1": record1.part_id,
+                    "part_id_2": record2.part_id,
+                    "reason": "part_completed",
+                    "completed_part_ids": done_part_ids,
+                },
+            )
+            raise HTTPException(
+                400,
+                f"Cannot simulate swap - all operations for part(s) {done_numbers} "
+                f"are already completed"
+            )
 
         if record1.priority == record2.priority:
             return {"message": "No change needed", "impacts": []}
@@ -1775,13 +2400,6 @@ def simulate_priority_swap(
                         "machine_id": machine_id
                     }
 
-            # Include machines for all parts in the swap scope (regardless of schedule change)
-            machines_affected: set = set()
-            for part_id in part_ids_in_scope:
-                # Add machines from both current and simulated schedules for this part
-                machines_affected.update(current_part_machines.get(part_id, set()))
-                machines_affected.update(simulated_part_machines.get(part_id, set()))
-
         finally:
             # ROLLBACK — all priority writes and rescheduling_items changes revert
             db.rollback()
@@ -1793,9 +2411,10 @@ def simulate_priority_swap(
             p.id: p for p in db.query(Part).filter(Part.id.in_(all_part_ids)).all()
         }
 
-        # Build detailed machine impact information (why machines are affected)
+        # Build detailed machine impact — only machines/ops whose times actually change
         from sqlalchemy import text as sa_text
         machine_impact_details: Dict[int, Dict] = {}
+        machines_affected: set = set()
         
         for part_id in part_ids_in_scope:
             part = parts_map.get(part_id)
@@ -1820,13 +2439,12 @@ def simulate_priority_swap(
                             "parts": [],
                             "operations": []
                         }
-                    machine_impact_details[machine_id]["parts"].append(part_number)
-                    
+
                     # Add schedule times (before and after)
                     current_times = current_op_times.get(op_id, {})
                     simulated_times = simulated_op_times.get(op_id, {})
                     
-                    machine_impact_details[machine_id]["operations"].append({
+                    op_entry = {
                         "part_number": part_number,
                         "operation_number": str(op_num),
                         "operation_name": op_name,
@@ -1834,8 +2452,21 @@ def simulate_priority_swap(
                         "current_start_time": current_times.get("start_time"),
                         "current_end_time": current_times.get("end_time"),
                         "simulated_start_time": simulated_times.get("start_time"),
-                        "simulated_end_time": simulated_times.get("end_time")
-                    })
+                        "simulated_end_time": simulated_times.get("end_time"),
+                    }
+                    if not _op_schedule_times_changed(current_times, simulated_times):
+                        continue
+                    machine_impact_details[machine_id]["parts"].append(part_number)
+                    machine_impact_details[machine_id]["operations"].append(op_entry)
+                    machines_affected.add(machine_id)
+
+        # Drop machines that ended up with no changed operations
+        machine_impact_details = {
+            mid: details
+            for mid, details in machine_impact_details.items()
+            if details.get("operations")
+        }
+        machines_affected = set(machine_impact_details.keys())
 
         # Resolve machine IDs → {id, name} so the frontend can display
         # "Mazak QT-200" instead of "Machine 25"
@@ -1848,32 +2479,21 @@ def simulate_priority_swap(
             machine_id_to_name = {
                 m.id: f"{m.make} {m.model}".strip() for m in machine_objs
             }
-            
-            # Check if any parts in scope had schedule changes
-            has_schedule_change = False
-            for part_id in part_ids_in_scope:
-                old_end = current_end.get(part_id)
-                new_end = simulated_end.get(part_id)
-                if old_end and new_end:
-                    time_diff = abs((new_end - old_end).total_seconds() / 60)
-                    if time_diff > 1:
-                        has_schedule_change = True
-                        break
-            
+
             machines_affected = [
                 {
-                    "id": mid, 
+                    "id": mid,
                     "name": machine_id_to_name.get(mid) or f"Machine {mid}",
                     "parts_affected": list(set(machine_impact_details.get(mid, {}).get("parts", []))),
                     "operations": machine_impact_details.get(mid, {}).get("operations", []),
                     "reason": (
-                        "Processes operations for parts involved in priority swap. Schedule changed due to priority reordering." 
-                        if has_schedule_change 
-                        else "Processes operations for parts involved in priority swap. Schedule unchanged because parts use different machines with no resource competition."
-                    )
+                        "Schedule changed on this machine due to priority reordering."
+                    ),
                 }
-                for mid in machines_affected
+                for mid in sorted(machines_affected)
             ]
+        else:
+            machines_affected = []
 
 
 
@@ -1933,10 +2553,12 @@ def simulate_priority_swap(
                 completed_op_ids.add(op_id)
                 continue
 
+            # Same fix as the real-swap warning check above: a submitted-but-
+            # unapproved log sits at status="pending", not "inprogress".
             is_inprogress = any(
                 (l.operator_status == "inprogress" and l.to_time is None)
                 or
-                (l.operator_status == "completed" and l.status == "inprogress")
+                (l.operator_status == "completed" and l.status in ("pending", "inprogress"))
                 for l in all_logs
             )
             if is_inprogress:
@@ -1947,25 +2569,6 @@ def simulate_priority_swap(
                 Operation.id.in_(truly_inprogress_op_ids)
             ).all()
             inprogress_part_ids = {op.part_id for op in inprogress_ops}
-
-        # Track parts with partially completed operations (some ops done, but not all)
-        if completed_op_ids:
-            completed_ops = db.query(Operation).filter(
-                Operation.id.in_(completed_op_ids)
-            ).all()
-            completed_part_ids = {op.part_id for op in completed_ops}
-            
-            # For each part with completed ops, check if ALL ops are completed
-            for part_id in completed_part_ids:
-                all_part_ops = db.query(Operation.id).filter(
-                    Operation.part_id == part_id
-                ).all()
-                all_part_op_ids = {op[0] for op in all_part_ops}
-                completed_count = len(all_part_op_ids & completed_op_ids)
-                
-                # If some but not all operations are completed, it's partially completed
-                if completed_count > 0 and completed_count < len(all_part_op_ids):
-                    partially_completed_part_ids.add(part_id)
 
             for op in inprogress_ops:
                 all_logs = op_all_logs_map.get(op.id, [])
@@ -2043,6 +2646,25 @@ def simulate_priority_swap(
                     "actual_end":       actual_end,
                 }
 
+        # Track parts with partially completed operations (some ops done, but not all)
+        if completed_op_ids:
+            completed_ops = db.query(Operation).filter(
+                Operation.id.in_(completed_op_ids)
+            ).all()
+            completed_part_ids = {op.part_id for op in completed_ops}
+            
+            # For each part with completed ops, check if ALL ops are completed
+            for part_id in completed_part_ids:
+                all_part_ops = db.query(Operation.id).filter(
+                    Operation.part_id == part_id
+                ).all()
+                all_part_op_ids = {op[0] for op in all_part_ops}
+                completed_count = len(all_part_op_ids & completed_op_ids)
+                
+                # If some but not all operations are completed, it's partially completed
+                if completed_count > 0 and completed_count < len(all_part_op_ids):
+                    partially_completed_part_ids.add(part_id)
+
         # ── 7. Due dates for both orders ──────────────────────────────── #
         order1 = db.query(Order).filter(Order.id == record1.order_id).first()
         order2 = db.query(Order).filter(Order.id == record2.order_id).first()
@@ -2105,7 +2727,15 @@ def simulate_priority_swap(
             is_caution_op = False
             if last_log:
                 is_caution_op = (
-                    (last_log.operator_status == "completed" and last_log.status == "inprogress")
+                    # Operator submitted produced output; supervisor hasn't
+                    # reviewed it yet. The real status here is "pending" (set
+                    # by activate_job_card / left at the DB default) — NOT
+                    # "inprogress". Checking only "inprogress" let a fully
+                    # submitted-but-unapproved log slip through undetected
+                    # and get reported as safe to swap, which ignores real,
+                    # already-produced operator output.
+                    (last_log.operator_status == "completed" and
+                     last_log.status in ("pending", "inprogress"))
                     or
                     (last_log.status == "inprogress" and
                      (last_log.remaining_quantity_to_be_produced or 0) > 0)
@@ -2145,7 +2775,7 @@ def simulate_priority_swap(
 
                 # Build specific reason based on production log state
                 if last_log:
-                    if last_log.operator_status == "completed" and last_log.status == "inprogress":
+                    if last_log.operator_status == "completed" and last_log.status in ("pending", "inprogress"):
                         # Case: Operator submitted work, supervisor hasn't approved yet
                         approved_qty = last_log.approved_quantity or 0
                         remaining_qty = last_log.remaining_quantity_to_be_produced or 0
@@ -2383,19 +3013,34 @@ def simulate_priority_swap(
         # ── 12. Critical warnings ─────────────────────────────────────── #
         critical_warnings = []
         if caution_parts:
-            # Check if cautions are only due to in-production operations that won't be affected
-            production_safe_caution_count = sum(
-                1 for op in caution_parts
-                if "in production but swap will not affect" in op.get("caution_reason", "")
-            )
-            if production_safe_caution_count == len(caution_parts):
-                # All cautions are safe - no critical warning needed
-                pass
-            else:
-                critical_warnings.append(f"{len(caution_parts)} operation(s) are partially completed or awaiting supervisor approval")
+            # Exclude cautions that are flagged as safe (in production but the
+            # swap won't actually change their schedule) — those shouldn't
+            # inflate the count or need calling out here.
+            real_caution_ops = [
+                op for op in caution_parts
+                if "in production but swap will not affect" not in op.get("caution_reason", "")
+            ]
+            if real_caution_ops:
+                caution_op_labels = ", ".join(
+                    f"Op {op['operation_number']} - {op['operation_name']} ({op['part_number']})"
+                    for op in real_caution_ops
+                )
+                critical_warnings.append(
+                    f"{len(real_caution_ops)} operation(s) are partially completed or "
+                    f"awaiting supervisor approval: {caution_op_labels}"
+                )
         if has_inprogress_impact:
             inprogress_parts = [l for l in losses if l['is_inprogress']]
-            inprogress_part_numbers = ", ".join([l['part_number'] for l in inprogress_parts])
+            inprogress_labels = []
+            for l in inprogress_parts:
+                ip_detail = inprogress_detail_map.get(l['part_id'])
+                if ip_detail:
+                    inprogress_labels.append(
+                        f"{l['part_number']} (Op {ip_detail['operation_number']} - {ip_detail['operation_name']})"
+                    )
+                else:
+                    inprogress_labels.append(l['part_number'])
+            inprogress_part_numbers = ", ".join(inprogress_labels)
             critical_warnings.append(f"{len(inprogress_parts)} part(s) currently in production will be affected: {inprogress_part_numbers}")
         if has_partially_completed:
             partially_completed_parts = [l for l in losses if l['part_id'] in partially_completed_part_ids]
@@ -2637,6 +3282,34 @@ def simulate_priority_swap(
                 evidence_entry["caution_reason"] = op_evidence.get("caution_reason", "operation partially completed")
                 validation_data["production_log_evidence"]["caution_operations_with_logs"].append(evidence_entry)
 
+        logger.info(
+            "Priority swap simulated",
+            extra={
+                "event": "priority_swap_simulated",
+                "part_id_moved": record1.part_id,
+                "part_id_displaced": record2.part_id,
+                "order_id_moved": record1.order_id,
+                "order_id_displaced": record2.order_id,
+                "old_priority_moved": p1,
+                "new_priority_moved": p2,
+                "recommendation": recommendation,
+                "blocked": blocked,
+                "parts_delayed": len(losses),
+                "parts_benefiting": len(gains),
+            },
+        )
+        if blocked:
+            logger.warning(
+                "Priority swap simulation blocked",
+                extra={
+                    "event": "priority_swap_blocked",
+                    "part_id_moved": record1.part_id,
+                    "part_id_displaced": record2.part_id,
+                    "reason": block_reason,
+                    "blocked_operations_count": len(blocked_parts),
+                },
+            )
+
         return {
             "summary": {
                 "recommendation": recommendation,
@@ -2832,6 +3505,15 @@ def generate_schedule_endpoint(
     in parts_without_operations.
     """
     try:
+        logger.info(
+            "Schedule generation requested",
+            extra={
+                "event": "planned_schedule_triggered",
+                "trigger_source": "generate_schedule_endpoint",
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+            },
+        )
         # ── Guard: block if ANY operation is currently inprogress ──────── #
         # if not force:
         #     inprogress = (
@@ -2866,6 +3548,15 @@ def generate_schedule_endpoint(
         result = generate_machine_schedule(db, start_date, end_date)
 
         if not result.get("success", False):
+            logger.error(
+                "Schedule generation failed",
+                extra={
+                    "event": "planned_schedule_failed",
+                    "result_message": result.get("message"),
+                    "start_date": start_date.isoformat() if start_date else None,
+                    "end_date": end_date.isoformat() if end_date else None,
+                },
+            )
             return {
                 "success":                   False,
                 "message":                   result.get("message", "Scheduling failed"),
@@ -2930,6 +3621,16 @@ def generate_schedule_endpoint(
                 for item, op, machine, wc, priority, part in rows
             ]
 
+        logger.info(
+            "Schedule generation completed",
+            extra={
+                "event": "planned_schedule_completed",
+                "schedule_history_id": result.get("schedule_history_id"),
+                "operations_scheduled": result.get("operations_scheduled"),
+                "parts_processed": result.get("parts_processed"),
+                "result_message": result.get("message"),
+            },
+        )
         return {
             "success":                   True,
             "message":                   result["message"],
@@ -2946,6 +3647,14 @@ def generate_schedule_endpoint(
         }
 
     except Exception as e:
+        logger.exception(
+            "Schedule generation failed with exception",
+            extra={
+                "event": "planned_schedule_failed",
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+            },
+        )
         raise HTTPException(500, f"Scheduling failed: {str(e)}")
 
 # =========================================================
@@ -3123,6 +3832,333 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
 # =========================================================
 # PART OPERATION DETAILS FOR DROPDOWN (latest schedule)
 # =========================================================
+
+def _get_operation_actual_times(
+    db: Session,
+    operation_id: int,
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """
+    Derive actual start/end from production logs.
+    actual_start_time: earliest from_date+from_time once the operator starts.
+    actual_end_time: latest to_date+to_time only when a log's status is 'completed'
+    (supervisor approved); null while awaiting supervisor review.
+    """
+    logs = (
+        db.query(ProductionLog)
+        .filter(ProductionLog.operation_id == operation_id)
+        .order_by(ProductionLog.created_at.asc())
+        .all()
+    )
+    if not logs:
+        return None, None
+
+    actual_start = None
+    actual_end = None
+    for log in logs:
+        if log.from_date and log.from_time:
+            candidate = datetime.combine(log.from_date, log.from_time)
+            if not actual_start or candidate < actual_start:
+                actual_start = candidate
+        if log.to_date and log.to_time and log.status == "completed":
+            candidate = datetime.combine(log.to_date, log.to_time)
+            if not actual_end or candidate > actual_end:
+                actual_end = candidate
+
+    return actual_start, actual_end
+
+
+def _get_planned_times_for_part(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+) -> Dict[int, Dict[str, Optional[datetime]]]:
+    """Consolidated planned start/end per operation from the latest schedule history."""
+    planned: Dict[int, Dict[str, Optional[datetime]]] = {}
+
+    latest = (
+        db.query(ScheduleHistory)
+        .order_by(ScheduleHistory.generated_at.desc())
+        .first()
+    )
+    if latest:
+        rows = (
+            db.query(PlannedScheduleItem)
+            .filter(
+                PlannedScheduleItem.schedule_history_id == latest.id,
+                PlannedScheduleItem.sale_order_id == sale_order_id,
+                PlannedScheduleItem.part_id == part_id,
+            )
+            .order_by(PlannedScheduleItem.planned_start_time.asc())
+            .all()
+        )
+        for item in rows:
+            if item.operation_id not in planned:
+                planned[item.operation_id] = {
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                }
+            else:
+                entry = planned[item.operation_id]
+                if item.planned_start_time < entry["planned_start_time"]:
+                    entry["planned_start_time"] = item.planned_start_time
+                if item.planned_end_time > entry["planned_end_time"]:
+                    entry["planned_end_time"] = item.planned_end_time
+
+    if not planned:
+        reschedule_rows = (
+            db.query(Rescheduling)
+            .filter(
+                Rescheduling.order_id == sale_order_id,
+                Rescheduling.part_id == part_id,
+                Rescheduling.status.in_(["scheduled", "rescheduled"]),
+            )
+            .order_by(Rescheduling.start_time.asc())
+            .all()
+        )
+        for item in reschedule_rows:
+            if item.operation_id not in planned:
+                planned[item.operation_id] = {
+                    "planned_start_time": item.start_time,
+                    "planned_end_time": item.end_time,
+                }
+            else:
+                entry = planned[item.operation_id]
+                if item.start_time < entry["planned_start_time"]:
+                    entry["planned_start_time"] = item.start_time
+                if item.end_time > entry["planned_end_time"]:
+                    entry["planned_end_time"] = item.end_time
+
+    return planned
+
+
+def _fetch_active_part_planned_rows(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+    schedule_history_id: int,
+) -> List[dict]:
+    """
+    Return schedule rows for an active part.
+    Prefers planned_schedule_items from the latest history; falls back to the
+    live rescheduling_items table when the part was scheduled dynamically.
+    """
+    rows = (
+        db.query(PlannedScheduleItem, Operation, Machine)
+        .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
+        .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
+        .filter(
+            PlannedScheduleItem.schedule_history_id == schedule_history_id,
+            PlannedScheduleItem.sale_order_id == sale_order_id,
+            PlannedScheduleItem.part_id == part_id,
+        )
+        .order_by(PlannedScheduleItem.planned_start_time.asc(), PlannedScheduleItem.id.asc())
+        .all()
+    )
+
+    if rows:
+        return [
+            {
+                "operation_id": op.id,
+                "operation": f"{op.operation_number} - {op.operation_name}",
+                "machine": (
+                    f"{machine.make} {machine.model}".strip()
+                    if machine else None
+                ),
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time": item.planned_end_time,
+            }
+            for item, op, machine in rows
+        ]
+
+    reschedule_rows = (
+        db.query(Rescheduling, Operation, Machine)
+        .join(Operation, Operation.id == Rescheduling.operation_id)
+        .outerjoin(Machine, Machine.id == Rescheduling.machine_id)
+        .filter(
+            Rescheduling.order_id == sale_order_id,
+            Rescheduling.part_id == part_id,
+            Rescheduling.status.in_(["scheduled", "rescheduled"]),
+        )
+        .order_by(Rescheduling.start_time.asc(), Rescheduling.id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "operation_id": op.id,
+            "operation": f"{op.operation_number} - {op.operation_name}",
+            "machine": (
+                f"{machine.make} {machine.model}".strip()
+                if machine else None
+            ),
+            "planned_start_time": item.start_time,
+            "planned_end_time": item.end_time,
+        }
+        for item, op, machine in reschedule_rows
+    ]
+
+
+def _build_active_part_operations(
+    db: Session,
+    planned_rows: List[dict],
+    consolidated: bool = False,
+) -> List[dict]:
+    """Attach actual times; optionally consolidate multi-day rows per operation."""
+    if not consolidated:
+        return [
+            _build_active_part_operation_row(
+                db,
+                operation_id=row["operation_id"],
+                operation_label=row["operation"],
+                machine_name=row["machine"],
+                planned_start_time=row["planned_start_time"],
+                planned_end_time=row["planned_end_time"],
+            )
+            for row in planned_rows
+        ]
+
+    operation_groups: Dict[int, dict] = {}
+    for row in planned_rows:
+        op_id = row["operation_id"]
+        if op_id not in operation_groups:
+            operation_groups[op_id] = dict(row)
+            continue
+
+        group = operation_groups[op_id]
+        if row["planned_start_time"] < group["planned_start_time"]:
+            group["planned_start_time"] = row["planned_start_time"]
+        if row["planned_end_time"] > group["planned_end_time"]:
+            group["planned_end_time"] = row["planned_end_time"]
+
+    return [
+        _build_active_part_operation_row(
+            db,
+            operation_id=group["operation_id"],
+            operation_label=group["operation"],
+            machine_name=group["machine"],
+            planned_start_time=group["planned_start_time"],
+            planned_end_time=group["planned_end_time"],
+        )
+        for group in sorted(
+            operation_groups.values(),
+            key=lambda g: (g["planned_start_time"], g["operation_id"]),
+        )
+    ]
+
+
+def _build_completed_part_operations(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+) -> List[dict]:
+    """
+    Build operation rows for parts that have finished all operations and left
+    the active schedule. Planned times come from schedule history; actual times
+    from production logs.
+    """
+    operations = (
+        db.query(Operation)
+        .filter(Operation.part_id == part_id)
+        .order_by(Operation.operation_number.asc(), Operation.id.asc())
+        .all()
+    )
+    planned_times = _get_planned_times_for_part(db, sale_order_id, part_id)
+
+    result = []
+    for op in operations:
+        op_status = db.query(OperationStatus).filter(
+            OperationStatus.operation_id == op.id,
+            OperationStatus.order_id == sale_order_id,
+            OperationStatus.part_id == part_id,
+        ).first()
+
+        machine_name = None
+        reschedule = (
+            db.query(Rescheduling)
+            .filter(
+                Rescheduling.operation_id == op.id,
+                Rescheduling.order_id == sale_order_id,
+            )
+            .order_by(Rescheduling.start_time.desc())
+            .first()
+        )
+
+        log_with_machine = (
+            db.query(ProductionLog)
+            .filter(
+                ProductionLog.operation_id == op.id,
+                ProductionLog.machine_id.isnot(None),
+            )
+            .order_by(ProductionLog.created_at.desc())
+            .first()
+        )
+        if log_with_machine and log_with_machine.machine:
+            machine = log_with_machine.machine
+            machine_name = f"{machine.make} {machine.model}".strip()
+        elif reschedule and reschedule.machine_id:
+            machine = db.query(Machine).filter(Machine.id == reschedule.machine_id).first()
+            if machine:
+                machine_name = f"{machine.make} {machine.model}".strip()
+
+        planned = planned_times.get(op.id, {})
+        planned_start = planned.get("planned_start_time")
+        planned_end = planned.get("planned_end_time")
+        if reschedule:
+            if planned_start is None:
+                planned_start = reschedule.start_time
+            if planned_end is None:
+                planned_end = reschedule.end_time
+
+        actual_start, actual_end = _get_operation_actual_times(db, op.id)
+
+        has_logs = db.query(ProductionLog).filter(
+            ProductionLog.operation_id == op.id
+        ).count() > 0
+
+        operation_status_str = (
+            op_status.status
+            if op_status
+            else ("completed" if has_logs else "pending")
+        )
+
+        result.append({
+            "operation_id": op.id,
+            "operation": f"{op.operation_number} - {op.operation_name}",
+            "machine": machine_name,
+            "planned_start_time": planned_start,
+            "planned_end_time": planned_end,
+            "actual_start_time": actual_start,
+            "actual_end_time": actual_end,
+            "operation_status": operation_status_str,
+        })
+
+    return result
+
+
+def _build_active_part_operation_row(
+    db: Session,
+    operation_id: int,
+    operation_label: str,
+    machine_name: Optional[str],
+    planned_start_time: Optional[datetime],
+    planned_end_time: Optional[datetime],
+    operation_status: Optional[str] = None,
+) -> dict:
+    actual_start, actual_end = _get_operation_actual_times(db, operation_id)
+    row = {
+        "operation_id": operation_id,
+        "operation": operation_label,
+        "machine": machine_name,
+        "planned_start_time": planned_start_time,
+        "planned_end_time": planned_end_time,
+        "actual_start_time": actual_start,
+        "actual_end_time": actual_end,
+    }
+    if operation_status is not None:
+        row["operation_status"] = operation_status
+    return row
+
+
 @router.get("/part-operation-details/{sale_order_id}/{part_id}")
 def get_part_operation_details(
     sale_order_id: int,
@@ -3133,9 +4169,11 @@ def get_part_operation_details(
     Dropdown endpoint for In-House Parts UI.
     Returns operation, machine, planned start and planned end for one part.
 
-    Only returns data if the part is currently active in PartScheduleStatus.
-    If the part/order is deactivated, returns `{ "message": "Part is deactivated", "operations": [] }`
-    even if older schedule rows exist.
+    Active parts return one row per operation (multi-day blocks consolidated to
+    earliest planned start and latest planned end). Falls back to live
+    rescheduling_items when the part was scheduled dynamically.
+    Completed parts return actual operation history with message "completed".
+    Inactive / missing parts return `{ "message": "Part is deactivated", "operations": [] }`.
     """
     try:
         # Optional validation: order + part should exist for this order's product
@@ -3150,7 +4188,6 @@ def get_part_operation_details(
         if not part:
             raise HTTPException(404, "Part not found for this order")
 
-        # If part is not active now, don't show any previous planned operations.
         part_status = (
             db.query(PartScheduleStatus.status)
             .filter(
@@ -3159,7 +4196,17 @@ def get_part_operation_details(
             )
             .first()
         )
-        if not part_status or part_status[0] != "active":
+        status_value = part_status[0] if part_status else None
+
+        if status_value == "completed":
+            return {
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
+                "message": "completed",
+                "operations": _build_completed_part_operations(db, sale_order_id, part_id),
+            }
+
+        if status_value != "active":
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
@@ -3182,32 +4229,10 @@ def get_part_operation_details(
             }
         schedule_history_id = latest.id
 
-        rows = (
-            db.query(PlannedScheduleItem, Operation, Machine)
-            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
-            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
-            .filter(
-                PlannedScheduleItem.schedule_history_id == schedule_history_id,
-                PlannedScheduleItem.sale_order_id == sale_order_id,
-                PlannedScheduleItem.part_id == part_id
-            )
-            .order_by(PlannedScheduleItem.planned_start_time.asc(), PlannedScheduleItem.id.asc())
-            .all()
+        planned_rows = _fetch_active_part_planned_rows(
+            db, sale_order_id, part_id, schedule_history_id
         )
-
-        operations = [
-            {
-                "operation_id": op.id,
-                "operation": f"{op.operation_number} - {op.operation_name}",
-                "machine": (
-                    f"{machine.make} {machine.model}".strip()
-                    if machine else None
-                ),
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time": item.planned_end_time,
-            }
-            for item, op, machine in rows
-        ]
+        operations = _build_active_part_operations(db, planned_rows, consolidated=True)
 
         return {
             "sale_order_id": sale_order_id,
@@ -3246,7 +4271,6 @@ def get_part_operation_details_consolidated(
         if not part:
             raise HTTPException(404, "Part not found for this order")
 
-        # If part is not active now, don't show any previous planned operations.
         part_status = (
             db.query(PartScheduleStatus.status)
             .filter(
@@ -3255,7 +4279,18 @@ def get_part_operation_details_consolidated(
             )
             .first()
         )
-        if not part_status or part_status[0] != "active":
+        status_value = part_status[0] if part_status else None
+
+        if status_value == "completed":
+            return {
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
+                "part_name": part.part_name,
+                "message": "completed",
+                "operations": _build_completed_part_operations(db, sale_order_id, part_id),
+            }
+
+        if status_value != "active":
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
@@ -3280,43 +4315,12 @@ def get_part_operation_details_consolidated(
             }
         schedule_history_id = latest.id
 
-        rows = (
-            db.query(PlannedScheduleItem, Operation, Machine)
-            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
-            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
-            .filter(
-                PlannedScheduleItem.schedule_history_id == schedule_history_id,
-                PlannedScheduleItem.sale_order_id == sale_order_id,
-                PlannedScheduleItem.part_id == part_id
-            )
-            .order_by(PlannedScheduleItem.planned_start_time.asc(), PlannedScheduleItem.id.asc())
-            .all()
+        planned_rows = _fetch_active_part_planned_rows(
+            db, sale_order_id, part_id, schedule_history_id
         )
-
-        # Group operations by operation_id to consolidate multi-day operations
-        operation_groups = {}
-        for item, op, machine in rows:
-            if op.id not in operation_groups:
-                operation_groups[op.id] = {
-                    "operation_id": op.id,
-                    "operation": f"{op.operation_number} - {op.operation_name}",
-                    "machine": (
-                        f"{machine.make} {machine.model}".strip()
-                        if machine else None
-                    ),
-                    "planned_start_time": item.planned_start_time,
-                    "planned_end_time": item.planned_end_time,
-                }
-            else:
-                # Update with earliest start time and latest end time
-                current_group = operation_groups[op.id]
-                if item.planned_start_time < current_group["planned_start_time"]:
-                    current_group["planned_start_time"] = item.planned_start_time
-                if item.planned_end_time > current_group["planned_end_time"]:
-                    current_group["planned_end_time"] = item.planned_end_time
-
-        # Convert to list
-        consolidated_operations = list(operation_groups.values())
+        consolidated_operations = _build_active_part_operations(
+            db, planned_rows, consolidated=True
+        )
 
         return {
             "sale_order_id": sale_order_id,
@@ -4193,6 +5197,197 @@ def get_schedule_history(db: Session = Depends(get_db)):
 
 
 # =========================================================
+# DELIVERY FEASIBILITY ANALYSIS
+# =========================================================
+@router.get("/delivery-feasibility-analysis")
+def get_delivery_feasibility_analysis(
+    db: Session = Depends(get_db)
+):
+    """
+    Analyze delivery feasibility for all active parts.
+    
+    Compares baseline schedule (first planned) vs dynamic schedule (current)
+    and calculates on-time/late delivery metrics based on actual production progress.
+    
+    Metrics provided:
+    - Total parts, on-time parts, late parts
+    - Quantity-based: units on-time vs late
+    - Expected delivery dates
+    - Days overdue / days before due
+    - Baseline vs Dynamic comparison
+    """
+    try:
+        from sqlalchemy import text as sa_text
+        from datetime import datetime, timedelta
+        from DB.models.oms import Order, Part, OrderPartPriority
+        from DB.models.scheduling import ScheduleHistory, Rescheduling, ProductionLog
+        
+        # ── 1. Get baseline schedule (first planned schedule) ───────────────── #
+        baseline_history = db.query(ScheduleHistory).order_by(ScheduleHistory.generated_at.asc()).first()
+
+        baseline_part_completion: Dict[int, datetime] = {}
+        if baseline_history:
+            baseline_rows = db.execute(
+                sa_text("""
+                    SELECT part_id, MAX(planned_end_time) as completion_time
+                    FROM scheduling.planned_schedule_items
+                    WHERE schedule_history_id = :history_id
+                    GROUP BY part_id
+                """),
+                {"history_id": baseline_history.id}
+            ).fetchall()
+            for row in baseline_rows:
+                baseline_part_completion[row[0]] = row[1]
+        
+        # ── 2. Get current dynamic schedule (rescheduling_items) ─────────────── #
+        current_rows = db.execute(
+            sa_text("""
+                SELECT part_id, MAX(end_time) as completion_time
+                FROM scheduling.rescheduling_items
+                WHERE status IN ('scheduled', 'rescheduled')
+                GROUP BY part_id
+            """)
+        ).fetchall()
+        current_part_completion: Dict[int, datetime] = {}
+        for row in current_rows:
+            current_part_completion[row[0]] = row[1]
+        
+        # ── 3. Get all active parts with due dates ──────────────────────────── #
+        active_parts = db.query(OrderPartPriority, Part, Order).join(
+            Part, OrderPartPriority.part_id == Part.id
+        ).join(
+            Order, OrderPartPriority.order_id == Order.id
+        ).filter(
+            OrderPartPriority.status == "active"
+        ).all()
+        
+        # ── 4. Get production progress for each part ────────────────────────── #
+        def get_part_production_progress(part_id: int, total_qty: int) -> dict:
+            """Calculate production progress based on approved quantities."""
+            approved_qty = db.execute(
+                sa_text("""
+                    SELECT COALESCE(SUM(approved_quantity), 0)
+                    FROM scheduling.production_logs pl
+                    JOIN oms.operations o ON pl.operation_id = o.id
+                    WHERE o.part_id = :part_id AND pl.approved_quantity IS NOT NULL
+                """),
+                {"part_id": part_id}
+            ).scalar() or 0
+
+            # Cap approved quantity at total quantity to avoid data integrity issues
+            approved_qty = min(approved_qty, total_qty)
+
+            return {
+                "total_quantity": total_qty,
+                "approved_quantity": approved_qty,
+                "remaining_quantity": max(0, total_qty - approved_qty),
+                "completion_percentage": round((approved_qty / total_qty * 100) if total_qty > 0 else 0, 1)
+            }
+        
+        # ── 5. Calculate working minutes per day (from shift calendar) ───────── #
+        working_mins_per_day = 510.0  # Default: 8.5 hours * 60 minutes
+        
+        # ── 6. Build analysis for each part ──────────────────────────────────── #
+        analysis_parts = []
+        total_parts = 0
+        on_time_parts = 0
+        late_parts = 0
+        total_quantity = 0
+        on_time_quantity = 0
+        late_quantity = 0
+        
+        for priority_record, part, order in active_parts:
+            part_id = part.id
+            due_date = order.due_date
+            total_qty = part.qty or 0
+            total_parts += 1
+            total_quantity += total_qty
+            
+            # Get completion times
+            baseline_completion = baseline_part_completion.get(part_id)
+            current_completion = current_part_completion.get(part_id)
+
+            # If part is not in current schedule (completed), use baseline as fallback
+            if not current_completion and baseline_completion:
+                current_completion = baseline_completion
+            
+            # Get production progress
+            progress = get_part_production_progress(part_id, total_qty)
+            
+            # Determine if on-time or late based on current schedule
+            is_on_time = False
+            days_diff = None
+            status = "unknown"
+            
+            if current_completion and due_date:
+                if current_completion <= due_date:
+                    is_on_time = True
+                    status = "on_time"
+                    days_diff = (due_date - current_completion).total_seconds() / 60 / working_mins_per_day
+                else:
+                    is_on_time = False
+                    status = "late"
+                    days_diff = (current_completion - due_date).total_seconds() / 60 / working_mins_per_day
+            
+            # Update counters
+            if is_on_time:
+                on_time_parts += 1
+                on_time_quantity += progress["approved_quantity"]
+            elif status == "late":
+                late_parts += 1
+                late_quantity += progress["approved_quantity"]
+            
+            # Calculate baseline vs current change
+            baseline_vs_current = None
+            if baseline_completion and current_completion:
+                diff_mins = (current_completion - baseline_completion).total_seconds() / 60
+                diff_days = diff_mins / working_mins_per_day
+                baseline_vs_current = {
+                    "baseline_completion": baseline_completion.strftime("%d %b %Y %H:%M"),
+                    "current_completion": current_completion.strftime("%d %b %Y %H:%M"),
+                    "days_change": round(diff_days, 1),
+                    "direction": "earlier" if diff_mins < 0 else "later" if diff_mins > 0 else "no_change"
+                }
+            
+            analysis_parts.append({
+                "part_id": part_id,
+                "part_number": part.part_number,
+                "part_name": part.part_name,
+                "order_id": order.id,
+                "order_number": order.sale_order_number,
+                "due_date": due_date.strftime("%d %b %Y") if due_date else None,
+                "expected_delivery": current_completion.strftime("%d %b %Y %H:%M") if current_completion else None,
+                "baseline_expected_delivery": baseline_completion.strftime("%d %b %Y %H:%M") if baseline_completion else None,
+                "status": status,
+                "days_before_due": round(days_diff, 1) if status == "on_time" and days_diff else None,
+                "days_overdue": round(days_diff, 1) if status == "late" and days_diff else None,
+                "production_progress": progress,
+                "baseline_vs_current": baseline_vs_current
+            })
+        
+        # ── 7. Build summary ──────────────────────────────────────────────────── #
+        summary = {
+            "total_parts": total_parts,
+            "on_time_parts": on_time_parts,
+            "late_parts": late_parts,
+            "on_time_percentage": round((on_time_parts / total_parts * 100) if total_parts > 0 else 0, 1),
+            "total_quantity": total_quantity,
+            "on_time_quantity": on_time_quantity,
+            "late_quantity": late_quantity,
+            "on_time_quantity_percentage": round((on_time_quantity / total_quantity * 100) if total_quantity > 0 else 0, 1),
+            "baseline_schedule_date": baseline_history.generated_at.strftime("%d %b %Y %H:%M") if baseline_history else None
+        }
+        
+        return {
+            "summary": summary,
+            "parts": analysis_parts
+        }
+        
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch delivery feasibility analysis: {str(e)}")
+
+
+# =========================================================
 # GET MACHINE-WISE OPERATIONS
 # =========================================================
 @router.get("/machine-operations/{machine_id}")
@@ -4376,13 +5571,31 @@ def get_machine_operations(
             this_op_num = group.pop("_op_number")
 
             current_status = group["operation_status"]
+            op_id = group["operation_id"]
+            total_qty = group.get("total_quantity") or 0
 
-            # Already started/completed
+            activation_block = get_job_card_activation_block_message(
+                db,
+                machine_id,
+                start_time,
+            )
+            production_block = get_operator_activation_block_reason(
+                db, op_id, total_qty
+            )
+            if production_block:
+                activation_block = production_block
+
+            # Already started/completed — still block during breakdown / before schedule
             if current_status in ("inprogress", "completed"):
 
-                group["can_activate"] = True
-                group["blocked_by"] = []
-                group["block_reason"] = None
+                if activation_block:
+                    group["can_activate"] = False
+                    group["blocked_by"] = []
+                    group["block_reason"] = activation_block
+                else:
+                    group["can_activate"] = True
+                    group["blocked_by"] = []
+                    group["block_reason"] = None
 
             else:
 
@@ -4483,6 +5696,12 @@ def get_machine_operations(
                         f"operation(s) must be completed first."
                     )
 
+                elif activation_block:
+
+                    group["can_activate"] = False
+                    group["blocked_by"] = []
+                    group["block_reason"] = activation_block
+
                 else:
 
                     group["can_activate"] = True
@@ -4531,6 +5750,352 @@ def get_machine_operations(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch machine operations: {str(e)}"
+        )
+
+
+# =========================================================
+# GET COMPLETED MACHINE-WISE JOB CARDS
+# =========================================================
+@router.get("/machine-operations/{machine_id}/completed")
+def get_completed_machine_operations(
+    machine_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch completed job cards for a specific machine.
+
+    Completion is determined from production_logs only: for each operation on
+    this machine, the latest log is checked — if status = 'completed' or
+    remaining_quantity_to_be_produced = 0, the operation is treated as completed.
+
+    Response shape matches /machine-operations/{machine_id}.
+    """
+    try:
+        machine_obj = (
+            db.query(Machine)
+            .filter(Machine.id == machine_id)
+            .first()
+        )
+
+        if not machine_obj:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Machine with ID {machine_id} not found"
+            )
+
+        completed_op_rows = db.execute(
+            text("""
+                WITH latest_logs AS (
+                    SELECT DISTINCT ON (pl.operation_id)
+                        pl.operation_id,
+                        pl.id AS log_id,
+                        pl.status,
+                        pl.remaining_quantity_to_be_produced,
+                        CASE
+                            WHEN pl.to_date IS NOT NULL AND pl.to_time IS NOT NULL
+                            THEN (pl.to_date + pl.to_time)
+                            ELSE pl.created_at
+                        END AS completed_at
+                    FROM scheduling.production_logs pl
+                    WHERE pl.machine_id = :machine_id
+                    ORDER BY pl.operation_id, pl.created_at DESC, pl.id DESC
+                )
+                SELECT
+                    operation_id,
+                    log_id,
+                    status,
+                    remaining_quantity_to_be_produced,
+                    completed_at
+                FROM latest_logs
+                WHERE status = 'completed'
+                   OR remaining_quantity_to_be_produced = 0
+                ORDER BY completed_at DESC NULLS LAST
+            """),
+            {"machine_id": machine_id}
+        ).fetchall()
+
+        total_completed = len(completed_op_rows)
+        paginated_rows = completed_op_rows[skip: skip + limit]
+
+        if not paginated_rows:
+            return {
+                "machine_id": machine_id,
+                "machine_make": machine_obj.make,
+                "machine_model": machine_obj.model,
+                "machine_type": machine_obj.type,
+                "work_center_id": machine_obj.work_center_id,
+                "work_center_name": (
+                    machine_obj.work_center.work_center_name
+                    if machine_obj.work_center else None
+                ),
+                "total_operations": 0,
+                "operations": [],
+            }
+
+        latest_history_id = (
+            db.query(func.max(ScheduleHistory.id)).scalar()
+        )
+
+        result = []
+
+        for (
+            op_id,
+            latest_log_id,
+            _latest_status,
+            latest_remaining_qty,
+            completed_at,
+        ) in paginated_rows:
+            op = db.query(Operation).filter(Operation.id == op_id).first()
+            if not op:
+                continue
+
+            part = db.query(Part).filter(Part.id == op.part_id).first()
+            if not part:
+                continue
+
+            op_status = db.query(OperationStatus).filter(
+                OperationStatus.operation_id == op_id
+            ).first()
+
+            order_id = op_status.order_id if op_status else None
+            sale_order_number = None
+            if order_id:
+                order = db.query(Order).filter(Order.id == order_id).first()
+                sale_order_number = order.sale_order_number if order else None
+
+            if not order_id:
+                priority_row = (
+                    db.query(OrderPartPriority)
+                    .filter(OrderPartPriority.part_id == part.id)
+                    .order_by(OrderPartPriority.id.desc())
+                    .first()
+                )
+                if priority_row:
+                    order_id = priority_row.order_id
+                    order = db.query(Order).filter(Order.id == order_id).first()
+                    sale_order_number = order.sale_order_number if order else None
+
+            priority = None
+            if order_id:
+                priority = (
+                    db.query(OrderPartPriority)
+                    .filter(
+                        OrderPartPriority.order_id == order_id,
+                        OrderPartPriority.part_id == part.id,
+                    )
+                    .first()
+                )
+
+            # Planned schedule spans all segments for this operation on the machine.
+            # Start = earliest segment; end + quantities = latest row by id.
+            schedule_id = latest_log_id
+            planned_start = None
+            planned_end = None
+            total_qty = part.qty or 0
+            completed_qty = 0
+            remaining_qty = 0
+            has_schedule_rows = False
+
+            reschedule_rows = (
+                db.query(Rescheduling)
+                .filter(
+                    Rescheduling.operation_id == op_id,
+                    Rescheduling.machine_id == machine_id,
+                )
+                .order_by(Rescheduling.id.asc())
+                .all()
+            )
+
+            if reschedule_rows:
+                has_schedule_rows = True
+                latest_reschedule = reschedule_rows[-1]
+                schedule_id = latest_reschedule.id
+                planned_start = min(row.start_time for row in reschedule_rows)
+                planned_end = latest_reschedule.end_time
+                total_qty = latest_reschedule.total_qty
+                completed_qty = latest_reschedule.completed_qty
+                remaining_qty = latest_reschedule.remaining_qty
+            else:
+                reschedule_rows = (
+                    db.query(Rescheduling)
+                    .filter(Rescheduling.operation_id == op_id)
+                    .order_by(Rescheduling.id.asc())
+                    .all()
+                )
+                if reschedule_rows:
+                    has_schedule_rows = True
+                    latest_reschedule = reschedule_rows[-1]
+                    schedule_id = latest_reschedule.id
+                    planned_start = min(row.start_time for row in reschedule_rows)
+                    planned_end = latest_reschedule.end_time
+                    total_qty = latest_reschedule.total_qty
+                    completed_qty = latest_reschedule.completed_qty
+                    remaining_qty = latest_reschedule.remaining_qty
+
+            if not has_schedule_rows and latest_history_id:
+                planned_rows = (
+                    db.query(PlannedScheduleItem)
+                    .filter(
+                        PlannedScheduleItem.operation_id == op_id,
+                        PlannedScheduleItem.machine_id == machine_id,
+                        PlannedScheduleItem.schedule_history_id == latest_history_id,
+                    )
+                    .order_by(PlannedScheduleItem.id.asc())
+                    .all()
+                )
+                if planned_rows:
+                    has_schedule_rows = True
+                    latest_planned = planned_rows[-1]
+                    schedule_id = latest_planned.id
+                    planned_start = min(
+                        row.planned_start_time for row in planned_rows
+                    )
+                    planned_end = latest_planned.planned_end_time
+                    total_qty = latest_planned.total_quantity
+                    remaining_qty = latest_planned.remaining_quantity
+                    completed_qty = max(0, total_qty - remaining_qty)
+                else:
+                    planned_rows = (
+                        db.query(PlannedScheduleItem)
+                        .filter(
+                            PlannedScheduleItem.operation_id == op_id,
+                            PlannedScheduleItem.schedule_history_id == latest_history_id,
+                        )
+                        .order_by(PlannedScheduleItem.id.asc())
+                        .all()
+                    )
+                    if planned_rows:
+                        has_schedule_rows = True
+                        latest_planned = planned_rows[-1]
+                        schedule_id = latest_planned.id
+                        planned_start = min(
+                            row.planned_start_time for row in planned_rows
+                        )
+                        planned_end = latest_planned.planned_end_time
+                        total_qty = latest_planned.total_quantity
+                        remaining_qty = latest_planned.remaining_quantity
+                        completed_qty = max(0, total_qty - remaining_qty)
+
+            logs = (
+                db.query(ProductionLog)
+                .filter(
+                    ProductionLog.operation_id == op_id,
+                    ProductionLog.machine_id == machine_id,
+                )
+                .order_by(ProductionLog.created_at.asc())
+                .all()
+            )
+
+            actual_start = None
+            actual_end = None
+            for log in logs:
+                if log.from_date and log.from_time:
+                    candidate = datetime.combine(log.from_date, log.from_time)
+                    if not actual_start or candidate < actual_start:
+                        actual_start = candidate
+                if log.to_date and log.to_time:
+                    candidate = datetime.combine(log.to_date, log.to_time)
+                    if not actual_end or candidate > actual_end:
+                        actual_end = candidate
+
+            if not planned_start:
+                planned_start = actual_start
+            if not planned_end:
+                planned_end = actual_end
+
+            if not has_schedule_rows:
+                approved_total = db.execute(
+                    text("""
+                        SELECT COALESCE(SUM(approved_quantity), 0)
+                        FROM scheduling.production_logs
+                        WHERE operation_id = :op_id
+                    """),
+                    {"op_id": op_id}
+                ).scalar() or 0
+                total_qty = part.qty or 0
+                completed_qty = approved_total
+                remaining_qty = (
+                    latest_remaining_qty
+                    if latest_remaining_qty is not None
+                    else max(0, total_qty - completed_qty)
+                )
+
+            operation_started_at = (
+                op_status.started_at if op_status else actual_start
+            )
+            operation_completed_at = (
+                op_status.completed_at if op_status and op_status.completed_at
+                else completed_at
+            )
+
+            duration_hours = None
+            if operation_started_at and operation_completed_at:
+                duration_hours = round(
+                    (operation_completed_at - operation_started_at).total_seconds() / 3600.0,
+                    4
+                )
+
+            wc = machine_obj.work_center
+
+            result.append({
+                "schedule_id": schedule_id,
+                "sale_order_id": order_id,
+                "sale_order_number": sale_order_number,
+                "part_id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.part_name,
+                "priority": priority.priority if priority else None,
+                "order_part_priority_id": priority.id if priority else None,
+                "operation_id": op_id,
+                "operation_number": op.operation_number,
+                "operation_name": op.operation_name,
+                "operation_type": (
+                    "Out-Source" if op.part_type_id == 2 else "IN-House"
+                ),
+                "machine_id": machine_id,
+                "machine_make": machine_obj.make,
+                "machine_model": machine_obj.model,
+                "machine_type": machine_obj.type,
+                "work_center_id": wc.id if wc else None,
+                "work_center_name": wc.work_center_name if wc else None,
+                "planned_start_time": planned_start,
+                "planned_end_time": planned_end,
+                "total_quantity": total_qty,
+                "completed_quantity": completed_qty,
+                "remaining_quantity": remaining_qty,
+                "status": "completed",
+                "operation_status": "completed",
+                "operation_started_at": operation_started_at,
+                "operation_completed_at": operation_completed_at,
+                "can_activate": False,
+                "blocked_by": [],
+                "block_reason": "Operation already completed",
+                "duration_hours": duration_hours,
+            })
+
+        return {
+            "machine_id": machine_id,
+            "machine_make": machine_obj.make,
+            "machine_model": machine_obj.model,
+            "machine_type": machine_obj.type,
+            "work_center_id": machine_obj.work_center_id,
+            "work_center_name": (
+                machine_obj.work_center.work_center_name
+                if machine_obj.work_center else None
+            ),
+            "total_operations": total_completed,
+            "operations": result,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch completed machine operations: {str(e)}"
         )
 
 
@@ -4810,6 +6375,16 @@ def activate_job_card(
         ).first()
         
         if operator_leave:
+            logger.warning(
+                "Job card activation blocked — operator on leave",
+                extra={
+                    "event": "operator_leave_activation_block",
+                    "operator_id": operator_id,
+                    "operation_id": operation_id,
+                    "leave_from_date": operator_leave.from_date.isoformat(),
+                    "leave_to_date": operator_leave.to_date.isoformat(),
+                },
+            )
             raise HTTPException(
                 400,
                 f"Cannot activate job card. Operator has acknowledged leave from {operator_leave.from_date} to {operator_leave.to_date}. Reason: {operator_leave.reason if operator_leave.reason else 'Not specified'}"
@@ -4831,6 +6406,24 @@ def activate_job_card(
         
         # Check operation sequence dependency using Rescheduling
         operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if operation:
+            part_for_qty = db.query(Part).filter(Part.id == operation.part_id).first()
+            total_quantity = (part_for_qty.qty or 0) if part_for_qty else 0
+            production_block = get_operator_activation_block_reason(
+                db, operation_id, total_quantity
+            )
+            if production_block:
+                logger.warning(
+                    "Job card activation blocked",
+                    extra={
+                        "event": "job_card_activation_blocked",
+                        "operator_id": operator_id,
+                        "operation_id": operation_id,
+                        "reason": production_block,
+                    },
+                )
+                raise HTTPException(400, production_block)
+
         if operation:
             all_ops = db.query(Operation).filter(
                 Operation.part_id == rescheduling_item.part_id
@@ -4890,32 +6483,65 @@ def activate_job_card(
                     is_completed = False
                 
                 if not (total_approved > 0 or is_completed):
+                    if prev_op.part_type_id == OUT_SOURCE_TYPE_ID:
+                        os_row = (
+                            db.query(OutSourceOperationStatus)
+                            .filter(
+                                OutSourceOperationStatus.operation_id == prev_op.id,
+                                OutSourceOperationStatus.part_id == rescheduling_item.part_id,
+                                OutSourceOperationStatus.order_id == rescheduling_item.order_id,
+                            )
+                            .first()
+                        )
+                        os_status = os_row.status if os_row else "pending"
+                        if os_status != "delivered":
+                            logger.warning(
+                                "Job card activation blocked — out-source not returned",
+                                extra={
+                                    "event": "outsource_operation_pending_block",
+                                    "order_id": rescheduling_item.order_id,
+                                    "part_id": rescheduling_item.part_id,
+                                    "operation_id": operation_id,
+                                    "blocking_outsource_operation_id": prev_op.id,
+                                    "outsource_status": os_status,
+                                },
+                            )
                     blocking_ops.append(
                         f"Op {prev_op.operation_number} ({prev_op.operation_name})"
                     )
             
-            if blocking_ops:
-                raise HTTPException(
-                    400,
-                    f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
-                )
-        
-        # Check for any pending production logs that need supervisor approval
-        from sqlalchemy import text
-        pending_count = db.execute(text("""
-            SELECT COUNT(*) FROM scheduling.production_logs
-            WHERE operation_id = :op_id AND (
-                operator_status = 'inprogress' OR
-                (operator_status = 'completed' AND status = 'pending')
+        if blocking_ops:
+            logger.warning(
+                "Job card activation blocked",
+                extra={
+                    "event": "job_card_activation_blocked",
+                    "operator_id": operator_id,
+                    "operation_id": operation_id,
+                    "reason": "prior_operations_incomplete",
+                    "blocking_operations": blocking_ops,
+                },
             )
-        """), {"op_id": operation_id}).scalar()
-        
-        if pending_count > 0:
             raise HTTPException(
                 400,
-                f"Cannot activate job card. There are {pending_count} pending production log(s) waiting for supervisor approval. Please wait for supervisor to approve existing logs before activating again."
+                f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
             )
-        
+
+        breakdown_block = get_machine_breakdown_block_message(
+            db, machine_id, datetime.now()
+        )
+        if breakdown_block:
+            logger.warning(
+                "Job card activation blocked",
+                extra={
+                    "event": "job_card_activation_blocked",
+                    "operator_id": operator_id,
+                    "operation_id": operation_id,
+                    "machine_id": machine_id,
+                    "reason": breakdown_block,
+                },
+            )
+            raise HTTPException(400, breakdown_block)
+
         # Create or update production log
         current_time = datetime.now()
         current_date = current_time.date()
@@ -4932,55 +6558,56 @@ def activate_job_card(
             new_log = ProductionLog(
                 operation_id=operation_id,
                 operator_id=operator_id,
+                machine_id=machine_id,
                 from_date=current_date,
                 from_time=current_time_only,
                 operator_status="inprogress"
             )
             db.add(new_log)
         
-        # Update machine_live_status table if it exists
-        current_time = datetime.now()
+        # Link active job to machine_live_status when a row already exists for this machine.
+        # Do not change status/last_updated and do not insert a new row.
         try:
-            check_existing_sql = """
-            SELECT id FROM production_monitoring.machine_live_status 
+            update_sql = """
+            UPDATE production_monitoring.machine_live_status
+            SET current_order_id = :order_id,
+                current_part_id = :part_id,
+                current_operation_id = :operation_id
             WHERE machine_id = :machine_id
             """
-            existing_result = db.execute(text(check_existing_sql), {"machine_id": machine_id}).fetchone()
-            
-            if existing_result:
-                update_sql = """
-                UPDATE production_monitoring.machine_live_status 
-                SET status = 'off',
-                    last_updated = :current_time,
-                    current_order_id = :order_id,
-                    current_part_id = :part_id,
-                    current_operation_id = :operation_id
-                WHERE machine_id = :machine_id
-                """
-                db.execute(text(update_sql), {
+            db.execute(
+                text(update_sql),
+                {
                     "machine_id": machine_id,
-                    "current_time": current_time,
                     "order_id": rescheduling_item.order_id,
                     "part_id": rescheduling_item.part_id,
-                    "operation_id": operation_id
-                })
-            else:
-                insert_sql = """
-                INSERT INTO production_monitoring.machine_live_status 
-                (machine_id, status, last_updated, current_order_id, current_part_id, current_operation_id)
-                VALUES (:machine_id, 'off', :current_time, :order_id, :part_id, :operation_id)
-                """
-                db.execute(text(insert_sql), {
-                    "machine_id": machine_id,
-                    "current_time": current_time,
-                    "order_id": rescheduling_item.order_id,
-                    "part_id": rescheduling_item.part_id,
-                    "operation_id": operation_id
-                })
+                    "operation_id": operation_id,
+                },
+            )
         except Exception as e:
-            print(f"[WARNING] Could not update machine_live_status: {e}")
+            logger.exception(
+                "Could not update machine_live_status",
+                extra={
+                    "event": "machine_live_status_update_failed",
+                    "machine_id": machine_id,
+                    "operation_id": operation_id,
+                    "order_id": rescheduling_item.order_id,
+                    "part_id": rescheduling_item.part_id,
+                },
+            )
         
         db.commit()
+        logger.info(
+            "Job card activated",
+            extra={
+                "event": "job_card_activation_completed",
+                "operator_id": operator_id,
+                "operation_id": operation_id,
+                "machine_id": machine_id,
+                "order_id": rescheduling_item.order_id,
+                "part_id": rescheduling_item.part_id,
+            },
+        )
         
         return {
             "message": "Job card activated successfully",
@@ -5204,6 +6831,32 @@ OUT_SOURCE_TYPE_ID = 2                              # oms.part_types.id for Out-
 VALID_OS_STATUSES  = {"pending", "in_transit", "delivered"}
 
 
+def _log_outsource_status_event(
+    *,
+    event: str,
+    order_id: int,
+    part_id: int,
+    operation_id: int,
+    status: str,
+    sent_date=None,
+    delivered_date=None,
+    previous_status: Optional[str] = None,
+) -> None:
+    logger.info(
+        "Out-source operation status changed",
+        extra={
+            "event": event,
+            "order_id": order_id,
+            "part_id": part_id,
+            "operation_id": operation_id,
+            "status": status,
+            "previous_status": previous_status,
+            "sent_date": sent_date.isoformat() if sent_date else None,
+            "delivered_date": delivered_date.isoformat() if delivered_date else None,
+        },
+    )
+
+
 def _serialize_os_row(
     operation: Operation,
     part: Part,
@@ -5412,13 +7065,38 @@ def upsert_out_source_status(
                 status         = new_status,
             )
             db.add(row)
+            previous_status = None
         else:
+            previous_status = row.status
             row.sent_date      = sent_date      if sent_date      is not None else row.sent_date
             row.delivered_date = delivered_date if delivered_date is not None else row.delivered_date
             row.status         = new_status
 
         db.commit()
         db.refresh(row)
+
+        if new_status == "in_transit" and previous_status != "in_transit":
+            _log_outsource_status_event(
+                event="outsource_operation_sent",
+                order_id=order_id,
+                part_id=part_id,
+                operation_id=operation_id,
+                status=new_status,
+                sent_date=row.sent_date,
+                delivered_date=row.delivered_date,
+                previous_status=previous_status,
+            )
+        if new_status == "delivered" and previous_status != "delivered":
+            _log_outsource_status_event(
+                event="outsource_operation_returned",
+                order_id=order_id,
+                part_id=part_id,
+                operation_id=operation_id,
+                status=new_status,
+                sent_date=row.sent_date,
+                delivered_date=row.delivered_date,
+                previous_status=previous_status,
+            )
 
         # Side-effect: on delivered, trigger a dynamic reschedule so downstream
         # ops snap to the actual delivered_date (respecting shift boundaries).
@@ -5430,10 +7108,28 @@ def upsert_out_source_status(
                     triggered_by_part_id=part_id,
                     triggered_by_op_id=operation_id,
                 )
-                print(f"[OS-CRUD] Auto-reschedule after delivered: {resched_result.get('message')}")
+                logger.info(
+                    "Dynamic reschedule after out-source delivery",
+                    extra={
+                        "event": "dynamic_reschedule_completed",
+                        "trigger_source": "outsource_delivered",
+                        "order_id": order_id,
+                        "part_id": part_id,
+                        "operation_id": operation_id,
+                        "result_message": resched_result.get("message"),
+                    },
+                )
             except Exception as resched_err:
-                # Do not fail the status update if reschedule has problems; just log
-                print(f"[OS-CRUD] WARNING: auto-reschedule failed: {resched_err}")
+                logger.exception(
+                    "Auto-reschedule failed after out-source delivery",
+                    extra={
+                        "event": "dynamic_reschedule_failed",
+                        "trigger_source": "outsource_delivered",
+                        "order_id": order_id,
+                        "part_id": part_id,
+                        "operation_id": operation_id,
+                    },
+                )
 
         return row
 
@@ -5518,6 +7214,29 @@ def update_out_source_status(
         db.commit()
         db.refresh(row)
 
+        if row.status == "in_transit" and previous_status != "in_transit":
+            _log_outsource_status_event(
+                event="outsource_operation_sent",
+                order_id=order_id,
+                part_id=operation.part_id,
+                operation_id=operation_id,
+                status=row.status,
+                sent_date=row.sent_date,
+                delivered_date=row.delivered_date,
+                previous_status=previous_status,
+            )
+        if row.status == "delivered" and previous_status != "delivered":
+            _log_outsource_status_event(
+                event="outsource_operation_returned",
+                order_id=order_id,
+                part_id=operation.part_id,
+                operation_id=operation_id,
+                status=row.status,
+                sent_date=row.sent_date,
+                delivered_date=row.delivered_date,
+                previous_status=previous_status,
+            )
+
         # Side-effect on delivered transition
         if row.status == "delivered" and previous_status != "delivered":
             try:
@@ -5527,9 +7246,28 @@ def update_out_source_status(
                     triggered_by_part_id=operation.part_id,
                     triggered_by_op_id=operation_id,
                 )
-                print(f"[OS-CRUD] Auto-reschedule after delivered: {resched_result.get('message')}")
+                logger.info(
+                    "Dynamic reschedule after out-source delivery",
+                    extra={
+                        "event": "dynamic_reschedule_completed",
+                        "trigger_source": "outsource_delivered",
+                        "order_id": order_id,
+                        "part_id": operation.part_id,
+                        "operation_id": operation_id,
+                        "result_message": resched_result.get("message"),
+                    },
+                )
             except Exception as resched_err:
-                print(f"[OS-CRUD] WARNING: auto-reschedule failed: {resched_err}")
+                logger.exception(
+                    "Auto-reschedule failed after out-source delivery",
+                    extra={
+                        "event": "dynamic_reschedule_failed",
+                        "trigger_source": "outsource_delivered",
+                        "order_id": order_id,
+                        "part_id": operation.part_id,
+                        "operation_id": operation_id,
+                    },
+                )
 
         return row
 

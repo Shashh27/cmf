@@ -86,7 +86,9 @@ class OperatorLeaveResponse(OperatorLeaveBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    
+    approved_by_name: Optional[str] = None
+    acknowledged_by: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -104,7 +106,9 @@ class OperatorLeaveResponseWithOperator(OperatorLeaveBase):
     created_at: datetime
     updated_at: datetime
     operator_name: str
-    
+    approved_by_name: Optional[str] = None
+    acknowledged_by: Optional[str] = None
+
     class Config:
         from_attributes = True
 

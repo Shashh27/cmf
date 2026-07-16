@@ -10,13 +10,14 @@ class MachineOperatorShiftAssignmentBase(BaseModel):
 
 
 class MachineOperatorShiftAssignmentCreate(MachineOperatorShiftAssignmentBase):
-    pass
+    assigned_by_id: int
 
 
 class MachineOperatorShiftAssignmentUpdate(BaseModel):
     machine_id: Optional[int] = None
     operator_id: Optional[int] = None
     shift_config_id: Optional[int] = None
+    assigned_by_id: int
 
 
 class ShiftTimingInfo(BaseModel):
@@ -41,11 +42,21 @@ class ShiftConfigDetails(BaseModel):
         from_attributes = True
 
 
+class AssignedByInfo(BaseModel):
+    id: int
+    user_name: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
 class MachineOperatorShiftAssignmentResponse(BaseModel):
     id: int
     machine_id: int
     operator_id: int
     shift_config: ShiftConfigDetails
+    assigned_by: Optional[AssignedByInfo] = None
     created_at: datetime
     updated_at: datetime
     

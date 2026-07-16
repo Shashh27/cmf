@@ -293,7 +293,8 @@ class ProductionLog(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
     operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
-    supervisor_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
+    user_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
+    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=True)
     notes = Column(Text, nullable=True)
     remarks = Column(Text, nullable=True)
     from_date = Column(DATE)
@@ -303,9 +304,10 @@ class ProductionLog(Base):
     status = Column(String, default='pending', nullable=False)
     operator_status = Column(String, nullable=False, default='inprogress')
     produced_quantity = Column(Integer)
+    operator_rework_quantity = Column(Integer, nullable=True)
     approved_quantity = Column(Integer, nullable=True)
-    supervisor_acknowledged = Column(Boolean, default=False, nullable=False)
-    supervisor_acknowledged_at = Column(DateTime, nullable=True)
+    acknowledged = Column(Boolean, default=False, nullable=False)
+    acknowledged_at = Column(DateTime, nullable=True)
     operator_acknowledged = Column(Boolean, default=False, nullable=False)
     operator_acknowledged_at = Column(DateTime, nullable=True)
     rework_quantity = Column(Integer, nullable=True)
@@ -315,7 +317,8 @@ class ProductionLog(Base):
 
     # Relationships
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
+    reviewer = relationship("AccessUser", foreign_keys=[user_id])
+    machine = relationship("Machine", foreign_keys=[machine_id])
 
 
 # =======================
@@ -329,12 +332,14 @@ class MachineOperatorShiftAssignment(Base):
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     shift_config_id = Column(Integer, ForeignKey("scheduling.shift_hours_configuration.id"), nullable=False)
+    assigned_by_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     machine = relationship("Machine", foreign_keys=[machine_id])
     operator = relationship("AccessUser", foreign_keys=[operator_id])
+    assigner = relationship("AccessUser", foreign_keys=[assigned_by_id])
     shift_config = relationship("ShiftHoursConfiguration", foreign_keys=[shift_config_id])
 
 

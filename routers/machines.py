@@ -15,6 +15,63 @@ router = APIRouter(
 )
 
 
+def _clear_machine_references(db: Session, machine_id: int) -> None:
+    """
+    Remove or detach all rows that reference this machine so it can be deleted.
+    Safe when the machine is unused / not part of the live schedule.
+    """
+    cleanup_statements = [
+        ("DELETE FROM scheduling.machine_status WHERE machine_id = :id", {}),
+        ("DELETE FROM scheduling.machine_downtimes WHERE machine_id = :id", {}),
+        ("DELETE FROM scheduling.machine_operator_shift_assignment WHERE machine_id = :id", {}),
+        ("DELETE FROM scheduling.machine_schedule WHERE machine_id = :id", {}),
+        ("DELETE FROM scheduling.planned_schedule_items WHERE machine_id = :id", {}),
+        ("DELETE FROM scheduling.rescheduling_items WHERE machine_id = :id", {}),
+        ("UPDATE scheduling.production_logs SET machine_id = NULL WHERE machine_id = :id", {}),
+        ("UPDATE oms.operations SET machine_id = NULL WHERE machine_id = :id", {}),
+        (
+            "DELETE FROM notifications.machine_calibration_notification "
+            "WHERE machine_id = :id",
+            {},
+        ),
+    ]
+
+    params = {"id": machine_id}
+    for sql, extra in cleanup_statements:
+        try:
+            with db.begin_nested():
+                db.execute(text(sql), {**params, **extra})
+        except Exception as exc:
+            print(f"Warning: machine {machine_id} cleanup step failed ({sql[:60]}...): {exc}")
+
+
+def _machine_reference_counts(db: Session, machine_id: int) -> dict:
+    """Return row counts per table still referencing the machine (for error detail)."""
+    tables = [
+        ("scheduling.planned_schedule_items", "machine_id"),
+        ("scheduling.rescheduling_items", "machine_id"),
+        ("scheduling.production_logs", "machine_id"),
+        ("scheduling.machine_schedule", "machine_id"),
+        ("scheduling.machine_downtimes", "machine_id"),
+        ("scheduling.machine_operator_shift_assignment", "machine_id"),
+        ("scheduling.machine_status", "machine_id"),
+        ("oms.operations", "machine_id"),
+        ("notifications.machine_calibration_notification", "machine_id"),
+    ]
+    counts = {}
+    for table, column in tables:
+        try:
+            count = db.execute(
+                text(f"SELECT COUNT(*) FROM {table} WHERE {column} = :id"),
+                {"id": machine_id},
+            ).scalar() or 0
+            if count:
+                counts[table] = count
+        except Exception:
+            pass
+    return counts
+
+
 @router.post("/", response_model=Machine, status_code=status.HTTP_201_CREATED)
 def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     """Create a new machine"""
@@ -122,7 +179,7 @@ def update_machine(machine_id: int, machine: MachineUpdate, db: Session = Depend
 
 @router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_machine(machine_id: int, db: Session = Depends(get_db)):
-    """Delete a machine"""
+    """Delete a machine and detach it from schedule / production references."""
     db_machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not db_machine:
         raise HTTPException(
@@ -130,49 +187,25 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db)):
             detail=f"Machine with id {machine_id} not found"
         )
 
-    # Delete related machine_status records to avoid foreign key violation
-    # Note: machine_status table exists in DB but not in models
-    try:
-        with db.begin_nested():
-            db.execute(text("DELETE FROM scheduling.machine_status WHERE machine_id = :id"), {"id": machine_id})
-    except Exception:
-        # Fallback to unqualified table name for environments where scheduling is in search_path
-        try:
-            with db.begin_nested():
-                db.execute(text("DELETE FROM machine_status WHERE machine_id = :id"), {"id": machine_id})
-        except Exception as e2:
-            print(f"Warning: Could not delete from machine_status: {e2}")
-
-    # Set machine_id to NULL in operations table if referenced
-    try:
-        with db.begin_nested():
-             db.execute(text("UPDATE oms.operations SET machine_id = NULL WHERE machine_id = :id"), {"id": machine_id})
-    except Exception as e3:
-        print(f"Warning: Could not update operations: {e3}")
-
-    # Delete related machine_calibration_notification records to avoid foreign key violation
-    try:
-        with db.begin_nested():
-            db.execute(text("DELETE FROM notifications.machine_calibration_notification WHERE machine_id = :id"), {"id": machine_id})
-    except Exception:
-        # Fallback to unqualified table name
-        try:
-            with db.begin_nested():
-                db.execute(text("DELETE FROM machine_calibration_notification WHERE machine_id = :id"), {"id": machine_id})
-        except Exception as e4:
-            print(f"Warning: Could not delete from machine_calibration_notification: {e4}")
+    _clear_machine_references(db, machine_id)
 
     try:
         db.delete(db_machine)
         db.commit()
     except IntegrityError:
         db.rollback()
-        # Use available fields from the Machine model (type/model) in the message.
+        refs = _machine_reference_counts(db, machine_id)
+        ref_detail = (
+            ", ".join(f"{table}: {count}" for table, count in refs.items())
+            if refs
+            else "unknown table"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f'Cannot delete machine ID {db_machine.id} (type: {db_machine.type or "-"}, model: {db_machine.model or "-"}). '
-                "It is still referenced by other records (for example planned schedule items). "
+                f"Cannot delete machine ID {db_machine.id} "
+                f"(type: {db_machine.type or '-'}, model: {db_machine.model or '-'}). "
+                f"It is still referenced by other records ({ref_detail}). "
                 "Remove or update those references first, then try again."
             ),
         )

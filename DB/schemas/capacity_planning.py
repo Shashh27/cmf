@@ -20,10 +20,11 @@ class MachineUtilization(BaseModel):
 
 
 class EfficiencyCreate(BaseModel):
-    efficiency_factor: float = Field(..., gt=0.1, lt=1)
+    # Allow 0.11 .. 1.00 inclusive (1.00 = 100% efficiency)
+    efficiency_factor: float = Field(..., gt=0.1, le=1)
 
 class EfficiencyUpdate(BaseModel):
-    efficiency_factor: float = Field(..., gt=0.1, lt=1)
+    efficiency_factor: float = Field(..., gt=0.1, le=1)
 
 class EfficiencyResponse(BaseModel):
     id: int

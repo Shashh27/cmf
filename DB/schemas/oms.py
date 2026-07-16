@@ -576,6 +576,14 @@ class OrderPartPriorityGlobalUpdate(BaseModel):
 class OrderPartPrioritySwap(BaseModel):
     id1: int
     id2: int
+    priority_changed_by_id: int
+
+
+class PriorityChangedByAudit(BaseModel):
+    user_id: int
+    priority_changed_by: str
+    name: str
+    priority_changed_at: Optional[datetime] = None
 
 
 class OrderPartPriority(OrderPartPriorityBase):

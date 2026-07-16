@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date, datetime
+import logging
 
 from DB import AccessUser as AccessUserModel, OperatorLeave
 from DB.schemas.access_control_pydantic import (
@@ -18,6 +19,59 @@ router = APIRouter(
     prefix="/operator-leaves",
     tags=["Operator Leaves"]
 )
+logger = logging.getLogger(__name__)
+
+
+def _approver_display_names(leave: OperatorLeave) -> tuple[Optional[str], Optional[str]]:
+    """
+    Return (approved_by_name, acknowledged_by) for supervisor / manufacturing_coordinator.
+    acknowledged_by is set only when the leave status is 'acknowledged'.
+    """
+    if not leave.approved_by:
+        return None, None
+    approver = leave.approver
+    if approver is None:
+        return None, None
+    name = approver.user_name
+    acknowledged_by = name if leave.status == "acknowledged" else None
+    return name, acknowledged_by
+
+
+def _serialize_leave(leave: OperatorLeave) -> OperatorLeaveResponse:
+    approved_by_name, acknowledged_by = _approver_display_names(leave)
+    return OperatorLeaveResponse(
+        id=leave.id,
+        operator_id=leave.operator_id,
+        from_date=leave.from_date,
+        to_date=leave.to_date,
+        reason=leave.reason,
+        additional_remarks=leave.additional_remarks,
+        status=leave.status,
+        approved_by=leave.approved_by,
+        approved_by_name=approved_by_name,
+        acknowledged_by=acknowledged_by,
+        created_at=leave.created_at,
+        updated_at=leave.updated_at,
+    )
+
+
+def _serialize_leave_with_operator(leave: OperatorLeave) -> OperatorLeaveResponseWithOperator:
+    approved_by_name, acknowledged_by = _approver_display_names(leave)
+    return OperatorLeaveResponseWithOperator(
+        id=leave.id,
+        operator_id=leave.operator_id,
+        operator_name=leave.operator.user_name,
+        from_date=leave.from_date,
+        to_date=leave.to_date,
+        reason=leave.reason,
+        additional_remarks=leave.additional_remarks,
+        status=leave.status,
+        approved_by=leave.approved_by,
+        approved_by_name=approved_by_name,
+        acknowledged_by=acknowledged_by,
+        created_at=leave.created_at,
+        updated_at=leave.updated_at,
+    )
 
 
 @router.get("/operators", response_model=List[AccessUserResponseForOperator])
@@ -92,6 +146,17 @@ def create_leave(
     db.add(leave)
     db.commit()
     db.refresh(leave)
+
+    logger.info(
+        "Operator leave request submitted",
+        extra={
+            "event": "operator_leave_applied",
+            "leave_id": leave.id,
+            "operator_id": operator_id,
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+        },
+    )
     
     return leave
 
@@ -105,7 +170,14 @@ def get_all_leaves(
 ):
     """Get all leave requests with optional filters"""
     
-    query = db.query(OperatorLeave).join(AccessUserModel, OperatorLeave.operator_id == AccessUserModel.id)
+    query = (
+        db.query(OperatorLeave)
+        .options(
+            joinedload(OperatorLeave.operator),
+            joinedload(OperatorLeave.approver),
+        )
+        .join(AccessUserModel, OperatorLeave.operator_id == AccessUserModel.id)
+    )
     
     # Apply filters
     if operator_id:
@@ -118,26 +190,20 @@ def get_all_leaves(
         query = query.filter(OperatorLeave.from_date <= to_date)
     
     leaves = query.order_by(OperatorLeave.from_date.desc()).all()
+
+    return [_serialize_leave_with_operator(leave) for leave in leaves]
+
+
+@router.get("/pending", response_model=List[OperatorLeaveResponse])
+def get_pending_leaves(db: Session = Depends(get_db)):
+    """Get all pending leave requests for Manufacturing Coordinator approval"""
     
-    # Create response with operator name
-    leave_responses = []
-    for leave in leaves:
-        leave_response = OperatorLeaveResponseWithOperator(
-            id=leave.id,
-            operator_id=leave.operator_id,
-            operator_name=leave.operator.user_name,
-            from_date=leave.from_date,
-            to_date=leave.to_date,
-            reason=leave.reason,
-            additional_remarks=leave.additional_remarks,
-            status=leave.status,
-            approved_by=leave.approved_by,
-            created_at=leave.created_at,
-            updated_at=leave.updated_at
-        )
-        leave_responses.append(leave_response)
+    pending_leaves = db.query(OperatorLeave).filter(
+        OperatorLeave.status == 'pending'
+    ).order_by(OperatorLeave.from_date.asc()).all()
     
-    return leave_responses
+    return pending_leaves
+
 
 
 @router.get("/{leave_id}", response_model=OperatorLeaveResponse)
@@ -168,11 +234,15 @@ def get_operator_leaves(
     if not operator:
         raise HTTPException(status_code=404, detail="Operator not found")
     
-    leaves = db.query(OperatorLeave).filter(
-        OperatorLeave.operator_id == operator_id
-    ).order_by(OperatorLeave.from_date.desc()).all()
-    
-    return leaves
+    leaves = (
+        db.query(OperatorLeave)
+        .options(joinedload(OperatorLeave.approver))
+        .filter(OperatorLeave.operator_id == operator_id)
+        .order_by(OperatorLeave.from_date.desc())
+        .all()
+    )
+
+    return [_serialize_leave(leave) for leave in leaves]
 
 
 @router.put("/{leave_id}", response_model=OperatorLeaveResponse)
@@ -332,19 +402,36 @@ def approve_leave(
     
     db.commit()
     db.refresh(leave)
+
+    if status_update.status == "acknowledged":
+        logger.info(
+            "Operator leave approved",
+            extra={
+                "event": "operator_leave_approved",
+                "leave_id": leave.id,
+                "operator_id": leave.operator_id,
+                "from_date": leave.from_date.isoformat(),
+                "to_date": leave.to_date.isoformat(),
+                "approved_by": status_update.approved_by,
+                "approved_by_role": approver.role,
+            },
+        )
+    else:
+        logger.info(
+            "Operator leave rejected",
+            extra={
+                "event": "operator_leave_rejected",
+                "leave_id": leave.id,
+                "operator_id": leave.operator_id,
+                "from_date": leave.from_date.isoformat(),
+                "to_date": leave.to_date.isoformat(),
+                "approved_by": status_update.approved_by,
+                "approved_by_role": approver.role,
+            },
+        )
     
     return leave
 
-
-@router.get("/pending", response_model=List[OperatorLeaveResponse])
-def get_pending_leaves(db: Session = Depends(get_db)):
-    """Get all pending leave requests for Manufacturing Coordinator approval"""
-    
-    pending_leaves = db.query(OperatorLeave).filter(
-        OperatorLeave.status == 'pending'
-    ).order_by(OperatorLeave.from_date.asc()).all()
-    
-    return pending_leaves
 
 
 @router.get("/status/{status}", response_model=List[OperatorLeaveResponse])

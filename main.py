@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
@@ -14,8 +16,16 @@ from routers import (
     machine_scheduling,
     production_logs,
     operator_leaves,
+    notifications,
+    order_tracking,
 )
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +53,8 @@ app.include_router(capacity_planning.router, prefix="/api/v1")
 app.include_router(machine_scheduling_router, prefix="/api/v1")
 app.include_router(production_logs.router, prefix="/api/v1")
 app.include_router(operator_leaves.router, prefix="/api/v1")
+app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(order_tracking.router, prefix="/api/v1")
 # app.include_router(machine_scheduling_engine_router, prefix="/api/v1")
 
 
@@ -53,16 +65,14 @@ async def startup_event():
     - Creates database tables
     - Initializes MinIO client
     """
-    print("=" * 60)
-    print("Starting CMF Backend API...")
-    print("=" * 60)
+    logger.info("Starting CMF Backend API")
 
     # Create database tables
     try:
         Base.metadata.create_all(bind=engine)
-        print("✓ Database tables created/verified")
+        logger.info("Database tables created or verified")
     except Exception as e:
-        print(f"✗ Error creating database tables: {e}")
+        logger.exception("Error creating database tables")
 
     # Initialize MinIO client
     try:
@@ -73,17 +83,20 @@ async def startup_event():
             bucket_name=MINIO_BUCKET_NAME,
             secure=MINIO_SECURE
         )
-        print("✓ MinIO client initialized")
-        print(f"  - Endpoint: {MINIO_ENDPOINT}")
-        print(f"  - Bucket: {MINIO_BUCKET_NAME}")
+        logger.info(
+            "MinIO client initialized",
+            extra={
+                "event": "minio_initialized",
+                "minio_endpoint": MINIO_ENDPOINT,
+                "minio_bucket": MINIO_BUCKET_NAME,
+            },
+        )
     except Exception as e:
-        print(f"✗ Error initializing MinIO client: {e}")
-        print("  Warning: Document upload functionality may not work")
+        logger.exception("Error initializing MinIO client")
+        logger.warning("Document upload functionality may not work")
 
-    print("=" * 60)
-    print("CMF Backend API is ready!")
-    print(f"Documentation available at: http://localhost:8765/docs")
-    print("=" * 60)
+    logger.info("CMF Backend API is ready")
+    logger.info("Documentation available at /docs")
 
 
 

@@ -12,6 +12,8 @@ Return keys used by the /generate-schedule endpoint:
     start_date, end_date, parts_processed   ← must match router expectation
 """
 
+import logging
+
 from datetime import datetime, timedelta, time, timezone
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy import cast, Integer
@@ -66,6 +68,8 @@ OUT_SOURCE_PROVISION = timedelta(days=7)  # Maximum vendor turnaround: 1 week
 
 # ── Dynamic scheduling constant ───────────────────────────────────────────
 STALE_INPROGRESS_WORKING_DAYS = 1  # Flag op stale after N working days with no log
+logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 
@@ -398,24 +402,23 @@ class SchedulerEngine:
     # ------------------------------------------------------------------ #
 
     def _operation_duration_hours(
-        self, operation: Operation, quantity: int
+        self, operation: Operation, quantity: int, skip_setup: bool = False
     ) -> float:
         """
         Duration (hours):
           = (setup_seconds + cycle_seconds × quantity) / 3600
+          When skip_setup=True (rework): cycle_seconds × quantity only.
 
-        Setup applied once per batch.
+        Setup applied once per batch unless skip_setup.
         Returns 0.0 when both setup_time and cycle_time are null/zero.
-
-        Operation.setup_time / cycle_time → Python datetime.time objects
-        (stored as SQL TIME columns).
         """
         def _secs(t: Optional[time]) -> int:
             if t is None:
                 return 0
             return t.hour * 3600 + t.minute * 60 + t.second
 
-        total_sec = _secs(operation.setup_time) + _secs(operation.cycle_time) * quantity
+        setup_sec = 0 if skip_setup else _secs(operation.setup_time)
+        total_sec = setup_sec + _secs(operation.cycle_time) * quantity
         if total_sec == 0:
             return 0.0
         return (total_sec / 3600.0)
@@ -432,6 +435,9 @@ class SchedulerEngine:
         op_start:            datetime,
         schedule_history_id: int,
         part_data:           Dict,
+        skip_setup:          bool = False,
+        order_total_qty:     Optional[int] = None,
+        order_remaining_ref: Optional[List[int]] = None,
     ) -> Tuple[List[PlannedScheduleItem], datetime]:
         """
         Place operation on machine starting at op_start.
@@ -439,7 +445,10 @@ class SchedulerEngine:
         Produces one PlannedScheduleItem per contiguous working segment.
         A new segment begins whenever the duration hits:
           • the end of the current shift, or
-          • the start of an upcoming machine OFF window.
+          • the start of an upcoming machine OFF window (breakdown).
+
+        Machine breakdown pauses work: partial cycle progress and setup state
+        carry over — no re-setup and no full-cycle reset when the machine returns.
 
         Tracks remaining_quantity for each segment based on setup_time, cycle_time,
         and available window hours.
@@ -451,12 +460,18 @@ class SchedulerEngine:
                 return 0
             return t.hour * 3600 + t.minute * 60 + t.second
 
-        setup_seconds = _secs(operation.setup_time)
+        setup_seconds = 0 if skip_setup else _secs(operation.setup_time)
         cycle_seconds = _secs(operation.cycle_time)
+        display_total_qty = order_total_qty if order_total_qty is not None else quantity
         
         # Handle case where both setup and cycle times are zero
         if setup_seconds == 0 and cycle_seconds == 0:
             # Create single item with full quantity
+            if order_remaining_ref is not None:
+                order_remaining_ref[0] = max(0, order_remaining_ref[0] - quantity)
+                seg_remaining = order_remaining_ref[0]
+            else:
+                seg_remaining = 0
             items = [
                 PlannedScheduleItem(
                     part_id             = part_data['part_id'],
@@ -467,19 +482,19 @@ class SchedulerEngine:
                     machine_id          = machine.id,
                     planned_start_time  = op_start,
                     planned_end_time    = op_start,
-                    total_quantity      = quantity,
-                    remaining_quantity  = quantity,
+                    total_quantity      = display_total_qty,
+                    remaining_quantity  = seg_remaining,
                     status              = 'pending',
                     schedule_history_id = schedule_history_id,
                 )
             ]
             return items, op_start
 
-        remaining_hours = self._operation_duration_hours(operation, quantity)
+        remaining_hours = self._operation_duration_hours(operation, quantity, skip_setup=skip_setup)
         remaining_quantity = quantity
         items: List[PlannedScheduleItem] = []
         cur = op_start
-        setup_applied = False
+        setup_applied = skip_setup
         # remaining_cycle_seconds tracks how many seconds of the CURRENT unit's
         # cycle are still left to run.  It starts at cycle_seconds and is
         # decremented as production windows are consumed.  When it reaches 0,
@@ -487,6 +502,17 @@ class SchedulerEngine:
         remaining_cycle_seconds = cycle_seconds
 
         while remaining_hours > 1e-9 and remaining_quantity > 0:
+            # Skip into / past an OFF window that already covers `cur`
+            # (e.g. overnight breakdown 03:00–09:00 while next shift starts 08:30).
+            # Without this, we only detect OFF that *starts after* cur mid-shift.
+            resolved = self._machine_next_available(machine, cur)
+            if resolved is None:
+                break  # permanently OFF
+            if resolved > cur:
+                cur = resolved
+                # Breakdown / overnight OFF — keep setup + remaining cycle progress
+                continue
+
             shift_end = self._shift_end_dt(cur, machine.id)
 
             # Machine OFF window starting after cur but before shift_end
@@ -512,12 +538,13 @@ class SchedulerEngine:
                 if next_off and window_end == next_off.available_from:
                     if next_off.available_to:
                         cur = self.adjust_to_shift(next_off.available_to, machine.id)
-                        setup_applied = False          # Machine OFF → part removed → re-setup needed
-                        remaining_cycle_seconds = cycle_seconds  # part removed, cycle resets
+                        # Breakdown pause — setup and partial cycle progress unchanged
                     else:
                         break                          # machine permanently OFF
                 else:
                     # Zero-width shift boundary — part stays on machine; no re-setup.
+                    # Next loop iteration will push past any overnight OFF via
+                    # _machine_next_available (do not start at 08:30 during 03:00–09:00 OFF).
                     cur = self._next_shift_start(cur, machine.id)
                     # setup_applied and remaining_cycle_seconds intentionally unchanged
                 continue
@@ -531,7 +558,6 @@ class SchedulerEngine:
                     if next_off and window_end == next_off.available_from:
                         if next_off.available_to:
                             cur = self.adjust_to_shift(next_off.available_to, machine.id)
-                            remaining_cycle_seconds = cycle_seconds
                         else:
                             break
                     else:
@@ -573,6 +599,14 @@ class SchedulerEngine:
                 remaining_cycle_seconds  = cycle_seconds  # reset for next unit
                 remaining_hours         -= segment_hours
 
+                if order_remaining_ref is not None:
+                    order_remaining_ref[0] = max(
+                        0, order_remaining_ref[0] - segment_quantity
+                    )
+                    seg_remaining = order_remaining_ref[0]
+                else:
+                    seg_remaining = remaining_quantity
+
                 print(
                     f"[DEBUG][SEGMENT-COMPLETE] "
                     f"Part {part_data['part_number']} | Op {operation.operation_number} | "
@@ -590,8 +624,8 @@ class SchedulerEngine:
                         machine_id          = machine.id,
                         planned_start_time  = cur,
                         planned_end_time    = segment_end,
-                        total_quantity      = quantity,
-                        remaining_quantity  = remaining_quantity,
+                        total_quantity      = display_total_qty,
+                        remaining_quantity  = seg_remaining,
                         status              = 'pending',
                         schedule_history_id = schedule_history_id,
                     )
@@ -626,6 +660,11 @@ class SchedulerEngine:
                 segment_hours = segment_secs / 3600.0
                 remaining_hours -= segment_hours
 
+                if order_remaining_ref is not None:
+                    seg_remaining = order_remaining_ref[0]
+                else:
+                    seg_remaining = remaining_quantity
+
                 print(
                     f"[DEBUG][SEGMENT-PARTIAL] "
                     f"Part {part_data['part_number']} | Op {operation.operation_number} | "
@@ -645,8 +684,8 @@ class SchedulerEngine:
                         machine_id          = machine.id,
                         planned_start_time  = cur,
                         planned_end_time    = segment_end,
-                        total_quantity      = quantity,
-                        remaining_quantity  = remaining_quantity,  # unit not yet complete
+                        total_quantity      = display_total_qty,
+                        remaining_quantity  = seg_remaining,
                         status              = 'pending',
                         schedule_history_id = schedule_history_id,
                     )
@@ -655,11 +694,11 @@ class SchedulerEngine:
                 if next_off and segment_end >= next_off.available_from:
                     if next_off.available_to:
                         cur = self.adjust_to_shift(next_off.available_to, machine.id)
-                        setup_applied = False           # machine OFF → part removed
-                        remaining_cycle_seconds = cycle_seconds  # cycle resets
                         print(
-                            f"[DEBUG][SEGMENT-PARTIAL] Machine goes OFF — "
-                            f"re-setup needed when machine returns at {cur}"
+                            f"[DEBUG][SEGMENT-PARTIAL] Machine breakdown — "
+                            f"resuming at {cur} with "
+                            f"{remaining_cycle_seconds/60:.1f} min cycle remaining "
+                            f"(no re-setup)"
                         )
                     else:
                         break
@@ -1562,7 +1601,36 @@ def generate_machine_schedule(
     end_date:   Optional[datetime] = None,
 ) -> Dict:
     """Instantiate SchedulerEngine and run generate_schedule."""
-    return SchedulerEngine(db).generate_schedule(start_date, end_date)
+    logger.info(
+        "Planned schedule triggered",
+        extra={
+            "event": "planned_schedule_triggered",
+            "trigger_source": "manual_generate_schedule",
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None,
+        },
+    )
+    result = SchedulerEngine(db).generate_schedule(start_date, end_date)
+    if result.get("success"):
+        logger.info(
+            "Planned schedule completed",
+            extra={
+                "event": "planned_schedule_completed",
+                "schedule_history_id": result.get("schedule_history_id"),
+                "operations_scheduled": result.get("operations_scheduled"),
+                "parts_processed": result.get("parts_processed"),
+                "result_message": result.get("message"),
+            },
+        )
+    else:
+        logger.error(
+            "Planned schedule failed",
+            extra={
+                "event": "planned_schedule_failed",
+                "result_message": result.get("message"),
+            },
+        )
+    return result
 
 
 
@@ -1637,27 +1705,12 @@ class DynamicSchedulerEngine(SchedulerEngine):
             return None
 
     def _is_operation_completed(self, operation_id: int, total_qty: int) -> bool:
-        """
-        Check if operation is completed by either:
-        1. approved_quantity >= total_qty, OR
-        2. remaining_quantity_to_be_produced == 0 in any log
-        """
+        """True only when total approved quantity has closed the operation."""
         try:
-            rows = self.db.query(ProductionLog).filter(
-                ProductionLog.operation_id == operation_id
-            ).all()
-            
-            # Check approved quantity
-            approved = sum((r.approved_quantity or 0) for r in rows)
-            if approved >= total_qty:
-                return True
-            
-            # Check remaining quantity
-            remaining_zero = any(
-                r.remaining_quantity_to_be_produced == 0 
-                for r in rows if r.remaining_quantity_to_be_produced is not None
-            )
-            return remaining_zero
+            from production_log_helpers import total_approved_for_operation
+
+            approved = total_approved_for_operation(self.db, operation_id)
+            return approved >= total_qty
         except Exception as e:
             print(f"[ERROR] _is_operation_completed op={operation_id}: {e}")
             return False
@@ -1687,7 +1740,48 @@ class DynamicSchedulerEngine(SchedulerEngine):
         except Exception as e:
             print(f"[ERROR] _baseline_end op={operation_id}: {e}")
             return None
- 
+
+    def _preserve_existing_rescheduling_rows(
+        self,
+        operation_id: int,
+        schedule_version: int,
+    ) -> List[Rescheduling]:
+        """
+        Clone existing schedule rows for an operation when it must not be
+        replanned mid-run (operator job card active).
+        """
+        existing = (
+            self.db.query(Rescheduling)
+            .filter(
+                Rescheduling.operation_id == operation_id,
+                Rescheduling.status.in_(["scheduled", "rescheduled"]),
+            )
+            .order_by(Rescheduling.start_time.asc())
+            .all()
+        )
+        if not existing:
+            return []
+
+        return [
+            Rescheduling(
+                order_id=row.order_id,
+                order_number=row.order_number,
+                part_id=row.part_id,
+                part_number=row.part_number,
+                operation_id=row.operation_id,
+                operation_number=row.operation_number,
+                machine_id=row.machine_id,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                total_qty=row.total_qty,
+                completed_qty=row.completed_qty,
+                remaining_qty=row.remaining_qty,
+                status="rescheduled",
+                schedule_version=schedule_version,
+            )
+            for row in existing
+        ]
+
     # ------------------------------------------------------------------ #
     #  Version helper                                                      #
     # ------------------------------------------------------------------ #
@@ -1760,24 +1854,13 @@ class DynamicSchedulerEngine(SchedulerEngine):
         """
         Convert _schedule_operation_blocks() output into Rescheduling rows
         with status='rescheduled'.
- 
-        remaining_qty decrements across blocks so each row shows how many
-        units are still outstanding after that block completes.
+
+        remaining_qty on each row is the order-level units still to close
+        after that time block (from PlannedScheduleItem.remaining_quantity).
         """
         rows: List[Rescheduling] = []
-        # remaining starts at total not-yet-completed
-        running_remaining = total_qty - completed_qty
- 
-        for idx, block in enumerate(blocks):
-            # units produced in this block
-            if idx == 0:
-                units_in_block = block.total_quantity - block.remaining_quantity
-            else:
-                units_in_block = (
-                    blocks[idx - 1].remaining_quantity - block.remaining_quantity
-                )
-            running_remaining = max(0, running_remaining - units_in_block)
- 
+
+        for block in blocks:
             rows.append(
                 Rescheduling(
                     order_id         = order_id,
@@ -1791,13 +1874,63 @@ class DynamicSchedulerEngine(SchedulerEngine):
                     end_time         = block.planned_end_time,
                     total_qty        = total_qty,
                     completed_qty    = completed_qty,
-                    remaining_qty    = running_remaining,
+                    remaining_qty    = block.remaining_quantity,
                     status           = 'rescheduled',
                     schedule_version = schedule_version,
                 )
             )
         return rows
  
+    def _schedule_remaining_work_blocks(
+        self,
+        operation:           Operation,
+        machine:             Machine,
+        rework_qty:          int,
+        reject_qty:          int,
+        op_start:            datetime,
+        schedule_history_id: int,
+        part_data:           Dict,
+        order_total_qty:     int,
+        order_remaining:     int,
+    ) -> Tuple[List[PlannedScheduleItem], datetime]:
+        """
+        Schedule outstanding work with manufacturing-accurate durations:
+          rework              → cycle time only (same part, no setup)
+          reject + balance    → setup + cycle per unit (fresh manufacture)
+        """
+        new_production_qty = max(0, order_remaining - rework_qty - reject_qty)
+        replacement_qty = reject_qty + new_production_qty
+
+        all_items: List[PlannedScheduleItem] = []
+        cur = op_start
+        order_remaining_ref = [order_remaining]
+
+        work_batches = (
+            (rework_qty, True, "rework"),
+            (replacement_qty, False, "replacement"),
+        )
+        for batch_qty, skip_setup, label in work_batches:
+            if batch_qty <= 0:
+                continue
+            blocks, cur = self._schedule_operation_blocks(
+                operation=operation,
+                machine=machine,
+                quantity=batch_qty,
+                op_start=cur,
+                schedule_history_id=schedule_history_id,
+                part_data=part_data,
+                skip_setup=skip_setup,
+                order_total_qty=order_total_qty,
+                order_remaining_ref=order_remaining_ref,
+            )
+            all_items.extend(blocks)
+            print(
+                f"[DYNAMIC] Scheduled {batch_qty} unit(s) as {label} "
+                f"(skip_setup={skip_setup}) for op {operation.id}"
+            )
+
+        return all_items, cur
+
     # ------------------------------------------------------------------ #
     #  Main entry-point                                                    #
     # ------------------------------------------------------------------ #
@@ -2108,24 +2241,11 @@ class DynamicSchedulerEngine(SchedulerEngine):
                                 )
                         continue
  
-                    # ── inprogress ──────────────────────────────────── #
-                    elif approved > 0:
-                        # inprogress, no log: operator mid-job, leave alone ─ #
-                        if not has_logs:
-                            b = self._baseline_end(op_id)
-                            if b:
-                                cascade_cursor = self.adjust_to_shift(b)
-                            print(
-                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
-                                f"INPROGRESS (no log) — untouched."
-                            )
-                            continue
-
-                        # inprogress with logs: schedule remaining qty ────── #
+                    # ── in progress (has production logs, remaining work) ── #
+                    elif has_logs:
                         remaining_qty = max(0, total_qty - approved)
- 
+
                         if remaining_qty == 0:
-                            # All units approved; status update may be lagging
                             actual = self._actual_end(op_id)
                             if actual:
                                 cascade_cursor = self.adjust_to_shift(actual)
@@ -2134,50 +2254,49 @@ class DynamicSchedulerEngine(SchedulerEngine):
                                 f"fully approved (status lag) — skip."
                             )
                             continue
- 
-                        # Start from when the operator's last log ended
+
+                        # Operator actively running — do not replan mid-job
+                        active_run = (
+                            self.db.query(ProductionLog)
+                            .filter(
+                                ProductionLog.operation_id == op_id,
+                                ProductionLog.operator_status == "inprogress",
+                                ProductionLog.to_time.is_(None),
+                            )
+                            .first()
+                        )
+                        if active_run:
+                            preserved = self._preserve_existing_rescheduling_rows(
+                                op_id, version
+                            )
+                            if preserved:
+                                part_rescheduled_rows.extend(preserved)
+                                cascade_cursor = self.adjust_to_shift(
+                                    preserved[-1].end_time
+                                )
+                                print(
+                                    f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                    f"ACTIVE RUN — preserved {len(preserved)} schedule row(s)."
+                                )
+                                continue
+
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"ACTIVE RUN — no schedule rows; planning remaining work."
+                            )
+
                         actual = self._actual_end(op_id)
                         op_cursor = (
                             self.adjust_to_shift(actual) if actual
                             else cascade_cursor
                         )
 
-
-                        # ── FIX: Re-lock the machine to actual_end ──────── #
-                        # Other parts processed earlier in this loop may have
-                        # overwritten machine_end_time[machine_id] to an earlier
-                        # value.  The operator is physically on this machine until
-                        # op_cursor, so we must re-assert that lock BEFORE calling
-                        # _select_machine — otherwise cand_start can be pulled back
-                        # to a time before the last production log's to_time.
-                        # if actual and operation.machine_id:
-                        #     current_lock = self.machine_end_time.get(operation.machine_id)
-                        #     if current_lock is None or op_cursor > current_lock:
-                        #         self.machine_end_time[operation.machine_id] = op_cursor
-                        #         print(
-                        #             f"[DYNAMIC] Op {op_id} — re-locked machine "
-                        #             f"{operation.machine_id} to actual_end {op_cursor}"
-                        #         )
-                         # ────────────────────────────────────────────────── #
-
-                         # ── Re-lock the machine to actual_end ───────────── #
-                        # Other parts processed earlier in this loop may have
-                        # overwritten machine_end_time[machine_id] to an earlier
-                        # value. The operator is physically on this machine until
-                        # op_cursor, so we must re-assert that lock BEFORE calling
-                        # _select_machine — otherwise cand_start can be pulled back
-                        # to a time before the last production log's to_time.
                         if actual and operation.machine_id:
-                            # Always re-lock to actual_end for inprogress ops —
-                            # regardless of what other parts set machine_end_time to.
-                            # The operator is physically on this machine until op_cursor.
                             self.machine_end_time[operation.machine_id] = op_cursor
                             print(
                                 f"[DYNAMIC] Op {op_id} — re-locked machine "
                                 f"{operation.machine_id} to actual_end {op_cursor}"
                             )
-                            # ────────────────────────────────────────────────── #
-                        
 
                         machine, cand_start = self._select_machine(
                             operation, all_machines, machines_by_wc, op_cursor
@@ -2188,25 +2307,35 @@ class DynamicSchedulerEngine(SchedulerEngine):
                                 f"Op {operation.operation_number}: no machine available."
                             )
                             continue
- 
+
+                        from production_log_helpers import get_operation_work_due
+
+                        work = get_operation_work_due(self.db, op_id, total_qty)
+                        rework_due = work["rework_due"]
+                        reject_due = work["reject_due"]
+
                         print(
                             f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
-                            f"INPROGRESS — approved={approved}, remaining={remaining_qty}, "
+                            f"REMAINING — approved={approved}, remaining={remaining_qty}, "
+                            f"rework={rework_due}, reject={reject_due}, "
                             f"start={cand_start}"
                         )
- 
-                        blocks, op_end = self._schedule_operation_blocks(
-                            operation           = operation,
-                            machine             = machine,
-                            quantity            = remaining_qty,
-                            op_start            = cand_start,
-                            schedule_history_id = 0,   # not used here
-                            part_data           = part_data,
+
+                        blocks, op_end = self._schedule_remaining_work_blocks(
+                            operation=operation,
+                            machine=machine,
+                            rework_qty=rework_due,
+                            reject_qty=reject_due,
+                            op_start=cand_start,
+                            schedule_history_id=0,
+                            part_data=part_data,
+                            order_total_qty=total_qty,
+                            order_remaining=remaining_qty,
                         )
                         self.machine_end_time[machine.id] = op_end
                         cascade_cursor = op_end
                         cascade_active = True
- 
+
                         part_rescheduled_rows.extend(
                             self._to_rescheduling_rows(
                                 blocks=blocks, operation=operation,
@@ -2216,7 +2345,7 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             )
                         )
                         continue
- 
+
                     # ── pending: schedule full qty from cascade_cursor ──── #
                     # Also handles: cascade_active=True (downstream of changed op)
                     machine, cand_start = self._select_machine(
@@ -2341,7 +2470,40 @@ def dynamic_reschedule(
         Green → production_logs                     (actual output)
         Red   → rescheduling_items status=rescheduled (remaining live plan)
     """
-    return DynamicSchedulerEngine(db).dynamic_reschedule(
+    logger.info(
+        "Dynamic reschedule triggered",
+        extra={
+            "event": "dynamic_reschedule_triggered",
+            "trigger_source": "router_or_system",
+            "part_id": triggered_by_part_id,
+            "operation_id": triggered_by_op_id,
+        },
+    )
+    result = DynamicSchedulerEngine(db).dynamic_reschedule(
         triggered_by_part_id=triggered_by_part_id,
         triggered_by_op_id=triggered_by_op_id,
     )
+    if result.get("success"):
+        logger.info(
+            "Dynamic reschedule completed",
+            extra={
+                "event": "dynamic_reschedule_completed",
+                "part_id": triggered_by_part_id,
+                "operation_id": triggered_by_op_id,
+                "reschedule_version": result.get("reschedule_version"),
+                "parts_rescheduled": result.get("parts_rescheduled"),
+                "operations_inserted": result.get("operations_inserted"),
+                "result_message": result.get("message"),
+            },
+        )
+    else:
+        logger.error(
+            "Dynamic reschedule failed",
+            extra={
+                "event": "dynamic_reschedule_failed",
+                "part_id": triggered_by_part_id,
+                "operation_id": triggered_by_op_id,
+                "result_message": result.get("message"),
+            },
+        )
+    return result

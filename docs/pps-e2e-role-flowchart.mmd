@@ -1,0 +1,283 @@
+%% =============================================================================
+%% CMF — End-to-End Production Planning & Scheduling
+%% Role-based flowchart (manufacturing language only)
+%% Roles: Administrator / Manufacturing Coordinator | Supervisor | Operator
+%% Open in Mermaid Live, VS Code Mermaid preview, or the HTML viewer
+%% =============================================================================
+
+flowchart TB
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% START
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    START([Start — Plant ready for production planning])
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 1. ASSET AVAILABILITY
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph ASSETS["1 — Asset availability"]
+        direction TB
+        A1[Administrator / Coordinator<br/>Review machines available for work]
+        A2{Is every machine<br/>fit for production?}
+        A3[Administrator / Coordinator<br/>Mark machine available]
+        A4[Administrator / Coordinator<br/>Mark machine unavailable<br/>breakdown start and expected return]
+        A1 --> A2
+        A2 -->|Yes| A3
+        A2 -->|No — breakdown / maintenance| A4
+    end
+
+    START --> A1
+
+    %% Breakdown notification from shop floor
+    subgraph BD_NOTIFY["Breakdown notice from the floor"]
+        direction TB
+        N1[Operator notices machine failed]
+        N2[Operator notifies Administrator<br/>or Manufacturing Coordinator]
+        N3[Administrator / Coordinator<br/>Records breakdown period<br/>machine off from date — to date]
+        N4[Live schedule recalculates<br/>no new work on that machine<br/>during unavailable window]
+        N1 --> N2 --> N3 --> N4
+    end
+
+    A4 -.-> N3
+    N1 -.-> A2
+
+    %% After machine returns
+    subgraph BD_RESUME["After machine returns to service"]
+        direction TB
+        R1[Administrator / Coordinator<br/>Marks machine available again]
+        R2[Interrupted job resumes<br/>remaining machining time continues<br/>setup is not repeated]
+        R3[Next jobs run only after<br/>earlier operations on that part<br/>are finished]
+        R4[Other parts competing for<br/>the same machine are pushed<br/>to realistic new times]
+        R1 --> R2 --> R3 --> R4
+    end
+
+    A3 --> SHIFT
+    N4 --> R1
+    R4 --> SHIFT
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 2. SHIFT PLANNING & ASSIGNMENT
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph SHIFT["2 — Shift planning and machine–operator assignment"]
+        direction TB
+        S1[Administrator<br/>Set working calendar and shift hours]
+        S2{Overtime needed<br/>for this day?}
+        S3[Administrator<br/>Extend shift / record overtime hours]
+        S4[Administrator<br/>Assign operator to machine<br/>for that shift day]
+        S5[Operator sees assignment<br/>on job board]
+        S1 --> S2
+        S2 -->|Yes| S3
+        S2 -->|No — normal shift| S4
+        S3 --> S4
+        S4 --> S5
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 3. OPERATOR LEAVE
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph LEAVE["3 — Operator leave"]
+        direction TB
+        L1[Operator requests leave]
+        L2[Administrator / Supervisor / Coordinator<br/>Approves leave]
+        L3[Leave acknowledged<br/>for the leave dates]
+        L4{Job card start<br/>on a leave day?}
+        L5[Start blocked<br/>Operator cannot activate job card<br/>until leave dates are over]
+        L6[Operator may start jobs<br/>on non-leave days only]
+        L1 --> L2 --> L3 --> L4
+        L4 -->|Yes — on leave| L5
+        L4 -->|No — available| L6
+    end
+
+    S5 --> LEAVE_CHK{Is operator on<br/>approved leave today?}
+    LEAVE_CHK -->|Yes| L5
+    LEAVE_CHK -->|No| READY_ORD
+    L1 -.-> LEAVE_CHK
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 4. ORDER & PART READY FOR SCHEDULING
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph READY_ORD["4 — Order and part ready for scheduling"]
+        direction TB
+        O1[Administrator<br/>Activate sale order]
+        O2{Raw material linked<br/>and drawing ready?}
+        O3[Administrator<br/>Activate in-house part]
+        O4[Manufacturing Coordinator<br/>Set part priority — who runs first]
+        O5[Order and part enter<br/>the scheduling pool]
+        O1 --> O2
+        O2 -->|No| O2B[Hold — cannot schedule yet]
+        O2 -->|Yes| O3 --> O4 --> O5
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 5. CREATE THE PLAN
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph PLAN["5 — Create the production plan"]
+        direction TB
+        P1[Administrator / Coordinator<br/>Generate baseline schedule]
+        P2[Plan respects<br/>priority · shift hours · machine availability]
+        P3[Copy plan to live schedule<br/>shown on Gantt and job cards]
+        P1 --> P2 --> P3
+    end
+
+    O5 --> P1
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 6. ROUTING — IN-HOUSE VS OUT-SOURCE
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph ROUTING["6 — Operation type on the part route"]
+        direction TB
+        RT1{Next operation<br/>on this part?}
+        RT2{Made on plant machine<br/>or sent outside?}
+        RT3[In-house operation<br/>Machining on assigned machine]
+        RT4[Out-source operation<br/>e.g. heat treatment]
+        RT5[Administrator / Coordinator<br/>Record sent to vendor]
+        RT6{Returned from vendor?}
+        RT7[Record delivered<br/>Downstream in-house ops<br/>may start after delivery]
+        RT8[Hold next in-house work<br/>until out-source returns]
+        RT1 --> RT2
+        RT2 -->|In-house| RT3
+        RT2 -->|Out-source| RT4
+        RT4 --> RT5 --> RT6
+        RT6 -->|Yes| RT7
+        RT6 -->|No| RT8
+        RT8 --> RT6
+    end
+
+    P3 --> RT1
+    RT3 --> SHOP
+    RT7 --> RT1
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 7. SHOP FLOOR — JOB CARD
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph SHOP["7 — Shop floor — job card cycle"]
+        direction TB
+        J1[Operator opens job card<br/>sees live start and finish]
+        J2{All start checks pass?}
+        J3[Operator starts the job]
+        J4[Operator records what was made<br/>new manufacture and rework]
+        J5[Operator submits for approval]
+        J6[Supervisor or Coordinator reviews<br/>approve · rework · reject]
+        J7{More work still needed<br/>on this operation?}
+        J2 -->|No| J2B[Blocked — see blocking reasons]
+        J2 -->|Yes| J3 --> J4 --> J5 --> J6 --> J7
+        J7 -->|Yes| J1
+        J7 -->|No — this op done| NEXT_OP
+    end
+
+    subgraph BLOCKS["When start is blocked"]
+        direction LR
+        B1[Machine unavailable]
+        B2[Before scheduled start]
+        B3[Earlier operation not finished]
+        B4[Previous submission<br/>awaiting review]
+        B5[Operator on leave]
+        B6[Nothing left to make]
+    end
+
+    J2B --- B1
+    J2B --- B2
+    J2B --- B3
+    J2B --- B4
+    J2B --- B5
+    J2B --- B6
+
+    NEXT_OP{More operations<br/>on this part?}
+    NEXT_OP -->|Yes| RT1
+    NEXT_OP -->|No| COMPLETE
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 8. DYNAMIC SCHEDULING — HOW THE LIVE PLAN STAYS TRUE
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph DYNAMIC["8 — Dynamic scheduling — live plan stays honest"]
+        direction TB
+        D0[Live schedule recalculates when…]
+        D1[Production approved / reworked / rejected]
+        D2[Machine marked unavailable or back]
+        D3[Part priority swapped]
+        D4[Out-source delivery recorded]
+        D5[Shift / overtime window changed]
+        D6[Outcomes]
+        D7[Later jobs get new start and finish times]
+        D8[Work after breakdown resumes remaining time only]
+        D9[In-house work after heat treatment<br/>waits for vendor return]
+        D10[Higher-priority parts take machines first]
+        D0 --- D1
+        D0 --- D2
+        D0 --- D3
+        D0 --- D4
+        D0 --- D5
+        D1 --> D6
+        D2 --> D6
+        D3 --> D6
+        D4 --> D6
+        D5 --> D6
+        D6 --> D7
+        D6 --> D8
+        D6 --> D9
+        D6 --> D10
+    end
+
+    J6 -.-> D1
+    N3 -.-> D2
+    R1 -.-> D2
+    O4 -.-> D3
+    RT7 -.-> D4
+    S3 -.-> D5
+    D7 -.-> J1
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 9. PRIORITY CHANGE
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph PRIORITY["9 — Priority change under pressure"]
+        direction TB
+        PR1[Manufacturing Coordinator<br/>Customer expedites a part]
+        PR2[Preview impact on machines and due dates]
+        PR3[Confirm swap]
+        PR4[Live schedule recalculates globally]
+        PR1 --> PR2 --> PR3 --> PR4
+    end
+
+    PR4 -.-> D3
+
+    %% ═══════════════════════════════════════════════════════════════════════
+    %% 10. PART COMPLETED
+    %% ═══════════════════════════════════════════════════════════════════════
+
+    subgraph COMPLETE["10 — Part completed"]
+        direction TB
+        C1[Every operation approved]
+        C2[Part status marked completed]
+        C3[Part removed from priority queue]
+        C4[Next parts move up]
+        C1 --> C2 --> C3 --> C4
+    end
+
+    C4 --> END([End — Part finished in Production Planning and Scheduling])
+
+    %% Styles
+    style START fill:#e2e8f0,stroke:#475569
+    style END fill:#faf5ff,stroke:#9333ea
+    style ASSETS fill:#eff6ff,stroke:#3b82f6
+    style BD_NOTIFY fill:#fee2e2,stroke:#dc2626
+    style BD_RESUME fill:#ffedd5,stroke:#ea580c
+    style SHIFT fill:#f0fdf4,stroke:#16a34a
+    style LEAVE fill:#fef9c3,stroke:#ca8a04
+    style READY_ORD fill:#eff6ff,stroke:#2563eb
+    style PLAN fill:#e0f2fe,stroke:#0284c7
+    style ROUTING fill:#fce7f3,stroke:#db2777
+    style SHOP fill:#fff7ed,stroke:#ea580c
+    style BLOCKS fill:#fee2e2,stroke:#b91c1c
+    style DYNAMIC fill:#dcfce7,stroke:#16a34a
+    style PRIORITY fill:#ffedd5,stroke:#c2410c
+    style COMPLETE fill:#faf5ff,stroke:#9333ea

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
@@ -13,6 +15,9 @@ from DB.schemas.machine_status import (
     UpdateMachineStatusRequest
 )
 from DB.schemas.machine_downtime import MachineDowntimeOut
+
+STATUS_OFF = 2
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/machine-status",
@@ -107,7 +112,13 @@ async def get_machine_status(db: Session = Depends(get_db)):
         # Commit the new default status entries
         if machines_without_status:
             db.commit()
-            print(f"Created default status entries for {len(machines_without_status)} machines")
+            logger.info(
+                "Created default machine status entries",
+                extra={
+                    "event": "machine_status_defaults_created",
+                    "count": len(machines_without_status),
+                },
+            )
         
         return MachineStatusResponse(
             total_machines=len(machine_statuses),
@@ -207,6 +218,73 @@ async def update_machine_status(
         
         db.refresh(machine_status)
         db.refresh(machine)
+
+        if status_update.status_id == STATUS_OFF or previous_status_id == STATUS_OFF:
+            try:
+                from algorithm import dynamic_reschedule
+                logger.info(
+                    "Machine status changed",
+                    extra={
+                        "event": (
+                            "machine_breakdown_recorded"
+                            if status_update.status_id == STATUS_OFF
+                            else "machine_breakdown_cleared"
+                        ),
+                        "machine_id": machine_id,
+                        "from_status_id": previous_status_id,
+                        "to_status_id": status_update.status_id,
+                        "from_datetime": (
+                            status_update.available_from.isoformat()
+                            if status_update.available_from else None
+                        ),
+                        "to_datetime": (
+                            status_update.available_to.isoformat()
+                            if status_update.available_to else None
+                        ),
+                        "reason": status_update.description,
+                    },
+                )
+                logger.info(
+                    "Dynamic reschedule triggered after machine status change",
+                    extra={
+                        "event": "machine_breakdown_reschedule_triggered",
+                        "machine_id": machine_id,
+                        "trigger_source": (
+                            "machine_breakdown"
+                            if status_update.status_id == STATUS_OFF
+                            else "machine_restored"
+                        ),
+                    },
+                )
+                reschedule_result = dynamic_reschedule(db, triggered_by_part_id=None)
+                logger.info(
+                    "Dynamic reschedule completed after machine status change",
+                    extra={
+                        "event": "dynamic_reschedule_completed",
+                        "machine_id": machine_id,
+                        "trigger_source": (
+                            "machine_breakdown"
+                            if status_update.status_id == STATUS_OFF
+                            else "machine_restored"
+                        ),
+                        "reschedule_message": reschedule_result.get("message"),
+                        "parts_rescheduled": reschedule_result.get("parts_rescheduled"),
+                        "operations_inserted": reschedule_result.get("operations_inserted"),
+                    },
+                )
+            except Exception as reschedule_error:
+                logger.exception(
+                    "Dynamic reschedule failed after machine status change",
+                    extra={
+                        "event": "dynamic_reschedule_failed",
+                        "machine_id": machine_id,
+                        "trigger_source": (
+                            "machine_breakdown"
+                            if status_update.status_id == STATUS_OFF
+                            else "machine_restored"
+                        ),
+                    },
+                )
         
         # Return the updated status
         return MachineStatusOut(

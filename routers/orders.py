@@ -258,23 +258,28 @@ def get_parts_by_sale_order(sale_order_number: str, db: Session = Depends(get_db
 
 @router.get("/{order_id}/part-priorities", response_model=List[OrderPartPrioritySchema])
 def get_order_part_priorities(order_id: int, db: Session = Depends(get_db)):
-    """Get part priorities for an order"""
-    priorities = db.query(OrderPartPriority).filter(OrderPartPriority.order_id == order_id).order_by(OrderPartPriority.priority.asc()).all()
-    
-    # Enrich with part details
-    result = []
-    for p in priorities:
-        p_data = {
-            "id": p.id,
-            "order_id": p.order_id,
-            "product_id": p.product_id,
-            "part_id": p.part_id,
-            "priority": p.priority,
-            "part_name": p.part.part_name if p.part else None,
-            "part_number": p.part.part_number if p.part else None
-        }
-        result.append(p_data)
-    return result
+    """
+    Get part priorities for an order.
+
+    Only returns parts that are still in the live priority queue
+    (status='active' and priority > 0). Completed parts remain stored
+    in the database with status='completed' and priority=0, but are
+    hidden from the UI.
+    """
+    priorities = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.order_id == order_id,
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority.asc())
+        .all()
+    )
+    return [
+        OrderPartPrioritySchema.from_orm(p)
+        for p in priorities
+    ]
 
 @router.put("/{order_id}/part-priorities", response_model=List[OrderPartPrioritySchema])
 def update_order_part_priorities(order_id: int, priorities: List[OrderPartPriorityUpdate], db: Session = Depends(get_db)):
@@ -298,25 +303,27 @@ def update_order_part_priorities(order_id: int, priorities: List[OrderPartPriori
 
 @router.get("/part-priorities/all", response_model=List[OrderPartPrioritySchema])
 def get_all_part_priorities(db: Session = Depends(get_db)):
-    """Get all part priorities globally with details"""
-    priorities = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
-    
-    result = []
-    for p in priorities:
-        p_data = {
-            "id": p.id,
-            "order_id": p.order_id,
-            "product_id": p.product_id,
-            "part_id": p.part_id,
-            "priority": p.priority,
-            "part_name": p.part.part_name if p.part else None,
-            "part_number": p.part.part_number if p.part else None,
-            "sale_order_number": p.order.sale_order_number if p.order else None,
-            "project_name": p.order.project_name if p.order else None,
-            "product_name": p.product.product_name if p.product else None
-        }
-        result.append(p_data)
-    return result
+    """
+    Get all part priorities globally with details.
+
+    Only returns parts that are still in the live priority queue
+    (status='active' and priority > 0). Completed parts remain in
+    order_part_priorities with status='completed' and priority=0 but
+    are omitted from this listing.
+    """
+    priorities = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority.asc())
+        .all()
+    )
+
+    # Pydantic schema already exposes part_name, part_number, sale_order_number,
+    # product_name, status, etc. via from_attributes.
+    return [OrderPartPrioritySchema.from_orm(p) for p in priorities]
 
 @router.put("/part-priorities/update-global")
 def update_global_priority(update: OrderPartPriorityGlobalUpdate, db: Session = Depends(get_db)):
@@ -385,12 +392,22 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
 
 @router.get("/part-priorities/order-wise", response_model=List[OrderWisePriority])
 def get_order_wise_priorities(db: Session = Depends(get_db)):
+    """
+    Summary of priorities per order, based only on live-queue parts.
+
+    Uses status='active' and priority > 0 so completed parts do not
+    contribute to counts or min/max priority in the UI.
+    """
     groups_subquery = (
         db.query(
             OrderPartPriority.order_id.label("order_id"),
             func.min(OrderPartPriority.priority).label("min_priority"),
             func.max(OrderPartPriority.priority).label("max_priority"),
             func.count(OrderPartPriority.id).label("part_count"),
+        )
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
         )
         .group_by(OrderPartPriority.order_id)
         .subquery()

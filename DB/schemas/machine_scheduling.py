@@ -18,6 +18,8 @@ class UpdatePartStatusResponse(BaseModel):
     message: str
     sale_order_id: int
     part_id: int
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
     part_type: str
     status: str
     will_be_scheduled: bool

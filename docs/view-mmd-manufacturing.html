@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CMF — Manufacturing Workflow MMD</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+    header {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 1rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    header p {
+      margin: 0 0 1rem;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .toolbar a, .toolbar button {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #334155;
+      color: #f8fafc;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .toolbar a:hover, .toolbar button:hover {
+      background: #475569;
+    }
+    .toolbar .primary {
+      background: #166534;
+      border-color: #16a34a;
+    }
+    .toolbar .primary:hover {
+      background: #15803d;
+    }
+    .status {
+      font-size: 0.8rem;
+      color: #86efac;
+      margin-left: 0.5rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .status.show { opacity: 1; }
+    main {
+      padding: 1rem 1.5rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .note {
+      background: #14532d;
+      border: 1px solid #22c55e;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      line-height: 1.5;
+      color: #dcfce7;
+    }
+    pre {
+      margin: 0;
+      padding: 1.25rem;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: auto;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      color: #cbd5e1;
+      white-space: pre;
+      max-height: calc(100vh - 220px);
+    }
+    @media (max-width: 600px) {
+      header, main { padding-left: 1rem; padding-right: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>scheduling-workflow-manufacturing.mmd</h1>
+    <p>14 Mermaid diagrams — manufacturing language only (plain English)</p>
+    <div class="toolbar">
+      <button type="button" class="primary" id="downloadBtn">⬇ Download .mmd</button>
+      <button type="button" id="copyBtn">Copy all</button>
+      <a href="https://mermaid.live" target="_blank" rel="noopener">Open Mermaid Live</a>
+      <a href="./view-scheduling-manufacturing-diagrams.html">Rendered diagrams</a>
+      <a href="./SCHEDULING_WORKFLOW_MANUFACTURING_GUIDE.md">Full guide (Markdown)</a>
+      <span class="status" id="status"></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="note">
+      Source is embedded in this page — works when opened from File Explorer or Edge (<code>file://</code>).
+      For rendered diagrams, open <a href="./view-scheduling-manufacturing-diagrams.html" style="color:#86efac">view-scheduling-manufacturing-diagrams.html</a>.
+    </div>
+    <pre id="source"></pre>
+  </main>
+
+  <!-- Embedded MMD — no fetch needed for file:// -->
+  <script type="text/plain" id="mmd-embedded">%% =============================================================================
+%% CMF Production Scheduling — Manufacturing Diagrams (plain English)
+%% Open in Mermaid Live Editor, VS Code Mermaid preview, or draw.io import
+%% Each section is a separate diagram — copy one block at a time to render
+%% =============================================================================
+
+%% --- 1. The full circle — from plant setup to part done ---
+flowchart TB
+    subgraph Setup["Step 0 — Prepare the plant"]
+        S1[Set shift hours and working calendar]
+        S2[Register machines and work centres]
+        S3[Assign operators to machines]
+    end
+
+    subgraph Ready["Step A — Make the order ready"]
+        R1[Link raw material and drawing]
+        R2[Activate the sale order]
+        R3[Activate each in-house part]
+        R4[Set part priority — who runs first]
+    end
+
+    subgraph Plan["Step B — Create the plan"]
+        P1[Generate the baseline schedule]
+        P2[Copy plan to the live shop-floor schedule]
+    end
+
+    subgraph Floor["Step C — Run work on the floor"]
+        F1[Operator opens job card]
+        F2[Start the job when allowed]
+        F3[Record what was made]
+        F4[Supervisor or coordinator reviews]
+    end
+
+    subgraph Replan["Step D — Keep the plan honest"]
+        D1[Recalculate remaining work and times]
+        D2[Update job cards and Gantt]
+    end
+
+    subgraph Done["Step E — Part finished"]
+        E1[Every operation approved]
+        E2[Part removed from priority queue]
+    end
+
+    Setup --> Ready
+    Ready --> Plan
+    Plan --> Floor
+    Floor --> Replan
+    Replan --> Floor
+    Floor --> Done
+    Setup -->|Machine breakdown| Replan
+    Ready -->|Priority change| Replan
+
+    style Setup fill:#f1f5f9,stroke:#64748b
+    style Ready fill:#eff6ff,stroke:#3b82f6
+    style Plan fill:#f0f9ff,stroke:#0284c7
+    style Floor fill:#fff7ed,stroke:#ea580c
+    style Replan fill:#f0fdf4,stroke:#16a34a
+    style Done fill:#faf5ff,stroke:#9333ea
+
+%% --- 2. Two plans — planners vs shop floor ---
+flowchart LR
+    subgraph Baseline["Baseline plan — the formal snapshot"]
+        B1[Last generated schedule]
+        B2[Used for history and capacity reports]
+    end
+
+    subgraph Live["Live plan — what operators follow today"]
+        L1[Current start and finish times on job cards]
+        L2[Updates after approvals, breakdowns, priority changes]
+    end
+
+    GEN[Generate schedule] --> Baseline
+    Baseline -->|Copy to floor| Live
+    EVENTS[Shop-floor events] --> Live
+
+    style Baseline fill:#f0f9ff,stroke:#0284c7
+    style Live fill:#f0fdf4,stroke:#16a34a
+
+%% --- 3. What must be true before a part can be scheduled ---
+flowchart TD
+    START([Part on the order]) --> T1{Made in-house?}
+    T1 -->|No| OUT[Handled outside this scheduling path]
+    T1 -->|Yes| T2{Raw material ready?}
+    T2 -->|No| BLOCK[Cannot activate — material missing]
+    T2 -->|Yes| T3{Engineering drawing available?}
+    T3 -->|No| BLOCK
+    T3 -->|Yes| T4{Order activated?}
+    T4 -->|No| WAIT1[Not in the scheduling pool yet]
+    T4 -->|Yes| T5{Part activated?}
+    T5 -->|No| WAIT2[Part not released for production]
+    T5 -->|Yes| T6{Priority assigned and not completed?}
+    T6 -->|No| WAIT3[Completed or taken out of queue]
+    T6 -->|Yes| T7{Routing operations defined?}
+    T7 -->|No| SKIP[Nothing to schedule]
+    T7 -->|Yes| READY([Ready for scheduling])
+
+    style READY fill:#dcfce7,stroke:#16a34a
+    style BLOCK fill:#fee2e2,stroke:#dc2626
+
+%% --- 4. Who does what ---
+flowchart LR
+    subgraph Office["Planning & administration"]
+        ADM[Administrator]
+        MC[Manufacturing Coordinator]
+    end
+
+    subgraph Shop["Shop floor"]
+        SUP[Supervisor]
+        OP[Operator]
+    end
+
+    ADM -->|Machines, shifts, breakdowns| Office
+    MC -->|Part priorities, swaps| Office
+    ADM -->|Activate orders and parts| Office
+
+    Office -->|Live schedule| OP
+    OP -->|Production record| SUP
+    OP -->|Production record| MC
+    SUP -->|Approve OR| LIVE[Live schedule refreshed]
+    MC -->|Approve OR| LIVE
+    ADM -->|Record breakdown| LIVE
+    LIVE --> OP
+
+%% --- 5. Operator job card — start, work, submit, wait for review ---
+stateDiagram-v2
+    [*] --> Waiting: Job appears on schedule
+
+    Waiting --> Working: Start job — all checks pass
+    Waiting --> Blocked: Machine down, too early, or prior op not done
+
+    Working --> AwaitingReview: Submit quantities for approval
+
+    state AwaitingReview {
+        [*] --> ReviewerMustAct
+    }
+
+    AwaitingReview --> Reviewed: Supervisor or coordinator decides
+
+    state Reviewed {
+        [*] --> MoreWorkNeeded: Some approved, some rework or reject
+        [*] --> AllGoodThisRound: Everything presented was approved
+    }
+
+    MoreWorkNeeded --> Working: Start next run after review
+    AllGoodThisRound --> Working: More quantity still needed on this operation
+    AllGoodThisRound --> OperationDone: Total approved equals order quantity
+
+    OperationDone --> [*]
+
+    note right of AwaitingReview
+      Operator cannot start
+      or submit again until
+      reviewer has acted
+    end note
+
+%% --- 6. What the operator records — new work vs rework ---
+flowchart LR
+    subgraph StillToDo["Work still open on this operation"]
+        TOTAL[Total still to complete]
+        NEW[Never-made units + units to remake after rejection]
+        REWORK[Same parts to fix — rework only]
+        TOTAL --- NEW
+        TOTAL --- REWORK
+    end
+
+    subgraph OperatorEnters["What the operator enters"]
+        E1[New manufacture quantity]
+        E2[Rework quantity]
+    end
+
+    NEW --> E1
+    REWORK --> E2
+
+    style StillToDo fill:#eff6ff,stroke:#3b82f6
+    style OperatorEnters fill:#fff7ed,stroke:#ea580c
+
+%% --- 7. When the system will not let the operator start a job ---
+flowchart TD
+    START([Operator taps Start]) --> G1{Previous operations on this part done?}
+    G1 -->|No| B1[Blocked — finish earlier steps first]
+    G1 -->|Yes| G2{Last submission still waiting for review?}
+    G2 -->|Yes| B2[Blocked — reviewer must decide first]
+    G2 -->|No| G3{This operation already fully approved?}
+    G3 -->|Yes| B3[Blocked — nothing left to make]
+    G3 -->|No| G4{Machine in breakdown?}
+    G4 -->|Yes| B4[Blocked — machine unavailable]
+    G4 -->|No| G5{Scheduled start time reached?}
+    G5 -->|No| B5[Blocked — too early]
+    G5 -->|Yes| G6{Operator on approved leave?}
+    G6 -->|Yes| B6[Blocked — on leave]
+    G6 -->|No| OK[Job started — work in progress]
+
+    style OK fill:#dcfce7,stroke:#16a34a
+    style B1 fill:#fee2e2,stroke:#dc2626
+    style B2 fill:#fee2e2,stroke:#dc2626
+    style B3 fill:#fee2e2,stroke:#dc2626
+    style B4 fill:#fee2e2,stroke:#dc2626
+    style B5 fill:#fee2e2,stroke:#dc2626
+    style B6 fill:#fee2e2,stroke:#dc2626
+
+%% --- 8. Waiting for review — why the operator must pause ---
+sequenceDiagram
+    actor Operator
+    participant JobCard as Job card
+    participant Review as Supervisor or Coordinator
+
+    Operator->>JobCard: Start job
+    JobCard-->>Operator: Work in progress
+    Operator->>JobCard: Submit quantities
+    JobCard-->>Operator: Sent for review — please wait
+    Operator->>JobCard: Try to start again
+    JobCard-->>Operator: Not allowed — review pending
+    Operator->>JobCard: Try to submit again
+    JobCard-->>Operator: Not allowed — review pending
+    Review->>JobCard: Approve, rework, or reject
+    JobCard-->>JobCard: Live schedule updated
+    Operator->>JobCard: Start next run
+    JobCard-->>Operator: Allowed
+
+%% --- 9. How the live schedule recalculates ---
+flowchart TD
+    TRIG([Something changes on the floor]) --> LOAD[Load all active parts by priority]
+    LOAD --> WALK[Walk each part's operation sequence]
+    WALK --> DEC{Is this operation finished?}
+    DEC -->|Yes — all quantity approved| SKIP[Move on — use actual finish time]
+    DEC -->|No| WORK{What work is left?}
+    WORK -->|Rework only| RW[Plan rework time — machining only, no setup]
+    WORK -->|Remake or first-time units| NM[Plan setup plus cycle time per unit]
+    WORK -->|Job already running| KEEP[Keep current schedule block — do not disturb active job]
+    RW --> UPDATE[Update live schedule on job cards]
+    NM --> UPDATE
+    KEEP --> UPDATE
+    SKIP --> UPDATE
+
+    style UPDATE fill:#dcfce7,stroke:#16a34a
+
+%% --- 10. Rework vs remake — different time on the schedule ---
+flowchart LR
+    subgraph Rework["Rework — fix the same part"]
+        R1[Uses cycle time only]
+        R2[No setup — part already on machine/spindle]
+    end
+
+    subgraph Remake["Remake or first-time — new manufacture"]
+        M1[Setup time plus cycle time]
+        M2[Applies to rejected units and never-started units]
+    end
+
+    REVIEW[Reviewer marks rework or reject] --> Rework
+    REVIEW --> Remake
+    Rework --> GANTT[Live Gantt and job card times]
+    Remake --> GANTT
+
+    style Rework fill:#fff7ed,stroke:#ea580c
+    style Remake fill:#eff6ff,stroke:#3b82f6
+
+%% --- 11. Machine breakdown — partial work is not lost ---
+gantt
+    title Operation running when machine goes down
+    dateFormat YYYY-MM-DD HH:mm
+    axisFormat %d %H:%M
+    section Machine
+    Working before breakdown     :active, 2026-07-07 12:39, 2026-07-07 14:15
+    Breakdown — machine OFF      :crit, 2026-07-07 14:15, 2026-07-08 08:30
+    Resume remaining machining   :active, 2026-07-08 08:30, 2026-07-08 08:58
+
+%% --- 12. Changing which part runs first (priority swap) ---
+sequenceDiagram
+    actor Coordinator
+    participant Priority as Parts priority screen
+    participant Schedule as Scheduling system
+
+    Coordinator->>Priority: Preview swap — Part B before Part A
+    Priority->>Schedule: Simulate impact
+    Schedule-->>Priority: Show effect on machines and due dates
+    Coordinator->>Priority: Confirm swap
+    Priority->>Schedule: Apply new priority order
+    Schedule->>Schedule: Recalculate live schedule
+    Schedule-->>Coordinator: Done — audit trail recorded
+
+%% --- 13. Taking a part out of the queue (deactivation) ---
+flowchart TD
+    DEACT([Request to deactivate part]) --> P1{Job currently running?}
+    P1 -->|Yes| B1[Not allowed — finish or stop job first]
+    P1 -->|No| P2{Submission waiting for review?}
+    P2 -->|Yes| B2[Not allowed — reviewer must decide]
+    P2 -->|No| P3{Part already fully completed?}
+    P3 -->|Yes| B3[Not allowed — part is done; history must be cleared by admin]
+    P3 -->|No| OK[Part deactivated — removed from live scheduling]
+
+    style OK fill:#dcfce7,stroke:#16a34a
+    style B1 fill:#fee2e2,stroke:#dc2626
+    style B2 fill:#fee2e2,stroke:#dc2626
+    style B3 fill:#fee2e2,stroke:#dc2626
+
+%% --- 14. Typical week on the floor ---
+timeline
+    title Example part journey
+    section Monday — Planning
+        Shifts confirmed : Calendar and assignments set
+        Order released : Part activated and given priority
+        Schedule generated : Baseline and live plan aligned
+    section Tuesday — First operation
+        Operator starts Op 20 : Job card active
+        Submits 10 pieces : Waiting for supervisor
+        Supervisor approves 5, rework 3, reject 2 : Live plan shows follow-up work
+    section Wednesday — Follow-up and breakdown
+        Operator completes rework and remakes : Second review cycle
+        Machine breakdown midday : Jobs on that machine pushed
+        Machine back online : Remaining time resumes without full reset
+    section Friday — Done
+        All operations approved : Part marked complete
+        Priority cleared : Next parts move up in queue
+</script>
+
+  <script>
+    const MMD_FILENAME = "scheduling-workflow-manufacturing.mmd";
+    const sourceEl = document.getElementById("source");
+    const statusEl = document.getElementById("status");
+    const embedded = document.getElementById("mmd-embedded");
+    const mmdText = embedded.textContent.replace(/^\n/, "");
+
+    sourceEl.textContent = mmdText;
+
+    function flash(msg) {
+      statusEl.textContent = msg;
+      statusEl.classList.add("show");
+      setTimeout(() => statusEl.classList.remove("show"), 2000);
+    }
+
+    document.getElementById("copyBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(mmdText);
+        flash("Copied to clipboard");
+      } catch {
+        flash("Copy failed — select text manually");
+      }
+    });
+
+    document.getElementById("downloadBtn").addEventListener("click", () => {
+      const blob = new Blob([mmdText], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = MMD_FILENAME;
+      a.click();
+      URL.revokeObjectURL(url);
+      flash("Download started");
+    });
+  </script>
+</body>
+</html>
