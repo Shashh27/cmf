@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 
 from dotenv import load_dotenv
 
@@ -125,6 +125,9 @@ from notification_routers import (
 
 from routers.ems import router as ems_router
 
+# Import MHR router
+from services.machine_mhr_router import router as machine_mhr_router
+
 
 # Import document routers
 
@@ -154,20 +157,13 @@ app = FastAPI(
 
 
 
-# Configure CORS
-
+# Open CORS — frontend calls backend IP directly (no JWT cookies)
 app.add_middleware(
-
     CORSMiddleware,
-
-    allow_origins=["*"],  # Configure this with your frontend URL in production
-
-    allow_credentials=True,
-
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
-
     allow_headers=["*"],
-
 )
 
 
@@ -275,109 +271,66 @@ async def shutdown_event():
 
 
 
-# Include all routers with api/v1 prefix
+# Unified API router (no JWT)
+api_router = APIRouter()
 
-app.include_router(products_router, prefix="/api/v1")
+# Include all routers in the unified router
+api_router.include_router(products_router)
+api_router.include_router(assemblies_router)
+api_router.include_router(part_types_router)
+api_router.include_router(parts_router)
+api_router.include_router(operations_router)
+api_router.include_router(documents_router)
+api_router.include_router(tools_router)
+api_router.include_router(customers_router)
+api_router.include_router(orders_router)
+api_router.include_router(order_documents_router)
+api_router.include_router(rawmaterials_router)
+api_router.include_router(order_raw_materials_router, prefix="/rawmaterials")
+api_router.include_router(workcenter_router)
+api_router.include_router(general_documents_router)
+api_router.include_router(machine_documents_router)
+api_router.include_router(common_documents_router)
+api_router.include_router(access_control_router)
+api_router.include_router(login_router)
+api_router.include_router(machines_router)
+api_router.include_router(operation_documents_router)
+api_router.include_router(tools_list_router)
+api_router.include_router(inventory_requests_router)
+api_router.include_router(inventory_return_requests_router)
+api_router.include_router(transaction_history_router)
+api_router.include_router(tool_issues_router)
+api_router.include_router(out_source_parts_status_router)
+api_router.include_router(maintenance_router)
+api_router.include_router(ems_router)
+api_router.include_router(order_tracking_router)
+api_router.include_router(monitoring_router)
+api_router.include_router(production_analytics_router)
+api_router.include_router(order_additional_costs_router)
+api_router.include_router(stock_quality_documents_router)
+api_router.include_router(pm_router)
+api_router.include_router(operation_checklists_router)
+api_router.include_router(machine_mhr_router)
+api_router.include_router(recycle_bin_router)
+api_router.include_router(planned_raw_materials_router)
 
-app.include_router(assemblies_router, prefix="/api/v1")
+# Include notification routers
+api_router.include_router(component_issues_notification_router)
+api_router.include_router(machine_calibration_notification_router)
+api_router.include_router(machine_notifications_router)
+api_router.include_router(order_notifications_router)
+api_router.include_router(tool_issues_notification_router)
+api_router.include_router(pc_notifications_router)
+api_router.include_router(mc_notifications_router)
+api_router.include_router(admin_document_notifications_router)
 
-app.include_router(part_types_router, prefix="/api/v1")
+# Include unified router with single prefix
+app.include_router(api_router, prefix="/api/v1")
 
-app.include_router(parts_router, prefix="/api/v1")
-
-app.include_router(operations_router, prefix="/api/v1")
-
-
-
-app.include_router(documents_router, prefix="/api/v1")
-
-app.include_router(tools_router, prefix="/api/v1")
-
-app.include_router(customers_router, prefix="/api/v1")
-
-app.include_router(orders_router, prefix="/api/v1")
-
-app.include_router(order_documents_router, prefix="/api/v1")
-
-app.include_router(rawmaterials_router, prefix="/api/v1")
-
-app.include_router(order_raw_materials_router, prefix="/api/v1/rawmaterials")
-
-app.include_router(workcenter_router, prefix="/api/v1")
-
-app.include_router(general_documents_router, prefix="/api/v1")
-
-app.include_router(machine_documents_router, prefix="/api/v1")
-
-app.include_router(common_documents_router, prefix="/api/v1")
-
-app.include_router(access_control_router, prefix="/api/v1")
-
-app.include_router(login_router, prefix="/api/v1")
-
-app.include_router(machines_router, prefix="/api/v1")
-
-app.include_router(operation_documents_router, prefix="/api/v1")
-
-app.include_router(tools_list_router, prefix="/api/v1")
-
-app.include_router(inventory_requests_router, prefix="/api/v1")
-
-app.include_router(inventory_return_requests_router, prefix="/api/v1")
-
-app.include_router(transaction_history_router, prefix="/api/v1")
-
-
-app.include_router(tool_issues_router, prefix="/api/v1")
-
-app.include_router(out_source_parts_status_router, prefix="/api/v1")
-
-app.include_router(maintenance_router, prefix="/api/v1")
-
-app.include_router(ems_router, prefix="/api/v1")
-
-app.include_router(order_tracking_router, prefix="/api/v1")
-
-app.include_router(monitoring_router, prefix="/api/v1")
-
-app.include_router(production_analytics_router, prefix="/api/v1")
-
-app.include_router(order_additional_costs_router, prefix="/api/v1")
-
-app.include_router(stock_quality_documents_router, prefix="/api/v1")
-
-app.include_router(pm_router, prefix="/api/v1")
-
-app.include_router(operation_checklists_router, prefix="/api/v1")
-
-app.include_router(recycle_bin_router, prefix="/api/v1")
-
-app.include_router(planned_raw_materials_router, prefix="/api/v1")
-
+# Include chatbot router separately (different prefix)
 app.include_router(chatbot_router, prefix="/api/chatbot")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
-
-
-
-# Include notification routers
-
-app.include_router(component_issues_notification_router, prefix="/api/v1")
-
-app.include_router(machine_calibration_notification_router, prefix="/api/v1")
-
-app.include_router(machine_notifications_router, prefix="/api/v1")
-
-app.include_router(order_notifications_router, prefix="/api/v1")
-
-app.include_router(tool_issues_notification_router, prefix="/api/v1")
-
-app.include_router(pc_notifications_router, prefix="/api/v1")
-
-app.include_router(mc_notifications_router, prefix="/api/v1")
-
-app.include_router(admin_document_notifications_router, prefix="/api/v1")
-
 
 
 

@@ -72,8 +72,6 @@ from DB.minio_client import get_minio_client
 
 from DB.models.notifications import OrderNotification as OrderNotificationModel
 
-
-
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
@@ -82,11 +80,9 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 def get_shop_floor_hierarchical_data(
 
-    admin_id: int | None = None,
-
-    manufacturing_coordinator_id: int | None = None,
-
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
 
 ):
 
@@ -94,15 +90,7 @@ def get_shop_floor_hierarchical_data(
 
     Get shop floor hierarchical data with machines, orders, parts, and operations.
 
-    Returns:
-
-    - All machines with their status
-
-    - Orders assigned to each machine (through operations)
-
-    - Parts with their status from scheduling schema
-
-    - Operations with their status from scheduling schema
+    Optional admin_id / manufacturing_coordinator_id query params scope the results.
 
     """
 
@@ -1213,25 +1201,17 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
 
 def get_orders(
 
-    user_id: int | None = None,
-
-    admin_id: int | None = None,
-
-    project_coordinator_id: int | None = None,
-
-    manufacturing_coordinator_id: int | None = None,
-
     db: Session = Depends(get_db),
+    user_id: Optional[int] = Query(None),
+    admin_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
 
 ):
 
     """
 
-    Get all orders with company_name, product_name, and role user names.
-
-    Filter by user_id (creator), admin_id, project_coordinator_id, or manufacturing_coordinator_id
-
-    for module-specific views (admin / project coordinator / manufacturing coordinator).
+    Get orders with optional scoping via query params.
 
     """
 
@@ -1287,19 +1267,15 @@ def get_orders(
 
 def get_orders_with_customers(
 
-    user_id: int | None = None,
-
-    admin_id: int | None = None,
-
-    project_coordinator_id: int | None = None,
-
-    manufacturing_coordinator_id: int | None = None,
-
     db: Session = Depends(get_db),
+    user_id: Optional[int] = Query(None),
+    admin_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
 
 ):
 
-    """Get all orders with customer information. Filter by user_id, admin_id, project_coordinator_id, or manufacturing_coordinator_id."""
+    """Get orders with customer information, optionally scoped via query params."""
 
     from sqlalchemy.orm import joinedload
 

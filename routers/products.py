@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text, or_
-from typing import List
+from typing import List, Optional
 
 from DB.database import get_db
 from DB.models.oms import (
@@ -44,6 +44,7 @@ from DB.schemas.oms import (
 )
 from DB.schemas.inventory import ToolsList as ToolsListSchema
 from DB.minio_client import get_minio_client
+from auth.roles import normalize_role
 
 router = APIRouter(
     prefix="/products",
@@ -84,59 +85,51 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=List[Product])
-def get_products(user_id: int | None = None, db: Session = Depends(get_db)):
+def get_products(
+    db: Session = Depends(get_db),
+    user_id: Optional[int] = Query(None),
+    role: Optional[str] = Query(None),
+):
     """
-    Get products, with role-aware visibility when user_id is provided.
-
-    Rules:
-    - When user_id is omitted: return all products.
-    - When user_id is provided:
-      * If user is admin:
-          - Products they created (Product.user_id == admin.id), AND
-          - Products linked to orders where Order.admin_id == admin.id.
-      * If user is project_coordinator:
-          - Products they created, AND
-          - Products linked to orders where Order.project_coordinator_id == PC.id.
-      * If user is manufacturing_coordinator:
-          - Products linked to orders where Order.manufacturing_coordinator_id == MC.id.
-      * Any other role: currently no extra filtering rules; returns products they created only.
+    Get products with optional role-aware visibility via query params.
+    If role is not provided, filter by user_id only (or return all if user_id unset).
     """
     base_query = db.query(ProductModel).options(joinedload(ProductModel.user)).order_by(ProductModel.id.asc())
 
-    if user_id is None:
-        products = base_query.all()
-    else:
-        user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
-        role = (user.role or "").strip().lower() if user and user.role else ""
+    normalized_role = normalize_role(role) if role else None
 
+    if not normalized_role:
+        if user_id is not None:
+            products = base_query.filter(ProductModel.user_id == user_id).all()
+        else:
+            products = base_query.all()
+    else:
         product_ids_from_orders: list[int] = []
 
-        if role in {"admin", "project_coordinator", "manufacturing_coordinator"}:
+        if normalized_role in {"admin", "project_coordinator", "manufacturing_coordinator"}:
             order_query = db.query(OrderModel.product_id).filter(
                 OrderModel.product_id.isnot(None)
             )
-            if role == "admin":
+            if normalized_role == "admin":
                 order_query = order_query.filter(OrderModel.admin_id == user_id)
-            elif role == "project_coordinator":
+            elif normalized_role == "project_coordinator":
                 order_query = order_query.filter(OrderModel.project_coordinator_id == user_id)
-            elif role == "manufacturing_coordinator":
+            elif normalized_role == "manufacturing_coordinator":
                 order_query = order_query.filter(OrderModel.manufacturing_coordinator_id == user_id)
 
             product_ids_from_orders = [row[0] for row in order_query.distinct().all()]
 
-        # Build filters based on role
-        if role == "admin" or role == "project_coordinator":
+        if normalized_role == "admin" or normalized_role == "project_coordinator":
             conditions = [ProductModel.user_id == user_id]
             if product_ids_from_orders:
                 conditions.append(ProductModel.id.in_(product_ids_from_orders))
             products = base_query.filter(or_(*conditions)).all()
-        elif role == "manufacturing_coordinator":
+        elif normalized_role == "manufacturing_coordinator":
             if product_ids_from_orders:
                 products = base_query.filter(ProductModel.id.in_(product_ids_from_orders)).all()
             else:
                 products = []
         else:
-            # Fallback: only products explicitly created by this user
             products = base_query.filter(ProductModel.user_id == user_id).all()
 
     return [
@@ -807,7 +800,7 @@ def get_product_summary_data(product_id: int, order_id: int = None, db: Session 
     # Get machine names + mhr rates
     all_machines = db.query(MachineModel).all()
     machine_map = {m.id: m.make for m in all_machines}
-    machine_mhr_map = {m.id: (m.mhr or 0) for m in all_machines}
+    machine_mhr_map = {m.id: (m.recommended_mhr or m.mhr or 0) for m in all_machines}
 
     # Get part type names
     all_part_types = db.query(PartTypeModel).all()
@@ -1134,6 +1127,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'raw_material_id': part.raw_material_id,
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,
+            'part_detail': part.part_detail,
             'stock_dimensions': stock_dimensions,
             'schedule_status': part_schedule_status_map.get(part.id, None),
             'vendor_id': part.vendor_id,

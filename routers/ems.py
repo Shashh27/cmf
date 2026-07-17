@@ -92,9 +92,8 @@ class MachineStatusTracker:
 class MachineParameterTracker:
     PARAMS = [
         'phase_a_voltage', 'phase_b_voltage', 'phase_c_voltage', 'avg_phase_voltage',
-        'line_ab_voltage', 'line_bc_voltage', 'line_ca_voltage', 'avg_line_voltage',
         'phase_a_current', 'phase_b_current', 'phase_c_current', 'avg_three_phase_current',
-        'power_factor', 'frequency', 'total_instantaneous_power', 'active_energy_delivered', 'status'
+        'frequency', 'total_instantaneous_power', 'active_energy_delivered', 'status'
     ]
 
     def __init__(self):
@@ -151,15 +150,10 @@ def _live_row_parameters(row):
         "phase_b_voltage": row.phase_b_voltage,
         "phase_c_voltage": row.phase_c_voltage,
         "avg_phase_voltage": _mean(row.phase_a_voltage, row.phase_b_voltage, row.phase_c_voltage),
-        "line_ab_voltage": None,
-        "line_bc_voltage": None,
-        "line_ca_voltage": None,
-        "avg_line_voltage": None,
         "phase_a_current": row.phase_a_current,
         "phase_b_current": row.phase_b_current,
         "phase_c_current": row.phase_c_current,
         "avg_three_phase_current": _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current),
-        "power_factor": None,
         "frequency": row.frequency,
         "total_instantaneous_power": row.total_instantaneous_power,
         "active_energy_delivered": row.active_energy_delivered,
@@ -382,15 +376,10 @@ class ParameterEnum(str, Enum):
     phase_b_voltage = "phase_b_voltage"
     phase_c_voltage = "phase_c_voltage"
     avg_phase_voltage = "avg_phase_voltage"
-    line_ab_voltage = "line_ab_voltage"
-    line_bc_voltage = "line_bc_voltage"
-    line_ca_voltage = "line_ca_voltage"
-    avg_line_voltage = "avg_line_voltage"
     phase_a_current = "phase_a_current"
     phase_b_current = "phase_b_current"
     phase_c_current = "phase_c_current"
     avg_three_phase_current = "avg_three_phase_current"
-    power_factor = "power_factor"
     frequency = "frequency"
     total_instantaneous_power = "total_instantaneous_power"
     active_energy_delivered = "active_energy_delivered"

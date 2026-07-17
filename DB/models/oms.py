@@ -293,7 +293,7 @@ class Operation(Base):
 
     workcenter_id = Column(Integer)
 
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="SET NULL"), nullable=True)
 
 
 

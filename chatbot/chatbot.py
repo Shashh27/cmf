@@ -5,6 +5,7 @@ import redis
 import decimal
 import datetime
 import asyncio
+from contextvars import ContextVar
 import concurrent.futures
 from typing import Dict, List, Any, Tuple, AsyncGenerator, Optional
 from fastapi import APIRouter, HTTPException, Request
@@ -28,6 +29,10 @@ from chatbot.user_context import (
     personalized_greeting,
     get_role_suggestions,
     get_user_intent_hints,
+)
+
+_chat_user_context: ContextVar[Optional[UserContext]] = ContextVar(
+    "chat_user_context", default=None
 )
 from chatbot.query_patterns import (
     PARTS_FOR_ORDER_SQL,
@@ -518,7 +523,65 @@ def run_broad_search(question: str) -> Tuple[Optional[str], List[Dict]]:
     return sql, data
 
 
+def scope_order_sql(sql: str, ctx: Optional[UserContext]) -> str:
+    """Restrict order-backed tables to orders assigned to the current Admin/MC."""
+    if not ctx or not ctx.user_id:
+        return sql
+    scope_column = ctx.order_scope_column()
+    if not scope_column:
+        return sql
+
+    uid = int(ctx.user_id)
+    predicate = f"{scope_column} = {uid}"
+
+    # Scope the canonical orders table. Replacing the table expression works for
+    # both FROM and JOIN clauses without having to parse their ON/WHERE syntax.
+    scoped = re.sub(
+        r"\boms\.orders\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+        rf"(SELECT * FROM oms.orders WHERE {predicate}) \1",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+    # Some order-related queries start from downstream tables and never join
+    # oms.orders. Scope those sources through their order foreign key.
+    table_scopes = (
+        (
+            r"\bscheduling\.planned_schedule_items\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "scheduling.planned_schedule_items",
+            "sale_order_id",
+        ),
+        (
+            r"\boms\.order_part_priorities\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "oms.order_part_priorities",
+            "order_id",
+        ),
+        (
+            r"\bscheduling\.part_schedule_status\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "scheduling.part_schedule_status",
+            "sale_order_id",
+        ),
+        (
+            r"\bquality\.stage_inspection\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "quality.stage_inspection",
+            "sale_order_id",
+        ),
+    )
+    for pattern, table, order_key in table_scopes:
+        def _replace(match, source=table, key=order_key):
+            alias = match.group(1)
+            return (
+                f"(SELECT scoped_source.* FROM {source} scoped_source "
+                f"JOIN oms.orders scoped_order ON scoped_order.id = scoped_source.{key} "
+                f"WHERE scoped_order.{predicate}) {alias}"
+            )
+
+        scoped = re.sub(pattern, _replace, scoped, flags=re.IGNORECASE)
+    return scoped
+
+
 def execute_sql(sql: str) -> Tuple[List[Dict], str]:
+    sql = scope_order_sql(sql, _chat_user_context.get())
     ok, err = SQLValidator.validate(sql)
     if not ok:
         return [], err
@@ -638,6 +701,7 @@ class ChatService:
 
     def process(self, question: str, session_id: str, ctx: Optional[UserContext] = None) -> Dict:
         ctx = ctx or UserContext()
+        context_token = _chat_user_context.set(ctx)
         try:
             return self._process(question, session_id, ctx)
         except Exception:
@@ -651,6 +715,8 @@ class ChatService:
             suggestions = get_role_suggestions(ctx)[:3]
             self.history.save(session_id, question, answer)
             return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
+        finally:
+            _chat_user_context.reset(context_token)
 
     def _process(self, question: str, session_id: str, ctx: UserContext) -> Dict:
         hist = self.history.get(session_id)
@@ -865,7 +931,7 @@ class ChatService:
 # ══════════════════════════════════════════════════════════════════════════════
 
 limiter = Limiter(key_func=get_remote_address)
-router = APIRouter()
+router = APIRouter(tags=["Chatbot"])
 
 _svc: ChatService = None
 
@@ -876,7 +942,8 @@ def get_svc():
     return _svc
 
 
-def _ctx_from_body(body: ChatRequest) -> UserContext:
+def _ctx_from_request(request: Request, body: ChatRequest) -> UserContext:
+    """Build user context from request body fields only."""
     return UserContext(
         user_id=body.user_id,
         user_name=body.user_name,
@@ -885,11 +952,20 @@ def _ctx_from_body(body: ChatRequest) -> UserContext:
     )
 
 
+def _require_chatbot_role(ctx: UserContext) -> None:
+    if not ctx.user_id or ctx.role_key() not in {"admin", "mc"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Chatbot access is limited to Admin and Manufacturing Coordinator users.",
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
 async def chat(request: Request, body: ChatRequest):
+    ctx = _ctx_from_request(request, body)
+    _require_chatbot_role(ctx)
     try:
-        ctx = _ctx_from_body(body)
         result = await asyncio.to_thread(
             get_svc().process, body.question, body.session_id, ctx,
         )
@@ -899,7 +975,7 @@ async def chat(request: Request, body: ChatRequest):
     except Exception:
         import logging
         logging.exception("Chatbot API error")
-        ctx = _ctx_from_body(body)
+        ctx = _ctx_from_request(request, body)
         from chatbot.user_context import get_role_suggestions
         return ChatResponse(
             answer=(
@@ -916,7 +992,8 @@ async def chat(request: Request, body: ChatRequest):
 @router.post("/chat/stream")
 @limiter.limit("30/minute")
 async def chat_stream(request: Request, body: ChatRequest):
-    ctx = _ctx_from_body(body)
+    ctx = _ctx_from_request(request, body)
+    _require_chatbot_role(ctx)
 
     async def generate():
         result = await asyncio.to_thread(
@@ -940,13 +1017,24 @@ async def clear_history(session_id: str):
 
 @router.get("/suggestions")
 async def suggestions(
+    request: Request,
     user_id: Optional[int] = None,
     user_name: Optional[str] = None,
     role: Optional[str] = None,
     center: Optional[str] = None,
 ):
     from chatbot.suggestions import get_dynamic_suggestions
-    ctx = UserContext(user_id=user_id, user_name=user_name, role=role, center=center)
+
+    class _SuggestionContext:
+        pass
+
+    body = _SuggestionContext()
+    body.user_id = user_id
+    body.user_name = user_name
+    body.role = role
+    body.center = center
+    ctx = _ctx_from_request(request, body)
+    _require_chatbot_role(ctx)
     return await asyncio.to_thread(get_dynamic_suggestions, ctx)
 
 

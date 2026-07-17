@@ -32,7 +32,7 @@ def get_mc_notifications(
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
-    """Get document notifications for a Manufacturing Coordinator"""
+    """Get document notifications for a Manufacturing Coordinator by path mc_user_id."""
     # Verify user exists and is an MC
     user = db.query(AccessUserModel).filter(AccessUserModel.id == mc_user_id).first()
     if not user:
@@ -120,8 +120,11 @@ def get_mc_notifications(
 
 
 @router.get("/{mc_user_id}/pending-count")
-def get_pending_count(mc_user_id: int, db: Session = Depends(get_db)):
-    """Get count of pending document notifications for an MC user"""
+def get_pending_count(
+    mc_user_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get count of pending document notifications for the MC identified by path mc_user_id."""
     count = db.query(MCNotificationModel).filter(
         MCNotificationModel.mc_user_id == mc_user_id,
         MCNotificationModel.is_acknowledged == False,  # noqa: E712

@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import Any, Dict, List, Optional, Tuple
@@ -454,23 +454,25 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[OrderTrackingSummary])
 def get_all_orders_tracking(
-    admin_id: Optional[int] = None,
-    manufacturing_coordinator_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
 ):
     """
-    Get tracking summary for all orders. 
-    Optionally filter by admin_id or manufacturing_coordinator_id.
+    Get tracking summary for orders, optionally scoped via query params.
     """
-    # Build query with filters
     query = db.query(Order)
-    
+
     if admin_id is not None:
         query = query.filter(Order.admin_id == admin_id)
-    
+
     if manufacturing_coordinator_id is not None:
         query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
-    
+
+    if project_coordinator_id is not None:
+        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+
     orders = query.all()
     
     tracking_summaries = []

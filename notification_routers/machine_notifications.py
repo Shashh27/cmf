@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
@@ -27,11 +27,11 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[MachineNotificationWithDetails])
 def list_machine_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(MachineNotificationModel)
@@ -105,10 +105,10 @@ def list_machine_notifications(
 
 @router.get("/pending", response_model=List[MachineNotificationSchema])
 def list_pending_machine_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
 ):
     q = db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(MachineNotificationModel.id.desc()).all()

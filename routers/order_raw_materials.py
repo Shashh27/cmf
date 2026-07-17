@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, text
 from typing import List, Optional
@@ -662,12 +662,12 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
 
 @router.get("/order-parts-raw-material-linked/")
 def get_order_parts_raw_material_linked(
-    manufacturing_coordinator_id: Optional[int] = None,
-    admin_id: Optional[int] = None,
-    project_coordinator_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    admin_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
 ):
-    """Get order-linked raw materials filtered by order association (admin, PC, or MC involved in order)"""
+    """Get order-linked raw materials, optionally filtered by role query params."""
     from routers.rawmaterials import _stock_with_details
     
     # Query order-type stock items
@@ -1128,12 +1128,12 @@ def bulk_create_order_parts_raw_material_linked(
 @router.delete("/order-parts-raw-material-linked/{stock_id}")
 def delete_order_parts_raw_material_linked(
     stock_id: int,
-    user_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: Optional[int] = Query(None),
 ):
     """Delete order-linked stock item and all related data"""
     from DB.models.oms import Part as PartModel
-    
+
     stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
     if not stock:
         raise HTTPException(
@@ -1180,23 +1180,21 @@ def delete_order_parts_raw_material_linked(
                 detail=f"Sorry, this order material cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this material, please inactivate the schedule status of these parts first."
             )
     
-    # Optional user authorization verification
-    # User can delete if: 1) They created the stock, OR 2) They are admin or MC of the associated order
-    if user_id:
-        if stock.user_id != user_id:
-            # Check if user is admin or manufacturing_coordinator of the order
-            if stock.source_order_id:
-                order = db.query(OrderModel).filter(OrderModel.id == stock.source_order_id).first()
-                if order and order.admin_id != user_id and order.manufacturing_coordinator_id != user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not authorized to delete this stock item"
-                    )
-            else:
+    # Authorization: if user_id provided, require creator or admin/MC of the associated order
+    if user_id is not None and stock.user_id != user_id:
+        # Check if user is admin or manufacturing_coordinator of the order
+        if stock.source_order_id:
+            order = db.query(OrderModel).filter(OrderModel.id == stock.source_order_id).first()
+            if order and order.admin_id != user_id and order.manufacturing_coordinator_id != user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not authorized to delete this stock item"
                 )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to delete this stock item"
+            )
     
     try:
         # Rule 3: Delete all related data

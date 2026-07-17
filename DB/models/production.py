@@ -8,7 +8,7 @@ class ShiftSummary(Base):
     __table_args__ = {"schema": "production_monitoring"}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     shift = Column(Integer, nullable=False)  # 1, 2, 3
     timestamp = Column(DateTime, nullable=False)
 

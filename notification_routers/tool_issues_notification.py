@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
@@ -27,11 +27,11 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[ToolIssuesNotificationWithDetails])
 def list_tool_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(ToolIssuesNotificationModel)
@@ -104,10 +104,10 @@ def list_tool_issues_notifications(
 
 @router.get("/pending", response_model=List[ToolIssuesNotificationSchema])
 def list_pending_tool_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
 ):
     q = db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(ToolIssuesNotificationModel.id.desc()).all()

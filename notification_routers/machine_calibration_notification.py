@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
@@ -47,11 +47,11 @@ def _generate_due_calibration_notifications(db: Session):
 
 @router.get("/", response_model=List[MachineCalibrationNotificationWithDetails])
 def list_machine_calibration_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     # Note: Notifications are now generated automatically by the scheduler
@@ -102,10 +102,10 @@ def list_machine_calibration_notifications(
 
 @router.get("/pending", response_model=List[MachineCalibrationNotificationSchema])
 def list_pending_machine_calibration_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
 ):
     q = db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(MachineCalibrationNotificationModel.id.desc()).all()

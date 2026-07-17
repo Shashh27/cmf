@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import List, Optional
@@ -92,20 +92,10 @@ def create_raw_material(raw_material: RawMaterialCreate, db: Session = Depends(g
 
 @router.get("/", response_model=List[RawMaterial])
 def get_raw_materials(
-    user_id: int = None,
-    manufacturing_coordinator_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Get all raw materials with stock status, optionally filtered by user or manufacturing coordinator"""
+    """Get all raw materials with stock status."""
     materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
-    
-    # For manufacturing coordinator, show all raw materials (not just order-linked ones)
-    # This allows them to see and work with general materials too
-    if manufacturing_coordinator_id is not None:
-        # Manufacturing coordinators can see all raw materials
-        # No filtering applied - they get full access to materials catalog
-        pass
-    # If no specific filter, return all materials (default behavior)
     
     # Add stock status to each material
     materials_with_status = []
@@ -156,19 +146,14 @@ def get_raw_materials(
 
 @router.get("/inventory-view")
 def get_inventory_view(
-    admin_id: int | None = None,
-    manufacturing_coordinator_id: int | None = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
 ):
     """
     Single endpoint returning full inventory hierarchy:
     materials -> stocks (general + order) -> units (with usages).
-    Replaces multiple /stock/ and /stock/{id}/units calls.
-    
-    Filters stocks based on user role:
-    - If admin_id provided: shows general stocks + order stocks where admin is involved
-    - If manufacturing_coordinator_id provided: shows general stocks + order stocks where MC is involved
-    - If neither provided: shows all stocks (for superadmin or testing)
+    Optional admin_id / manufacturing_coordinator_id query params scope order stocks.
     """
     from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
     from sqlalchemy.orm import joinedload
@@ -503,36 +488,23 @@ def get_raw_material_history(
     year: int = None,
     month: int = None,
     day: int = None,
-    admin_id: int = None,  # Filter by admin ID
-    manufacturing_coordinator_id: int = None,  # Filter by manufacturing coordinator ID
     source_type: str = None,  # "general" or "order"
     order_id: int = None,
     material_id: int = None,
     activity_type: str = None,  # "stock_created", "material_linked", "order_status_changed", "stock_updated", "material_unlinked"
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """
-    Get comprehensive raw material history from database with date filtering.
-    
-    Fetches all raw material activities from the raw_material_history table including:
-    - Material creation, updates, deletion
-    - Stock creation, updates, deletion
-    - Unit creation, deletion
-    - Material linking to parts
-    - Material unlinking from parts
-    - Order status changes
-    - Vendor changes
-    
-    Date filtering options:
-    - start_date and end_date: Range filter (YYYY-MM-DD format)
-    - year, month, day: Specific date filter
-    
-    User filtering:
-    - admin_id: Filter by admin's orders
-    - manufacturing_coordinator_id: Filter by manufacturing coordinator's orders
+    Get comprehensive raw material history.
+    Optional admin_id / manufacturing_coordinator_id accepted for API compatibility (unused in filter).
     """
     from datetime import datetime
     from sqlalchemy import and_, or_
+
+    # Note: admin_id / manufacturing_coordinator_id currently unused — both Admin and MC see all history
+    _ = (admin_id, manufacturing_coordinator_id)
     
     # Build query with joins
     history_query = db.query(RawMaterialHistoryModel).options(

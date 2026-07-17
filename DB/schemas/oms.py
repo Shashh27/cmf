@@ -427,6 +427,7 @@ class PartLightweight(BaseModel):
     raw_material_id: Optional[int] = None
     raw_material_name: Optional[str] = None
     raw_material_status: Optional[str] = None
+    part_detail: Optional[str] = None
     vendor_id: Optional[int] = None
     vendor_name: Optional[str] = None
     user_id: Optional[int] = None

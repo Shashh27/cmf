@@ -542,16 +542,13 @@ def get_combined_schedule_production(
     start_date: Optional[datetime] = Query(None, description="Filter from this date"),
     end_date: Optional[datetime] = Query(None, description="Filter until this date"),
     machine_id: Optional[int] = Query(None, description="Filter by machine ID"),
-    admin_id: Optional[int] = Query(None),
-    project_coordinator_id: Optional[int] = Query(None),
-    manufacturing_coordinator_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = Query(None, description="Filter by admin ID"),
+    project_coordinator_id: Optional[int] = Query(None, description="Filter by project coordinator ID"),
+    manufacturing_coordinator_id: Optional[int] = Query(None, description="Filter by manufacturing coordinator ID"),
+    db: Session = Depends(get_db),
 ):
     """
     Retrieve combined planned schedule items and actual production logs with optional filtering.
-    Planned data comes from planned_schedule_items (planned_start_time, planned_end_time).
-    Actual data comes from production_logs (from_time, to_time).
-    An operation is considered completed when approved_qty matches the total part quantity.
     """
     try:
         # First, get ALL machines from configuration to ensure we show all machines
