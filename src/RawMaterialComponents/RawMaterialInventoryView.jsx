@@ -81,6 +81,13 @@ const RawMaterialInventoryView = ({
   const [addStockModal, setAddStockModal] = useState({ open: false, material: null });
   const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null });
 
+  // ── Column header filters ──────────────────────────────────────────────────
+  const [colProcess, setColProcess] = useState([]);
+  const [colForm, setColForm] = useState([]);
+  const [colSource, setColSource] = useState([]);
+  const [colStockStatus, setColStockStatus] = useState([]);
+  const [colUnitStatus, setColUnitStatus] = useState([]);
+
   const getCurrentUserId = () => {
     try {
       const stored = localStorage.getItem("user");
@@ -92,20 +99,17 @@ const RawMaterialInventoryView = ({
       return null;
     }
   };
-  // ── Column header filters ──────────────────────────────────────────────────
-  const [colProcess, setColProcess] = useState([]);
-  const [colForm, setColForm] = useState([]);
-  const [colSource, setColSource] = useState([]);
-  const [colStockStatus, setColStockStatus] = useState([]);
-  const [colUnitStatus, setColUnitStatus] = useState([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const uid = getCurrentUserId();
-      const r = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const role = String(JSON.parse(localStorage.getItem('user') || '{}')?.role || '').toLowerCase();
+      const params = uid == null ? undefined
+        : (role.includes('manufacturing') || role === 'mc')
+          ? { manufacturing_coordinator_id: uid }
+          : { admin_id: uid };
+      const r = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, { params });
       const data = r.data || [];
       // Build stock and unit maps from the nested response
       const stockMap = {};

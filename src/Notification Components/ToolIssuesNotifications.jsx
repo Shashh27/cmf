@@ -18,6 +18,14 @@ const ToolIssuesNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
+      if (uid != null) {
+        if (role.includes('admin')) params.set('admin_id', uid);
+        else if (role.includes('manufacturing') || role === 'mc') params.set('mc_id', uid);
+        else if (role.includes('project') || role === 'pc') params.set('pc_id', uid);
+      }
       const url = `${base}?${params.toString()}`;
 
       const response = await fetch(url);

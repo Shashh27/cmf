@@ -3,6 +3,7 @@ import { Spin, Alert, Typography, Button, Space, Row, Col, Segmented, Card } fro
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
+import { getApiWsUrl } from '../../auth/apiUrl';
 import { TableOutlined, CalendarOutlined, AppstoreOutlined, LineChartOutlined } from '@ant-design/icons';
 
 import { MachineGrid } from './MachineComponents';
@@ -10,11 +11,7 @@ import { SchedulingAnalytics } from './SchedulingAnalytics';
 
 const { Title, Text } = Typography;
 
-const getMonitoringWsUrl = () => {
-  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  return url.toString();
-};
+const getMonitoringWsUrl = () => getApiWsUrl('monitoring/live/ws');
 
 const normalizeMachineStatus = (value) => {
   const raw = String(value ?? '').trim().toUpperCase();
@@ -84,14 +81,13 @@ const ShopFloorDashboard = ({ onBack }) => {
     if (!background) setLoading(true);
     setError(null);
     try {
-      const manufacturingcoordinatorId = getCurrentmanufacturingcoordinatorId();
-      if (!manufacturingcoordinatorId) {
-        setError('No manufacturingcoordinator ID found. Please log in again.');
+      const mcId = getCurrentmanufacturingcoordinatorId();
+      if (!mcId) {
+        setError('No user ID found. Please log in again.');
         return;
       }
-
       const response = await axios.get(`${API_BASE_URL}/orders/shop-floor/hierarchical`, {
-        params: { manufacturing_coordinator_id: manufacturingcoordinatorId }
+        params: { manufacturing_coordinator_id: mcId },
       });
       setData(response.data);
     } catch (err) {

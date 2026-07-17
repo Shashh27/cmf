@@ -30,6 +30,9 @@ const PlannedVsActualTable = () => {
       if (machineId) {
         params.machine_id = machineId;
       }
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      if (uid != null) params.manufacturing_coordinator_id = uid;
 
       const response = await axios.get(`${config.API_BASE_URL}/production-analytics/combined-schedule-production/`, { params });
       setData(response.data);

@@ -341,7 +341,6 @@ const ProductBOMView = ({ onBackToOrders }) => {
         const response = await axios.get(url, {
           responseType: 'blob',
           headers: { 'Content-Type': 'application/octet-stream' },
-          withCredentials: true,
         });
         link.href = window.URL.createObjectURL(response.data);
       }

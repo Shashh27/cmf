@@ -25,7 +25,7 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
           role: editingUser.role,
           center: editingUser.center,
           group: editingUser.group,
-          password: editingUser.password || '',
+          password: '',
         });
       } else {
         form.resetFields();

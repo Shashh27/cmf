@@ -23,9 +23,7 @@ const Machines = ({ workcenter, onBack, userId, searchText }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`);
       setMachines(response.data);
     } catch (error) {
       console.error("Error fetching machines:", error);
@@ -60,9 +58,7 @@ const Machines = ({ workcenter, onBack, userId, searchText }) => {
 
   const handleDeleteMachine = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/machines/${id}`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      await axios.delete(`${API_BASE_URL}/machines/${id}`);
       message.success("Machine deleted successfully");
       fetchMachines();
     } catch (error) {

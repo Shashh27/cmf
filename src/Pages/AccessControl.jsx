@@ -192,23 +192,9 @@ const AccessControl = () => {
       title: 'Password',
       dataIndex: 'password',
       key: 'password',
-      render: (text, record) => {
-        const password = text || '';
-        const isVisible = visiblePasswords[record.id];
-        const displayText = isVisible
-          ? (password || 'Not set')
-          : (password ? '••••••••' : 'Not set');
-        return (
-          <Space>
-            <span>{displayText}</span>
-            <Button
-              type="text"
-              icon={isVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-              onClick={() => togglePasswordVisibility(record.id)}
-            />
-          </Space>
-        );
-      },
+      render: () => (
+        <span style={{ color: '#94a3b8' }}>Set via edit (never shown)</span>
+      ),
     },
     {
       title: 'Actions',

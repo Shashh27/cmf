@@ -48,15 +48,10 @@ const RealtimeGraph = ({ machineId, machineName }) => {
         'phaseBVoltage': 'phase_b_voltage',
         'phaseCVoltage': 'phase_c_voltage',
         'avgPhaseVoltage': 'avg_phase_voltage',
-        'lineABVoltage': 'line_ab_voltage',
-        'lineBCVoltage': 'line_bc_voltage',
-        'lineCAVoltage': 'line_ca_voltage',
-        'avgLineVoltage': 'avg_line_voltage',
         'phaseACurrent': 'phase_a_current',
         'phaseBCurrent': 'phase_b_current',
         'phaseCCurrent': 'phase_c_current',
         'avgThreePhaseCurrent': 'avg_three_phase_current',
-        'powerFactor': 'power_factor',
         'frequency': 'frequency',
         'totalInstantaneousPower': 'total_instantaneous_power',
         'activeEnergyDelivered': 'active_energy_delivered'
@@ -128,18 +123,11 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       case 'phaseCVoltage':
       case 'avgPhaseVoltage':
         return 220;
-      case 'lineABVoltage':
-      case 'lineBCVoltage':
-      case 'lineCAVoltage':
-      case 'avgLineVoltage':
-        return 380;
       case 'phaseACurrent':
       case 'phaseBCurrent':
       case 'phaseCCurrent':
       case 'avgThreePhaseCurrent':
         return 10;
-      case 'powerFactor':
-        return 0.9;
       case 'frequency':
         return 50;
       case 'totalInstantaneousPower':
@@ -157,15 +145,10 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       'phaseBVoltage': 'Phase B Voltage (V)',
       'phaseCVoltage': 'Phase C Voltage (V)',
       'avgPhaseVoltage': 'Avg Phase Voltage (V)',
-      'lineABVoltage': 'Line AB Voltage (V)',
-      'lineBCVoltage': 'Line BC Voltage (V)',
-      'lineCAVoltage': 'Line CA Voltage (V)',
-      'avgLineVoltage': 'Avg Line Voltage (V)',
       'phaseACurrent': 'Phase A Current (A)',
       'phaseBCurrent': 'Phase B Current (A)',
       'phaseCCurrent': 'Phase C Current (A)',
       'avgThreePhaseCurrent': 'Avg Current (A)',
-      'powerFactor': 'Power Factor',
       'frequency': 'Frequency (Hz)',
       'totalInstantaneousPower': 'Total Power (kW)',
       'activeEnergyDelivered': 'Energy Delivered (kWh)'
@@ -237,15 +220,10 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       'phaseBVoltage': 'phase_b_voltage',
       'phaseCVoltage': 'phase_c_voltage',
       'avgPhaseVoltage': 'avg_phase_voltage',
-      'lineABVoltage': 'line_ab_voltage',
-      'lineBCVoltage': 'line_bc_voltage',
-      'lineCAVoltage': 'line_ca_voltage',
-      'avgLineVoltage': 'avg_line_voltage',
       'phaseACurrent': 'phase_a_current',
       'phaseBCurrent': 'phase_b_current',
       'phaseCCurrent': 'phase_c_current',
       'avgThreePhaseCurrent': 'avg_three_phase_current',
-      'powerFactor': 'power_factor',
       'frequency': 'frequency',
       'totalInstantaneousPower': 'total_instantaneous_power',
       'activeEnergyDelivered': 'active_energy_delivered'
@@ -391,10 +369,6 @@ const RealtimeGraph = ({ machineId, machineName }) => {
                   </div>
                 </div>
                 <div style={{ fontSize: '13px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <Text>Power Factor:</Text>
-                    <Text strong style={{ color: getValueColor(parameters.power_factor, 0.7, 1) }}>{formatValue(parameters.power_factor, '')}</Text>
-                  </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Text>Frequency:</Text>
                     <Text strong style={{ color: getValueColor(parameters.frequency, 49.8, 50.2) }}>{formatValue(parameters.frequency, 'Hz')}</Text>
@@ -438,15 +412,10 @@ const RealtimeGraph = ({ machineId, machineName }) => {
                 <Option value="phaseBVoltage">Phase B Voltage</Option>
                 <Option value="phaseCVoltage">Phase C Voltage</Option>
                 <Option value="avgPhaseVoltage">Avg Phase Voltage</Option>
-                <Option value="lineABVoltage">Line AB Voltage</Option>
-                <Option value="lineBCVoltage">Line BC Voltage</Option>
-                <Option value="lineCAVoltage">Line CA Voltage</Option>
-                <Option value="avgLineVoltage">Avg Line Voltage</Option>
                 <Option value="phaseACurrent">Phase A Current</Option>
                 <Option value="phaseBCurrent">Phase B Current</Option>
                 <Option value="phaseCCurrent">Phase C Current</Option>
                 <Option value="avgThreePhaseCurrent">Avg Current</Option>
-                <Option value="powerFactor">Power Factor</Option>
                 <Option value="frequency">Frequency</Option>
                 <Option value="totalInstantaneousPower">Total Power</Option>
                 <Option value="activeEnergyDelivered">Energy Delivered</Option>

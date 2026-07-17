@@ -77,7 +77,21 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   const plannedFormType = planningData?.[row.key]?.formType;
 
   const eligibleRecommendations = useMemo(
-    () => (recommendations || []).filter((rec) => rec.status !== 'unavailable'),
+    () => (recommendations || [])
+      .filter((rec) => rec.status !== 'unavailable')
+      .slice()
+      .sort((a, b) => {
+        // Best Match % first
+        const aScore = a.match_score ?? 0;
+        const bScore = b.match_score ?? 0;
+        if (aScore !== bScore) return bScore - aScore;
+        const aCross = a.cross_section_excess_mm ?? Number.POSITIVE_INFINITY;
+        const bCross = b.cross_section_excess_mm ?? Number.POSITIVE_INFINITY;
+        if (aCross !== bCross) return aCross - bCross;
+        const aLen = a.length_excess_mm ?? 0;
+        const bLen = b.length_excess_mm ?? 0;
+        return aLen - bLen;
+      }),
     [recommendations],
   );
 
@@ -250,6 +264,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   };
 
   const getFormType = () => {
+    if (plannedFormType) return plannedFormType;
     const dimensions = planningData?.[row.key]?.dimensions || {};
     if (dimensions.diameter && dimensions.inner_diameter && dimensions.outer_diameter) {
       return 'Hollow';
@@ -259,6 +274,22 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       return 'Round';
     }
     return 'Unknown';
+  };
+
+  const getPlannedDimensionsSummary = () => {
+    const formType = plannedFormType || getFormType();
+    const dims = plannedDims || {};
+    if (formType === 'Round' && dims.diameter != null && dims.length != null) {
+      return `${dims.diameter} DIA x ${dims.length} LENGTH`;
+    }
+    if (formType === 'Square' && dims.breadth != null && dims.height != null && dims.length != null) {
+      return `${dims.breadth} x ${dims.height} x ${dims.length}`;
+    }
+    if (formType === 'Pipe' && dims.outer_diameter != null && dims.inner_diameter != null && dims.length != null) {
+      return `${dims.outer_diameter} OD x ${dims.inner_diameter} ID x ${dims.length} LENGTH`;
+    }
+    if (plannedLength != null) return `${plannedLength} mm length`;
+    return 'Not planned';
   };
 
   const getDimensionsToShow = () => {
@@ -388,7 +419,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       {!linkedStock && eligibleRecommendations.length > 0 && (
         <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
           <Text style={{ color: '#1890ff', fontSize: isMobile ? 9 : 10, fontWeight: 600, display: 'block', marginBottom: 2 }}>
-            Recommended Stocks (nearest fit):
+            Recommended Stocks (best match % first):
           </Text>
           {eligibleRecommendations.slice(0, 3).map((rec, idx) => (
             <div key={idx} style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
@@ -464,14 +495,17 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         <div style={{ marginBottom: 16 }}>
           <Text strong>Extracted Dimension:</Text> <Text>{rowData.dimension}</Text>
         </div>
+        <div style={{ marginBottom: 8 }}>
+          <Text strong>Form Type:</Text> <Tag color="blue">{plannedFormType || getFormType()}</Tag>
+        </div>
         <div style={{ marginBottom: 16 }}>
-          <Text strong>Planned Length (Required):</Text> <Text>{plannedLength ? `${plannedLength} mm` : 'Not planned'}</Text>
+          <Text strong>Planned Dimensions:</Text> <Text>{getPlannedDimensionsSummary()}</Text>
         </div>
         
         {/* Recommended Stocks Section - show if not already assigned and recommendations exist with available units */}
         {!linkedStock && eligibleRecommendations.length > 0 && (
           <div style={{ marginBottom: 24, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
-            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (nearest fit by length, ≥ planned size):</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (best match % first, length ≤ 3× planned):</Text>
             <div style={{ marginTop: 8, maxHeight: '300px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, border: '1px solid #b3d9ff' }}>
                 <thead style={{ backgroundColor: '#e6f7ff' }}>
@@ -508,6 +542,9 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         {/* Available General Stock Section */}
         <div>
           <Text strong>Available General Stock with Units:</Text>
+          <Text style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>
+            (nearest fit first — all usable stocks, including longer bars)
+          </Text>
           {loadingStock ? (
             <Spin style={{ marginLeft: 16 }} />
           ) : generalStock.length === 0 ? (

@@ -30,6 +30,14 @@ const PlannedVsActualTable = () => {
       if (machineId) {
         params.machine_id = machineId;
       }
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || '').toLowerCase();
+      if (uid != null) {
+        if (role.includes('manufacturing') || role === 'mc') params.manufacturing_coordinator_id = uid;
+        else if (role.includes('project') || role === 'pc') params.project_coordinator_id = uid;
+        else if (role.includes('admin')) params.admin_id = uid;
+      }
 
       const response = await axios.get(`${config.API_BASE_URL}/production-analytics/combined-schedule-production/`, { params });
       setData(response.data);

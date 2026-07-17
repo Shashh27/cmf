@@ -206,6 +206,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState([]);
   const [selectedRM, setSelectedRM] = useState([]);
+  const [selectedPartName, setSelectedPartName] = useState([]);
   const [selectedPartNumber, setSelectedPartNumber] = useState([]);
   const [selectedStockSource, setSelectedStockSource] = useState([]);
   const [previewModal, setPreviewModal] = useState({ visible: false, document: null });
@@ -221,6 +222,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   // ── Column header filters ──────────────────────────────────────────────────
   const [colOrder, setColOrder] = useState([]);
   const [colRM, setColRM] = useState([]);
+  const [colPartName, setColPartName] = useState([]);
   const [colPartNumber, setColPartNumber] = useState([]);
   const [colFormType, setColFormType] = useState([]);
   const [colSource, setColSource] = useState([]);
@@ -359,14 +361,29 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     return [...arr].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
   };
 
+  /** Skip STANDARD parts and parts marked WITHOUT_RAW_MATERIAL — not relevant to RM planning. */
+  const isRmRelevantPart = (partNode) => {
+    const part = partNode?.part;
+    if (!part) return false;
+    const typeName = String(part.type_name || '').trim().toUpperCase();
+    const partDetail = String(part.part_detail || '').trim().toUpperCase();
+    if (typeName === 'STANDARD') return false;
+    if (partDetail === 'WITHOUT_RAW_MATERIAL') return false;
+    return true;
+  };
+
   const getAllParts = (hierarchy) => {
     const parts = [];
     const processAssembly = (assembly, path = []) => {
       const currentPath = [...path, assembly.assembly.assembly_name];
-      assembly.parts?.forEach(p => parts.push({ ...p, path: currentPath.join(' > ') }));
+      assembly.parts?.forEach(p => {
+        if (isRmRelevantPart(p)) parts.push({ ...p, path: currentPath.join(' > ') });
+      });
       assembly.subassemblies?.forEach(sub => processAssembly(sub, currentPath));
     };
-    hierarchy?.direct_parts?.forEach(p => parts.push({ ...p, path: 'Direct Parts' }));
+    hierarchy?.direct_parts?.forEach(p => {
+      if (isRmRelevantPart(p)) parts.push({ ...p, path: 'Direct Parts' });
+    });
     hierarchy?.assemblies?.forEach(a => processAssembly(a));
     return parts;
   };
@@ -997,15 +1014,21 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     fetchExistingPlannedRM(tableData, extractedDataIds);
   }, [extractedDataIdsKey, refreshTrigger, tableData]);
 
+  const partNameOptions = useMemo(() => {
+    const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
+    return [...new Set(base.map(r => r.partName).filter(Boolean))].sort();
+  }, [tableData, selectedOrder]);
+
   const partNumberOptions = useMemo(() => {
     const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
-    return [...new Set(base.map(r => r.partNumber))];
+    return [...new Set(base.map(r => r.partNumber).filter(Boolean))];
   }, [tableData, selectedOrder]);
 
   // Derived column filter options
   const colFilterOptions = useMemo(() => ({
     orders: [...new Set(tableData.map(r => r.orderName).filter(Boolean))].sort(),
     rms: [...new Set(tableData.map(r => r.rmName).filter(Boolean))].sort(),
+    partNames: [...new Set(tableData.map(r => r.partName).filter(Boolean))].sort(),
     partNumbers: [...new Set(tableData.map(r => r.partNumber).filter(Boolean))].sort(),
     formTypes: [...new Set(tableData.map(r => planningData[r.key]?.formType).filter(Boolean))].sort(),
     sources: ['General Stock', 'Procured', 'Not Assigned'],
@@ -1015,6 +1038,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     const rows = tableData.filter(r => {
       if (selectedOrder.length > 0 && !selectedOrder.includes(r.orderName)) return false;
       if (selectedRM.length > 0 && !selectedRM.includes(r.rmName)) return false;
+      if (selectedPartName.length > 0 && !selectedPartName.includes(r.partName)) return false;
       if (selectedPartNumber.length > 0 && !selectedPartNumber.includes(r.partNumber)) return false;
       if (selectedStockSource.length > 0) {
         const src = linkedStockMap[r.partId]?.sourceType;
@@ -1025,6 +1049,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       // Column header filters
       if (colOrder.length > 0 && !colOrder.includes(r.orderName)) return false;
       if (colRM.length > 0 && !colRM.includes(r.rmName)) return false;
+      if (colPartName.length > 0 && !colPartName.includes(r.partName)) return false;
       if (colPartNumber.length > 0 && !colPartNumber.includes(r.partNumber)) return false;
       if (colFormType.length > 0 && !colFormType.includes(planningData[r.key]?.formType)) return false;
       if (colSource.length > 0) {
@@ -1051,7 +1076,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       rmSeen[k] = true;
       return { ...r, orderRowSpan: oSpan, rmRowSpan: rSpan };
     });
-  }, [tableData, selectedOrder, selectedRM, selectedPartNumber, selectedStockSource, linkedStockMap, colOrder, colRM, colPartNumber, colFormType, colSource, planningData]); // eslint-disable-line
+  }, [tableData, selectedOrder, selectedRM, selectedPartName, selectedPartNumber, selectedStockSource, linkedStockMap, colOrder, colRM, colPartName, colPartNumber, colFormType, colSource, planningData]); // eslint-disable-line
 
   const border = '1px solid #000';
   const isMobile = window.innerWidth <= 768;
@@ -1066,8 +1091,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: isMobile ? 10 : 14, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: isMobile ? 14 : 16, whiteSpace: 'nowrap' }}>Plan & Procure Raw Materials</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartNumber([]); }}>
+          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartName([]); setSelectedPartNumber([]); }}>
             {orderOptions.map(o => <Option key={o} value={o}>{o}</Option>)}
+          </Select>
+          <Select mode="multiple" value={selectedPartName} placeholder="Part Name" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartName(val || [])}>
+            {partNameOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
           </Select>
           <Select mode="multiple" value={selectedPartNumber} placeholder="Part Number" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartNumber(val || [])}>
             {partNumberOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
@@ -1080,8 +1108,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
             <Option value="order">Procured</Option>
             <Option value="not_assigned">Not Assigned</Option>
           </Select>
-          {(selectedOrder.length > 0 || selectedRM.length > 0 || selectedPartNumber.length > 0 || selectedStockSource.length > 0) && (
-            <Button size="small" danger onClick={() => { setSelectedOrder([]); setSelectedPartNumber([]); setSelectedRM([]); setSelectedStockSource([]); }}>
+          {(selectedOrder.length > 0 || selectedRM.length > 0 || selectedPartName.length > 0 || selectedPartNumber.length > 0 || selectedStockSource.length > 0) && (
+            <Button size="small" danger onClick={() => { setSelectedOrder([]); setSelectedPartName([]); setSelectedPartNumber([]); setSelectedRM([]); setSelectedStockSource([]); }}>
               Clear
             </Button>
           )}
@@ -1105,7 +1133,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
               </tr>
               <tr>
                 <th style={thStyle}><FilterHeader label="Part Number" options={colFilterOptions.partNumbers} value={colPartNumber} onChange={setColPartNumber} /></th>
-                <th style={thStyle}>Part Name</th>
+                <th style={thStyle}><FilterHeader label="Part Name" options={colFilterOptions.partNames} value={colPartName} onChange={setColPartName} /></th>
                 <th style={thStyle}>Qty</th>
                 <th style={thStyle}>Preview Document</th>
                 <th style={thStyle}>Material Name</th>

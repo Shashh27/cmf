@@ -189,11 +189,10 @@ const MachineScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const coordinatorId = getCurrentProjectCoordinatorId();
-        const url = coordinatorId
-          ? `${API_BASE_URL}/orders/?project_coordinator_id=${coordinatorId}`
-          : `${API_BASE_URL}/orders/`;
-        const res = await fetch(url);
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const uid = storedUser?.id;
+        const qs = uid != null ? `?project_coordinator_id=${uid}` : '';
+        const res = await fetch(`${API_BASE_URL}/orders/${qs}`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);

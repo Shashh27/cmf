@@ -76,6 +76,14 @@ const Notification = () => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      const storedUser = getStoredUser();
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
+      if (uid != null) {
+        if (role.includes('admin')) params.set('admin_id', uid);
+        else if (role.includes('manufacturing') || role === 'mc') params.set('mc_id', uid);
+        else if (role.includes('project') || role === 'pc') params.set('pc_id', uid);
+      }
       const qs = params.toString();
       const endpoints = [
         `${config.API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
@@ -91,7 +99,6 @@ const Notification = () => {
         `${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`,
       );
       const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
-      const storedUser = getStoredUser();
       const visibleOrders = filterOwnCreatedNotifications(orders, storedUser);
       setCounts({
         orders: Array.isArray(visibleOrders) ? visibleOrders.filter((n) => !n.is_ack).length : 0,

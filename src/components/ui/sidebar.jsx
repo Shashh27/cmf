@@ -20,9 +20,28 @@ import { QUALITY_API_BASE_URL } from '../../Config/qualityconfig';
 
 import { filterOwnCreatedNotifications, getStoredUser } from '../../utils/notificationFilters';
 
+import axios from 'axios';
+
 
 
 const { Sider } = Layout;
+
+
+
+const getNotificationScopeParams = () => {
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const uid = storedUser?.id;
+  const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
+  const params = new URLSearchParams();
+  if (uid == null) return params;
+  if (role.includes('admin')) params.set('admin_id', uid);
+  else if (role.includes('manufacturing') || role === 'mc') {
+    params.set('mc_id', uid);
+  } else if (role.includes('project') || role === 'pc') {
+    params.set('pc_id', uid);
+  }
+  return params;
+};
 
 
 
@@ -137,6 +156,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   // Fetch notification count for sidebar badge
 
   useEffect(() => {
+
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+    if (!storedUser?.id && prefix !== '/operator' && prefix !== '/supervisor') {
+      return;
+    }
 
     if (prefix === '/operator') {
 
@@ -288,7 +312,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
-        fetch(`${API_BASE_URL}/operation-checklists/submissions`),
+        axios.get(`${API_BASE_URL}/operation-checklists/submissions`).then((r) => ({ ok: true, json: async () => r.data })).catch(() => ({ ok: false })),
       ]);
 
       let productionCount = 0;
@@ -326,27 +350,13 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     try {
 
-      const storedUser = localStorage.getItem('user');
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      if (uid == null) return;
 
-      if (!storedUser) return;
+      const response = await axios.get(`${API_BASE_URL}/pc-notifications/${uid}/unread-count`);
 
-      
-
-      const user = JSON.parse(storedUser);
-
-      if (!user.id) return;
-
-
-
-      const response = await fetch(`${API_BASE_URL}/pc-notifications/${user.id}/unread-count`);
-
-      if (response.ok) {
-
-        const data = await response.json();
-
-        setNotificationCount(data.unread_count || 0);
-
-      }
+      setNotificationCount(response.data?.unread_count || 0);
 
     } catch (error) {
 
@@ -362,32 +372,57 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     try {
 
+      const params = getNotificationScopeParams();
+      const qs = params.toString();
+
       const endpoints = [
 
-        `${API_BASE_URL}/order-notifications/`,
+        `${API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-notifications/`,
+        `${API_BASE_URL}/machine-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/tool-issues-notifications/`,
+        `${API_BASE_URL}/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/component-issues-notifications/`,
+        `${API_BASE_URL}/component-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-calibration-notifications/`,
+        `${API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
 
       ];
 
-      const [orders, machines, tools, components, calibrations, inspRes] = await Promise.all([
+      const results = await Promise.all(
 
-        ...endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : []))),
+        endpoints.map((url) =>
 
-        fetch(`${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`),
+          axios.get(url).then((r) => r.data).catch(() => [])
 
-      ]);
+        )
+
+      );
+
+      const [orders, machines, tools, components, calibrations] = results;
+
+      let inspectionPlans = [];
+
+      try {
+
+        const inspRes = await fetch(
+
+          `${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`
+
+        );
+
+        inspectionPlans = inspRes.ok ? await inspRes.json() : [];
+
+      } catch {
+
+        inspectionPlans = [];
+
+      }
 
       const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.is_ack).length : 0);
 
-      const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
       const currentUser = getStoredUser();
+
       const visibleOrders = filterOwnCreatedNotifications(orders, currentUser);
 
       setNotificationCount(
@@ -420,32 +455,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     try {
 
-      const storedUser = localStorage.getItem('user');
-
-      let mcId = null;
-
-      if (storedUser) {
-
-        try {
-
-          const user = JSON.parse(storedUser);
-
-          mcId = user.id ?? user.user_id ?? user.userId ?? null;
-
-        } catch (e) {
-
-          console.error('Error parsing user from local storage', e);
-
-        }
-
-      }
-
-
-
-      const params = new URLSearchParams();
-
-      if (mcId) params.set('mc_id', mcId);
-
+      const params = getNotificationScopeParams();
       const qs = params.toString();
 
       const endpoints = [
@@ -464,28 +474,53 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [orders, machines, tools, components, calibrations, productionResponse, pokayokeResponse] = await Promise.all([
+      const results = await Promise.all(
 
-        ...endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : []))),
+        endpoints.map((url) =>
 
-        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
+          axios.get(url).then((r) => r.data).catch(() => [])
 
-        fetch(`${API_BASE_URL}/operation-checklists/submissions`),
+        )
 
-      ]);
+      );
+
+      const [orders, machines, tools, components, calibrations] = results;
+
+      let productionResponse = { ok: false, data: [] };
+
+      let pokayokeResponse = { ok: false, data: [] };
+
+      try {
+
+        const pr = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`);
+
+        productionResponse = { ok: pr.ok, data: pr.ok ? await pr.json() : [] };
+
+      } catch { /* scheduling optional */ }
+
+      try {
+
+        const pk = await axios.get(`${API_BASE_URL}/operation-checklists/submissions`);
+
+        pokayokeResponse = { ok: true, data: pk.data };
+
+      } catch { /* optional */ }
 
 
 
       const countPending = (arr) => (Array.isArray(arr) ? arr.filter((n) => !n.mc_is_ack).length : 0);
 
       const currentUser = getStoredUser();
+
+      const mcId = currentUser?.id ?? null;
+
       const visibleOrders = filterOwnCreatedNotifications(orders, currentUser);
 
       let productionCount = 0;
 
       if (productionResponse.ok) {
 
-        const data = await productionResponse.json();
+        const data = productionResponse.data;
 
         productionCount = (data || []).filter((log) => {
 
@@ -527,7 +562,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       if (pokayokeResponse.ok) {
 
-        const data = await pokayokeResponse.json();
+        const data = pokayokeResponse.data;
 
         pokayokeCount = (data || []).filter((log) => !log.mc_ack_by).length;
 

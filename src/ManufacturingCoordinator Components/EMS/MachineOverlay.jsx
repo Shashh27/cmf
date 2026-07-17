@@ -12,15 +12,10 @@ const PARAMETER_OPTIONS = [
   { value: 'phase_b_voltage', label: 'Phase B Voltage (V)' },
   { value: 'phase_c_voltage', label: 'Phase C Voltage (V)' },
   { value: 'avg_phase_voltage', label: 'Average Phase Voltage (V)' },
-  { value: 'line_ab_voltage', label: 'Line AB Voltage (V)' },
-  { value: 'line_bc_voltage', label: 'Line BC Voltage (V)' },
-  { value: 'line_ca_voltage', label: 'Line CA Voltage (V)' },
-  { value: 'avg_line_voltage', label: 'Average Line Voltage (V)' },
   { value: 'phase_a_current', label: 'Phase A Current (A)' },
   { value: 'phase_b_current', label: 'Phase B Current (A)' },
   { value: 'phase_c_current', label: 'Phase C Current (A)' },
   { value: 'avg_three_phase_current', label: 'Average Three Phase Current (A)' },
-  { value: 'power_factor', label: 'Power Factor' },
   { value: 'frequency', label: 'Frequency (Hz)' },
   { value: 'total_instantaneous_power', label: 'Total Instantaneous Power (kW)' },
   { value: 'active_energy_delivered', label: 'Active Energy Delivered (kWh)' }
@@ -434,18 +429,6 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
                   <Col span={12}>
                     <ParameterCard title="Avg Phase V" value={machineParameters?.avg_phase_voltage || 0} unit="V" color="#722ed1" />
                   </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line AB V" value={machineParameters?.line_ab_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line BC V" value={machineParameters?.line_bc_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line CA V" value={machineParameters?.line_ca_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Avg Line V" value={machineParameters?.avg_line_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
                 </Row>
               </Card>
             </Col>
@@ -503,15 +486,12 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
               >
                 <Row gutter={[2, 2]}>
                   <Col span={12}>
-                    <ParameterCard title="Power Factor" value={machineParameters?.power_factor || 0} unit="" color="#2f54eb" />
-                  </Col>
-                  <Col span={12}>
                     <ParameterCard title="Frequency" value={machineParameters?.frequency || 0} unit="Hz" color="#2f54eb" />
                   </Col>
                   <Col span={12}>
                     <ParameterCard title="Total Power" value={machineParameters?.total_instantaneous_power || 0} unit="kW" color="#52c41a" />
                   </Col>
-                  <Col span={12}>
+                  <Col span={24}>
                     <ParameterCard title="Energy Delivered" value={machineParameters?.active_energy_delivered || 0} unit="kWh" color="#52c41a" />
                   </Col>
                 </Row>

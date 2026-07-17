@@ -161,16 +161,13 @@ const OrderTracking = () => {
   const fetchOrders = async () => {
     setInitialLoading(true);
     try {
-      const userId = getCurrentAdminId();
-      const userRole = getUserRole();
-      const normalizedRole = (userRole || '').toLowerCase().replace(/_/g, ' ').trim();
-      
-      // Use manufacturing_coordinator_id for MC users, admin_id for admin users
-      const isManufacturingCoordinator = normalizedRole.includes('manufacturing coordinator') || normalizedRole === 'mc';
-      const params = userId != null 
-        ? (isManufacturingCoordinator ? { manufacturing_coordinator_id: userId } : { admin_id: userId })
-        : undefined;
-      
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || '').toLowerCase();
+      const params = uid == null ? undefined
+        : (role.includes('manufacturing') || role === 'mc') ? { manufacturing_coordinator_id: uid }
+        : (role.includes('project') || role === 'pc') ? { project_coordinator_id: uid }
+        : { admin_id: uid };
       const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
       const data = Array.isArray(res.data) ? res.data : [];
       setOrders(data);

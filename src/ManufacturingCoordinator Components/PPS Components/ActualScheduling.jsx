@@ -185,11 +185,10 @@ const ActualScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const mcId = getCurrentManufacturingCoordinatorId();
-        const url = mcId
-          ? `${API_BASE_URL}/orders/?manufacturing_coordinator_id=${mcId}`
-          : `${API_BASE_URL}/orders/`;
-        const res = await fetch(url);
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const uid = storedUser?.id;
+        const qs = uid != null ? `?manufacturing_coordinator_id=${uid}` : '';
+        const res = await fetch(`${API_BASE_URL}/orders/${qs}`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);

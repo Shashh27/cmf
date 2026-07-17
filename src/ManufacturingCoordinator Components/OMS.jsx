@@ -70,7 +70,6 @@ const OMS = () => {
   const fetchOrders = async () => {
     try {
       const uid = getCurrentUserId();
-      // For manufacturing coordinator view, filter by manufacturing_coordinator_id instead of admin_id
       const response = await axios.get(`${API_BASE_URL}/orders/`, {
         params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
       });

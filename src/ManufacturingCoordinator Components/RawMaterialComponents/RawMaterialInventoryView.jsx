@@ -81,6 +81,13 @@ const RawMaterialInventoryView = ({
   const [addStockModal, setAddStockModal] = useState({ open: false, material: null });
   const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null });
 
+  // ── Column header filters ──────────────────────────────────────────────────
+  const [colProcess, setColProcess] = useState([]);
+  const [colForm, setColForm] = useState([]);
+  const [colSource, setColSource] = useState([]);
+  const [colStockStatus, setColStockStatus] = useState([]);
+  const [colUnitStatus, setColUnitStatus] = useState([]);
+
   const getCurrentUserId = () => {
     try {
       const stored = localStorage.getItem("user");
@@ -92,12 +99,6 @@ const RawMaterialInventoryView = ({
       return null;
     }
   };
-  // ── Column header filters ──────────────────────────────────────────────────
-  const [colProcess, setColProcess] = useState([]);
-  const [colForm, setColForm] = useState([]);
-  const [colSource, setColSource] = useState([]);
-  const [colStockStatus, setColStockStatus] = useState([]);
-  const [colUnitStatus, setColUnitStatus] = useState([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);

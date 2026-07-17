@@ -21,6 +21,25 @@ const useGanttStore = create((set, get) => ({
 
     try {
       const queryParams = new URLSearchParams();
+
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          if (user?.id) {
+            const role = String(user.role || '').toLowerCase();
+            if (role.includes('manufacturing') || role === 'mc') {
+              queryParams.append('manufacturing_coordinator_id', user.id);
+            } else if (role.includes('project') || role === 'pc') {
+              queryParams.append('project_coordinator_id', user.id);
+            } else if (role.includes('admin')) {
+              queryParams.append('admin_id', user.id);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing user from localStorage:', e);
+        }
+      }
       
       // Use provided date range or current store date range
       // For refresh button (forceRefresh=true), use today's date
@@ -164,7 +183,27 @@ const useGanttStore = create((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/`;
+      const queryParams = new URLSearchParams();
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          if (user?.id) {
+            const role = String(user.role || '').toLowerCase();
+            if (role.includes('manufacturing') || role === 'mc') {
+              queryParams.append('manufacturing_coordinator_id', user.id);
+            } else if (role.includes('project') || role === 'pc') {
+              queryParams.append('project_coordinator_id', user.id);
+            } else if (role.includes('admin')) {
+              queryParams.append('admin_id', user.id);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing user from localStorage:', e);
+        }
+      }
+      const qs = queryParams.toString();
+      const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/${qs ? `?${qs}` : ''}`;
 
       const response = await axios.get(url);
 

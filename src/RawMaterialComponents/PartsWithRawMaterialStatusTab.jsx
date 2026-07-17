@@ -214,8 +214,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       const uid = getCurrentUserId();
 
-      // Admin dashboard - use combined filtering to see all materials from orders where admin is involved
-
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
 
         params: uid != null ? { admin_id: uid } : undefined,
@@ -509,11 +507,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         try {
 
-          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`, {
-
-            params: { user_id: getCurrentUserId() ?? undefined },
-
-          });
+          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`);
 
           await fetchLinkedMaterials();
 
@@ -687,7 +681,13 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`);
+      const uid = getCurrentUserId();
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
+
+        params: uid != null ? { admin_id: uid } : undefined,
+
+      });
 
       const count = response.data.filter(item => item.merge_group_id === groupId).length;
 

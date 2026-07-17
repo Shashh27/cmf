@@ -63,10 +63,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     fetchingRawMaterials.current = true;
     setLoading(true);
     try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
       const materials = response.data || [];
 
       // Backend already returns materials with stock status
@@ -209,9 +206,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`, {
-            params: { user_id: getCurrentUserId() ?? undefined },
-          });
+          await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`);
           await fetchRawMaterials();
           message.success("Raw material deleted successfully");
         } catch (error) {

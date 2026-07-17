@@ -31,17 +31,6 @@ function getLoggedInUser() {
   }
 }
 
-function buildUserQuery() {
-  const u = getLoggedInUser();
-  const params = new URLSearchParams();
-  if (u.user_id) params.set('user_id', String(u.user_id));
-  if (u.user_name) params.set('user_name', u.user_name);
-  if (u.role) params.set('role', u.role);
-  if (u.center) params.set('center', u.center);
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
-}
-
 const useChatStore = create((set) => ({
   messages: [],
   loading: false,
@@ -240,8 +229,13 @@ export default function ChatPanel() {
   const loadSuggestions = useCallback(async () => {
     setPromptsLoading(true);
     try {
+      const user = getLoggedInUser();
+      const params = new URLSearchParams();
+      Object.entries(user).forEach(([key, value]) => {
+        if (value != null) params.set(key, String(value));
+      });
       const res = await fetch(
-        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}${buildUserQuery()}`,
+        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}?${params}`,
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -381,7 +375,7 @@ export default function ChatPanel() {
         }
       } else {
         const msg = e.message === 'Failed to fetch'
-          ? 'Backend server is not reachable. Start uvicorn on port 3000:\n\npython -m uvicorn main:app --reload --host 172.18.7.86 --port 3000'
+          ? 'Backend server is not reachable. Check that uvicorn is running.'
           : (e.message || 'Something went wrong. Please try again.');
         store.setError(msg);
       }

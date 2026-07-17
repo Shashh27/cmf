@@ -78,9 +78,10 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const coordinatorId = getCurrentProjectCoordinatorId();
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
       const response = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: coordinatorId != null ? { project_coordinator_id: coordinatorId } : undefined,
+        params: uid != null ? { project_coordinator_id: uid } : undefined,
       });
       const data = response.data;
       setOrders(Array.isArray(data) ? data : []);

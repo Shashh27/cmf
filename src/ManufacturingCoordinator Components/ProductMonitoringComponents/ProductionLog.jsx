@@ -122,15 +122,11 @@ const ProductionLog = () => {
   const mcId = mcMeta.id;
 
   const fetchLogs = useCallback(async () => {
-    if (!mcId) {
-      message.error('User not found in session. Please log in again.');
-      return;
-    }
-
     setLoading(true);
     try {
+      const qs = mcId != null ? `?manufacturing_coordinator_id=${mcId}` : '';
       const response = await fetch(
-        `${SCHEDULING_API_BASE_URL}/production-logs/?manufacturing_coordinator_id=${mcId}`
+        `${SCHEDULING_API_BASE_URL}/production-logs/${qs}`
       );
       if (!response.ok) throw new Error('Failed to fetch production logs');
       const allLogs = await response.json();
@@ -175,11 +171,10 @@ const ProductionLog = () => {
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
   useEffect(() => {
-    if (!mcId) return;
-
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/?manufacturing_coordinator_id=${mcId}`);
+        const qs = mcId != null ? `?manufacturing_coordinator_id=${mcId}` : '';
+        const res = await fetch(`${API_BASE_URL}/orders/${qs}`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);

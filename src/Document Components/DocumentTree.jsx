@@ -105,12 +105,17 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const role = getUserRole();
-      const userId = getUserId();
-      const url = role === 'manufacturing_coordinator' && userId
-        ? `${config.API_BASE_URL}/orders/?manufacturing_coordinator_id=${userId}`
-        : `${config.API_BASE_URL}/orders/`;
-      const response = await fetch(url);
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || '').toLowerCase();
+      const params = new URLSearchParams();
+      if (uid != null) {
+        if (role.includes('manufacturing') || role === 'mc') params.set('manufacturing_coordinator_id', uid);
+        else if (role.includes('project') || role === 'pc') params.set('project_coordinator_id', uid);
+        else if (role.includes('admin')) params.set('admin_id', uid);
+      }
+      const qs = params.toString();
+      const response = await fetch(`${config.API_BASE_URL}/orders/${qs ? `?${qs}` : ''}`);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }

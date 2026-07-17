@@ -35,24 +35,13 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
-      
-      // Add role-based filtering based on user's role
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          const userRole = (user.role || user.user_role || '').toLowerCase();
-          // Pass the appropriate role ID based on the user's role
-          if (userRole.includes('manufacturing') || userRole === 'mc') {
-            if (user.id) params.set('mc_id', user.id);
-          } else if (userRole.includes('project') || userRole === 'pc') {
-            if (user.id) params.set('pc_id', user.id);
-          } else if (userRole.includes('admin')) {
-            if (user.id) params.set('admin_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage', e);
-        }
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const uid = storedUser?.id;
+      const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
+      if (uid != null) {
+        if (role.includes('admin')) params.set('admin_id', uid);
+        else if (role.includes('manufacturing') || role === 'mc') params.set('mc_id', uid);
+        else if (role.includes('project') || role === 'pc') params.set('pc_id', uid);
       }
       
       const url = `${base}?${params.toString()}`;

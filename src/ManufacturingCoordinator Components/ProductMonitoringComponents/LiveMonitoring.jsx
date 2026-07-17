@@ -4,6 +4,7 @@ import { Activity, Cpu, Filter, LayoutGrid, Map, PauseCircle, RefreshCw, WifiOff
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { API_BASE_URL } from '../../Config/auth';
+import { getApiWsUrl } from '../../auth/apiUrl';
 import IsometricMachineView from './IsometricMachineView';
 
 dayjs.extend(relativeTime);
@@ -82,11 +83,7 @@ const safeGet = (obj, key, fallback = null) => {
   return fallback;
 };
 
-const getMonitoringWsUrl = () => {
-  const httpUrl = new URL(`${API_BASE_URL}/monitoring/live/ws`);
-  httpUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-  return httpUrl.toString();
-};
+const getMonitoringWsUrl = () => getApiWsUrl('monitoring/live/ws');
 
 /* ─── Status Pill ───────────────────────────────────────────── */
 const StatusPill = ({ status }) => {
