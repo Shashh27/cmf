@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Select, Typography, message } from 'antd';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { UserOutlined, LockOutlined, DesktopOutlined, TeamOutlined,CheckCircleOutlined } from '@ant-design/icons';
 import logo from '../assets/cmtis.png';
 import loginBg from '../assets/bg.jpg';
@@ -16,7 +16,6 @@ const Login = () => {
   const [operatorStep, setOperatorStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState([]);
-  const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
 
@@ -104,63 +103,45 @@ const Login = () => {
       }
 
       const data = await login(userName, values.password);
-      const normalize = (s) => String(s || '').toLowerCase().replace(/_/g, ' ').trim();
-      const selected = normalize(role);
-      const actual = normalize(data.user?.role);
-      const rolePrefix =
-        actual === 'admin' ? '/admin' :
-        actual.includes('project coordinator') ? '/project_coordinator' :
-        actual.includes('manufacturing coordinator') ? '/manufacturing_coordinator' :
-        actual.includes('inventory supervisor') ? '/inventory_supervisor' :
-        actual.includes('supervisor') ? '/supervisor' :
-        '/operator';
+      const toKey = (s) => {
+        const n = String(s || '').toLowerCase().replace(/_/g, ' ').trim();
+        if (n === 'admin') return 'admin';
+        if (n.includes('project coordinator') || n === 'coordinator' || n === 'pc') return 'project_coordinator';
+        if (n.includes('manufacturing coordinator') || n === 'mc') return 'manufacturing_coordinator';
+        if (n.includes('inventory supervisor')) return 'inventory_supervisor';
+        if (n.includes('supervisor')) return 'supervisor';
+        if (n.includes('operator')) return 'operator';
+        return n.replace(/\s+/g, '_');
+      };
+      const selected = toKey(role);
+      const actual = toKey(data.user?.role);
+      const homes = {
+        admin: '/admin/dashboard',
+        project_coordinator: '/project_coordinator/oms/orders',
+        manufacturing_coordinator: '/manufacturing_coordinator/dashboard',
+        inventory_supervisor: '/inventory_supervisor/inventory-management/inventory-master',
+        supervisor: '/supervisor/production_logs',
+        operator: '/operator/dashboard',
+      };
+      const home = homes[actual] || '/login';
 
       if (selected !== actual) {
-        if (selected === 'admin') {
-          message.error('You do not have admin access');
-        } else if (selected.includes('project coordinator')) {
-          message.error('You do not have project coordinator access');
-        } else if (selected.includes('manufacturing coordinator')) {
-          message.error('You do not have manufacturing coordinator access');
-        } else if (selected.includes('inventory supervisor')) {
-          message.error('You do not have inventory supervisor access');
-        } else if (selected.includes('supervisor')) {
-          message.error('You do not have supervisor access');
-        } else {
-          message.error('You do not have operator access');
-        }
-        return;
+        message.warning(
+          `Logged in as ${data.user?.role || actual}. Opening that portal (you selected ${role}).`
+        );
+      } else {
+        message.success('Login Successful');
       }
 
-      message.success('Login Successful');
-
-      // Check if there's a saved location to redirect back to
       const fromState = location.state?.from;
       const from = fromState ? fromState.pathname + fromState.search : null;
-
-      // Validate if the 'from' path is allowed for this role
-      let allowedRedirect = false;
-      if (from) {
-         if (from.startsWith(rolePrefix)) allowedRedirect = true;
+      const rolePrefix = home.split('/').slice(0, 2).join('/') || '';
+      if (from && rolePrefix && from.startsWith(rolePrefix)) {
+        window.location.assign(from);
+        return;
       }
-
-      if (allowedRedirect) {
-        navigate(from, { replace: true });
-      } else {
-        if (actual === 'admin') {
-           navigate('/admin/dashboard');
-        } else if (actual.includes('project coordinator')) {
-           navigate('/project_coordinator/oms/orders');
-        } else if (actual.includes('manufacturing coordinator')) {
-           navigate('/manufacturing_coordinator/dashboard');
-        } else if (actual.includes('inventory supervisor')) {
-           navigate('/inventory_supervisor/inventory-management/inventory-master');
-        } else if (actual.includes('supervisor')) {
-           navigate('/supervisor/production_logs');
-        } else {
-           navigate('/operator/dashboard');
-        }
-      }
+      // Full navigation so ProtectedRoute always sees localStorage user
+      window.location.assign(home);
     } catch (error) {
       console.error('Login error:', error);
       message.error('invalid credential');

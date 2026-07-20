@@ -139,8 +139,13 @@ function AuthenticatedChatPanel() {
   
   // Check user role - only show for admin and manufacturing_coordinator
   try {
-    const role = user?.role?.toLowerCase()?.replace(/\s+/g, '_');
-    if (role !== 'admin' && role !== 'manufacturing_coordinator') {
+    const role = String(user?.role || '')
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .trim();
+    const isAdmin = role === 'admin';
+    const isMc = role.includes('manufacturing coordinator') || role === 'mc';
+    if (!isAdmin && !isMc) {
       return null;
     }
   } catch {

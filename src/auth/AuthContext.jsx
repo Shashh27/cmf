@@ -55,15 +55,19 @@ export function AuthProvider({ children }) {
       password,
     });
     const profile = data?.user || data;
-    setUser(profile);
+    if (!profile || !profile.id) {
+      throw new Error('Login response missing user');
+    }
+    // Write storage FIRST so ProtectedRoute can read it even before React re-renders
     localStorage.setItem('isAuthenticated', 'true');
     localStorage.setItem('user', JSON.stringify(profile));
+    setUser(profile);
     return { user: profile };
   }, []);
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (!user) return;
+    if (!user && !readStoredUser()) return;
     idleTimerRef.current = setTimeout(() => {
       logout().finally(() => {
         if (window.location.pathname !== '/login') {
@@ -74,7 +78,7 @@ export function AuthProvider({ children }) {
   }, [logout, user]);
 
   useEffect(() => {
-    if (!user) return undefined;
+    if (!user && !readStoredUser()) return undefined;
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'];
     events.forEach((e) => window.addEventListener(e, resetIdleTimer));
     resetIdleTimer();
@@ -84,16 +88,19 @@ export function AuthProvider({ children }) {
     };
   }, [user, resetIdleTimer]);
 
+  const effectiveUser = user || readStoredUser();
+
   const value = useMemo(
     () => ({
-      user,
-      isAuthenticated: Boolean(user),
+      user: effectiveUser,
+      isAuthenticated: Boolean(effectiveUser),
       bootstrapping: false,
       login,
       logout,
+      clearSession,
       normalizeRole,
     }),
-    [user, login, logout]
+    [effectiveUser, login, logout, clearSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
