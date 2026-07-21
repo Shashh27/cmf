@@ -1,6 +1,4 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import {
   Modal,
   Table,
@@ -15,6 +13,7 @@ import {
   Input,
   Popconfirm,
 } from "antd";
+import { api } from '../api/client.js';
 import { CalculatorOutlined, SaveOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import MachineMhrExport from "../DownloadReports/MachineMhrExport.jsx";
 
@@ -58,7 +57,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
   const fetchMhrData = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/machines/${machine.id}/mhr`);
+      const res = await api.get(`/machines/${machine.id}/mhr`);
       setValues(res.data.values || []);
       setFinalMhr(res.data.final_mhr);
       setRecommendedMhr(res.data.recommended_mhr);
@@ -74,7 +73,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
 
   const fetchAvailableParticulars = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/machines/${machine.id}/mhr/available-particulars`);
+      const res = await api.get(`/machines/${machine.id}/mhr/available-particulars`);
       setAvailableParticulars(res.data || []);
     } catch (error) {
       console.error("Error fetching available particulars:", error);
@@ -103,8 +102,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
         value: value
       }));
 
-      const res = await axios.put(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/values`,
+      const res = await api.put(`/machines/${machine.id}/mhr/values`,
         updates
       );
       await fetchMhrData();
@@ -126,8 +124,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
 
     setSaving(true);
     try {
-      await axios.post(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/particulars/${valueRecord.particular_id}/toggle`,
+      await api.post(`/machines/${machine.id}/mhr/particulars/${valueRecord.particular_id}/toggle`,
         null,
         { params: { is_applicable: isApplicable } }
       );
@@ -149,8 +146,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
 
     setSaving(true);
     try {
-      await axios.post(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/particulars/${selectedParticular}`
+      await api.post(`/machines/${machine.id}/mhr/particulars/${selectedParticular}`
       );
       await fetchMhrData();
       await fetchAvailableParticulars();
@@ -167,8 +163,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
   const removeParticular = async (particularId) => {
     setSaving(true);
     try {
-      await axios.delete(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/particulars/${particularId}`
+      await api.delete(`/machines/${machine.id}/mhr/particulars/${particularId}`
       );
       await fetchMhrData();
       await fetchAvailableParticulars();
@@ -184,8 +179,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
   const updateRecommendedMhr = async (newValue) => {
     setSaving(true);
     try {
-      await axios.put(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/recommended-mhr`,
+      await api.put(`/machines/${machine.id}/mhr/recommended-mhr`,
         null,
         { params: { recommended_mhr: newValue } }
       );

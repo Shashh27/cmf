@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Button, Modal, Select, App, Spin, Tag, Typography, Space } from "antd";
-import { LinkOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, DisconnectOutlined, ShoppingCartOutlined } from "@ant-design/icons";
 import {
   filterUnitsForPlanned,
   getEligibleGeneralStocks,
   stockMeetsPlannedCrossSection,
 } from "./stockPlanningUtils";
+import { LinkOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, DisconnectOutlined, ShoppingCartOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 
@@ -116,14 +115,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   // Check if material is linked to order stock (procured)
   const isLinkedToOrderStock = linkedStock?.sourceType === 'order';
 
-  // Get user ID from localStorage
-  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const userId = storedUser?.id;
-
   const fetchGeneralStock = async () => {
     try {
       setLoadingStock(true);
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+      const response = await api.get(`/rawmaterials/stock/`, {
         params: {
           material_name: rowData.resolvedMaterialName || rowData.rmName,
           material_id: rowData.resolvedMaterialId || rowData.rmId,
@@ -141,7 +136,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   const fetchStockUnits = async (stockId) => {
     try {
       setLoadingUnits(prev => ({ ...prev, [stockId]: true }));
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/${stockId}/units`);
+      const response = await api.get(`/rawmaterials/stock/${stockId}/units`);
       setStockUnits(prev => ({ ...prev, [stockId]: response.data || [] }));
     } catch (error) {
     } finally {
@@ -164,7 +159,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       onOk: async () => {
         try {
           setLoadingLink(true);
-          await axios.put(`${API_BASE_URL}/parts/${rowData.partId}`, {
+          await api.put(`/parts/${rowData.partId}`, {
             raw_material_stock_id: null,
             raw_material_unit_id: null,
             raw_material_id: null,
@@ -229,12 +224,11 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       onOk: async () => {
         try {
           setLoadingLink(true);
-          await axios.post(`${API_BASE_URL}/rawmaterials/assign-material/`, null, {
+          await api.post(`/rawmaterials/assign-material/`, null, {
             params: {
               unit_id: targetUnitId,
               part_id: rowData.partId,
-              required_length: plannedLength,
-              user_id: userId
+              required_length: plannedLength
             }
           });
           message.success('Stock linked successfully');
@@ -319,12 +313,11 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       
       // Call the auto-extract-process endpoint to create order material
       // Send form_type and dimensions directly to avoid re-parsing issues
-      await axios.post(`${API_BASE_URL}/rawmaterials/auto-extract-process`, {
+      await api.post(`/rawmaterials/auto-extract-process`, {
         part_id: rowData.partId,
         material_name: rowData.resolvedMaterialName || rowData.rmName,
         required_length: dimensions.length || plannedLength,
         process_type: selectedProcessType,
-        user_id: userId,
         form_type: formType,
         dimensions: dimensions
       });

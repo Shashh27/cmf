@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { message, Spin, DatePicker, Button } from 'antd';
-import dayjs from 'dayjs';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import {
   CheckCircleFilled, CloseCircleFilled,
   CalendarOutlined, ClockCircleOutlined, ThunderboltOutlined,
   DownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { authFetch } from '../api/client.js';
 import { API_BASE_URL } from '../Config/auth.js';
 import cmtisLogo from '../assets/cmtis.png';
 
@@ -324,7 +325,7 @@ const PokayokeHistory = ({ machineId }) => {
     if (!machineId) return;
     setLoading(true);
     try {
-      const r = await fetch(`${API_BASE_URL}/pm/machines/${machineId}/submissions`, {
+      const r = await authFetch(`${API_BASE_URL}/pm/machines/${machineId}/submissions`, {
         headers: { accept: 'application/json' },
       });
       if (!r.ok) throw new Error('Failed to fetch');

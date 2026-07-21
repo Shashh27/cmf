@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
 import { Card, Table, Spin, message, Typography, Tag, Select, Empty, Space } from 'antd';
-import { 
+import {
   SyncOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -10,9 +8,10 @@ import {
   ToolOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import {
+import { 
   getOpQtyTotals,
 } from '../utils/productionLogDisplay';
+import { api } from '../api/client.js';
 import ProductionStagesPanel from '../components/ProductionStagesPanel';
 
 const { Text } = Typography;
@@ -161,14 +160,7 @@ const OrderTracking = () => {
   const fetchOrders = async () => {
     setInitialLoading(true);
     try {
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const uid = storedUser?.id;
-      const role = String(storedUser?.role || '').toLowerCase();
-      const params = uid == null ? undefined
-        : (role.includes('manufacturing') || role === 'mc') ? { manufacturing_coordinator_id: uid }
-        : (role.includes('project') || role === 'pc') ? { project_coordinator_id: uid }
-        : { admin_id: uid };
-      const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
+      const res = await api.get(`/orders/`);
       const data = Array.isArray(res.data) ? res.data : [];
       setOrders(data);
       if (data.length > 0 && !selectedOrderId) {
@@ -181,7 +173,7 @@ const OrderTracking = () => {
   const fetchOrderDetails = async (orderId) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const res = await api.get(`/orders/${orderId}/hierarchical`);
       setOrderDetails(res.data);
     } catch { message.error('Failed to fetch order details'); }
     finally { setLoading(false); }
@@ -189,7 +181,7 @@ const OrderTracking = () => {
 
   const fetchOrderTrackingData = async (orderId) => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/order-tracking/${orderId}`);
+      const res = await api.get(`/order-tracking/${orderId}`);
       setOrderTrackingData(res.data);
       
       // Extract production logs from tracking data and update state

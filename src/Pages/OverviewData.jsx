@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Tabs, Badge } from 'antd';
 import { InventoryRequestsTable, ReturnRequestsTable, InventoryAnalytics, TransactionHistory, ToolsIssues } from '../InventorySupervisor Components/Inventory/OverviewData';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
 
 const OverviewData = () => {
   const [counts, setCounts] = useState({
@@ -30,17 +31,17 @@ const OverviewData = () => {
     
     try {
       // Fetch Inventory Requests
-      const reqRes = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      const reqRes = await authFetch(`${API_BASE_URL}/inventory-requests/`);
       const reqData = await reqRes.json();
       const pendingReqs = reqData.filter(r => (r.status || '').toLowerCase() === 'pending').length;
 
       // Fetch Return Requests
-      const retRes = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
+      const retRes = await authFetch(`${API_BASE_URL}/inventory-return-requests/`);
       const retData = await retRes.json();
       const pendingRets = retData.filter(r => (r.status || '').toLowerCase() === 'pending').length;
 
       // Fetch Tool Issues
-      const issueRes = await fetch(`${API_BASE_URL}/tool-issues/`);
+      const issueRes = await authFetch(`${API_BASE_URL}/tool-issues/`);
       const issueData = await issueRes.json();
       const pendingIssues = issueData.filter(r => (r.status || '').toLowerCase() === 'pending').length;
 

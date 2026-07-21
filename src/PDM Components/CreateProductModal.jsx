@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import axios from "axios";
 
 import { API_BASE_URL } from "../Config/auth";
 
 import { Modal, Form, Input, Select, Button, App, Badge } from "antd";
 import "./pdm-theme.css";
+import { api } from '../api/client.js';
 
 
 
@@ -445,7 +445,7 @@ const CreateProductModal = ({
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/part-types/`);
+      const response = await api.get(`/part-types/`);
 
       setPartTypes(response.data);
 
@@ -467,7 +467,7 @@ const CreateProductModal = ({
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      const response = await api.get(`/rawmaterials/vendors`);
 
       setVendors(response.data);
 
@@ -596,7 +596,7 @@ const CreateProductModal = ({
 
 
 
-      const response = await axios({
+      const response = await api({
 
         url,
 

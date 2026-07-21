@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Radio, Input, Space, Spin, message, Typography, Table, Tag } from 'antd';
 import { CloseOutlined, CheckOutlined } from '@ant-design/icons';
-import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
+import { api } from '../api/client.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -44,8 +43,7 @@ const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
       }
 
       // Fetch assigned checklists; fall back to all general checklists when MC has not assigned any
-      const response = await axios.get(
-        `${API_BASE_URL}/operation-checklists/assignments?operation_id=${operationId}&fallback_to_general=true`
+      const response = await api.get(`/operation-checklists/assignments?operation_id=${operationId}&fallback_to_general=true`
       );
       if (response.status === 200) {
         console.log('Checklist API Response:', response.data);
@@ -59,8 +57,7 @@ const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
         // Check for existing submission
         if (operatorId) {
           try {
-            const submissionResponse = await axios.get(
-              `${API_BASE_URL}/operation-checklists/submissions/latest?operation_id=${operationId}&operator=${operatorId}`
+            const submissionResponse = await api.get(`/operation-checklists/submissions/latest?operation_id=${operationId}&operator=${operatorId}`
             );
             if (submissionResponse.status === 200 && submissionResponse.data.status) {
               setExistingSubmission(submissionResponse.data);
@@ -83,8 +80,7 @@ const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
                 // If approved, show read-only mode with all responses
                 // Need to fetch all submissions to get complete checklist history
                 setIsEditMode(false);
-                const allSubmissionsResponse = await axios.get(
-                  `${API_BASE_URL}/operation-checklists/submissions?operation_id=${operationId}&operator=${operatorId}`
+                const allSubmissionsResponse = await api.get(`/operation-checklists/submissions?operation_id=${operationId}&operator=${operatorId}`
                 );
                 
                 const existingResponses = {};
@@ -239,8 +235,7 @@ const OperationChecklist = ({ visible, onClose, operationId, onSubmitted }) => {
 
       console.log('Submission Payload:', JSON.stringify(payload, null, 2));
 
-      const submissionsResponse = await axios.post(
-        `${API_BASE_URL}/operation-checklists/submissions`,
+      const submissionsResponse = await api.post(`/operation-checklists/submissions`,
         payload
       );
 

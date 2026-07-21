@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, DatePicker, Button, message, InputNumber, Select, Alert, Space } from "antd";
 import dayjs from "dayjs";
 import MachineMhrPanel from "./Machinemhrpanel.jsx";
+import { api } from '../api/client.js';
 
 const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
@@ -72,11 +71,11 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
 
     try {
       const url = machine 
-        ? `${API_BASE_URL}/machines/${machine.id}`
-        : `${API_BASE_URL}/machines/`;
+        ? `/machines/${machine.id}`
+        : `/machines/`;
       const method = machine ? "put" : "post";
 
-      await axios({
+      await api({
         url,
         method,
         headers: {

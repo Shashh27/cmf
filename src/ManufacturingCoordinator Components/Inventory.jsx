@@ -3,6 +3,7 @@ import { Tabs, message, Card, Typography } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
 import { ToolsList, ToolForm } from '../InventorySupervisor Components/Inventory/InventoryMaster';
 import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 
 const { TabPane } = Tabs;
 const { Title, Text } = Typography;
@@ -25,7 +26,7 @@ const Inventory = () => {
 
   const handleDeleteTool = async (tool) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
+      const response = await authFetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
         method: 'DELETE'
       });
 

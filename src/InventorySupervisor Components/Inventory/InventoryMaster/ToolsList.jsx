@@ -3,21 +3,22 @@ import {
   Table, Button, Space, message, Input, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip, Modal, Dropdown,
   Form, DatePicker, Select, InputNumber, Skeleton
 } from 'antd';
-import dayjs from 'dayjs';
-import { motion, AnimatePresence } from 'framer-motion';
+import { authFetch } from '../../../api/client.js';
 import {
   Plus, Search, RefreshCw, Upload, Download, Pencil, Trash2, Folder, Wrench, FlaskConical,
   ChevronRight, ChevronDown, ChevronLeft, Inbox, FileText, MoreHorizontal, Loader2
 } from 'lucide-react';
+import dayjs from 'dayjs';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ModernTableStyles,
+  MODERN_TABLE_CLASS,
+} from '../OverviewData/inventoryOverviewTable.jsx';
 import { API_BASE_URL } from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
 import ToolsBulkUpload from './ToolsBulkUpload';
 import CategorySubCategoryModal from './CategorySubCategoryModal';
 import CustomColumnModal from './CustomColumnModal';
-import {
-  ModernTableStyles,
-  MODERN_TABLE_CLASS,
-} from '../OverviewData/inventoryOverviewTable.jsx';
 import * as XLSX from 'xlsx';
 
 const { Search: AntSearch } = Input;
@@ -299,7 +300,7 @@ const CalibrationModal = ({ visible, onCancel, onSuccess, tool }) => {
         return;
       }
       
-      const response = await fetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
+      const response = await authFetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -553,7 +554,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     fetchingTree.current = true;
     setTreeLoading(true);
     try {
-      const res  = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const res  = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTree(data);
@@ -573,7 +574,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     setFilteredData([]);
     try {
       const url = `${API_BASE_URL}/tools-list/?category=${encodeURIComponent(category)}`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const sorted = Array.isArray(data)
@@ -598,7 +599,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     setFilteredData([]);
     try {
       const url = `${API_BASE_URL}/tools-list/category/${encodeURIComponent(category)}/sub/${encodeURIComponent(sub_category)}`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const sorted = Array.isArray(data)
@@ -621,7 +622,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   const fetchCustomColumnsForView = async (category, sub_category) => {
     try {
       // Fetch all custom columns
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`);
       if (!response.ok) {
         setCustomColumns([]);
         return;
@@ -756,7 +757,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     
     try {
       if (editModalData.type === 'category') {
-        const res = await fetch(`${API_BASE_URL}/tools-list/categories`, {
+        const res = await authFetch(`${API_BASE_URL}/tools-list/categories`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ old_name: editModalData.oldName, new_name: editModalValue.trim() })
@@ -764,7 +765,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         if (!res.ok) throw new Error((await res.json()).detail || 'Failed to update category');
         message.success('Category updated successfully');
       } else {
-        const res = await fetch(`${API_BASE_URL}/tools-list/sub-categories`, {
+        const res = await authFetch(`${API_BASE_URL}/tools-list/sub-categories`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -796,7 +797,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/tools-list/categories/${encodeURIComponent(category)}`, {
+          const res = await authFetch(`${API_BASE_URL}/tools-list/categories/${encodeURIComponent(category)}`, {
             method: 'DELETE'
           });
           if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete category');
@@ -822,7 +823,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/tools-list/sub-categories/${encodeURIComponent(category)}/${encodeURIComponent(sub_category)}`, {
+          const res = await authFetch(`${API_BASE_URL}/tools-list/sub-categories/${encodeURIComponent(category)}/${encodeURIComponent(sub_category)}`, {
             method: 'DELETE'
           });
           if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete sub-category');

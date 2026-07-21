@@ -3,6 +3,7 @@ import { Table, Tag, Spin, message, Button, Badge, Empty, Tooltip, Modal, Input 
 import { CheckOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
 import dayjs from 'dayjs';
+import { authFetch } from '../../api/client.js';
 
 const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
@@ -29,7 +30,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     setPokayokeChecklistLoading(true);
     try {
       const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions`;
-      const response = await fetch(apiUrl);
+      const response = await authFetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
         // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
@@ -77,7 +78,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
         }
       }
 
-      const response = await fetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
+      const response = await authFetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, message, Popconfirm, Space, Card, Tooltip, Input } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import CustomerModal from "./CustomerModal";
+import { api } from '../api/client.js';
 
 const CustomersTable = ({ userId }) => {
   const [customers, setCustomers] = useState([]);
@@ -20,7 +19,7 @@ const CustomersTable = ({ userId }) => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      const response = await api.get(`/customers/`);
       setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
@@ -42,7 +41,7 @@ const CustomersTable = ({ userId }) => {
 
   const handleDeleteCustomer = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/customers/${id}/`);
+      await api.delete(`/customers/${id}`);
       message.success("Customer deleted successfully");
       fetchCustomers();
     } catch (error) {

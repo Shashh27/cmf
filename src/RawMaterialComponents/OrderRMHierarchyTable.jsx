@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
 import { Spin, Empty, Alert, Select, Modal, Button, Image, Input, message } from 'antd';
 import { EyeOutlined, FileTextOutlined, PlusOutlined, SaveOutlined, CheckOutlined } from '@ant-design/icons';
 import PlannedRMActions from './PlannedRMActions';
 import PlanProcureRMDownload from '../DownloadReports/PlanProcureRMDownload';
 import { getMaterialMatchInfo, formatMaterialMatchLabel, stripMaterialMatchLabel } from './materialMatchUtils';
+import { api } from '../api/client.js';
 const { Option } = Select;
 
 // ── Column filter dropdown ───────────────────────────────────────────────────
@@ -50,9 +49,21 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
       e.preventDefault();
       return;
     }
-    if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) return;
+    // Block up/down — number inputs increment/decrement on arrow keys
+    if (e.keyCode === 38 || e.keyCode === 40) {
+      e.preventDefault();
+      return;
+    }
+    if ([8, 9, 27, 13, 37, 39].includes(e.keyCode)) return;
     if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) return;
+    if (e.key === '.') return;
     if (e.key && !/^\d$/.test(e.key)) e.preventDefault();
+  };
+
+  const parseDimensionValue = (raw) => {
+    if (raw === '' || raw == null) return 0;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : 0;
   };
 
   const inputStyle = {
@@ -63,137 +74,63 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
     borderRadius: '2px',
     textAlign: 'center',
     MozAppearance: 'textfield',
-    WebkitAppearance: 'none',
     ...(disabled ? { backgroundColor: '#f5f5f5', color: '#999', cursor: 'not-allowed' } : {}),
   };
   const labelStyle = { fontSize: isMobile ? 9 : 10, color: '#333', fontWeight: 500, marginRight: 3 };
   const rowStyle = { display: 'flex', alignItems: 'center', gap: isMobile ? 5 : 8 };
 
+  const dimInput = (field, value) => (
+    <input
+      type="text"
+      inputMode="decimal"
+      style={inputStyle}
+      value={value ?? ''}
+      onChange={(e) => {
+        const val = e.target.value;
+        if (val === '' || /^\d*\.?\d*$/.test(val)) {
+          onChange(field, val === '' ? 0 : parseDimensionValue(val));
+        }
+      }}
+      onKeyDown={handleInputKeyDown}
+      placeholder="0"
+      disabled={disabled}
+    />
+  );
+
   if (formType === 'Round') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Dia</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.diameter || ''}
-            onChange={(e) => onChange('diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Dia</span>
+        {dimInput('diameter', dimensions?.diameter)}
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+      </div>
     );
   }
 
   if (formType === 'Square') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Br</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.breadth || ''}
-            onChange={(e) => onChange('breadth', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Ht</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.height || ''}
-            onChange={(e) => onChange('height', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Br</span>
+        {dimInput('breadth', dimensions?.breadth)}
+        <span style={labelStyle}>Ht</span>
+        {dimInput('height', dimensions?.height)}
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+      </div>
     );
   }
 
   if (formType === 'Pipe') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>ID</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.inner_diameter || ''}
-            onChange={(e) => onChange('inner_diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>OD</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.outer_diameter || ''}
-            onChange={(e) => onChange('outer_diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>ID</span>
+        {dimInput('inner_diameter', dimensions?.inner_diameter)}
+        <span style={labelStyle}>OD</span>
+        {dimInput('outer_diameter', dimensions?.outer_diameter)}
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+      </div>
     );
   }
 
@@ -226,8 +163,6 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [colPartNumber, setColPartNumber] = useState([]);
   const [colFormType, setColFormType] = useState([]);
   const [colSource, setColSource] = useState([]);
-  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const userId = storedUser?.id;
   const plannedRmFetchKeyRef = useRef('');
 
   useEffect(() => { fetchAllOrdersHierarchy(); }, []);
@@ -263,13 +198,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     try {
       setLoading(true);
       setError(null);
-      const ordersResponse = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: userId != null ? { admin_id: userId } : undefined,
-      });
+      const ordersResponse = await api.get(`/orders/`);
       const orders = ordersResponse.data || [];
       const ordersWithHierarchy = await Promise.all(orders.map(async (order) => {
         try {
-          const hierarchyResponse = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${order.id}`);
+          const hierarchyResponse = await api.get(`/rawmaterials/order-raw-material-hierarchy/${order.id}`);
           return { ...order, hierarchy: hierarchyResponse.data.product_hierarchy };
         } catch { return { ...order, hierarchy: null }; }
       }));
@@ -648,7 +581,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
   const fetchStockRecommendations = async (materialName, dimensionsStr, key, materialId = null) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks`, {
         material_name: materialName,
         dimensions_str: dimensionsStr,
         min_score: 0.3,
@@ -680,7 +613,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
       if (requests.length === 0) return;
 
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks/batch`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks/batch`, {
         requests
       });
 
@@ -705,7 +638,6 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       extracted_data_id: row.extractedDataId,
       planned_form_type: planning.formType,
       planned_raw_material_id: resolvedMaterialId,
-      user_id: userId,
       planned_diameter: null,
       planned_length: null,
       planned_breadth: null,
@@ -761,8 +693,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
       const isUpdate = !!savedRows[row.key];
       const saveRequest = isUpdate
-        ? axios.put(`${API_BASE_URL}/planned-raw-materials/update/${row.extractedDataId}`, updateData)
-        : axios.post(`${API_BASE_URL}/planned-raw-materials/create`, updateData);
+        ? api.put(`/planned-raw-materials/update/${row.extractedDataId}`, updateData)
+        : api.post(`/planned-raw-materials/create`, updateData);
 
       await saveRequest;
 
@@ -798,7 +730,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         return;
       }
       
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks/batch`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks/batch`, {
         requests: [{
           material_name: row.rmName,
           dimensions_str: dimensionStr,
@@ -822,7 +754,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     try {
       if (extractedDataIds.length === 0) return;
 
-      const response = await axios.post(`${API_BASE_URL}/planned-raw-materials/batch-get`, {
+      const response = await api.post(`/planned-raw-materials/batch-get`, {
         extracted_data_ids: extractedDataIds
       });
       

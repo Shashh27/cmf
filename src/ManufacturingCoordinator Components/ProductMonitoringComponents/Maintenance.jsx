@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Tabs, Table, Spin, message } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 const formatIST = (iso) => {
   if (!iso) return '-';
@@ -51,9 +52,9 @@ const Maintenance = () => {
       setLoading(true);
       try {
         const [oeeRes, brRes, compRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
-          fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
-          fetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
+          authFetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
+          authFetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
+          authFetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
         ]);
         const [oeeData, brData, compData] = await Promise.all([
           oeeRes.ok ? oeeRes.json() : [],

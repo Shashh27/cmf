@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Modal, Form, Input, Select, Button, message } from 'antd';
 import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 
 const { Option } = Select;
 
@@ -46,13 +47,13 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
     try {
       let response;
       if (editingUser) {
-        response = await fetch(`${API_BASE_URL}/access-users/${editingUser.id}/`, {
+        response = await authFetch(`${API_BASE_URL}/access-users/${editingUser.id}/`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
       } else {
-        response = await fetch(`${API_BASE_URL}/access-users/`, {
+        response = await authFetch(`${API_BASE_URL}/access-users/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)

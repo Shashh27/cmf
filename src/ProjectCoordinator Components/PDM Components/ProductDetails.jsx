@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Button, message, Form, Input } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { getLatestRevision } from "./operationUtils";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 
@@ -40,8 +39,7 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
   const handleSaveExtractedMaterial = async () => {
     if (!selectedExtractedMaterial) return;
     try {
-      const response = await axios.put(
-        `${API_BASE_URL}/documents/extracted-data/${selectedExtractedMaterial.id}`,
+      const response = await api.put(`/documents/extracted-data/${selectedExtractedMaterial.id}`,
         editedMaterial,
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -163,7 +161,7 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
         const controller = new AbortController();
         (async () => {
           try {
-            const res = await axios.get(`${API_BASE_URL}/documents/part/${partId}/extracted-data`, { signal: controller.signal });
+            const res = await api.get(`/documents/part/${partId}/extracted-data`, { signal: controller.signal });
             setExtractedMaterials(buildRows(res.data || []));
           } catch {
             setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
@@ -260,8 +258,7 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
       onOk: async () => {
         try {
           const uid = getCurrentUserId();
-          await axios.put(
-            `${API_BASE_URL}/parts/${item.id}`,
+          await api.put(`/parts/${item.id}`,
             { raw_material_id: null, user_id: uid },
             { headers: { "Content-Type": "application/json" } }
           );

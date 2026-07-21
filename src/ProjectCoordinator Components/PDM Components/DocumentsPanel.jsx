@@ -5,8 +5,7 @@ import {
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
   CheckCircleOutlined, CloseCircleOutlined
 } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from '../../api/client.js';
 import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
 import { normalizeVersion, fetchInto } from "./operationUtils.js";
 import PartActionModal from "./PartActionModal";
@@ -17,6 +16,18 @@ import ModelViewer3D from "./ModelViewer3D";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
+
+async function downloadBlobWithAuth(path, filename) {
+  const response = await api.get(path, { responseType: 'blob' });
+  const blobUrl = URL.createObjectURL(response.data);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.setAttribute('download', filename || 'download');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}
 
 // ── OperationDocumentsList ──────────────────────────────────────────────────
 const OperationDocumentsList = ({ operationId, onPreview }) => {
@@ -30,8 +41,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
       if (!operationId || !alive) return;
       setLoading(true);
       try {
-        const r = await axios.get(
-          `${API_BASE_URL}/operation-documents/operation/${operationId}`,
+        const r = await api.get(`/operation-documents/operation/${operationId}`,
           { signal: ctrl.signal }
         );
         if (alive) setDocs(r.data);
@@ -65,7 +75,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
         <div className="flex gap-1 justify-center">
           <Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EyeOutlined />} onClick={() => onPreview(doc)} />
           <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
-            onClick={() => { const a = document.createElement('a'); a.href = `${API_BASE_URL}/operation-documents/${doc.id}/download`; a.setAttribute('download', doc.document_name); document.body.appendChild(a); a.click(); a.remove(); }} />
+            onClick={async () => { try { await downloadBlobWithAuth(`/operation-documents/${doc.id}/download`, doc.document_name); } catch (e) { console.error(e); } }} />
         </div>
       )
     },
@@ -89,7 +99,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
                     </div>
                     <div className="flex gap-2">
                       <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => onPreview(ver)} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
-                      <Tooltip title="Download"><Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => window.open(`${API_BASE_URL}/operation-documents/${ver.id}/download`, '_blank')} className="text-green-500 hover:bg-green-50" /></Tooltip>
+                      <Tooltip title="Download"><Button size="small" type="text" icon={<DownloadOutlined />} onClick={async () => { try { await downloadBlobWithAuth(`/operation-documents/${ver.id}/download`, ver.document_name); } catch (e) { console.error(e); } }} className="text-green-500 hover:bg-green-50" /></Tooltip>
                     </div>
                   </div>
                 ))}
@@ -144,6 +154,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   // Preview
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Modals
   const [showPartActionModal, setShowPartActionModal] = useState(false);
@@ -225,7 +237,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       const fetchTools = async () => {
         setLoadingViewTools(true);
         try {
-          const r = await axios.get(`${API_BASE_URL}/tools/operation/${viewOperation.id}`);
+          const r = await api.get(`/tools/operation/${viewOperation.id}`);
           setViewOperationTools(r.data);
         } catch (e) { console.error(e); setViewOperationTools([]); }
         finally { setLoadingViewTools(false); }
@@ -254,8 +266,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     setLoading(true);
     try {
       const [dR, oR] = await Promise.all([
-        axios.get(`${API_BASE_URL}/documents/part/${selectedItem.id}`),
-        axios.get(`${API_BASE_URL}/operations/part/${selectedItem.id}`),
+        api.get(`/documents/part/${selectedItem.id}`),
+        api.get(`/operations/part/${selectedItem.id}`),
       ]);
       const docs = dR.data;
       const ops = oR.data;
@@ -266,16 +278,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     finally { setLoading(false); }
   };
 
+  const downloadWithAuth = async (path, filename) => {
+    try {
+      await downloadBlobWithAuth(path, filename);
+    } catch (e) {
+      console.error(e);
+      message.error('Download failed');
+    }
+  };
+
   const handleDownload = (id) => {
-    const a = document.createElement('a');
-    a.href = `${API_BASE_URL}/documents/${id}/download`;
-    a.style.display = 'none';
-    document.body.appendChild(a); a.click(); a.remove();
+    downloadWithAuth(`/documents/${id}/download`, `document-${id}`);
   };
 
   const handlePreview = (doc) => {
-    if (!doc.document_url) { message.error("Document URL not found"); return; }
-    setPreviewDoc(doc);
+    setPreviewDoc({ doc, source: 'part' });
   };
 
   const getPreviewType = (name) => {
@@ -284,6 +301,66 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (ext === 'pdf') return 'pdf';
     if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
     return 'other';
+  };
+
+  const closePreview = () => {
+    setPreviewDoc(null);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!previewDoc) return undefined;
+    const type = getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name);
+    if (type !== 'image' && type !== 'pdf') {
+      setPreviewBlobUrl(null);
+      setPreviewLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const path =
+      previewDoc.source === 'part'
+        ? `/documents/${previewDoc.doc.id}/preview`
+        : `/operation-documents/${previewDoc.doc.id}/preview`;
+
+    setPreviewLoading(true);
+    setPreviewBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+
+    (async () => {
+      try {
+        const response = await api.get(path, { responseType: 'blob' });
+        if (cancelled) return;
+        const blobUrl = URL.createObjectURL(response.data);
+        setPreviewBlobUrl(blobUrl);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          message.error('Failed to load document preview');
+          setPreviewBlobUrl(null);
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewDoc]);
+
+  const previewDownload = () => {
+    if (!previewDoc) return;
+    const path =
+      previewDoc.source === 'part'
+        ? `/documents/${previewDoc.doc.id}/download`
+        : `/operation-documents/${previewDoc.doc.id}/download`;
+    downloadWithAuth(path, previewDoc.doc.document_name);
   };
 
   // ── Helper: compute next version string ────────────────────────────────
@@ -402,7 +479,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           if (parentId2D) fd2D.append('parent_id', parentId2D.toString());
           const uid = getCurrentUserId();
           if (uid != null) fd2D.append('user_id', String(uid));
-          uploads.push(axios.post(`${API_BASE_URL}/documents/`, fd2D));
+          uploads.push(api.post(`/documents/`, fd2D));
         }
 
         // Upload 3D
@@ -417,7 +494,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           if (parentId3D) fd3D.append('parent_id', parentId3D.toString());
           const uid = getCurrentUserId();
           if (uid != null) fd3D.append('user_id', String(uid));
-          uploads.push(axios.post(`${API_BASE_URL}/documents/`, fd3D));
+          uploads.push(api.post(`/documents/`, fd3D));
         }
 
         await Promise.all(uploads);
@@ -462,7 +539,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
     setUploading(true);
     try {
-      await axios.post(`${API_BASE_URL}/documents/`, fd);
+      await api.post(`/documents/`, fd);
       message.success('Document uploaded successfully');
       resetAll();
       setIsUploadModalOpen(false);
@@ -483,7 +560,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const handleDeleteDocument = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/documents/${id}`);
+      await api.delete(`/documents/${id}`);
       message.success('Document deleted successfully');
       await fetchDocuments();
     } catch (e) {
@@ -495,8 +572,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const handleEditDocument = async (values) => {
     try {
       const type = values.document_type === 'Other' && values.custom_type ? values.custom_type : values.document_type;
-      await axios.put(
-        `${API_BASE_URL}/documents/${editingDoc.id}`,
+      await api.put(`/documents/${editingDoc.id}`,
         { document_name: values.document_name, document_type: type },
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -512,7 +588,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const handleAcknowledgeDocument = async (docId, currentStatus) => {
     try {
-      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+      await api.put(`/documents/${docId}/acknowledge`, null, {
         params: { is_acknowledged: !currentStatus }
       });
       message.success('Document acknowledged successfully');
@@ -535,7 +611,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const handleDeleteOperation = async (opId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/operations/${opId}`);
+      await api.delete(`/operations/${opId}`);
       message.success("Operation deleted successfully");
       fetchDocuments();
     } catch (e) {
@@ -1049,21 +1125,35 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       {/* ── Preview Modal ──────────────────────────────────────────────── */}
       {previewDoc && (
         <Modal
-          title={previewDoc.document_name || "Document Preview"}
-          open onCancel={() => setPreviewDoc(null)}
+          title={getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name || "Document Preview"}
+          open onCancel={closePreview}
           width="95%" style={{ maxWidth: 1000, top: 20 }}
-          footer={null} destroyOnHidden
+          footer={[
+            <Button key="dl" icon={<DownloadOutlined />} onClick={previewDownload}>Download</Button>,
+            <Button key="cl" type="primary" onClick={closePreview}>Close</Button>
+          ]}
+          destroyOnHidden
           styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}
         >
-          {getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'image' ? (
+          {previewLoading ? (
+            <div className="flex items-center justify-center h-full"><Spin size="large" /></div>
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'image' ? (
             <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-              <img src={previewDoc.document_url} alt={getDocumentDisplayName(previewDoc)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              {previewBlobUrl ? (
+                <img src={previewBlobUrl} alt={getDocumentDisplayName(previewDoc.doc)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              ) : (
+                <Empty description="Preview unavailable" />
+              )}
             </div>
-          ) : getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'pdf' ? (
-            <iframe src={`${previewDoc.document_url}#toolbar=0`} title={getDocumentDisplayName(previewDoc)} width="100%" height="100%" style={{ border: 'none' }} />
-          ) : getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === '3d' ? (
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'pdf' ? (
+            previewBlobUrl ? (
+              <iframe src={`${previewBlobUrl}#toolbar=0`} title={getDocumentDisplayName(previewDoc.doc)} width="100%" height="100%" style={{ border: 'none' }} />
+            ) : (
+              <div className="flex items-center justify-center h-full"><Empty description="Preview unavailable" /></div>
+            )
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === '3d' ? (
             <div className="w-full h-full">
-              <ModelViewer3D documentId={previewDoc.id} height={500} showControls={true} />
+              <ModelViewer3D documentId={previewDoc.doc.id} height={500} showControls={true} />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
@@ -1137,7 +1227,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                 <FileTextOutlined /> Operation Documents:
               </p>
-              <OperationDocumentsList operationId={viewOperation.id} onPreview={(doc) => setPreviewDoc(doc)} />
+              <OperationDocumentsList operationId={viewOperation.id} onPreview={(doc) => setPreviewDoc({ doc, source: 'operation' })} />
             </div>
           </div>
         )}

@@ -3,8 +3,7 @@ import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, Del
 import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Form, Input } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import DocumentsPanel from "./DocumentsPanel";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 
@@ -116,7 +115,7 @@ const ProductDetails = ({ selectedItem }) => {
         const controller = new AbortController();
         (async () => {
           try {
-            const res = await axios.get(`${API_BASE_URL}/documents/part/${partId}/extracted-data`, { signal: controller.signal });
+            const res = await api.get(`/documents/part/${partId}/extracted-data`, { signal: controller.signal });
             setExtractedMaterials(buildRows(res.data || []));
           } catch {
             setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
@@ -219,8 +218,7 @@ const ProductDetails = ({ selectedItem }) => {
       onOk: async () => {
         try {
           const uid = getCurrentUserId();
-          await axios.put(
-            `${API_BASE_URL}/parts/${item.id}`,
+          await api.put(`/parts/${item.id}`,
             { raw_material_id: null, user_id: uid },
             { headers: { "Content-Type": "application/json" } }
           );
@@ -260,8 +258,7 @@ const ProductDetails = ({ selectedItem }) => {
         note: editingRecord.note,
       };
 
-      await axios.put(
-        `${API_BASE_URL}/documents/extracted-data/${editingRecord.id}`,
+      await api.put(`/documents/extracted-data/${editingRecord.id}`,
         payload,
         { headers: { "Content-Type": "application/json" } }
       );

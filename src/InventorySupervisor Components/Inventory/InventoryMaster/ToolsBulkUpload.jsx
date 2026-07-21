@@ -3,6 +3,7 @@ import { Modal, Upload, Table, Button, message, Space, Input, Spin, Alert, Divid
 import { UploadOutlined, CloseOutlined, SaveOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { authFetch } from '../../../api/client.js';
 
 const { Dragger } = Upload;
 
@@ -29,7 +30,7 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
     setCustomColumnsLoading(true);
     try {
       // Fetch all custom columns
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`);
       if (!response.ok) {
         setCustomColumns([]);
         return;
@@ -39,7 +40,7 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
       const allColumns = responseData.data || [];
 
       // Get category and sub-category IDs from tree
-      const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (!treeResponse.ok) {
         setCustomColumns([]);
         return;
@@ -323,7 +324,7 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
       if (selectedSubCategory) params.append('sub_category', selectedSubCategory);
       if (params.toString()) url += `?${params.toString()}`;
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: 'POST',
         body: formData,
       });

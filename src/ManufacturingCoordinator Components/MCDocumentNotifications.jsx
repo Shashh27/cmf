@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { BellOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, FileTextOutlined, ClockCircleOutlined, FilterOutlined, SearchOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Badge, Button, Modal, Input, Empty, Spin, Tag, Typography, Tooltip, message, Table, Space, Select, Card } from "antd";
+import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
 const MCDocumentNotifications = ({ currentUserId, orderId }) => {
+  const { user: authUser } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [filteredNotifications, setFilteredNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -22,17 +23,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
   const [partFilter, setPartFilter] = useState(null);
   const [searchText, setSearchText] = useState('');
 
-  const getCurrentUserId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const u = JSON.parse(stored);
-      if (u?.id == null) return null;
-      return u.id;
-    } catch {
-      return null;
-    }
-  };
+  const getCurrentUserId = () => authUser?.id ?? null;
 
   const fetchNotifications = async () => {
     const userId = currentUserId || getCurrentUserId();
@@ -42,7 +33,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
     try {
       const params = { pending_only: false };
       if (orderId) params.order_id = orderId;
-      const response = await axios.get(`${API_BASE_URL}/mc-notifications/${userId}`, { params });
+      const response = await api.get(`/mc-notifications/${userId}`, { params });
       setNotifications(response.data || []);
       setFilteredNotifications(response.data || []);
     } catch (error) {
@@ -101,7 +92,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
     if (!selectedNotification) return;
 
     try {
-      await axios.put(`${API_BASE_URL}/mc-notifications/${selectedNotification.id}/acknowledge`, {
+      await api.put(`/mc-notifications/${selectedNotification.id}/acknowledge`, {
         remarks: ackRemarks
       });
       message.success("Document acknowledged successfully");
@@ -119,7 +110,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
     if (!selectedNotification) return;
 
     try {
-      await axios.put(`${API_BASE_URL}/mc-notifications/${selectedNotification.id}/reject`, {
+      await api.put(`/mc-notifications/${selectedNotification.id}/reject`, {
         remarks: rejectRemarks
       });
       message.success("Document rejected successfully");
@@ -369,13 +360,13 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
           <div style={{ textAlign: 'center' }}>
             {getPreviewType(previewDoc) === 'pdf' ? (
               <iframe
-                src={`${API_BASE_URL}/documents/${previewDoc.id}/preview`}
+                src={`/documents/${previewDoc.id}/preview`}
                 style={{ width: '100%', height: '700px', border: 'none' }}
                 title="PDF Preview"
               />
             ) : getPreviewType(previewDoc) === 'image' ? (
               <img
-                src={`${API_BASE_URL}/documents/${previewDoc.id}/preview`}
+                src={`/documents/${previewDoc.id}/preview`}
                 alt={previewDoc.document_name}
                 style={{ maxWidth: '100%', maxHeight: '700px' }}
               />
@@ -387,7 +378,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
                   type="primary"
                   onClick={() => {
                     const a = document.createElement('a');
-                    a.href = `${API_BASE_URL}/documents/${previewDoc.id}/download`;
+                    a.href = `/documents/${previewDoc.id}/download`;
                     a.setAttribute('download', previewDoc.document_name);
                     document.body.appendChild(a);
                     a.click();

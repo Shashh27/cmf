@@ -1,31 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 
-import axios from "axios";
-
-import { API_BASE_URL } from "../../Config/auth";
-
-import { 
-
-  Card, Button, Select, message, Spin, 
-
+import {
+  Card, Button, Select, message, Spin,
   Modal, InputNumber, Tag, Typography, Space,
-
   Empty, Alert, App, Input, Tooltip
-
 } from "antd";
+import { api } from '../../api/client.js';
 
 import {
-
   ShoppingCartOutlined,
-
   CheckCircleOutlined,
-
   DeleteOutlined,
-
   SafetyCertificateOutlined,
-
   FileWordOutlined
-
 } from "@ant-design/icons";
 
 import OrderMaterialsPdfDownload from "../../DownloadReports/OrderMaterialsPdfDownload";
@@ -213,11 +200,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       const uid = getCurrentUserId();
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
-
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-
-      });
+      const response = await api.get(`/rawmaterials/order-parts-raw-material-linked/`);
 
       
 
@@ -418,9 +401,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         // Update all items in the group
 
-        await axios.put(
+        await api.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
+          `/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
 
           updateData,
 
@@ -436,9 +419,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         // Update single record
 
-        await axios.put(
+        await api.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
+          `/rawmaterials/order-parts-raw-material-linked/${stockId}`,
 
           updateData,
 
@@ -500,7 +483,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         try {
 
-          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`);
+          await api.delete(`/rawmaterials/order-parts-raw-material-linked/${record.id}`);
 
           await fetchLinkedMaterials();
 
@@ -630,9 +613,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         // Update all items in the group
 
-        await axios.put(
+        await api.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
+          `/rawmaterials/order-parts-raw-material-linked/group/${encodeURIComponent(trimmedGroupId)}`,
 
           {
 
@@ -648,9 +631,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         // Update single record
 
-        await axios.put(
+        await api.put(
 
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${vendorSelectRecord.id}`,
+          `/rawmaterials/order-parts-raw-material-linked/${vendorSelectRecord.id}`,
 
           {
 
@@ -690,11 +673,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       const uid = getCurrentUserId();
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
-
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-
-      });
+      const response = await api.get(`/rawmaterials/order-parts-raw-material-linked/`);
 
       const count = response.data.filter(item => item.merge_group_id === groupId).length;
 
@@ -766,7 +745,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      const response = await api.get(`/rawmaterials/vendors`);
 
       const vendorsData = response.data || [];
 
@@ -818,9 +797,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
           
 
-          await axios.post(
+          await api.post(
 
-            `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group`,
+            `/rawmaterials/order-parts-raw-material-linked/group`,
 
             { stock_ids: selectedRowKeys }
 
@@ -878,9 +857,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         try {
 
-          await axios.post(
+          await api.post(
 
-            `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/ungroup`,
+            `/rawmaterials/order-parts-raw-material-linked/ungroup`,
 
             { stock_ids: selectedRowKeys }
 

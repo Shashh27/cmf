@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api, authFetch } from '../../api/client.js';
 import {
   Modal, Table, Button, Space, App, Input, Tag, Spin, Badge, Tooltip,
   Tree, Typography
@@ -8,7 +9,6 @@ import {
   BlockOutlined, FileTextOutlined, CheckOutlined, BuildOutlined,
   ExperimentOutlined, InboxOutlined
 } from '@ant-design/icons';
-import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
 
 const { Search } = Input;
@@ -105,7 +105,7 @@ const OperationToolsSelector = ({
   const fetchTree = async () => {
     setTreeLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const res = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTree(data);
@@ -121,7 +121,7 @@ const OperationToolsSelector = ({
     setTools([]);
     setFilteredData([]);
     try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/?category=${encodeURIComponent(category)}`);
+      const res = await authFetch(`${API_BASE_URL}/tools-list/?category=${encodeURIComponent(category)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const sorted = Array.isArray(data) ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
@@ -140,7 +140,7 @@ const OperationToolsSelector = ({
     setFilteredData([]);
     try {
       const url = `${API_BASE_URL}/tools-list/category/${encodeURIComponent(category)}/sub/${encodeURIComponent(sub_category)}`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const sorted = Array.isArray(data) ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
@@ -191,8 +191,7 @@ const OperationToolsSelector = ({
         return;
       }
 
-      await axios.post(
-        `${API_BASE_URL}/tools/bulk-links`,
+      await api.post(`/tools/bulk-links`,
         newLinks,
         {
           headers: { 'Content-Type': 'application/json' },

@@ -1,20 +1,20 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Layout, Button, Select, DatePicker, Tooltip, message, Modal, Tabs } from 'antd';
-import { motion, AnimatePresence } from 'framer-motion';
-import ActualScheduling from './ActualScheduling.jsx';
-import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
-import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
 import {
   CONTROL_BAR_MOTION,
   LEGEND_CHIP_MOTION,
   LEGEND_MOTION,
   getWindowAnimation,
 } from './schedulingTimelineMotion.js';
+import { motion, AnimatePresence } from 'framer-motion';
+import ActualScheduling from './ActualScheduling.jsx';
+import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
+import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import { authFetch } from '../../api/client.js';
 import useLenis from '../../hooks/useLenis.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
-import { API_BASE_URL } from '../../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig.js';
 
 const { Content } = Layout;
@@ -176,7 +176,7 @@ const MachineScheduling = () => {
   useEffect(() => {
     const fetchMachines = async () => {
       try {
-        const mRes = await fetch(`${API_BASE_URL}/machines/`);
+        const mRes = await authFetch(`/api/v1/machines/`);
         const machines = mRes.ok ? await mRes.json() : [];
         const formatted = (machines || []).map(m => {
           const modelName = m.make && m.model
@@ -189,10 +189,7 @@ const MachineScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-        const uid = storedUser?.id;
-        const qs = uid != null ? `?project_coordinator_id=${uid}` : '';
-        const res = await fetch(`${API_BASE_URL}/orders/${qs}`);
+        const res = await authFetch(`/api/v1/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -243,7 +240,7 @@ const MachineScheduling = () => {
     }
 
     if (so) {
-      fetch(`${API_BASE_URL}/orders/sale-order/${so}/parts`)
+      authFetch(`/api/v1/orders/sale-order/${so}/parts`)
         .then(r => r.ok ? r.json() : [])
         .then(d => {
           const list = Array.isArray(d) ? d : (d.parts || []);

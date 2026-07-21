@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Form, Input, InputNumber, Button, Modal, message, Row, Col, Select, DatePicker } from 'antd';
 import { API_BASE_URL } from '../../../Config/auth.js';
 import dayjs from 'dayjs';
+import { authFetch } from '../../../api/client.js';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -73,7 +74,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool, selectedCategory, 
           // Need to resolve category_id and sub_category_id from names
           const fetchIdsAndColumns = async () => {
             try {
-              const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+              const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
               if (treeResponse.ok) {
                 const tree = await treeResponse.json();
                 let categoryId = null;
@@ -142,7 +143,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool, selectedCategory, 
     setCustomColumnsLoading(true);
     try {
       // Fetch all custom columns
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`);
       if (!response.ok) {
         setCustomColumns([]);
         return;
@@ -309,7 +310,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool, selectedCategory, 
         }
         
         // Update existing tool
-        const response = await fetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
+        const response = await authFetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
           method: 'PUT',
           headers: { 
             'Content-Type': 'application/json',
@@ -325,7 +326,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool, selectedCategory, 
         message.success('Tool updated successfully');
       } else {
         // Create new tool
-        const response = await fetch(`${API_BASE_URL}/tools-list/`, {
+        const response = await authFetch(`${API_BASE_URL}/tools-list/`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Tabs, Typography, App as AntApp } from "antd";
-import { 
+import {
   ExperimentOutlined, 
   LinkOutlined, 
   SafetyCertificateOutlined,
@@ -9,9 +8,8 @@ import {
   HistoryOutlined,
   DatabaseOutlined
 } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
-
+import { Tabs, Typography, App as AntApp } from "antd";
+import { api } from '../api/client.js';
 // Import split components
 import RawMaterialsTab from "./RawMaterialComponents/RawMaterialsTab";
 import RawMaterialInventoryTab from "./RawMaterialComponents/RawMaterialInventoryTab";
@@ -42,11 +40,7 @@ const RawMaterialsContent = () => {
 
   const fetchSharedRawMaterials = async () => {
     try {
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const uid = storedUser?.id;
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, {
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-      });
+      const response = await api.get(`/rawmaterials/inventory-view`);
       const data = response.data;
       setSharedRawMaterials(Array.isArray(data) ? data : []);
     } catch (error) {

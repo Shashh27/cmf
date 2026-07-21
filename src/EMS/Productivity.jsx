@@ -5,6 +5,7 @@ import ReactECharts from 'echarts-for-react';
 import moment from 'moment';
 import { API_BASE_URL } from '../Config/auth';
 import Report from './Reportnew';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -20,7 +21,7 @@ const Productivity = ({ onBack }) => {
   // Fetch live shiftwise energy data
   const fetchLiveShiftwiseData = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/energy-monitoring/shiftwise-energy/live`);
+      const response = await authFetch(`${API_BASE_URL}/energy-monitoring/shiftwise-energy/live`);
       const data = await response.json();
       
       if (Array.isArray(data)) {
@@ -46,7 +47,7 @@ const Productivity = ({ onBack }) => {
   // Fetch historical shiftwise energy data
   const fetchHistoricalShiftwiseData = async (fromDate, toDate) => {
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/energy-monitoring/shiftwise-energy/history?start_date=${fromDate}&end_date=${toDate}`
       );
       const data = await response.json();

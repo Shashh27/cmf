@@ -1,16 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { App, Alert, Button, Modal, Space, Spin, Tabs, Tag } from 'antd';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
-import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
-import InspectorHeader from './InspectorComponents/InspectorHeader';
-import InspectorSidebar from './InspectorComponents/InspectorSidebar';
-import PdfInspectionPlanCanvas, { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP } from './InspectorComponents/PdfInspectionPlanCanvas';
-import InteractiveDrawing from './InspectorComponents/InteractiveDrawing';
-import InspectorBOCTable from './InspectorComponents/InspectorBOCTable';
-import InspectorNotesTable from './InspectorComponents/InspectorNotesTable';
-import StampCharacteristicModal from './InspectorComponents/StampCharacteristicModal';
-import { parseNotesFromExtractedText } from './InspectorComponents/noteTextParser';
 
 function toRectFromQuad(quad) {
   if (!Array.isArray(quad) || quad.length < 2) return null;
@@ -46,12 +35,23 @@ import {
   pdfRectToQuad,
   withBalloonNumbers,
 } from './InspectorComponents/bocMappers';
-import { DEFAULT_MEASURED_INSTRUMENT } from './InspectorComponents/inspectorConstants';
-import { exportBalloonedPdf } from './InspectorComponents/exportBalloonedPdf';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   isBalloonDocumentName,
   resolveBaseDrawingDocument,
 } from './InspectorComponents/drawingDocumentUtils';
+import axios from 'axios';
+import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
+import InspectorHeader from './InspectorComponents/InspectorHeader';
+import InspectorSidebar from './InspectorComponents/InspectorSidebar';
+import PdfInspectionPlanCanvas, { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP } from './InspectorComponents/PdfInspectionPlanCanvas';
+import InteractiveDrawing from './InspectorComponents/InteractiveDrawing';
+import InspectorBOCTable from './InspectorComponents/InspectorBOCTable';
+import InspectorNotesTable from './InspectorComponents/InspectorNotesTable';
+import StampCharacteristicModal from './InspectorComponents/StampCharacteristicModal';
+import { parseNotesFromExtractedText } from './InspectorComponents/noteTextParser';
+import { DEFAULT_MEASURED_INSTRUMENT } from './InspectorComponents/inspectorConstants';
+import { exportBalloonedPdf } from './InspectorComponents/exportBalloonedPdf';
 
 const QMSInspector = () => {
   const { message } = App.useApp();

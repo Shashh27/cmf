@@ -1,35 +1,21 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  DataTable,
+  FollowUpSuggestions,
+} from './ChatbotResponse';
 import { Button, Input, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import { Send, Trash2, X, Maximize2, Minimize2, Lightbulb, Square } from 'lucide-react';
 import { CHATBOT_CONFIG } from '../Config/chatbot';
-import {
-  DataTable,
-  FollowUpSuggestions,
-} from './ChatbotResponse';
+import { authFetch, getAccessToken } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { getAnswerSummary } from './chatbotUtils';
 import './chatbot.css';
 
 const { TextArea } = Input;
 const CHATBOT_ICON = '/chatbot.png';
-
-function getLoggedInUser() {
-  try {
-    const raw = localStorage.getItem('user');
-    if (!raw) return {};
-    const u = JSON.parse(raw);
-    return {
-      user_id: u.id ?? null,
-      user_name: u.user_name ?? u.username ?? null,
-      role: u.role ?? null,
-      center: u.center ?? null,
-    };
-  } catch {
-    return {};
-  }
-}
 
 const useChatStore = create((set) => ({
   messages: [],
@@ -187,6 +173,7 @@ export default function ChatPanel() {
   const store = useChatStore();
   const { messages, loading, sessionId } = store;
   const { isMobile, isTablet } = useViewport();
+  const { accessToken, isAuthenticated, bootstrapping } = useAuth();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState('');
@@ -227,15 +214,15 @@ export default function ChatPanel() {
   }, []);
 
   const loadSuggestions = useCallback(async () => {
+    // Wait for JWT — endpoint requires Bearer auth (no query-param identity).
+    if (bootstrapping || !isAuthenticated || !(accessToken || getAccessToken())) {
+      setPromptsLoading(false);
+      return;
+    }
     setPromptsLoading(true);
     try {
-      const user = getLoggedInUser();
-      const params = new URLSearchParams();
-      Object.entries(user).forEach(([key, value]) => {
-        if (value != null) params.set(key, String(value));
-      });
-      const res = await fetch(
-        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}?${params}`,
+      const res = await authFetch(
+        `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}`,
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -247,7 +234,7 @@ export default function ChatPanel() {
     finally {
       setPromptsLoading(false);
     }
-  }, []);
+  }, [accessToken, isAuthenticated, bootstrapping]);
 
   useEffect(() => {
     loadSuggestions();
@@ -342,7 +329,7 @@ export default function ChatPanel() {
     const timer = setTimeout(() => ctrl.abort(), 12000);
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.CHAT_ENDPOINT}`,
         {
           method: 'POST',
@@ -350,7 +337,7 @@ export default function ChatPanel() {
           body: JSON.stringify({
             question: q,
             session_id: sessionId,
-            ...getLoggedInUser(),
+            
           }),
           signal: ctrl.signal,
         },
@@ -388,7 +375,7 @@ export default function ChatPanel() {
   const handleClear = useCallback(async () => {
     abortRef.current?.abort();
     try {
-      await fetch(
+      await authFetch(
         `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.HISTORY_ENDPOINT}/${sessionId}`,
         { method: 'DELETE' },
       );

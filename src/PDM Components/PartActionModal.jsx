@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { PlusOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
-import axios from "axios";
 import { API_BASE_URL } from '../Config/auth';
 import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
+import { api } from '../api/client.js';
 
 const { TextArea } = Input;
 
@@ -99,7 +99,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const fetchExistingOperations = async () => {
     setOpsLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/operations/`);
+      const res = await api.get(`/operations/`);
       const ops = Array.isArray(res.data) ? res.data : [];
       const uniqueNamesMap = new Map();
       ops.forEach(op => {
@@ -226,8 +226,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
       });
 
       try {
-        const opRes = await axios.post(
-          `${API_BASE_URL}/operations/bulk`,
+        const opRes = await api.post(`/operations/bulk`,
           opPayloads,
           { headers: { 'Content-Type': 'application/json' } }
         );
@@ -246,7 +245,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
             }
           }
           if (links.length) {
-            await axios.post(`${API_BASE_URL}/tools/bulk-links`, links, { headers: { 'Content-Type': 'application/json' } });
+            await api.post(`/tools/bulk-links`, links, { headers: { 'Content-Type': 'application/json' } });
           }
         } catch (e) { console.error(e); }
 
@@ -273,7 +272,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
           }
 
           if (fd.getAll('files')?.length) {
-            await axios.post(`${API_BASE_URL}/operation-documents/upload-bulk-multi/`, fd);
+            await api.post(`/operation-documents/upload-bulk-multi/`, fd);
           }
         } catch (e) { console.error(e); }
       } catch (e) {
@@ -311,7 +310,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     // Submit bulk part documents (if any)
     if (actionType === 'document' && bulkDocFormData) {
       try {
-        const resp = await axios.post(`${API_BASE_URL}/documents/bulk`, bulkDocFormData);
+        const resp = await api.post(`/documents/bulk`, bulkDocFormData);
         const created = Array.isArray(resp.data) ? resp.data : [];
         created.forEach(d => results.push(d));
       } catch (e) {

@@ -9,8 +9,20 @@ import React, {
 } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth.js';
+import {
+  api,
+  setAccessToken,
+  setRefreshToken,
+  setSessionUser,
+  getAccessToken,
+  getRefreshToken,
+  readStoredUser,
+  clearStoredSession,
+  restoreSessionFromStorage,
+  setUnauthorizedHandler,
+} from '../api/client.js';
 
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 const AuthContext = createContext(null);
 
@@ -21,27 +33,35 @@ function normalizeRole(role) {
     .trim();
 }
 
-function readStoredUser() {
-  try {
-    const raw = localStorage.getItem('user');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => readStoredUser());
+  const [accessToken, setAccessTokenState] = useState(null);
+  const [bootstrapping, setBootstrapping] = useState(() => Boolean(getRefreshToken()));
   const idleTimerRef = useRef(null);
+  const userRef = useRef(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const clearSession = useCallback(() => {
     setUser(null);
+    setAccessTokenState(null);
+    clearStoredSession();
     localStorage.removeItem('isAuthenticated');
     localStorage.removeItem('user');
   }, []);
 
   const logout = useCallback(async () => {
     const machine = localStorage.getItem('selectedMachine');
+    const rt = getRefreshToken();
+    try {
+      if (rt) {
+        await axios.post(`${API_BASE_URL}/auth/logout`, { refresh_token: rt });
+      }
+    } catch {
+      // still clear local session
+    }
     clearSession();
     localStorage.clear();
     if (machine) {
@@ -49,25 +69,85 @@ export function AuthProvider({ children }) {
     }
   }, [clearSession]);
 
-  const login = useCallback(async (user_name, password) => {
-    const { data } = await axios.post(`${API_BASE_URL}/login/`, {
-      user_name,
-      password,
-    });
-    const profile = data?.user || data;
-    if (!profile || !profile.id) {
-      throw new Error('Login response missing user');
-    }
-    // Write storage FIRST so ProtectedRoute can read it even before React re-renders
-    localStorage.setItem('isAuthenticated', 'true');
-    localStorage.setItem('user', JSON.stringify(profile));
+  const logoutToLogin = useCallback(
+    async (navigate) => {
+      navigate('/login', { replace: true, state: null });
+      await logout();
+    },
+    [logout]
+  );
+
+  const applySession = useCallback((token, refresh, profile) => {
+    setAccessToken(token);
+    setRefreshToken(refresh);
+    setSessionUser(profile);
+    setAccessTokenState(token);
     setUser(profile);
-    return { user: profile };
+    // Back-compat: many components still read the current user from localStorage.
+    try {
+      if (profile) {
+        localStorage.setItem('user', JSON.stringify(profile));
+        localStorage.setItem('isAuthenticated', 'true');
+      }
+    } catch {
+      // ignore storage errors
+    }
   }, []);
+
+  const login = useCallback(
+    async (user_name, password) => {
+      const { data } = await axios.post(`${API_BASE_URL}/login/`, {
+        user_name,
+        password,
+      });
+      const profile = data?.user;
+      const token = data?.access_token;
+      const refresh = data?.refresh_token;
+      if (!profile?.id || !token || !refresh) {
+        throw new Error('Login response missing token or user');
+      }
+      applySession(token, refresh, profile);
+      return { user: profile, access_token: token };
+    },
+    [applySession]
+  );
+
+  useEffect(() => {
+    let active = true;
+    restoreSessionFromStorage()
+      .then((result) => {
+        if (!active) return;
+        if (result?.access_token && result?.user) {
+          applySession(
+            result.access_token,
+            result.refresh_token || getRefreshToken(),
+            result.user
+          );
+        } else if (getRefreshToken()) {
+          clearSession();
+        }
+      })
+      .finally(() => {
+        if (active) setBootstrapping(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [applySession, clearSession]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearSession();
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [clearSession]);
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (!user && !readStoredUser()) return;
+    if (!userRef.current && !getAccessToken()) return;
     idleTimerRef.current = setTimeout(() => {
       logout().finally(() => {
         if (window.location.pathname !== '/login') {
@@ -75,10 +155,10 @@ export function AuthProvider({ children }) {
         }
       });
     }, IDLE_TIMEOUT_MS);
-  }, [logout, user]);
+  }, [logout]);
 
   useEffect(() => {
-    if (!user && !readStoredUser()) return undefined;
+    if (!user && !accessToken) return undefined;
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'];
     events.forEach((e) => window.addEventListener(e, resetIdleTimer));
     resetIdleTimer();
@@ -86,21 +166,22 @@ export function AuthProvider({ children }) {
       events.forEach((e) => window.removeEventListener(e, resetIdleTimer));
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [user, resetIdleTimer]);
-
-  const effectiveUser = user || readStoredUser();
+  }, [user, accessToken, resetIdleTimer]);
 
   const value = useMemo(
     () => ({
-      user: effectiveUser,
-      isAuthenticated: Boolean(effectiveUser),
-      bootstrapping: false,
+      user,
+      accessToken,
+      isAuthenticated: Boolean(accessToken && user),
+      bootstrapping,
       login,
       logout,
+      logoutToLogin,
       clearSession,
       normalizeRole,
+      api,
     }),
-    [effectiveUser, login, logout, clearSession]
+    [user, accessToken, bootstrapping, login, logout, logoutToLogin, clearSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

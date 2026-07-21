@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DatePicker, Select, Button, Card, Space, Tag, Typography, message, Empty, Spin } from 'antd';
 import { HistoryOutlined, FilterOutlined, ReloadOutlined, StockOutlined, LinkOutlined, ShoppingOutlined } from '@ant-design/icons';
-import axios from 'axios';
-import { API_BASE_URL } from '../../Config/auth';
 import dayjs from 'dayjs';
 import RawMaterialHistoryDownload from '../../DownloadReports/RawMaterialHistoryDownload';
+import { api } from '../../api/client.js';
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -146,7 +145,7 @@ const RawMaterialHistoryTab = () => {
       
       // Note: No user filtering - both Admin and MC see all history data
       
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/history`, { params });
+      const response = await api.get(`/rawmaterials/history`, { params });
       setAllHistory(response.data.history);
       // Apply current filters to the new data
       applyFilters(response.data.history);

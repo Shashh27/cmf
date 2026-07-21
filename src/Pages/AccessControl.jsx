@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Input, Typography, Tag, message, Space, Modal } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { Table, Button, Input, Typography, Tag, message, Space, Modal, Form } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined, KeyOutlined } from '@ant-design/icons';
 import LockAnimation from '../assets/Unlocking.json';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { API_BASE_URL } from '../Config/auth.js';
 import UserModal, { roleLabels } from '../Access Control Components/UserModal';
+import { authFetch } from '../api/client.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -19,6 +20,10 @@ const AccessControl = () => {
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [editingUser, setEditingUser] = useState(null);
   const [users, setUsers] = useState([]);
+  const [resetPasswordModalVisible, setResetPasswordModalVisible] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState(null);
+  const [resetToken, setResetToken] = useState('');
+  const [resetForm] = Form.useForm();
   const lockRef = React.useRef(null);
 
   useEffect(() => {
@@ -48,7 +53,7 @@ const AccessControl = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/access-users/`);
+      const response = await authFetch(`${API_BASE_URL}/access-users/`);
       if (response.ok) {
         let data = await response.json();
         data = Array.isArray(data) ? data.slice().sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
@@ -85,7 +90,7 @@ const AccessControl = () => {
       title: 'Are you sure you want to delete this user?',
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}/access-users/${id}/`, {
+          const response = await authFetch(`${API_BASE_URL}/access-users/${id}/`, {
             method: 'DELETE',
           });
           if (response.ok) {
@@ -104,6 +109,53 @@ const AccessControl = () => {
   const handleEdit = (record) => {
     setEditingUser(record);
     setIsModalVisible(true);
+  };
+
+  const handleRequestPasswordReset = async (userId) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/access-users/${userId}/request-password-reset`, {
+        method: 'POST',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setResetToken(data.token);
+        setResetPasswordUser(users.find(u => u.id === userId));
+        setResetPasswordModalVisible(true);
+        message.success('Password reset token generated');
+      } else {
+        message.error('Failed to generate reset token');
+      }
+    } catch (error) {
+      console.error('Error requesting password reset:', error);
+      message.error('Error requesting password reset');
+    }
+  };
+
+  const handleResetPassword = async (values) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/access-users/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: resetToken,
+          new_password: values.newPassword,
+        }),
+      });
+      if (response.ok) {
+        message.success('Password reset successfully');
+        setResetPasswordModalVisible(false);
+        resetForm.resetFields();
+        setResetToken('');
+        setResetPasswordUser(null);
+      } else {
+        message.error('Failed to reset password');
+      }
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      message.error('Error resetting password');
+    }
   };
 
   const filteredUsers = users.filter(user =>
@@ -202,6 +254,7 @@ const AccessControl = () => {
       render: (_, record) => (
         <Space size="middle">
           <Button type="text" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
+          <Button type="text" icon={<KeyOutlined />} onClick={() => handleRequestPasswordReset(record.id)} />
           <Button type="text" icon={<DeleteOutlined />} danger onClick={() => handleDelete(record.id)} />
         </Space>
       ),
@@ -299,6 +352,59 @@ const AccessControl = () => {
         editingUser={editingUser}
         existingUsers={users}
       />
+
+      <Modal
+        title="Reset Password"
+        open={resetPasswordModalVisible}
+        onCancel={() => {
+          setResetPasswordModalVisible(false);
+          resetForm.resetFields();
+          setResetToken('');
+          setResetPasswordUser(null);
+        }}
+        footer={null}
+      >
+        {resetPasswordUser && (
+          <div>
+            <p>Resetting password for: <strong>{resetPasswordUser.username}</strong></p>
+            <Form form={resetForm} onFinish={handleResetPassword} layout="vertical">
+              <Form.Item
+                label="New Password"
+                name="newPassword"
+                rules={[
+                  { required: true, message: 'Please enter new password' },
+                  { min: 6, message: 'Password must be at least 6 characters' },
+                ]}
+              >
+                <Input.Password placeholder="Enter new password" />
+              </Form.Item>
+              <Form.Item
+                label="Confirm Password"
+                name="confirmPassword"
+                dependencies={['newPassword']}
+                rules={[
+                  { required: true, message: 'Please confirm password' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('newPassword') === value) {
+                        return Promise.resolve();
+                      }
+                      return Promise.reject(new Error('Passwords do not match'));
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password placeholder="Confirm new password" />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" block>
+                  Reset Password
+                </Button>
+              </Form.Item>
+            </Form>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

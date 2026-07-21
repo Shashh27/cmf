@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Spin, Empty, Popconfirm, message } from "antd";
+import { api } from '../../api/client.js';
 
 const thStyle = {
   border: "2px solid #d1d5db",
@@ -43,7 +42,7 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData }) => {
 
   const handleDeleteUnit = async (unitId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/rawmaterials/stock/units/${unitId}`);
+      await api.delete(`/rawmaterials/stock/units/${unitId}`);
       message.success("Unit deleted successfully");
     } catch (err) {
       message.error(err.response?.data?.detail || "Failed to delete unit");

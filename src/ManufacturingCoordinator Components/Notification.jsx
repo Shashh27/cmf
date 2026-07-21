@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
 import dayjs from 'dayjs';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 import OrderNotifications from './Notification Components/OrderNotifications';
@@ -45,20 +46,8 @@ const Notification = () => {
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
       
-      // Add role-based filtering based on user's role
       const user = getStoredUser();
-      let userRole = '';
-      if (user) {
-        userRole = (user.role || user.user_role || '').toLowerCase();
-        if (userRole.includes('manufacturing') || userRole === 'mc') {
-          if (user.id) params.set('mc_id', user.id);
-        } else if (userRole.includes('project') || userRole === 'pc') {
-          if (user.id) params.set('pc_id', user.id);
-        } else if (userRole.includes('admin')) {
-          if (user.id) params.set('admin_id', user.id);
-        }
-      }
-      
+      const userRole = String(user?.role || user?.user_role || '').toLowerCase();
       const qs = params.toString();
       const endpoints = [
         `${config.API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
@@ -68,7 +57,7 @@ const Notification = () => {
         `${config.API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
       ];
       const [orders, machines, tools, components, calibrations] = await Promise.all(
-        endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
+        endpoints.map((url) => authFetch(url).then((r) => (r.ok ? r.json() : [])))
       );
       
       const visibleOrders = filterOwnCreatedNotifications(orders, user);

@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Table, Empty, Typography, Button, Tag, Space, message, Modal, Select } from 'antd';
-import { 
+import {
   FolderOutlined, 
   FileOutlined, 
   EyeOutlined
 } from '@ant-design/icons';
+import { authFetch } from '../../api/client.js';
 import { API_BASE_URL } from "../../Config/auth";
 
 const { Title, Text } = Typography;
@@ -47,7 +48,7 @@ const OperatorDocumentContent = ({ selectedNode }) => {
         return;
       }
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch documents');
       }

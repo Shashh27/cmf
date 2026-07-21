@@ -2,9 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { PlusOutlined, DownloadOutlined, EyeOutlined, SyncOutlined, InboxOutlined, FilePdfOutlined, DeleteOutlined, UploadOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined, } from "@ant-design/icons";
 import { Badge, Button, Empty, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, Upload, message, } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -80,8 +79,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
     setLoading(true);
     try {
-      const res = await axios.get(
-        `${API_BASE_URL}/documents/assembly/${selectedItem.id}`
+      const res = await api.get(`/documents/assembly/${selectedItem.id}`
       );
       setDocuments(res.data || []);
     } catch (e) {
@@ -138,14 +136,31 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     setIsPreviewModalOpen(true);
   };
 
-  const handleDownload = (documentId) => {
-    const url = `${API_BASE_URL}/documents/${documentId}/download`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Download via the authenticated api client so the JWT is sent, then save the
+  // returned blob. A raw <a href> to the API would be sent without the token
+  // and get a 401.
+  const downloadBlobWithAuth = async (documentId, fileName) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+      const blobUrl = window.URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", fileName || `document_${documentId}`);
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    } catch (e) {
+      console.error("Error downloading document", e);
+      message.error("Failed to download document");
+    }
+  };
+
+  const handleDownload = (documentId, fileName) => {
+    downloadBlobWithAuth(documentId, fileName);
   };
 
   const is3DFile = (doc) => {
@@ -241,7 +256,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const handleAcknowledgeDocument = async (docId, currentStatus) => {
     try {
-      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+      await api.put(`/documents/${docId}/acknowledge`, null, {
         params: { is_acknowledged: !currentStatus }
       });
       message.success('Document acknowledged successfully');
@@ -353,7 +368,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
           formData.append("user_id", String(uid));
         }
 
-        await axios.post(`${API_BASE_URL}/documents/`, formData);
+        await api.post(`/documents/`, formData);
         successCount++;
       }
 
@@ -551,7 +566,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                 size="small"
                 type="text"
                 icon={<DownloadOutlined />}
-                onClick={() => handleDownload(currentDoc.id)}
+                onClick={() => handleDownload(currentDoc.id, currentDoc.document_name)}
                 className="hover:text-green-500 hover:bg-green-50"
               />
             </Tooltip>
@@ -890,12 +905,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
           <Button key="dl" icon={<DownloadOutlined />} onClick={() => {
             const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
             if (selectedDoc?.id) {
-              const a = document.createElement("a");
-              a.href = `${API_BASE_URL}/documents/${selectedDoc.id}/download`;
-              a.setAttribute("download", selectedDoc.document_name);
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
+              downloadBlobWithAuth(selectedDoc.id, selectedDoc.document_name);
             }
           }}>Download</Button>,
           <Button key="cl" type="primary" onClick={() => {

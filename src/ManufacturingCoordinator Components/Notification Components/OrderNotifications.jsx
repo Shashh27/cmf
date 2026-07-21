@@ -4,6 +4,7 @@ import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
 import dayjs from 'dayjs';
 import { filterOwnCreatedNotifications, getStoredUser } from '../../utils/notificationFilters';
+import { authFetch } from '../../api/client.js';
 
 const OrderNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -35,18 +36,11 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const uid = storedUser?.id;
-      const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
-      if (uid != null) {
-        if (role.includes('admin')) params.set('admin_id', uid);
-        else if (role.includes('manufacturing') || role === 'mc') params.set('mc_id', uid);
-        else if (role.includes('project') || role === 'pc') params.set('pc_id', uid);
-      }
+      
       
       const url = `${base}?${params.toString()}`;
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch notifications');
       }
@@ -84,7 +78,7 @@ const OrderNotifications = ({ dateRange, onCount }) => {
         normalizedRole = 'admin';
       }
 
-      const response = await fetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
+      const response = await authFetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Table, Tag, message, Button, Modal, Input, Tooltip } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
  
 const ToolIssues = () => {
   const [issues, setIssues] = useState([]);
@@ -32,7 +33,7 @@ const ToolIssues = () => {
       if (opId != null) {
         url = `${API_BASE_URL}/tool-issues/by-operator/${opId}`;
       }
-      const resp = await fetch(url);
+      const resp = await authFetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];

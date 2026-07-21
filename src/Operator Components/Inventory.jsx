@@ -6,6 +6,7 @@ import {
   BlockOutlined, FileTextOutlined, AppstoreOutlined, ExpandOutlined, CompressOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
+import { authFetch } from '../api/client.js';
 import { API_BASE_URL } from '../Config/auth';
 
 const { Option } = Select;
@@ -195,7 +196,7 @@ const Inventory = () => {
 
   const fetchPendingToolQuantities = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      const response = await authFetch(`${API_BASE_URL}/inventory-requests/`);
       if (!response.ok) return;
       const data = await response.json();
       const map = {};
@@ -220,7 +221,7 @@ const Inventory = () => {
     fetchingTree.current = true;
     setTreeLoading(true);
     try {
-      const res  = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const res  = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTree(data);
@@ -240,7 +241,7 @@ const Inventory = () => {
     setFilteredData([]);
     try {
       const url = `${API_BASE_URL}/tools-list/category/${encodeURIComponent(category)}/sub/${encodeURIComponent(sub_category)}`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const sorted = Array.isArray(data)
@@ -259,7 +260,7 @@ const Inventory = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/`);
+      const response = await authFetch(`${API_BASE_URL}/orders/`);
       if (response.ok) {
         const data = await response.json();
         setOrders(data);
@@ -271,7 +272,7 @@ const Inventory = () => {
 
   const fetchParts = async (saleOrderNumber) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`);
+      const response = await authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`);
       if (response.ok) {
         const data = await response.json();
         const partsList = Array.isArray(data) ? data : (data.parts || []);
@@ -285,7 +286,7 @@ const Inventory = () => {
 
   const fetchOperations = async (partId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/operations/part/${partId}`);
+      const response = await authFetch(`${API_BASE_URL}/operations/part/${partId}`);
       if (response.ok) {
         const data = await response.json();
         setOperations(Array.isArray(data) ? data : []);
@@ -298,7 +299,7 @@ const Inventory = () => {
 
   const fetchProjectIdFromSaleOrder = async (saleOrderNumber) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/`);
+      const response = await authFetch(`${API_BASE_URL}/orders/`);
       if (response.ok) {
         const data = await response.json();
         const order = data.find(o => o.sale_order_number === saleOrderNumber);
@@ -312,7 +313,7 @@ const Inventory = () => {
 
   const fetchPartIdFromPartNumber = async (partNumber) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/parts/`);
+      const response = await authFetch(`${API_BASE_URL}/parts/`);
       if (response.ok) {
         const data = await response.json();
         const part = data.find(p => p.part_number === partNumber);
@@ -419,7 +420,7 @@ const Inventory = () => {
         purpose_of_use: values.purpose_of_use || ""
       };
 
-      const response = await fetch(`${API_BASE_URL}/inventory-requests/`, {
+      const response = await authFetch(`${API_BASE_URL}/inventory-requests/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

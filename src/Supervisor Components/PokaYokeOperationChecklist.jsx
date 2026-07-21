@@ -3,6 +3,7 @@ import { Table, Button, Modal, Card, Tag, message, Typography, Space, Input, Sel
 import { CheckOutlined, CloseOutlined, EyeOutlined, SafetyCertificateOutlined, SearchOutlined, ReloadOutlined, CheckSquareOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -65,7 +66,7 @@ const PokaYokeOperationChecklist = () => {
   const fetchSubmissions = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/operation-checklists/submissions`);
+      const response = await authFetch(`${API_BASE_URL}/operation-checklists/submissions`);
       if (response.ok) {
         const data = await response.json();
         const sortedData = (data || []).sort((a, b) => {
@@ -119,7 +120,7 @@ const PokaYokeOperationChecklist = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/operation-checklists/submissions/${submission.id}/supervisor-action`, {
+      const response = await authFetch(`${API_BASE_URL}/operation-checklists/submissions/${submission.id}/supervisor-action`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

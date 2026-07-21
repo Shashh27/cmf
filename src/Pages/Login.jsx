@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Select, Typography, message } from 'antd';
-import { useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { UserOutlined, LockOutlined, DesktopOutlined, TeamOutlined,CheckCircleOutlined } from '@ant-design/icons';
 import logo from '../assets/cmtis.png';
 import loginBg from '../assets/bg.jpg';
 import { API_BASE_URL } from '../Config/auth.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { normalizeRoleKey, roleHomePath } from '../auth/roleHomes.js';
 
 
 const { Title, Text } = Typography;
@@ -16,7 +17,7 @@ const Login = () => {
   const [operatorStep, setOperatorStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState([]);
-  const location = useLocation();
+  const navigate = useNavigate();
   const { login } = useAuth();
 
   const [machineForm] = Form.useForm();
@@ -103,27 +104,9 @@ const Login = () => {
       }
 
       const data = await login(userName, values.password);
-      const toKey = (s) => {
-        const n = String(s || '').toLowerCase().replace(/_/g, ' ').trim();
-        if (n === 'admin') return 'admin';
-        if (n.includes('project coordinator') || n === 'coordinator' || n === 'pc') return 'project_coordinator';
-        if (n.includes('manufacturing coordinator') || n === 'mc') return 'manufacturing_coordinator';
-        if (n.includes('inventory supervisor')) return 'inventory_supervisor';
-        if (n.includes('supervisor')) return 'supervisor';
-        if (n.includes('operator')) return 'operator';
-        return n.replace(/\s+/g, '_');
-      };
-      const selected = toKey(role);
-      const actual = toKey(data.user?.role);
-      const homes = {
-        admin: '/admin/dashboard',
-        project_coordinator: '/project_coordinator/oms/orders',
-        manufacturing_coordinator: '/manufacturing_coordinator/dashboard',
-        inventory_supervisor: '/inventory_supervisor/inventory-management/inventory-master',
-        supervisor: '/supervisor/production_logs',
-        operator: '/operator/dashboard',
-      };
-      const home = homes[actual] || '/login';
+      const selected = normalizeRoleKey(role);
+      const actual = normalizeRoleKey(data.user?.role);
+      const home = roleHomePath(data.user?.role);
 
       if (selected !== actual) {
         message.warning(
@@ -133,15 +116,7 @@ const Login = () => {
         message.success('Login Successful');
       }
 
-      const fromState = location.state?.from;
-      const from = fromState ? fromState.pathname + fromState.search : null;
-      const rolePrefix = home.split('/').slice(0, 2).join('/') || '';
-      if (from && rolePrefix && from.startsWith(rolePrefix)) {
-        window.location.assign(from);
-        return;
-      }
-      // Full navigation so ProtectedRoute always sees localStorage user
-      window.location.assign(home);
+      navigate(home, { replace: true });
     } catch (error) {
       console.error('Login error:', error);
       message.error('invalid credential');

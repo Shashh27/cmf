@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { PlusOutlined, PartitionOutlined, ToolOutlined, EditOutlined, DeleteOutlined, DeleteRowOutlined, CaretDownOutlined, CaretRightOutlined, SearchOutlined, DownloadOutlined, AppstoreOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography, Dropdown } from "antd";
 import "./pdm-theme.css";
+import { api } from '../api/client.js';
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
@@ -235,7 +234,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
     try {
       // Use lightweight endpoint - no operations/documents/tools (much faster)
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
+      const response = await api.get(`/products/${productId}/hierarchical-lightweight`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
         const bomExport = flattenBOMForExportLightweight(data);
@@ -338,10 +337,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const downloadTemplate = async (templateType) => {
     try {
       const endpoint = templateType === 'parts'
-        ? `${API_BASE_URL}/parts/template/download`
-        : `${API_BASE_URL}/operations/template/download`;
+        ? `/parts/template/download`
+        : `/operations/template/download`;
 
-      const response = await axios.get(endpoint, {
+      const response = await api.get(endpoint, {
         responseType: 'blob',
       });
 
@@ -459,13 +458,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         try {
           if (type === 'part') {
             // Use soft delete for parts (move to recycle bin)
-            await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/soft-delete`);
+            await api.post(`/recycle-bin/parts/${item.id}/soft-delete`);
           } else if (type === 'assembly') {
             // Use soft delete for assemblies (move to recycle bin)
-            await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/soft-delete`);
+            await api.post(`/recycle-bin/assemblies/${item.id}/soft-delete`);
           } else {
             // Use permanent delete for products
-            await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+            await api.delete(`${endpoints[type]}`);
           }
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
@@ -508,7 +507,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       okButtonProps: { id: `delete-all-parts-${product.id}` },
       onOk: async () => {
         try {
-          const response = await axios.post(`${API_BASE_URL}/recycle-bin/products/${product.id}/soft-delete-parts`);
+          const response = await api.post(`/recycle-bin/products/${product.id}/soft-delete-parts`);
           
           if (response.data?.deleted_count) {
             message.success(`${response.data.deleted_count} part(s) moved to recycle bin for product "${product.product_name}".`);

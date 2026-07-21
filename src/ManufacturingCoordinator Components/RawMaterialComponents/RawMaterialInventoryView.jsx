@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Spin, Empty, Modal, App, message, Popconfirm, Button, Badge } from "antd";
 import { FileOutlined } from "@ant-design/icons";
 import { StockForm } from "./RawMaterialsTab";
 import QualityDocumentsModal from "./QualityDocumentsModal";
+import { api } from '../../api/client.js';
 
 const border = "1px solid #d0d0d0";
 const thStyle = {
@@ -104,9 +103,7 @@ const RawMaterialInventoryView = ({
     setLoading(true);
     try {
       const uid = getCurrentUserId();
-      const r = await axios.get(`${API_BASE_URL}/rawmaterials/inventory-view`, {
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-      });
+      const r = await api.get(`/rawmaterials/inventory-view`);
       const data = r.data || [];
       // Build stock and unit maps from the nested response
       const stockMap = {};
@@ -312,7 +309,7 @@ const RawMaterialInventoryView = ({
 
   const handleDeleteStock = async (stockId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/rawmaterials/stock/${stockId}`);
+      await api.delete(`/rawmaterials/stock/${stockId}`);
       message.success("Stock deleted successfully");
       fetchAll();
     } catch (err) {
@@ -322,7 +319,7 @@ const RawMaterialInventoryView = ({
 
   const handleDeleteUnit = async (unitId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/rawmaterials/stock/units/${unitId}`);
+      await api.delete(`/rawmaterials/stock/units/${unitId}`);
       message.success("Unit deleted successfully");
       fetchAll();
     } catch (err) {

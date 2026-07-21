@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Tabs, Button, Checkbox, Input, Spin, Empty, Tag, message, Tooltip, Popconfirm, Select, Collapse } from "antd";
 import { UnorderedListOutlined, PlusCircleOutlined, CheckSquareOutlined, DeleteOutlined, PlusOutlined, EditOutlined, DownOutlined, RightOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from '../../api/client.js';
 
 const { Search } = Input;
 
@@ -39,8 +38,8 @@ const OperationChecklistsModal = ({ visible, onClose, operation }) => {
     setLoading(true);
     try {
       const [checklistsRes, assignedRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/operation-checklists`),
-        axios.get(`${API_BASE_URL}/operation-checklists/assignments?operation_id=${operation.id}`)
+        api.get(`/operation-checklists`),
+        api.get(`/operation-checklists/assignments?operation_id=${operation.id}`)
       ]);
       setAllChecklists(checklistsRes.data);
       setAssignedChecklistIds(assignedRes.data.map(a => a.checklist_id));
@@ -65,7 +64,7 @@ const OperationChecklistsModal = ({ visible, onClose, operation }) => {
     if (!userId) { message.error('User not authenticated'); return; }
     
     try {
-      await axios.post(`${API_BASE_URL}/operation-checklists`, {
+      await api.post(`/operation-checklists`, {
         name: newChecklistName,
         type: createType,
         created_by: userId
@@ -85,7 +84,7 @@ const OperationChecklistsModal = ({ visible, onClose, operation }) => {
     if (!editingChecklist) return;
     
     try {
-      await axios.put(`${API_BASE_URL}/operation-checklists/${editingChecklist.id}`, {
+      await api.put(`/operation-checklists/${editingChecklist.id}`, {
         name: editChecklistName
       });
       message.success('Checklist updated successfully');
@@ -101,7 +100,7 @@ const OperationChecklistsModal = ({ visible, onClose, operation }) => {
 
   const handleDeleteChecklist = async (checklistId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/operation-checklists/${checklistId}`);
+      await api.delete(`/operation-checklists/${checklistId}`);
       message.success('Checklist deleted successfully');
       await fetchChecklists();
     } catch (e) {
@@ -125,7 +124,7 @@ const OperationChecklistsModal = ({ visible, onClose, operation }) => {
     if (!userId) { message.error('User not authenticated'); return; }
     
     try {
-      await axios.post(`${API_BASE_URL}/operation-checklists/assignments/bulk`, {
+      await api.post(`/operation-checklists/assignments/bulk`, {
         operation_id: operation.id,
         checklist_ids: selectedForAssign,
         assigned_by: userId

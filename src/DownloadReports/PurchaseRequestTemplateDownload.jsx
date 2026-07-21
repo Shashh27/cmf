@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Button, Card, Space, Typography, message, Spin, Form, Input, InputNumber, Select, Row, Col } from "antd";
 import { FileWordOutlined, DownloadOutlined, EditOutlined, CheckOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import DimensionInputs from "../RawMaterialComponents/DimensionInputs";
+import { api } from '../api/client.js';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -177,8 +176,7 @@ const PurchaseRequestTemplateDownload = ({ visible, onClose, stockRecord, linked
 
       setLoading(true);
       try {
-        const response = await axios.post(
-          `${API_BASE_URL}/rawmaterials/order-materials/${stockRecord.id}/purchase-request`,
+        const response = await api.post(`/rawmaterials/order-materials/${stockRecord.id}/purchase-request`,
           {
             template_type: selectedTemplate.templateType,
             data: dataWithDimensions

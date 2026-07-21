@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, Button, message, TreeSelect, Space, Divider } from 'antd';
 import { PlusOutlined, FolderOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { authFetch } from '../../../api/client.js';
 
 const { Option } = Select;
 
@@ -24,7 +25,7 @@ const CategorySubCategoryModal = ({ visible, onCancel, onSuccess, mode = 'catego
   const fetchCategories = async () => {
     setCategoriesLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const res = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setCategories(data);
@@ -43,7 +44,7 @@ const CategorySubCategoryModal = ({ visible, onCancel, onSuccess, mode = 'catego
 
       if (mode === 'category') {
         // Use dedicated category creation endpoint
-        const response = await fetch(`${API_BASE_URL}/tools-list/categories`, {
+        const response = await authFetch(`${API_BASE_URL}/tools-list/categories`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category: values.category }),
@@ -57,7 +58,7 @@ const CategorySubCategoryModal = ({ visible, onCancel, onSuccess, mode = 'catego
         message.success('Category created successfully');
       } else {
         // Use dedicated sub-category creation endpoint
-        const response = await fetch(`${API_BASE_URL}/tools-list/sub-categories`, {
+        const response = await authFetch(`${API_BASE_URL}/tools-list/sub-categories`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

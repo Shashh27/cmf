@@ -4,6 +4,7 @@ import { ThunderboltOutlined, SearchOutlined, PlayCircleOutlined } from '@ant-de
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area } from 'recharts';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -59,7 +60,7 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       
       const apiParamName = apiParamMap[selectedParameter] || selectedParameter;
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/energy-monitoring/get_machine_history/${machineId}?start_time=${dateRange[0].format('YYYY-MM-DD 00:00:00')}&end_time=${dateRange[1].format('YYYY-MM-DD 23:59:59')}`
       );
       const data = await response.json();
@@ -161,7 +162,7 @@ const RealtimeGraph = ({ machineId, machineName }) => {
     const fetchData = async () => {
       try {
         setApiError(null);
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
+        const response = await authFetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
         const data = await response.json();
         
         if (data) {

@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { useSpring, animated } from '@react-spring/three';
 import { MeshStandardMaterial } from 'three';
 import { API_BASE_URL } from '../../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -359,7 +360,7 @@ const Machines = ({ onBack }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/energy-monitoring/machines/`);
+      const response = await authFetch(`${API_BASE_URL}/energy-monitoring/machines/`);
       const data = await response.json();
       setMachines(data || []);
     } catch (error) {
@@ -370,7 +371,7 @@ const Machines = ({ onBack }) => {
 
   const fetchMachineStates = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/energy-monitoring/all_machine_states`);
+      const response = await authFetch(`${API_BASE_URL}/energy-monitoring/all_machine_states`);
       const data = await response.json();
       const statesMap = {};
       data.forEach(machine => {

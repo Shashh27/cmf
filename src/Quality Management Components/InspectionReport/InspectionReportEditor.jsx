@@ -1,5 +1,10 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import {
+  buildEditorPagePayload,
+  buildReportDocumentHtml,
+  computeReportLayoutMm,
+} from './reportDocumentBuilder';
 import StarterKit from '@tiptap/starter-kit';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
@@ -7,11 +12,6 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import TextAlign from '@tiptap/extension-text-align';
 import { HolderOutlined } from '@ant-design/icons';
-import {
-  buildEditorPagePayload,
-  buildReportDocumentHtml,
-  computeReportLayoutMm,
-} from './reportDocumentBuilder';
 import cmtiReportLogo from '../../assets/cmti-report-logo.png';
 
 function classAttr() {

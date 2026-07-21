@@ -339,7 +339,7 @@ const OMSOrdersPdfDownload = ({ orders, orderCount, getOrdersForExport, label = 
 
   return (
     <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading || resolvedOrderCount === 0}>
-      <Button icon={<DownloadOutlined />} loading={!!loading} size="small" style={{ fontSize: 11 }}>
+      <Button icon={<DownloadOutlined />} loading={!!loading} size="middle" style={{ fontSize: 13 }}>
         Download Orders
       </Button>
     </Dropdown>

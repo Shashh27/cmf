@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, LineChartOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { API_BASE_URL } from '../Config/auth';
 import dayjs from 'dayjs';
+import { authFetch } from '../api/client.js';
 
 const { Title } = Typography;
 
@@ -130,7 +131,7 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
   useEffect(() => {
     const fetchParameters = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
+        const response = await authFetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
         const data = await response.json();
         setMachineParameters(data);
         setIsLoading(false);
@@ -154,7 +155,7 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
     const fetchParameterHistory = async () => {
       if (!isLive && startTime && endTime) {
         try {
-          const response = await fetch(
+          const response = await authFetch(
             `${API_BASE_URL}/energy-monitoring/get_machine_history/${machineId}?start_time=${startTime.format('YYYY-MM-DD HH:mm:ss')}&end_time=${endTime.format('YYYY-MM-DD HH:mm:ss')}`
           );
           const data = await response.json();

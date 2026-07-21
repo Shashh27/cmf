@@ -1,6 +1,6 @@
 import React from 'react';
 import { Row, Col, Card, Space, Empty, Select } from 'antd';
-import { 
+import {
   BarChartOutlined, 
   LineChartOutlined, 
   PieChartOutlined 

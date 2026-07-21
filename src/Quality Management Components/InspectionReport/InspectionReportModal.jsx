@@ -17,11 +17,11 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
-import InspectionReportEditor from './InspectionReportEditor';
-import { downloadInspectionReportPdf } from './downloadReportPdf';
 import {
   mergeReportEditsFromHtml,
 } from './reportEdits';
+import InspectionReportEditor from './InspectionReportEditor';
+import { downloadInspectionReportPdf } from './downloadReportPdf';
 import { useInspectionReport } from './useInspectionReport';
 import './inspectionReport.css';
 

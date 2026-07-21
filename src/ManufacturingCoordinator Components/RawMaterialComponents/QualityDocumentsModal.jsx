@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Spin, Empty, Modal, App, Popconfirm, Upload, Button, Table, Tag, Space, Image } from "antd";
 import { UploadOutlined, FileOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FilePdfOutlined, FileImageOutlined, FileTextOutlined, InboxOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 
 const { Dragger } = Upload;
 
@@ -33,7 +32,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
   const fetchQualityDocs = async (stockId) => {
     setDocsLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/stock-quality-documents/stock/${stockId}`);
+      const response = await api.get(`/stock-quality-documents/stock/${stockId}`);
       setQualityDocs(response.data || []);
     } catch (err) {
       message.error("Failed to fetch quality documents");
@@ -44,23 +43,18 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
 
   const handleUploadMultipleQualityDocs = async (info) => {
     const { fileList } = info;
-    
-    const userStr = localStorage.getItem('user');
-    const user = userStr ? JSON.parse(userStr) : null;
-    const userId = user?.id || user?.user_id;
 
     if (fileList.length === 0) return;
 
     const formData = new FormData();
     formData.append('stock_id', stock.id);
-    formData.append('user_id', userId);
     
     fileList.forEach((file) => {
       formData.append('files', file.originFileObj || file);
     });
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/stock-quality-documents/upload-bulk`, formData, {
+      const response = await api.post(`/stock-quality-documents/upload-bulk`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
@@ -90,7 +84,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
 
   const handleDeleteQualityDoc = async (docId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/stock-quality-documents/${docId}`);
+      await api.delete(`/stock-quality-documents/${docId}`);
       message.success("Document deleted successfully");
       await fetchQualityDocs(stock.id);
     } catch (err) {
@@ -104,7 +98,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
 
   const handleDownloadQualityDoc = async (doc) => {
     try {
-      const response = await axios.get(doc.document_url, {
+      const response = await api.get(doc.document_url, {
         responseType: 'blob'
       });
       

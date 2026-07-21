@@ -3,6 +3,7 @@ import {
   Table, Typography, Tag, message, Button, Space,
   Tooltip, Empty, Input, Select, DatePicker, Modal,
 } from 'antd';
+import { authFetch } from '../../api/client.js';
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
   SyncOutlined, ReloadOutlined, DownloadOutlined, EditOutlined,
@@ -12,7 +13,6 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
-import { API_BASE_URL } from '../../Config/auth.js';
 import cmtisLogo from '../../assets/cmtis.png';
 
 const { Text } = Typography;
@@ -124,9 +124,8 @@ const ProductionLog = () => {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const qs = mcId != null ? `?manufacturing_coordinator_id=${mcId}` : '';
       const response = await fetch(
-        `${SCHEDULING_API_BASE_URL}/production-logs/${qs}`
+        `${SCHEDULING_API_BASE_URL}/production-logs/`
       );
       if (!response.ok) throw new Error('Failed to fetch production logs');
       const allLogs = await response.json();
@@ -173,8 +172,7 @@ const ProductionLog = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const qs = mcId != null ? `?manufacturing_coordinator_id=${mcId}` : '';
-        const res = await fetch(`${API_BASE_URL}/orders/${qs}`);
+        const res = await authFetch(`/api/v1/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -184,7 +182,7 @@ const ProductionLog = () => {
       }
     };
     fetchOrders();
-  }, [mcId]);
+  }, []);
 
   const hasActiveFilters = useMemo(() => (
     selectedMachines.length > 0 ||
@@ -221,7 +219,7 @@ const ProductionLog = () => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+    authFetch(`/api/v1/orders/sale-order/${saleOrder}/parts`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);
@@ -372,7 +370,6 @@ const ProductionLog = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'inprogress',
-          user_id: mcId,
           remarks: remark || null,
           approved_quantity: totalApproved,
           rework_quantity: totalRework,
@@ -421,7 +418,6 @@ const ProductionLog = () => {
     const payload = {
       operation_id: log.operation_id,
       operator_id: log.operator_id,
-      user_id: mcId,
       notes: log.notes,
       remarks: remark || null,
       from_date: log.from_date,

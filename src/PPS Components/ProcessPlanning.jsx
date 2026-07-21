@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker, Tooltip } from "antd";
 import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
-import { API_BASE_URL } from "../Config/auth";
 import dayjs from "dayjs";
 import axios from "axios";
+import { api } from '../api/client.js';
 
 const getApiErrorMessage = (error, fallback = "Failed updating parts") => {
   const data = error?.response?.data;
@@ -73,7 +73,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     const fetchOrders = async () => {
       setOrdersLoading(true);
       try {
-        const res = await axios.get(`${API_BASE_URL}/orders/`);
+        const res = await api.get(`/orders/`);
         setOrders(res.data || []);
       } catch {}
       setOrdersLoading(false);
@@ -104,7 +104,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setDetailsLoading(true);
     setOrderPartsMetadata(null);
     try {
-      const res = await axios.get(`${API_BASE_URL}/orders/${id}/hierarchical`);
+      const res = await api.get(`/orders/${id}/hierarchical`);
       setOrderDetails(res.data || null);
     } catch {}
     setDetailsLoading(false);
@@ -383,7 +383,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   // ================================
   const fetchOutSourceStatuses = async (orderId) => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/out-source-parts-status/order/${orderId}`);
+      const res = await api.get(`/out-source-parts-status/order/${orderId}`);
       if (res.status !== 200) return;
       const rows = res.data;
       const map = {};
@@ -440,9 +440,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
       const existing = outStatusMap[part.id];
       let res;
       if (existing?.id) {
-        res = await axios.put(`${API_BASE_URL}/out-source-parts-status/${existing.id}`, payload);
+        res = await api.put(`/out-source-parts-status/${existing.id}`, payload);
       } else {
-        res = await axios.post(`${API_BASE_URL}/out-source-parts-status/`, payload);
+        res = await api.post(`/out-source-parts-status/`, payload);
       }
       if (res.status !== 200 && res.status !== 201) {
         let errMsg = "Failed to save";

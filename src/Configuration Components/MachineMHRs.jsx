@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
-import { message, Button, Input, Card, Space, Table, Tag } from "antd";
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react";
+import { message, Button, Input, Card, Spin } from "antd";
 import { SaveOutlined } from "@ant-design/icons";
 import MachineMHRsMatrixExport from "../DownloadReports/MachineMHRsMatrixExport";
+import { api } from "../api/client.js";
 
 const handleInputKeyDown = (e) => {
   if ([8, 9, 27, 13, 37, 39].includes(e.keyCode)) return;
@@ -13,7 +12,7 @@ const handleInputKeyDown = (e) => {
 };
 
 function fmt(n) {
-  if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
   return Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
@@ -22,19 +21,6 @@ function machineLabel(m) {
   return parts.length ? parts.join(" ") : m.type || `M${m.id}`;
 }
 
-const cellInputStyle = (dirty) => ({
-  width: "100%",
-  minWidth: "4.5rem",
-  maxWidth: "9rem",
-  border: dirty ? "1px solid #1890ff" : "1px solid #d9d9d9",
-  borderRadius: 4,
-  padding: "4px 6px",
-  fontSize: 13,
-  textAlign: "right",
-  background: dirty ? "#e6f4ff" : "#fff",
-  boxSizing: "border-box",
-});
-
 const MachineMHRs = ({ userId }) => {
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +28,29 @@ const MachineMHRs = ({ userId }) => {
   const [editedValues, setEditedValues] = useState({});
   const [editedRecommendedMhr, setEditedRecommendedMhr] = useState({});
   const [saving, setSaving] = useState(false);
+  const tableRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  const syncStickyOffsets = useCallback(() => {
+    const table = tableRef.current;
+    const scroll = scrollRef.current;
+    if (!table || !scroll) return;
+
+    const header = table.querySelector("thead tr");
+    if (!header) return;
+
+    const cols = header.querySelectorAll(":scope > th");
+    if (cols.length < 4) return;
+
+    const [sl, name, code] = cols;
+    const slW = sl.getBoundingClientRect().width;
+    const nameW = name.getBoundingClientRect().width;
+    const codeW = code.getBoundingClientRect().width;
+
+    scroll.style.setProperty("--mhr-name-left", `${slW}px`);
+    scroll.style.setProperty("--mhr-code-left", `${slW + nameW}px`);
+    scroll.style.setProperty("--mhr-formula-left", `${slW + nameW + codeW}px`);
+  }, []);
 
   useEffect(() => {
     fetchMachinesWithMHR();
@@ -50,7 +59,7 @@ const MachineMHRs = ({ userId }) => {
   const fetchMachinesWithMHR = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/machines/with-mhr`);
+      const response = await api.get(`/machines/with-mhr`);
       setMachines(response.data || []);
       setEditedValues({});
       setEditedRecommendedMhr({});
@@ -105,6 +114,23 @@ const MachineMHRs = ({ userId }) => {
     });
     return byMachine;
   }, [machines]);
+
+  useLayoutEffect(() => {
+    if (loading || filteredMachines.length === 0) return undefined;
+
+    syncStickyOffsets();
+    const table = tableRef.current;
+    if (!table) return undefined;
+
+    const ro = new ResizeObserver(() => syncStickyOffsets());
+    ro.observe(table);
+    window.addEventListener("resize", syncStickyOffsets);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", syncStickyOffsets);
+    };
+  }, [loading, filteredMachines, particulars, editedValues, editedRecommendedMhr, syncStickyOffsets]);
 
   const pendingChangeCount =
     Object.keys(editedValues).length + Object.keys(editedRecommendedMhr).length;
@@ -161,17 +187,12 @@ const MachineMHRs = ({ userId }) => {
     setSaving(true);
     try {
       for (const [machineId, updates] of Object.entries(byMachine)) {
-        await axios.put(
-          `${API_BASE_URL}/machines/${machineId}/mhr/values`,
-          updates
-        );
+        await api.put(`/machines/${machineId}/mhr/values`, updates);
       }
       for (const [machineId, recommended] of Object.entries(editedRecommendedMhr)) {
-        await axios.put(
-          `${API_BASE_URL}/machines/${machineId}/mhr/recommended-mhr`,
-          null,
-          { params: { recommended_mhr: recommended } }
-        );
+        await api.put(`/machines/${machineId}/mhr/recommended-mhr`, null, {
+          params: { recommended_mhr: recommended },
+        });
       }
       message.success("All MHR changes saved");
       await fetchMachinesWithMHR();
@@ -183,171 +204,58 @@ const MachineMHRs = ({ userId }) => {
     }
   };
 
-  const dataSource = useMemo(() => {
-    const rows = particulars.map((p, idx) => ({
-      key: p.code,
-      rowType: "particular",
-      sl: idx + 1,
-      name: p.name,
-      unit: p.unit,
-      code: p.code,
-      formula: p.is_input ? null : p.formula,
-      is_input: p.is_input,
-      particular: p,
-    }));
+  const renderValueCell = (machine, particular) => {
+    const cell = getCell(machine.id, particular);
+    if (cell.isInput) {
+      return (
+        <input
+          type="text"
+          inputMode="decimal"
+          className={`mhr-cell-input${cell.dirty ? " mhr-cell-input--dirty" : ""}`}
+          value={cell.value !== null && cell.value !== undefined ? String(cell.value) : ""}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+              handleInputChange(machine.id, cell.particularId, val === "" ? null : parseFloat(val));
+            }
+          }}
+          disabled={saving || !cell.particularId}
+          onKeyDown={handleInputKeyDown}
+        />
+      );
+    }
+    return <span className="mhr-cell-num">{fmt(cell.value)}</span>;
+  };
 
-    rows.push({
-      key: "__calc_mhr",
-      rowType: "calc_mhr",
-      sl: null,
-      name: "Calculated MHR",
-      code: "MHR*",
-      formula: null,
-      is_input: false,
-    });
+  const renderParticularName = (p) => (
+    <span className="mhr-name">
+      {p.name}
+      {p.unit ? <span className="mhr-unit"> ({p.unit})</span> : null}
+    </span>
+  );
 
-    rows.push({
-      key: "__rec_mhr",
-      rowType: "rec_mhr",
-      sl: null,
-      name: "Recommended MHR",
-      code: "REC",
-      formula: null,
-      is_input: true,
-    });
-
-    return rows;
-  }, [particulars]);
-
-  const columns = useMemo(() => {
-    const base = [
-      {
-        title: "SL",
-        dataIndex: "sl",
-        key: "sl",
-        align: "center",
-        render: (sl) =>
-          sl != null ? <span style={{ fontWeight: 600, color: "#1890ff" }}>{sl}</span> : null,
-      },
-      {
-        title: "PARTICULARS",
-        dataIndex: "name",
-        key: "name",
-        render: (name, record) => (
-          <span style={{ fontWeight: record.rowType === "particular" ? 500 : 700, whiteSpace: "nowrap" }}>
-            {name}
-            {record.unit ? (
-              <span style={{ fontWeight: 400, color: "#8c8c8c" }}> ({record.unit})</span>
-            ) : null}
-          </span>
-        ),
-      },
-      {
-        title: "CODE",
-        dataIndex: "code",
-        key: "code",
-        align: "center",
-        render: (code) => <Tag color="blue">{code}</Tag>,
-      },
-      {
-        title: "CALCULATION",
-        dataIndex: "formula",
-        key: "formula",
-        render: (formula, record) =>
-          record.rowType !== "particular" ? (
-            <span style={{ color: "#8c8c8c" }}>—</span>
-          ) : formula ? (
-            <span style={{ fontWeight: 400, color: "#595959", fontSize: 12, whiteSpace: "nowrap" }}>
-              {formula}
-            </span>
-          ) : (
-            <Tag>Input</Tag>
-          ),
-      },
-    ];
-
-    const machineCols = filteredMachines.map((m) => ({
-      title: (
-        <div style={{ lineHeight: 1.25, whiteSpace: "nowrap" }}>
-          <div style={{ fontSize: 11, fontWeight: 400, color: "#8c8c8c" }}>
-            {m.work_center_name || "—"}
-          </div>
-          <div style={{ fontWeight: 600 }}>{machineLabel(m)}</div>
-        </div>
-      ),
-      key: `m_${m.id}`,
-      align: "center",
-      render: (_, record) => {
-        if (record.rowType === "calc_mhr") {
-          return (
-            <span style={{ fontWeight: 700, color: "#1890ff", whiteSpace: "nowrap" }}>
-              {m.mhr != null ? `₹${m.mhr}` : "—"}
-            </span>
-          );
-        }
-
-        if (record.rowType === "rec_mhr") {
-          const dirty = editedRecommendedMhr[m.id] !== undefined;
-          const val = dirty ? editedRecommendedMhr[m.id] : m.recommended_mhr;
-          return (
-            <input
-              type="text"
-              inputMode="decimal"
-              value={val !== null && val !== undefined ? String(val) : ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "" || /^\d*\.?\d*$/.test(v)) {
-                  handleRecommendedMhrChange(m.id, v === "" ? null : parseFloat(v));
-                }
-              }}
-              disabled={saving}
-              onKeyDown={handleInputKeyDown}
-              placeholder="—"
-              style={cellInputStyle(dirty)}
-            />
-          );
-        }
-
-        const cell = getCell(m.id, record.particular);
-        if (cell.isInput) {
-          return (
-            <input
-              type="text"
-              inputMode="decimal"
-              value={cell.value !== null && cell.value !== undefined ? String(cell.value) : ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === "" || /^\d*\.?\d*$/.test(val)) {
-                  handleInputChange(
-                    m.id,
-                    cell.particularId,
-                    val === "" ? null : parseFloat(val)
-                  );
-                }
-              }}
-              disabled={saving || !cell.particularId}
-              onKeyDown={handleInputKeyDown}
-              style={cellInputStyle(cell.dirty)}
-            />
-          );
-        }
-
-        return <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{fmt(cell.value)}</span>;
-      },
-    }));
-
-    return [...base, ...machineCols];
-  }, [filteredMachines, editedValues, editedRecommendedMhr, saving, valueLookup]);
+  const renderFormulaCell = (p) =>
+    p.is_input ? (
+      <span className="mhr-formula mhr-formula--input">Manual input</span>
+    ) : (
+      <span className="mhr-formula">{p.formula || "—"}</span>
+    );
 
   return (
     <Card
-      title={<span className="text-lg font-bold">Machine Hour Rates</span>}
+      title={<span className="mhr-title">Machine Hour Rates</span>}
       extra={
-        <Space wrap>
+        <div className="mhr-toolbar">
+          <span className="mhr-meta">
+            {filteredMachines.length} machine{filteredMachines.length !== 1 ? "s" : ""}
+            {searchText.trim() && machines.length !== filteredMachines.length
+              ? ` / ${machines.length}`
+              : ""}
+          </span>
           <Input.Search
-            placeholder="Search machines..."
+            className="mhr-search"
+            placeholder="Filter machines..."
             allowClear
-            style={{ width: "min(220px, 100%)" }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
@@ -357,8 +265,11 @@ const MachineMHRs = ({ userId }) => {
             onClick={saveAllChanges}
             loading={saving}
             disabled={pendingChangeCount === 0}
+            className="mhr-save-btn"
           >
-            Save All ({pendingChangeCount})
+            <span className="mhr-save-label">
+              Save{pendingChangeCount > 0 ? ` (${pendingChangeCount})` : ""}
+            </span>
           </Button>
           <MachineMHRsMatrixExport
             particulars={particulars}
@@ -367,115 +278,465 @@ const MachineMHRs = ({ userId }) => {
             editedValues={editedValues}
             editedRecommendedMhr={editedRecommendedMhr}
           />
-        </Space>
+        </div>
       }
       variant="borderless"
-      className="shadow-sm overflow-hidden mhr-matrix-card"
-      styles={{
-        header: { padding: "12px 16px" },
-        body: { padding: "0 12px 12px" },
-      }}
+      className="shadow-sm mhr-sheet-card"
+      styles={{ header: { padding: 0 }, body: { padding: 0 } }}
     >
       <style>{`
-        .mhr-matrix-card {
+        .mhr-sheet-card {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+        }
+
+        .mhr-body-inner {
+          width: 100%;
+          min-width: 0;
+          padding: 0 4px 8px;
+        }
+
+        /* Prevent tab pane from stretching to full table width on mobile */
+        .ant-tabs-tabpane:has(.mhr-sheet-card) {
+          min-width: 0;
+          overflow: hidden;
+        }
+
+        .mhr-sheet-card .ant-card-head {
+          flex-wrap: wrap;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 10px 12px !important;
+          min-height: unset;
+        }
+
+        .mhr-sheet-card .ant-card-head-wrapper {
+          flex-wrap: wrap;
+          width: 100%;
+          gap: 8px;
+        }
+
+        .mhr-sheet-card .ant-card-extra {
+          margin-inline-start: 0 !important;
+          width: 100%;
+          max-width: 100%;
+        }
+
+        .mhr-sheet-card .ant-card-body {
+          padding: 0 8px 8px !important;
+        }
+
+        @media (min-width: 768px) {
+          .mhr-sheet-card .ant-card-head { padding: 10px 16px !important; }
+          .mhr-sheet-card .ant-card-body { padding: 0 12px 12px !important; }
+          .mhr-sheet-card .ant-card-extra { width: auto; margin-inline-start: auto !important; }
+          .mhr-sheet-card .ant-card-head-wrapper { flex-wrap: nowrap; }
+        }
+
+        .mhr-title { font-size: clamp(14px, 2.5vw, 16px); font-weight: 600; }
+
+        .mhr-toolbar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
           width: 100%;
         }
 
-        .mhr-matrix-table {
+        @media (min-width: 768px) {
+          .mhr-toolbar { flex-wrap: nowrap; justify-content: flex-end; width: auto; }
+        }
+
+        .mhr-meta { font-size: 12px; color: #8c8c8c; white-space: nowrap; flex: 0 0 auto; }
+        .mhr-search { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+
+        @media (min-width: 480px) {
+          .mhr-search { flex: 0 1 200px; max-width: 220px; }
+        }
+
+        .mhr-save-btn { flex: 0 0 auto; }
+        .mhr-save-label { white-space: nowrap; }
+
+        .mhr-scroll-wrap {
           width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow: hidden;
         }
 
-        .mhr-matrix-table .ant-table {
-          width: 100% !important;
-        }
-
-        .mhr-matrix-table .ant-table-container {
+        .mhr-scroll {
+          display: block;
           width: 100%;
-        }
-
-        .mhr-matrix-table .ant-table-content {
-          overflow-x: auto !important;
+          max-width: 100%;
+          min-width: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          border: 1px solid #d9d9d9;
+          border-radius: 4px;
+          background: #fff;
           -webkit-overflow-scrolling: touch;
+          overscroll-behavior-x: contain;
+
+          --mhr-name-left: 40px;
+          --mhr-code-left: 180px;
+          --mhr-formula-left: 230px;
         }
 
-        .mhr-matrix-table table {
-          width: max-content !important;
-          min-width: 100% !important;
-          table-layout: auto !important;
+        .mhr-sheet {
+          border-collapse: separate;
+          border-spacing: 0;
+          font-size: 12px;
+          table-layout: auto;
+          width: max-content;
+          min-width: 100%;
         }
 
-        .mhr-matrix-table .ant-table-thead > tr > th {
-          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff) !important;
+        .mhr-th {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          background: #f0f5ff;
+          color: #003a8c;
           font-weight: 600;
-          border-bottom: 2px solid #1890ff !important;
-          white-space: nowrap !important;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+          padding: 8px 10px;
+          border-bottom: 2px solid #1890ff;
+          border-right: 1px solid #d6e4ff;
+          text-align: center;
           vertical-align: bottom;
-          width: auto !important;
-        }
-
-        .mhr-matrix-table .ant-table-tbody > tr > td {
           white-space: nowrap;
-          width: auto !important;
         }
 
-        .mhr-matrix-table .ant-table-tbody > tr:hover > td {
-          background: #f0f8ff !important;
+        .mhr-th--sticky { z-index: 4; background: #f0f5ff; }
+        .mhr-th--formula { text-align: left; white-space: normal; }
+
+        .mhr-col-sl {
+          left: 0;
+          min-width: 2.2em;
         }
 
-        .mhr-matrix-table .ant-table-cell {
-          padding: 8px 12px !important;
+        .mhr-col-name {
+          left: var(--mhr-name-left);
+          text-align: left;
+          white-space: normal;
+          word-break: break-word;
         }
 
-        .mhr-matrix-table .ant-table-body {
-          max-height: calc(100vh - 260px);
-          overflow-y: auto !important;
+        .mhr-col-code {
+          left: var(--mhr-code-left);
         }
 
-        @media (max-width: 992px) {
-          .mhr-matrix-table .ant-table-cell {
-            padding: 7px 8px !important;
-            font-size: 12px;
+        .mhr-col-formula {
+          left: var(--mhr-formula-left);
+          text-align: left;
+          white-space: normal;
+          word-break: break-word;
+          box-shadow: 4px 0 6px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .mhr-td.mhr-col-formula {
+          box-shadow: 4px 0 6px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .mhr-th--machine {
+          padding: 6px 8px;
+          line-height: 1.2;
+          white-space: normal;
+          word-break: break-word;
+          min-width: max-content;
+        }
+
+        .mhr-th-wc {
+          display: block;
+          font-size: 10px;
+          font-weight: 500;
+          color: #597ef7;
+          margin-bottom: 2px;
+          white-space: normal;
+          word-break: break-word;
+        }
+
+        .mhr-th-name {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: #003a8c;
+          white-space: normal;
+          word-break: break-word;
+        }
+
+        .mhr-td {
+          padding: 6px 10px;
+          border-bottom: 1px solid #f0f0f0;
+          border-right: 1px solid #f0f0f0;
+          vertical-align: middle;
+          background: #fff;
+        }
+
+        .mhr-td--sticky {
+          position: sticky;
+          z-index: 1;
+          background: #fff;
+        }
+
+        .mhr-tr--even .mhr-td { background: #fafafa; }
+        .mhr-tr--even .mhr-td--sticky { background: #fafafa; }
+
+        .mhr-tr--summary .mhr-td {
+          background: #e6f4ff !important;
+          border-top: 2px solid #91caff;
+          font-weight: 600;
+        }
+
+        .mhr-tr--rec .mhr-td {
+          background: #fffbe6 !important;
+          border-top: 1px solid #ffe58f;
+        }
+
+        .mhr-sl { text-align: center; color: #595959; font-weight: 500; white-space: nowrap; }
+        .mhr-name { font-weight: 500; color: #262626; line-height: 1.3; white-space: normal; word-break: break-word; }
+        .mhr-unit { color: #8c8c8c; font-weight: 400; }
+        .mhr-code {
+          text-align: center;
+          font-family: Consolas, Monaco, monospace;
+          font-size: 11px;
+          font-weight: 600;
+          color: #0958d9;
+          white-space: nowrap;
+        }
+        .mhr-formula {
+          font-size: 11px;
+          color: #595959;
+          line-height: 1.35;
+          white-space: normal;
+          word-break: break-word;
+        }
+        .mhr-formula--input { color: #8c8c8c; font-style: italic; }
+
+        .mhr-td--val {
+          text-align: right;
+          white-space: nowrap;
+          min-width: 4.5rem;
+        }
+
+        .mhr-cell-num,
+        .mhr-cell-mhr {
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+        .mhr-cell-num { color: #262626; }
+        .mhr-cell-mhr { font-weight: 700; color: #0958d9; }
+
+        .mhr-cell-input {
+          width: auto;
+          min-width: 3.5em;
+          max-width: 9em;
+          box-sizing: border-box;
+          border: 1px solid #d9d9d9;
+          border-radius: 2px;
+          padding: 3px 6px;
+          font-size: 12px;
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+          background: #fff;
+        }
+
+        .mhr-cell-input:focus {
+          outline: none;
+          border-color: #4096ff;
+          box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+        }
+
+        .mhr-cell-input--dirty { border-color: #4096ff; background: #f0f8ff; }
+        .mhr-cell-input:disabled { background: #f5f5f5; color: #bfbfbf; cursor: not-allowed; }
+
+        .mhr-empty {
+          padding: 48px 16px;
+          text-align: center;
+          color: #8c8c8c;
+          font-size: 13px;
+        }
+
+        @media (max-width: 767px) {
+          .mhr-col-sl {
+            width: 1.8rem;
+            min-width: 1.8rem;
+            max-width: 1.8rem;
           }
+
+          .mhr-col-name {
+            width: 5.5rem;
+            min-width: 5.5rem;
+            max-width: 5.5rem;
+          }
+
+          .mhr-col-code {
+            width: 2.2rem;
+            min-width: 2.2rem;
+            max-width: 2.2rem;
+          }
+
+          .mhr-col-formula {
+            width: 5rem;
+            min-width: 5rem;
+            max-width: 5rem;
+          }
+
+          .mhr-th, .mhr-td {
+            padding: 5px 4px;
+          }
+
+          .mhr-th--machine,
+          .mhr-td--val {
+            min-width: 3.75rem;
+          }
+
+          .mhr-formula, .mhr-name {
+            font-size: 10px;
+            line-height: 1.25;
+          }
+
+          .mhr-code { font-size: 9px; }
         }
 
-        @media (max-width: 768px) {
-          .mhr-matrix-card .ant-card-head {
-            flex-wrap: wrap;
-          }
-          .mhr-matrix-card .ant-card-extra {
-            margin-left: 0 !important;
-            padding: 8px 0 0;
-            width: 100%;
-          }
-          .mhr-matrix-table .ant-table-cell {
-            padding: 6px 6px !important;
-            font-size: 12px;
-          }
-          .mhr-matrix-table .ant-table-body {
-            max-height: calc(100vh - 300px);
-          }
-        }
+        @media (max-width: 479px) {
+          .mhr-save-label { display: none; }
+          .mhr-save-btn .anticon { margin-inline-end: 0 !important; }
+          .mhr-sheet { font-size: 11px; }
 
-        @media (max-width: 576px) {
-          .mhr-matrix-table .ant-table-cell {
-            padding: 5px 4px !important;
-            font-size: 11px;
+          .mhr-col-name {
+            width: 4.75rem;
+            min-width: 4.75rem;
+            max-width: 4.75rem;
+          }
+
+          .mhr-col-formula {
+            width: 4.25rem;
+            min-width: 4.25rem;
+            max-width: 4.25rem;
           }
         }
       `}</style>
 
-      <Table
-        className="modern-table responsive-table mhr-matrix-table"
-        columns={columns}
-        dataSource={dataSource}
-        loading={loading}
-        pagination={false}
-        bordered
-        size="middle"
-        tableLayout="auto"
-        scroll={{ x: true }}
-        locale={{ emptyText: "No machine MHR data found" }}
-      />
+      <div className="mhr-body-inner">
+        <Spin spinning={loading}>
+          {!loading && filteredMachines.length === 0 ? (
+            <div className="mhr-empty">No machine MHR data found</div>
+          ) : (
+            <div className="mhr-scroll-wrap">
+              <div className="mhr-scroll" ref={scrollRef}>
+                <table className="mhr-sheet" ref={tableRef}>
+                  <thead>
+                    <tr>
+                      <th className="mhr-th mhr-th--sticky mhr-col-sl">Sl</th>
+                      <th className="mhr-th mhr-th--sticky mhr-col-name">Particulars</th>
+                      <th className="mhr-th mhr-th--sticky mhr-col-code">Code</th>
+                      <th className="mhr-th mhr-th--sticky mhr-col-formula mhr-th--formula">
+                        Calculation
+                      </th>
+                      {filteredMachines.map((m) => (
+                        <th
+                          key={m.id}
+                          className="mhr-th mhr-th--machine"
+                          title={`${m.work_center_name || ""} — ${machineLabel(m)}`}
+                        >
+                          <span className="mhr-th-wc">{m.work_center_name || "—"}</span>
+                          <span className="mhr-th-name">{machineLabel(m)}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {particulars.map((p, idx) => (
+                      <tr key={p.code} className={idx % 2 === 1 ? "mhr-tr--even" : ""}>
+                        <td className="mhr-td mhr-td--sticky mhr-col-sl">
+                          <span className="mhr-sl">{idx + 1}</span>
+                        </td>
+                        <td className="mhr-td mhr-td--sticky mhr-col-name">
+                          {renderParticularName(p)}
+                        </td>
+                        <td className="mhr-td mhr-td--sticky mhr-col-code">
+                          <span className="mhr-code">{p.code}</span>
+                        </td>
+                        <td className="mhr-td mhr-td--sticky mhr-col-formula">
+                          {renderFormulaCell(p)}
+                        </td>
+                        {filteredMachines.map((m) => (
+                          <td key={m.id} className="mhr-td mhr-td--val">
+                            {renderValueCell(m, p)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+
+                    <tr className="mhr-tr--summary">
+                      <td className="mhr-td mhr-td--sticky mhr-col-sl" />
+                      <td className="mhr-td mhr-td--sticky mhr-col-name">
+                        <span className="mhr-name">Calculated MHR</span>
+                      </td>
+                      <td className="mhr-td mhr-td--sticky mhr-col-code">
+                        <span className="mhr-code">MHR*</span>
+                      </td>
+                      <td className="mhr-td mhr-td--sticky mhr-col-formula">
+                        <span className="mhr-formula">—</span>
+                      </td>
+                      {filteredMachines.map((m) => (
+                        <td key={m.id} className="mhr-td mhr-td--val">
+                          <span className="mhr-cell-mhr">
+                            {m.mhr != null ? fmt(m.mhr) : "—"}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+
+                    <tr className="mhr-tr--rec">
+                      <td className="mhr-td mhr-td--sticky mhr-col-sl" />
+                      <td className="mhr-td mhr-td--sticky mhr-col-name">
+                        <span className="mhr-name">Recommended MHR</span>
+                      </td>
+                      <td className="mhr-td mhr-td--sticky mhr-col-code">
+                        <span className="mhr-code">REC</span>
+                      </td>
+                      <td className="mhr-td mhr-td--sticky mhr-col-formula">
+                        <span className="mhr-formula">—</span>
+                      </td>
+                      {filteredMachines.map((m) => {
+                        const dirty = editedRecommendedMhr[m.id] !== undefined;
+                        const val = dirty ? editedRecommendedMhr[m.id] : m.recommended_mhr;
+                        return (
+                          <td key={m.id} className="mhr-td mhr-td--val">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className={`mhr-cell-input${dirty ? " mhr-cell-input--dirty" : ""}`}
+                              value={val !== null && val !== undefined ? String(val) : ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "" || /^\d*\.?\d*$/.test(v)) {
+                                  handleRecommendedMhrChange(
+                                    m.id,
+                                    v === "" ? null : parseFloat(v)
+                                  );
+                                }
+                              }}
+                              disabled={saving}
+                              onKeyDown={handleInputKeyDown}
+                              placeholder="—"
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </Spin>
+      </div>
     </Card>
   );
 };

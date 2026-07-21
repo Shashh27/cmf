@@ -2,46 +2,28 @@ import React, { useState, useEffect } from "react";
 
 import { Layout, Menu, Drawer, Button, Badge } from "antd";
 
-import { Link, useLocation } from "react-router-dom";
 
-import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined,
 
+import {
   SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined,DeleteOutlined
 
-} from "@ant-design/icons";
+, AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined } from "@ant-design/icons";
+import { Link, useLocation } from "react-router-dom";
+import { api, authFetch } from '../../api/client.js';
 
 import cmtisLogo from "../../assets/cmtis.png";
 
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
 
-import { API_BASE_URL } from '../../Config/auth';
-
 import { QUALITY_API_BASE_URL } from '../../Config/qualityconfig';
 
 import { filterOwnCreatedNotifications, getStoredUser } from '../../utils/notificationFilters';
-
-import axios from 'axios';
-
-
 
 const { Sider } = Layout;
 
 
 
-const getNotificationScopeParams = () => {
-  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const uid = storedUser?.id;
-  const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
-  const params = new URLSearchParams();
-  if (uid == null) return params;
-  if (role.includes('admin')) params.set('admin_id', uid);
-  else if (role.includes('manufacturing') || role === 'mc') {
-    params.set('mc_id', uid);
-  } else if (role.includes('project') || role === 'pc') {
-    params.set('pc_id', uid);
-  }
-  return params;
-};
+const getNotificationScopeParams = () => new URLSearchParams();
 
 
 
@@ -224,7 +206,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const [productionResponse, pokayokeChecklistResponse, otResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
-        fetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
+        authFetch(`/api/v1/operation-checklists/submissions?operator=${operatorId}`),
         fetch(`${SCHEDULING_API_BASE_URL}/notifications/operator/${operatorId}?unread_only=true&limit=50`),
       ]);
 
@@ -312,7 +294,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
-        axios.get(`${API_BASE_URL}/operation-checklists/submissions`).then((r) => ({ ok: true, json: async () => r.data })).catch(() => ({ ok: false })),
+        api.get(`/operation-checklists/submissions`).then((r) => ({ ok: true, json: async () => r.data })).catch(() => ({ ok: false })),
       ]);
 
       let productionCount = 0;
@@ -354,7 +336,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       const uid = storedUser?.id;
       if (uid == null) return;
 
-      const response = await axios.get(`${API_BASE_URL}/pc-notifications/${uid}/unread-count`);
+      const response = await api.get(`/pc-notifications/${uid}/unread-count`);
 
       setNotificationCount(response.data?.unread_count || 0);
 
@@ -377,15 +359,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const endpoints = [
 
-        `${API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
+        `/order-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-notifications/${qs ? `?${qs}` : ''}`,
+        `/machine-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
+        `/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/component-issues-notifications/${qs ? `?${qs}` : ''}`,
+        `/component-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
+        `/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
 
       ];
 
@@ -393,7 +375,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
         endpoints.map((url) =>
 
-          axios.get(url).then((r) => r.data).catch(() => [])
+          api.get(url).then((r) => r.data).catch(() => [])
 
         )
 
@@ -460,15 +442,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const endpoints = [
 
-        `${API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
+        `/order-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-notifications/${qs ? `?${qs}` : ''}`,
+        `/machine-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
+        `/tool-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/component-issues-notifications/${qs ? `?${qs}` : ''}`,
+        `/component-issues-notifications/${qs ? `?${qs}` : ''}`,
 
-        `${API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
+        `/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
 
       ];
 
@@ -478,7 +460,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
         endpoints.map((url) =>
 
-          axios.get(url).then((r) => r.data).catch(() => [])
+          api.get(url).then((r) => r.data).catch(() => [])
 
         )
 
@@ -500,7 +482,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       try {
 
-        const pk = await axios.get(`${API_BASE_URL}/operation-checklists/submissions`);
+        const pk = await api.get(`/operation-checklists/submissions`);
 
         pokayokeResponse = { ok: true, data: pk.data };
 

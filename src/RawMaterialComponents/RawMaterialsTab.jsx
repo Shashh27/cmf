@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, App, Tabs } from "antd";
-import { 
+import {
   ExperimentOutlined, 
   PlusOutlined, 
   EditOutlined, 
   DeleteOutlined,
   DatabaseOutlined
 } from "@ant-design/icons";
+import { api } from '../api/client.js';
 import { RawMaterialsInventoryPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 import { StockDetailsPdfDownload } from "../DownloadReports/StockDetailsPdfDownload";
 
@@ -63,7 +62,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     fetchingRawMaterials.current = true;
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
+      const response = await api.get(`/rawmaterials/`);
       const materials = response.data || [];
 
       // Backend already returns materials with stock status
@@ -87,7 +86,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
   const fetchStockForMaterial = async (materialId) => {
     setStockLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+      const response = await api.get(`/rawmaterials/stock/`, {
         params: { material_id: materialId }
       });
       setSelectedMaterialStock(response.data || []);
@@ -123,7 +122,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
       cancelText: 'No, Cancel',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/stock/${stockId}`);
+          await api.delete(`/rawmaterials/stock/${stockId}`);
           message.success('Stock deleted successfully!');
           fetchStockForMaterial(selectedMaterialForStock?.id);
         } catch (error) {
@@ -159,7 +158,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     setSavingRawMaterial(true);
     try {
       const isEdit = !!editingRawMaterial?.id;
-      const url = isEdit ? `${API_BASE_URL}/rawmaterials/${editingRawMaterial.id}` : `${API_BASE_URL}/rawmaterials/`;
+      const url = isEdit ? `/rawmaterials/${editingRawMaterial.id}` : `/rawmaterials/`;
       const method = isEdit ? "put" : "post";
 
       const payload = {
@@ -172,10 +171,9 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
         quantity: values.quantity === "" ? 0 : Number(values.quantity) || 0,
         stock_dimensions: values.stock_dimensions,
         cost_per_kg: values.cost === "" ? null : Number(values.cost) || null,
-        user_id: getCurrentUserId(),
       };
 
-      await axios({
+      await api({
         url,
         method,
         headers: { "Content-Type": "application/json" },
@@ -206,7 +204,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`);
+          await api.delete(`/rawmaterials/${material.id}`);
           await fetchRawMaterials();
           message.success("Raw material deleted successfully");
         } catch (error) {
@@ -734,11 +732,10 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
         quantity: Number(values.quantity),
         source_type: "general",
         cost: materialCost || null,
-        user_id: getCurrentUserId(),
         ...getDimensions(values)
       };
       
-      await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, payload);
+      await api.post(`/rawmaterials/stock/`, payload);
       message.success("Stock added successfully!");
       form.resetFields();
       onSuccess?.();

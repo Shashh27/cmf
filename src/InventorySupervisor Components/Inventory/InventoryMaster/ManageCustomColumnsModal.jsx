@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Table, Button, message, Popconfirm, Tag, Space } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
+import { authFetch } from '../../../api/client.js';
 
 const ManageCustomColumnsModal = ({ visible, onClose, mode, target }) => {
   const [columns, setColumns] = useState([]);
@@ -15,7 +16,7 @@ const ManageCustomColumnsModal = ({ visible, onClose, mode, target }) => {
       let subCategoryId = null;
 
       if (target?.category || target?.sub_category) {
-        const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+        const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
         if (treeResponse.ok) {
           const tree = await treeResponse.json();
 
@@ -38,7 +39,7 @@ const ManageCustomColumnsModal = ({ visible, onClose, mode, target }) => {
       }
 
       // Fetch all custom columns
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`);
       if (!response.ok) {
         setColumns([]);
         return;
@@ -76,7 +77,7 @@ const ManageCustomColumnsModal = ({ visible, onClose, mode, target }) => {
 
   const handleDelete = async (columnId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns/${columnId}`, {
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns/${columnId}`, {
         method: 'DELETE',
       });
 

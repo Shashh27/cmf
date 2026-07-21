@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, Checkbox, Button, message } from "antd";
+import { api } from '../api/client.js';
 
 const WorkCenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
   const [form] = Form.useForm();
@@ -29,12 +28,12 @@ const WorkCenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
     setLoading(true);
     try {
       const url = workcenter 
-        ? `${API_BASE_URL}/workcenters/${workcenter.id}`
-        : `${API_BASE_URL}/workcenters/`;
+        ? `/workcenters/${workcenter.id}`
+        : `/workcenters/`;
       
       const method = workcenter ? "put" : "post";
       
-      await axios({
+      await api({
         url,
         method,
         headers: {

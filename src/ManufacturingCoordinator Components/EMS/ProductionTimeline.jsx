@@ -3,6 +3,7 @@ import * as echarts from 'echarts';
 import moment from 'moment';
 import { Empty, DatePicker } from 'antd';
 import { API_BASE_URL } from '../../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 function ProductionTimeline({ machineId }) {
   const [selectedDate, setSelectedDate] = useState(moment());
@@ -17,7 +18,7 @@ function ProductionTimeline({ machineId }) {
     
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/energy-monitoring/get_production_data?date=${date.format('YYYY-MM-DD')}&machine_id=${machineId}`
       );
       const data = await response.json();

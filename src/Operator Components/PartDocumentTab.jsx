@@ -3,10 +3,10 @@ import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, 
 import { FileTextOutlined, EyeOutlined, CheckCircleOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
-import { API_BASE_URL } from '../Config/auth';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import ModelViewer3D from './ModelViewer3D';
 import OperationChecklist from './OperationChecklist';
+import { api } from '../api/client.js';
 
 
 const { TabPane } = Tabs;
@@ -109,7 +109,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const fetchPendingToolQuantities = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/inventory-requests/`);
+      const response = await api.get(`/inventory-requests/`);
       if (response.status === 200) {
         const map = {};
         (response.data || []).forEach((req) => {
@@ -147,7 +147,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const fetchOrders = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/orders/`);
+      const response = await api.get(`/orders/`);
       if (response.status === 200) {
         setOrders(response.data);
       }
@@ -158,7 +158,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const fetchParts = async (saleOrderNumber) => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`);
+      const response = await api.get(`/orders/sale-order/${saleOrderNumber}/parts`);
       if (response.status === 200) {
         const partsList = Array.isArray(response.data) ? response.data : (response.data.parts || []);
         setParts(partsList);
@@ -175,7 +175,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       return;
     }
     try {
-      const response = await axios.get(`${API_BASE_URL}/operations/part/${partId}`);
+      const response = await api.get(`/operations/part/${partId}`);
       if (response.status === 200) {
         setRequestOperations(Array.isArray(response.data) ? response.data : []);
       }
@@ -195,7 +195,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
       if (!orderId && orderNumber) {
         try {
-          const ordersRes = await axios.get(`${API_BASE_URL}/orders`);
+          const ordersRes = await api.get(`/orders`);
           const matchingOrder = ordersRes.data.find(o => o.sale_order_number === orderNumber);
           if (matchingOrder) orderId = matchingOrder.id;
         } catch (err) {
@@ -218,7 +218,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const fetchPartData = async (orderId) => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const response = await api.get(`/orders/${orderId}/hierarchical`);
       if (response.status === 200) {
         let relevantPart = null;
         const data = response.data;
@@ -677,8 +677,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       for (const op of allOperations) {
         // Check if operation has checklists (MC-assigned or default general checklists)
         try {
-          const assignmentResponse = await axios.get(
-            `${API_BASE_URL}/operation-checklists/assignments?operation_id=${op.id}&fallback_to_general=true`
+          const assignmentResponse = await api.get(`/operation-checklists/assignments?operation_id=${op.id}&fallback_to_general=true`
           );
           checklistAssigned[op.id] = (
             assignmentResponse.status === 200 &&
@@ -691,8 +690,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
         // Fetch submission status
         try {
-          const response = await axios.get(
-            `${API_BASE_URL}/operation-checklists/submissions/latest?operation_id=${op.id}&operator=${operatorId}`
+          const response = await api.get(`/operation-checklists/submissions/latest?operation_id=${op.id}&operator=${operatorId}`
           );
           if (response.status === 200 && response.data.status) {
             statuses[op.id] = response.data.status;
@@ -853,7 +851,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         purpose_of_use: values.purpose_of_use || ""
       };
 
-      const response = await axios.post(`${API_BASE_URL}/inventory-requests/`, payload);
+      const response = await api.post(`/inventory-requests/`, payload);
       if (response.status === 200 || response.status === 201) {
         notification.success({ message: 'Success', description: 'Request submitted successfully' });
         setIsRequestModalVisible(false);

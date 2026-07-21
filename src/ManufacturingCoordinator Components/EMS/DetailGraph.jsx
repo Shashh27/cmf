@@ -4,6 +4,7 @@ import { BarChartOutlined, ReloadOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts';
 import moment from 'moment';
 import { API_BASE_URL } from '../../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 const { Content } = Layout;
 const { TabPane } = Tabs;
@@ -37,7 +38,7 @@ const DetailGraph = ({ machineId }) => {
     setLoading(true);
     try {
       const { start, end } = getTimeRange(timeRange);
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/energy-monitoring/get_machine_history/${machineId}?start_time=${start.format('YYYY-MM-DD HH:mm:ss')}&end_time=${end.format('YYYY-MM-DD HH:mm:ss')}`
       );
       const data = await response.json();

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea, App, Select } from "antd";
-import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
+import {
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea, App, Select } from "antd";
+import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined } from "@ant-design/icons";
+import { api } from '../api/client.js';
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -38,18 +38,6 @@ const OMS = () => {
   const [approvalAction, setApprovalAction] = useState(null);
   const [approvalForm] = Form.useForm();
 
-  const getCurrentAdminId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const user = JSON.parse(stored);
-      if (user?.id == null) return null;
-      return user.id;
-    } catch {
-      return null;
-    }
-  };
-
   useEffect(() => {
     if (hasFetchedData.current) return;
     
@@ -73,7 +61,7 @@ const OMS = () => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      const response = await api.get(`/customers/`);
       setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
@@ -83,11 +71,7 @@ const OMS = () => {
   
   const fetchOrders = async () => {
     try {
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const uid = storedUser?.id;
-      const response = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const response = await api.get(`/orders/`);
       const data = response.data;
       setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -173,7 +157,7 @@ const OMS = () => {
       centered: true,
       onOk: async () => {
         try {
-          const response = await axios.delete(`${API_BASE_URL}/orders/${order.id}`);
+          const response = await api.delete(`/orders/${order.id}`);
           const result = response.data || {};
           fetchOrders();
           if (result.product_also_deleted) {
@@ -212,7 +196,7 @@ const OMS = () => {
 
   const handleApprovalSubmit = async (values) => {
     try {
-      await axios.put(`${API_BASE_URL}/orders/${selectedOrderForApproval.id}/approve`, {
+      await api.put(`/orders/${selectedOrderForApproval.id}/approve`, {
         approval_status: values.approval_status,
         approval_remarks: values.approval_remarks,
       });
@@ -923,11 +907,6 @@ const OMS = () => {
                 style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
               />
               <div className="flex gap-2">
-                <OMSOrdersPdfDownload
-                  orderCount={filteredOrders.length}
-                  getOrdersForExport={getOrdersForExport}
-                  formatDate={formatDate}
-                />
                 <Button 
                     type="primary" 
                     icon={<PlusOutlined />}
@@ -939,6 +918,11 @@ const OMS = () => {
                     <span className="hidden sm:inline">New Order</span>
                     <span className="sm:hidden">New</span>
                 </Button>
+                <OMSOrdersPdfDownload
+                  orderCount={filteredOrders.length}
+                  getOrdersForExport={getOrdersForExport}
+                  formatDate={formatDate}
+                />
               </div>
             </div>
         </div>

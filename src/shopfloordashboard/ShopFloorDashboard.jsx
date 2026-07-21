@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Spin, Alert, Typography, Button, Switch, Radio, Space, Row, Col, Segmented, Card } from 'antd';
 import { motion } from 'framer-motion';
-import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
 import { getApiWsUrl } from '../auth/apiUrl';
 import { TableOutlined, CalendarOutlined, AppstoreOutlined, LineChartOutlined } from '@ant-design/icons';
 
 import { MachineGrid } from './MachineComponents';
 import { SchedulingAnalytics } from './SchedulingAnalytics';
+import { api } from '../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -89,18 +88,7 @@ const ShopFloorDashboard = ({ onBack }) => {
     if (!background) setLoading(true);
     setError(null);
     try {
-      const userId = getCurrentAdminId();
-      
-      if (!userId) {
-        setError('No user ID found. Please log in again.');
-        return;
-      }
-
-      const role = String(getUserRole() || '').toLowerCase();
-      const params = (role.includes('manufacturing') || role === 'mc')
-        ? { manufacturing_coordinator_id: userId }
-        : { admin_id: userId };
-      const response = await axios.get(`${API_BASE_URL}/orders/shop-floor/hierarchical`, { params });
+      const response = await api.get(`/orders/shop-floor/hierarchical`);
       setData(response.data);
     } catch (err) {
       console.error('Failed to fetch shop floor data:', err);

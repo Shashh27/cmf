@@ -4,6 +4,7 @@ import { Typography, Spin, Card, Row, Col, Button, Space } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts-for-react';
 import { API_BASE_URL } from '../../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -19,7 +20,7 @@ function MachineDetails() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
+        const response = await authFetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
         const data = await response.json();
         setMachineDetails(data);
         setMachineName(data.machine_name || `Machine ${machineId}`);

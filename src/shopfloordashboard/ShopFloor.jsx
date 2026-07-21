@@ -10,6 +10,7 @@ import { applyOverviewCamera, clampOrbitCamera, computeCameraPreset, getMachineF
 import './shopFloor.css'
 import { API_BASE_URL } from '../Config/auth'
 import { getApiWsUrl } from '../auth/apiUrl'
+import { useAuth } from '../auth/AuthContext.jsx'
 
 /** Always visible in header — show 0 when no machines in that state */
 const HEADER_STATUS_PILLS = ['PRODUCTION', 'IDLE', 'OFF']
@@ -417,6 +418,7 @@ function buildLayout(apiMachines, filterWorkCenter = 'ALL', workCenterColorMap =
 
 export default function ShopFloor() {
   const navigate = useNavigate()
+  const { logoutToLogin } = useAuth()
   const [selected, setSelected] = useState(null)
   const [showLegend, setShowLegend] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
@@ -662,7 +664,10 @@ export default function ShopFloor() {
         <Modal
           title="Confirm Logout"
           open={showLogoutConfirm}
-          onOk={() => navigate('/login')}
+          onOk={async () => {
+            setShowLogoutConfirm(false)
+            await logoutToLogin(navigate)
+          }}
           onCancel={() => setShowLogoutConfirm(false)}
           okText="Logout"
           cancelText="Cancel"

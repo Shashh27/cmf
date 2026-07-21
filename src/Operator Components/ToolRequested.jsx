@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Row, Col, Select } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
 import { SearchOutlined, ToolOutlined, CheckCircleOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { authFetch } from '../api/client.js';
 
 const KpiCard = ({ title, count, label, icon, color, bgColor }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -129,7 +130,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       if (currentOpId != null) {
         url = `${API_BASE_URL}/inventory-requests/by-operator/${currentOpId}`;
       }
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (response.ok) {
         let data = await response.json();
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
@@ -149,7 +150,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       if (currentOpId != null) {
         url = `${API_BASE_URL}/inventory-return-requests/by-operator/${currentOpId}`;
       }
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (response.ok) {
         let data = await response.json();
         const arr = Array.isArray(data) ? data : [];
@@ -175,7 +176,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       }
       let url = `${API_BASE_URL}/tool-issues/`;
       if (operator_id) url = `${API_BASE_URL}/tool-issues/by-operator/${operator_id}`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (res.ok) {
         const arr = await res.json();
         const map = {};
@@ -246,7 +247,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         status: 'pending',
         return_date: new Date().toISOString()
       };
-      const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`, {
+      const response = await authFetch(`${API_BASE_URL}/inventory-return-requests/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -339,7 +340,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           formData.append('document', file);
         });
       }
-      const resp = await fetch(`${API_BASE_URL}/tool-issues/`, {
+      const resp = await authFetch(`${API_BASE_URL}/tool-issues/`, {
         method: 'POST',
         body: formData,
         headers: {
