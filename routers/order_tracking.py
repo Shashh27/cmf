@@ -12,6 +12,8 @@ from DB.models.oms import (
 )
 from DB.models.configuration import Machine
 from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user, apply_order_role_scope
 from DB.schemas.oms import (
     OperationTrackingStatus,
     PartTrackingStatus,
@@ -458,20 +460,18 @@ def get_all_orders_tracking(
     admin_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
     project_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
-    Get tracking summary for orders, optionally scoped via query params.
+    Get tracking summary for orders scoped to the JWT user's role.
+    Client-supplied role ids are ignored.
     """
-    query = db.query(Order)
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
+    project_coordinator_id = scope["project_coordinator_id"]
 
-    if admin_id is not None:
-        query = query.filter(Order.admin_id == admin_id)
-
-    if manufacturing_coordinator_id is not None:
-        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
-
-    if project_coordinator_id is not None:
-        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+    query = apply_order_role_scope(db.query(Order), Order, current_user)
 
     orders = query.all()
     

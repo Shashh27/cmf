@@ -6,6 +6,8 @@ from DB.database import get_db
 from DB.models.oms import DocumentExtractedData as DocumentExtractedDataModel, Part as PartModel
 from DB.schemas.oms import DocumentExtractedDataUpdate
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, RawMaterialUnit as RawMaterialUnitModel
+from DB.models.access_control import AccessUser as AccessUserModel
+from auth.deps import get_current_user
 from services.stock_recommendation_service import StockRecommendationService
 from datetime import datetime
 
@@ -24,7 +26,7 @@ class PlannedRawMaterialRequest(BaseModel):
     planned_inner_diameter: Optional[float] = None
     planned_outer_diameter: Optional[float] = None
     planned_raw_material_id: Optional[int] = None
-    user_id: int
+    user_id: Optional[int] = None
 
 class BatchGetRequest(BaseModel):
     extracted_data_ids: List[int]
@@ -198,9 +200,12 @@ def batch_get_planned_raw_materials(
 @router.post("/create")
 def create_planned_raw_material(
     request: PlannedRawMaterialRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """Create a new planned raw material entry"""
+    if request.user_id is None:
+        request.user_id = current_user.id
     
     # Get the existing extracted data entry to verify it exists
     extracted_entry = db.query(DocumentExtractedDataModel).filter(
@@ -263,9 +268,12 @@ def create_planned_raw_material(
 def update_planned_raw_material(
     extracted_data_id: int,
     request: PlannedRawMaterialRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """Update planned raw material dimensions for a specific extracted data entry"""
+    if request.user_id is None:
+        request.user_id = current_user.id
     
     # Get the existing extracted data entry
     extracted_entry = db.query(DocumentExtractedDataModel).filter(

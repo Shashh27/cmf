@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Depends
 
 from dotenv import load_dotenv
 
@@ -61,6 +61,8 @@ from routers import (
     access_control_router,
 
     login_router,
+
+    auth_router,
 
     inventory_requests_router,
 
@@ -157,7 +159,13 @@ app = FastAPI(
 
 
 
-# Open CORS — frontend calls backend IP directly (no JWT cookies)
+from auth.deps import jwt_auth_http_middleware
+from auth.migrate_refresh_tokens import ensure_refresh_tokens_schema
+from auth.openapi import configure_openapi_jwt
+
+configure_openapi_jwt(app)
+
+# Open CORS — allow all origins (no credentials; Bearer JWT in Authorization header)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -165,6 +173,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.middleware("http")(jwt_auth_http_middleware)
 
 
 
@@ -199,6 +209,8 @@ async def startup_event():
     try:
 
         Base.metadata.create_all(bind=engine)
+
+        ensure_refresh_tokens_schema()
 
         print("SUCCESS: Database tables created/verified")
 
@@ -271,7 +283,7 @@ async def shutdown_event():
 
 
 
-# Unified API router (no JWT)
+# Unified API router — JWT enforced via HTTP middleware (WebSockets exempt)
 api_router = APIRouter()
 
 # Include all routers in the unified router
@@ -293,6 +305,7 @@ api_router.include_router(machine_documents_router)
 api_router.include_router(common_documents_router)
 api_router.include_router(access_control_router)
 api_router.include_router(login_router)
+api_router.include_router(auth_router)
 api_router.include_router(machines_router)
 api_router.include_router(operation_documents_router)
 api_router.include_router(tools_list_router)
@@ -327,7 +340,7 @@ api_router.include_router(admin_document_notifications_router)
 # Include unified router with single prefix
 app.include_router(api_router, prefix="/api/v1")
 
-# Include chatbot router separately (different prefix)
+# Include chatbot router separately (JWT via HTTP middleware + get_current_user on routes)
 app.include_router(chatbot_router, prefix="/api/chatbot")
 
 # app.include_router(production_logs_router, prefix="/api/v1")

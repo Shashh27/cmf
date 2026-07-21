@@ -8,6 +8,9 @@ from DB.models.production import ShiftSummary
 from DB.models.monitoring import MachineLiveStatus
 from DB.models.configuration import Machine, workcenter
 from DB.models.oms import Operation, Part
+from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from DB.schemas.production_analytics import (
     OverallOEEAnalysis, OEELosses, OEETrend, ShiftOEE, MachineOEE,
     DetailedShiftSummary, CombinedScheduleProductionResponse, PlannedOperation, ActualProductionLog, MachineInfo
@@ -546,10 +549,16 @@ def get_combined_schedule_production(
     project_coordinator_id: Optional[int] = Query(None, description="Filter by project coordinator ID"),
     manufacturing_coordinator_id: Optional[int] = Query(None, description="Filter by manufacturing coordinator ID"),
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
-    Retrieve combined planned schedule items and actual production logs with optional filtering.
+    Retrieve combined planned schedule items and actual production logs.
+    Role scope is taken from the JWT user (client role ids ignored).
     """
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    project_coordinator_id = scope["project_coordinator_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
     try:
         # First, get ALL machines from configuration to ensure we show all machines
         all_machines = db.query(Machine).all()

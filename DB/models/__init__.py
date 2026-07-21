@@ -28,6 +28,7 @@ from .configuration import (
     PMCheckpointSubmission,
 )
 from .access_control import AccessUser
+from .refresh_token import RefreshToken
 from .inventory import (
     RawMaterial,
     ToolsList
@@ -75,6 +76,7 @@ __all__ = [
     "Submission",
     "SubmissionDetail",
     "AccessUser",
+    "RefreshToken",
     "RawMaterial",
     "ToolsList",
     "OEEIssue",

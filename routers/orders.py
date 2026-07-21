@@ -36,6 +36,12 @@ from DB.models.inventory import InventoryRequest, InventoryReturnRequest, RawMat
 
 from DB.models.access_control import AccessUser
 
+from auth.deps import get_current_user
+
+from auth.scope import scope_ids_from_user, apply_order_role_scope
+
+from auth.roles import normalize_role
+
 from DB.schemas.oms import (
 
     Order as OrderResponse,
@@ -83,6 +89,7 @@ def get_shop_floor_hierarchical_data(
     db: Session = Depends(get_db),
     admin_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 
 ):
 
@@ -90,9 +97,15 @@ def get_shop_floor_hierarchical_data(
 
     Get shop floor hierarchical data with machines, orders, parts, and operations.
 
-    Optional admin_id / manufacturing_coordinator_id query params scope the results.
+    Scoped to the authenticated user's role (client admin_id / MC id ignored).
 
     """
+
+    scope = scope_ids_from_user(current_user)
+
+    admin_id = scope["admin_id"]
+
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     try:
 
@@ -112,7 +125,7 @@ def get_shop_floor_hierarchical_data(
 
         
 
-        # Filter orders based on admin_id or manufacturing_coordinator_id
+        # Filter orders by JWT role scope
 
         order_query = db.query(Order).options(
 
@@ -122,13 +135,7 @@ def get_shop_floor_hierarchical_data(
 
         )
 
-        if admin_id is not None:
-
-            order_query = order_query.filter(Order.admin_id == admin_id)
-
-        if manufacturing_coordinator_id is not None:
-
-            order_query = order_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+        order_query = apply_order_role_scope(order_query, Order, current_user)
 
         
 
@@ -1048,7 +1055,15 @@ def _order_to_response(order, db: Session):
 
 @router.post("/", response_model=OrderResponse)
 
-def create_order(order: OrderCreate, db: Session = Depends(get_db)):
+def create_order(
+
+    order: OrderCreate,
+
+    db: Session = Depends(get_db),
+
+    current_user: AccessUser = Depends(get_current_user),
+
+):
 
     """
 
@@ -1060,7 +1075,27 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
 
     admin_id is required. manufacturing_coordinator_id is set when admin assigns later.
 
+    Identity fields are stamped from the JWT user (client role ids ignored where forced).
+
     """
+
+    role = normalize_role(current_user.role)
+
+    if order.user_id is None:
+
+        order.user_id = current_user.id
+
+    if role == "admin":
+
+        order.admin_id = current_user.id
+
+    elif role == "project_coordinator":
+
+        order.project_coordinator_id = current_user.id
+
+    elif role == "manufacturing_coordinator":
+
+        order.manufacturing_coordinator_id = current_user.id
 
     # Trim and normalize case for the sale_order_number
 
@@ -1206,14 +1241,25 @@ def get_orders(
     admin_id: Optional[int] = Query(None),
     project_coordinator_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 
 ):
 
     """
 
-    Get orders with optional scoping via query params.
+    Get orders scoped to the authenticated user's role (client scope ids ignored).
 
     """
+
+    scope = scope_ids_from_user(current_user)
+
+    user_id = scope["user_id"]
+
+    admin_id = scope["admin_id"]
+
+    project_coordinator_id = scope["project_coordinator_id"]
+
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     from sqlalchemy.orm import joinedload
 
@@ -1241,21 +1287,7 @@ def get_orders(
 
     )
 
-    if user_id is not None:
-
-        query = query.filter(Order.user_id == user_id)
-
-    if admin_id is not None:
-
-        query = query.filter(Order.admin_id == admin_id)
-
-    if project_coordinator_id is not None:
-
-        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
-
-    if manufacturing_coordinator_id is not None:
-
-        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    query = apply_order_role_scope(query, Order, current_user)
 
     orders = query.all()
 
@@ -1272,10 +1304,21 @@ def get_orders_with_customers(
     admin_id: Optional[int] = Query(None),
     project_coordinator_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 
 ):
 
-    """Get orders with customer information, optionally scoped via query params."""
+    """Get orders with customer information, scoped to the JWT user's role."""
+
+    scope = scope_ids_from_user(current_user)
+
+    user_id = scope["user_id"]
+
+    admin_id = scope["admin_id"]
+
+    project_coordinator_id = scope["project_coordinator_id"]
+
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     from sqlalchemy.orm import joinedload
 
@@ -1301,21 +1344,7 @@ def get_orders_with_customers(
 
     )
 
-    if user_id is not None:
-
-        query = query.filter(Order.user_id == user_id)
-
-    if admin_id is not None:
-
-        query = query.filter(Order.admin_id == admin_id)
-
-    if project_coordinator_id is not None:
-
-        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
-
-    if manufacturing_coordinator_id is not None:
-
-        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    query = apply_order_role_scope(query, Order, current_user)
 
     orders = query.all()
 
@@ -1709,19 +1738,17 @@ def get_all_part_priorities(
 
     db: Session = Depends(get_db),
 
+    current_user: AccessUser = Depends(get_current_user),
+
 ):
 
-    """Get all part priorities globally with details.
+    """Get all part priorities globally with details, scoped to the JWT user's role."""
 
+    scope = scope_ids_from_user(current_user)
 
+    admin_id = scope["admin_id"]
 
-    - If admin_id is provided, filter by Order.admin_id.
-
-    - If manufacturing_coordinator_id is provided, filter by Order.manufacturing_coordinator_id.
-
-    - If both are omitted, return priorities for all orders.
-
-    """
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     query = (
 
@@ -1737,13 +1764,7 @@ def get_all_part_priorities(
 
     )
 
-    if admin_id is not None:
-
-        query = query.filter(Order.admin_id == admin_id)
-
-    if manufacturing_coordinator_id is not None:
-
-        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    query = apply_order_role_scope(query, Order, current_user)
 
 
 
@@ -1937,7 +1958,15 @@ def get_order_wise_priorities(
 
     db: Session = Depends(get_db),
 
+    current_user: AccessUser = Depends(get_current_user),
+
 ):
+
+    scope = scope_ids_from_user(current_user)
+
+    admin_id = scope["admin_id"]
+
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     groups_query = (
 
@@ -1963,13 +1992,7 @@ def get_order_wise_priorities(
 
     )
 
-    if admin_id is not None:
-
-        groups_query = groups_query.filter(Order.admin_id == admin_id)
-
-    if manufacturing_coordinator_id is not None:
-
-        groups_query = groups_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    groups_query = apply_order_role_scope(groups_query, Order, current_user)
 
 
 
@@ -2055,13 +2078,23 @@ class OrderWisePriorityUpdate(BaseModel):
 
 @router.put("/part-priorities/order-wise/reorder")
 
-def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session = Depends(get_db)):
+def reorder_order_wise_priorities(
+
+    update: OrderWisePriorityUpdate,
+
+    db: Session = Depends(get_db),
+
+    current_user: AccessUser = Depends(get_current_user),
+
+):
 
     order_ids = update.order_ids
 
-    admin_id = update.admin_id
+    scope = scope_ids_from_user(current_user)
 
-    manufacturing_coordinator_id = update.manufacturing_coordinator_id
+    admin_id = scope["admin_id"]
+
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     if not order_ids:
 
@@ -2069,17 +2102,11 @@ def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session =
 
 
 
-    # Limit existing IDs to those belonging to this admin / manufacturing coordinator, if provided
+    # Limit existing IDs to those belonging to the JWT user's role scope
 
     existing_query = db.query(OrderPartPriority.order_id).join(Order, OrderPartPriority.order_id == Order.id)
 
-    if admin_id is not None:
-
-        existing_query = existing_query.filter(Order.admin_id == admin_id)
-
-    if manufacturing_coordinator_id is not None:
-
-        existing_query = existing_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    existing_query = apply_order_role_scope(existing_query, Order, current_user)
 
     existing_ids = {row[0] for row in existing_query.distinct().all()}
 
@@ -2093,9 +2120,7 @@ def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session =
 
     records_query = db.query(OrderPartPriority).join(Order, OrderPartPriority.order_id == Order.id)
 
-    if admin_id is not None:
-
-        records_query = records_query.filter(Order.admin_id == admin_id)
+    records_query = apply_order_role_scope(records_query, Order, current_user)
 
     records = records_query.order_by(OrderPartPriority.priority.asc()).all()
 

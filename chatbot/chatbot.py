@@ -8,7 +8,7 @@ import asyncio
 from contextvars import ContextVar
 import concurrent.futures
 from typing import Dict, List, Any, Tuple, AsyncGenerator, Optional
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -18,6 +18,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from DB.database import engine
 from DB.models.chatbot import ChatRequest, ChatResponse
+from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
 from chatbot.schema_knowledge import OUT_OF_SCOPE_MESSAGE, build_system_prompt
 from chatbot.intent import get_intent_hints
 from chatbot.broad_search import is_clearly_off_topic, try_broad_search, extract_search_terms
@@ -59,6 +61,7 @@ from chatbot.result_validator import (
     results_look_wrong,
 )
 from chatbot.order_sql import try_order_query
+from chatbot.tool_sql import try_tool_query
 from chatbot.context_resolver import resolve_follow_up_question, try_machines_for_order_query
 from chatbot.groq_client import groq_follow_ups, is_groq_enabled
 
@@ -942,13 +945,21 @@ def get_svc():
     return _svc
 
 
-def _ctx_from_request(request: Request, body: ChatRequest) -> UserContext:
-    """Build user context from request body fields only."""
+def _ctx_from_request(request: Request, body: ChatRequest = None) -> UserContext:
+    """Build user context from JWT user (request.state.current_user or body ignored for identity)."""
+    user = getattr(request.state, "current_user", None)
+    if user is None:
+        return UserContext(
+            user_id=None,
+            user_name=None,
+            role=None,
+            center=None,
+        )
     return UserContext(
-        user_id=body.user_id,
-        user_name=body.user_name,
-        role=body.role,
-        center=body.center,
+        user_id=int(user.id),
+        user_name=getattr(user, "user_name", None),
+        role=getattr(user, "role", None),
+        center=getattr(user, "center", None),
     )
 
 
@@ -962,7 +973,12 @@ def _require_chatbot_role(ctx: UserContext) -> None:
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
-async def chat(request: Request, body: ChatRequest):
+async def chat(
+    request: Request,
+    body: ChatRequest,
+    current_user: AccessUser = Depends(get_current_user),
+):
+    request.state.current_user = current_user
     ctx = _ctx_from_request(request, body)
     _require_chatbot_role(ctx)
     try:
@@ -991,7 +1007,12 @@ async def chat(request: Request, body: ChatRequest):
 
 @router.post("/chat/stream")
 @limiter.limit("30/minute")
-async def chat_stream(request: Request, body: ChatRequest):
+async def chat_stream(
+    request: Request,
+    body: ChatRequest,
+    current_user: AccessUser = Depends(get_current_user),
+):
+    request.state.current_user = current_user
     ctx = _ctx_from_request(request, body)
     _require_chatbot_role(ctx)
 
@@ -1022,18 +1043,13 @@ async def suggestions(
     user_name: Optional[str] = None,
     role: Optional[str] = None,
     center: Optional[str] = None,
+    current_user: AccessUser = Depends(get_current_user),
 ):
     from chatbot.suggestions import get_dynamic_suggestions
 
-    class _SuggestionContext:
-        pass
-
-    body = _SuggestionContext()
-    body.user_id = user_id
-    body.user_name = user_name
-    body.role = role
-    body.center = center
-    ctx = _ctx_from_request(request, body)
+    request.state.current_user = current_user
+    _ = (user_id, user_name, role, center)  # ignore client identity
+    ctx = _ctx_from_request(request)
     _require_chatbot_role(ctx)
     return await asyncio.to_thread(get_dynamic_suggestions, ctx)
 

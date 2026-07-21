@@ -1,11 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime, timedelta
+from pydantic import BaseModel
+import secrets
+import string
 
 from DB.database import get_db
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.access_control import AccessUserResponse, AccessUserCreate, AccessUserUpdate
 from auth.password import hash_password
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    new_password: str
 
 router = APIRouter(
     prefix="/access-users",
@@ -135,3 +144,73 @@ def delete_access_user(user_id: int, db: Session = Depends(get_db)):
 
     db.delete(db_user)
     db.commit()
+
+
+@router.post("/{user_id}/request-password-reset")
+def request_password_reset(user_id: int, db: Session = Depends(get_db)):
+    """Generate password reset token for a user"""
+    db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {user_id} not found",
+        )
+    
+    # Generate secure random token
+    alphabet = string.ascii_letters + string.digits
+    token = ''.join(secrets.choice(alphabet) for _ in range(32))
+    
+    # Set expiration to 1 hour from now
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+    
+    # Update user with reset token
+    db_user.password_reset_token = token
+    db_user.password_reset_expires = expires_at
+    db_user.password_reset_used = False
+    
+    db.commit()
+    db.refresh(db_user)
+    
+    return {
+        "message": "Password reset token generated",
+        "token": token,  # In production, send this via email
+        "expires_at": expires_at.isoformat()
+    }
+
+
+@router.post("/reset-password")
+def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
+    """Reset password using token"""
+    from sqlalchemy import text
+    
+    # Find user with valid token
+    query = text("""
+        SELECT id FROM accesscontrol.access_users 
+        WHERE password_reset_token = :token 
+        AND password_reset_expires > :now 
+        AND password_reset_used = FALSE
+    """)
+    
+    result = db.execute(query, {
+        "token": request.token,
+        "now": datetime.utcnow()
+    }).fetchone()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    user_id = result[0]
+    db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
+    
+    # Update password
+    db_user.password = hash_password(request.new_password)
+    db_user.password_reset_token = None
+    db_user.password_reset_expires = None
+    db_user.password_reset_used = True
+    
+    db.commit()
+    
+    return {"message": "Password reset successfully"}

@@ -8,6 +8,8 @@ from DB.database import get_db
 from DB.models.notifications import MachineCalibrationNotification as MachineCalibrationNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.configuration import Machine, workcenter
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from DB.schemas.notifications import (
     MachineCalibrationNotification as MachineCalibrationNotificationSchema,
     MachineCalibrationNotificationWithDetails,
@@ -53,9 +55,14 @@ def list_machine_calibration_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     # Note: Notifications are now generated automatically by the scheduler
     # This endpoint only retrieves existing notifications
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(MachineCalibrationNotificationModel)
     if start_date:
         q = q.filter(MachineCalibrationNotificationModel.created_at >= start_date)
@@ -106,7 +113,12 @@ def list_pending_machine_calibration_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(MachineCalibrationNotificationModel.id.desc()).all()
     machine_ids = [n.machine_id for n in notifications]

@@ -23,6 +23,8 @@ from DB.schemas.documents import (
     MachineWithFolders
 )
 from DB.minio_client import get_minio_client
+from auth.deps import get_current_user
+from DB.models.access_control import AccessUser
 
 router = APIRouter(
     prefix="/machine-documents",
@@ -340,8 +342,9 @@ async def upload_machine_document(
     machine_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
     document_type: Optional[str] = Form(None),
-    user_id: int = Form(...),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload multiple machine documents with automatic versioning
@@ -351,6 +354,7 @@ async def upload_machine_document(
     - Either folder_id or machine_id must be provided (but not both)
     - document_type: 'maintenance' for maintenance docs, None for general docs
     """
+    user_id = current_user.id
     # Validate that either folder_id or machine_id is provided, but not both
     if folder_id is None and machine_id is None:
         raise HTTPException(

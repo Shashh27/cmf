@@ -16,6 +16,7 @@ from DB.schemas.notifications import (
     PCNotificationWithDetails as PCNotificationSchema,
     ActivityLogWithDetails as ActivityLogSchema,
 )
+from auth.deps import get_current_user
 router = APIRouter(prefix="/pc-notifications", tags=["pc-notifications"])
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -136,8 +137,12 @@ def get_pc_notifications(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
-    """Get notifications for a Project Coordinator by path pc_user_id."""
+    """Get notifications for the authenticated Project Coordinator (path id must match JWT)."""
+    if pc_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
+    pc_user_id = current_user.id
     # Verify user exists and is a PC
     user = db.query(AccessUserModel).filter(AccessUserModel.id == pc_user_id).first()
     if not user:
@@ -240,8 +245,12 @@ def get_pc_notifications(
 def get_unread_count(
     pc_user_id: int,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
-    """Get count of unread notifications for the PC identified by path pc_user_id."""
+    """Get count of unread notifications for the authenticated PC."""
+    if pc_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
+    pc_user_id = current_user.id
     count = db.query(PCNotificationModel).filter(
         PCNotificationModel.pc_user_id == pc_user_id,
         PCNotificationModel.is_read == False  # noqa: E712
@@ -271,8 +280,12 @@ def mark_notification_as_read(notification_id: int, db: Session = Depends(get_db
 def mark_all_as_read(
     pc_user_id: int,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
-    """Mark all notifications for the PC identified by path pc_user_id as read."""
+    """Mark all notifications for the authenticated PC as read."""
+    if pc_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
+    pc_user_id = current_user.id
     notifications = db.query(PCNotificationModel).filter(
         PCNotificationModel.pc_user_id == pc_user_id,
         PCNotificationModel.is_read == False  # noqa: E712

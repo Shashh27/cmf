@@ -34,7 +34,7 @@ from .tools_list import router as tools_list_router
 
 from .access_control import router as access_control_router
 
-from .login import router as login_router
+from .login import router as login_router, auth_router as auth_router
 
 from .inventory_requests import router as inventory_requests_router
 
@@ -95,6 +95,8 @@ __all__ = [
     "access_control_router",
 
     "login_router",
+
+    "auth_router",
 
     "inventory_requests_router",
 

@@ -23,6 +23,8 @@ from DB.schemas.documents import (
     DocumentVersionResponse
 )
 from DB.minio_client import get_minio_client
+from auth.deps import get_current_user
+from DB.models.access_control import AccessUser
 
 router = APIRouter(
     prefix="/general-documents",
@@ -324,15 +326,17 @@ async def upload_document(
     folder_id: int = Form(...),
     file_name: str = Form(...),
     parent_id: Optional[int] = Form(None),
-    user_id: int = Form(...),
+    user_id: Optional[int] = Form(None),
     document_type: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload a new document with automatic versioning
     - If parent_id is None, creates a new document with version 1.0
     - If parent_id is provided, creates a new version (auto-incremented)
     """
+    user_id = current_user.id
     # Validate folder exists
     folder = db.query(GeneralFolder).filter(GeneralFolder.id == folder_id).first()
     if not folder:

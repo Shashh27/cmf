@@ -7,6 +7,8 @@ from DB.database import get_db
 from DB.models.notifications import OrderNotification as OrderNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from DB.schemas.notifications import (
     OrderNotificationWithDetails as OrderNotificationSchema,
     OrderNotificationCreate as OrderNotificationCreateSchema,
@@ -31,7 +33,12 @@ def list_order_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(OrderNotificationModel)
     if start_date:
         q = q.filter(OrderNotificationModel.created_at >= start_date)
@@ -92,7 +99,12 @@ def list_pending_order_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(OrderNotificationModel)
     if start_date:
         q = q.filter(OrderNotificationModel.created_at >= start_date)

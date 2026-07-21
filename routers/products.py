@@ -45,6 +45,7 @@ from DB.schemas.oms import (
 from DB.schemas.inventory import ToolsList as ToolsListSchema
 from DB.minio_client import get_minio_client
 from auth.roles import normalize_role
+from auth.deps import get_current_user
 
 router = APIRouter(
     prefix="/products",
@@ -57,11 +58,14 @@ PRODUCT_CREATOR_ROLES = ("admin", "project_coordinator")
 
 
 @router.post("/", response_model=Product, status_code=status.HTTP_201_CREATED)
-def create_product(product: ProductCreate, db: Session = Depends(get_db)):
+def create_product(
+    product: ProductCreate,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     """Create a new product. Only admin or project_coordinator can create; manufacturing_coordinator cannot."""
-    creator = db.query(AccessUserModel).filter(AccessUserModel.id == product.user_id).first()
-    if not creator:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    product.user_id = current_user.id
+    creator = current_user
     if (creator.role or "").strip().lower() not in PRODUCT_CREATOR_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -89,11 +93,14 @@ def get_products(
     db: Session = Depends(get_db),
     user_id: Optional[int] = Query(None),
     role: Optional[str] = Query(None),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """
-    Get products with optional role-aware visibility via query params.
-    If role is not provided, filter by user_id only (or return all if user_id unset).
+    Get products with role-aware visibility from the JWT user.
+    Client-supplied user_id / role are ignored.
     """
+    user_id = current_user.id
+    role = current_user.role
     base_query = db.query(ProductModel).options(joinedload(ProductModel.user)).order_by(ProductModel.id.asc())
 
     normalized_role = normalize_role(role) if role else None

@@ -9,6 +9,9 @@ from DB.database import get_db
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel, RawMaterialUnit as RawMaterialUnitModel, RawMaterialUsage as RawMaterialUsageModel, RawMaterialHistory as RawMaterialHistoryModel, StockQualityDocument as StockQualityDocumentModel
 from DB.models.oms import Order as OrderModel, Part as PartModel, OutSourcePartStatus, Product as ProductModel
 from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
+from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from DB.schemas.inventory import (
     RawMaterial, RawMaterialCreate, RawMaterialUpdate,
     RawMaterialStock, RawMaterialStockCreate, RawMaterialStockUpdate, RawMaterialStockWithDetails,
@@ -149,14 +152,19 @@ def get_inventory_view(
     db: Session = Depends(get_db),
     admin_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Single endpoint returning full inventory hierarchy:
     materials -> stocks (general + order) -> units (with usages).
-    Optional admin_id / manufacturing_coordinator_id query params scope order stocks.
+    Scoped from JWT role (client admin_id / MC id ignored).
     """
     from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
     from sqlalchemy.orm import joinedload
+
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     # 1. All materials
     materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
@@ -495,14 +503,18 @@ def get_raw_material_history(
     admin_id: Optional[int] = Query(None),
     manufacturing_coordinator_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Get comprehensive raw material history.
-    Optional admin_id / manufacturing_coordinator_id accepted for API compatibility (unused in filter).
+    Role ids overridden from JWT (currently unused in filter; kept for API compat).
     """
     from datetime import datetime
     from sqlalchemy import and_, or_
 
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
     # Note: admin_id / manufacturing_coordinator_id currently unused — both Admin and MC see all history
     _ = (admin_id, manufacturing_coordinator_id)
     
@@ -1853,10 +1865,12 @@ def assign_material_to_part(
     part_id: int,
     required_length: float,
     user_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """Assign material unit to a part and track usage"""
-    
+    user_id = current_user.id
+
     # Get part first to check schedule status
     part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not part:
@@ -2047,8 +2061,14 @@ def assign_material_to_part(
 
 
 @router.delete("/parts/{part_id}/unlink-material")
-def unlink_material_from_part(part_id: int, user_id: int = None, db: Session = Depends(get_db)):
+def unlink_material_from_part(
+    part_id: int,
+    user_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Unlink material from part - restore unit length and delete part/usage details"""
+    user_id = current_user.id
     # Get part
     part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not part:

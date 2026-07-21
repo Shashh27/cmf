@@ -7,6 +7,8 @@ from DB.database import get_db
 from DB.models.notifications import MachineNotification as MachineNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.configuration import Machine
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from sqlalchemy import text
 from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
@@ -33,7 +35,12 @@ def list_machine_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(MachineNotificationModel)
     if start_date:
         q = q.filter(MachineNotificationModel.created_at >= start_date)
@@ -109,7 +116,12 @@ def list_pending_machine_notifications(
     pc_id: Optional[int] = None,
     mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(MachineNotificationModel.id.desc()).all()
     breakdown_ids = [n.machine_breakdown_id for n in notifications]

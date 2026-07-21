@@ -21,6 +21,8 @@ from DB.schemas.documents import (
     CommonDocumentVersionResponse
 )
 from DB.minio_client import get_minio_client
+from auth.deps import get_current_user
+from DB.models.access_control import AccessUser
 
 router = APIRouter(
     prefix="/common-documents",
@@ -271,8 +273,9 @@ async def upload_common_document(
     file: UploadFile = File(...),
     folder_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
-    user_id: int = Form(...),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload a new common document with automatic versioning
@@ -280,6 +283,7 @@ async def upload_common_document(
     - If parent_id is None, creates a new document with version 1.0
     - If parent_id is provided, creates a new version (auto-incremented)
     """
+    user_id = current_user.id
     if folder_id is not None:
         folder = db.query(CommonFolder).filter(CommonFolder.id == folder_id).first()
         if not folder:

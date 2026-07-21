@@ -23,6 +23,8 @@ from services.stock_auto_update import StockAutoUpdateService
 from services.notification_service import NotificationService
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartUpdate, Assembly, AssemblyUpdate
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 
 router = APIRouter(
     prefix="/recycle-bin",
@@ -259,9 +261,16 @@ def get_recycle_bin_parts(
     project_coordinator_id: Optional[int] = None,
     manufacturing_coordinator_id: Optional[int] = None,
     order_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
-    """Get all parts and assemblies in the recycle bin with optional user filtering"""
+    """Get all parts and assemblies in the recycle bin scoped to the JWT user's role."""
+    scope = scope_ids_from_user(current_user)
+    user_id = scope["user_id"]
+    admin_id = scope["admin_id"]
+    project_coordinator_id = scope["project_coordinator_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
+
     # Build query for parts
     parts_query = db.query(PartModel).filter(PartModel.recycle_bin == True)
     
