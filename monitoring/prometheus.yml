@@ -1,0 +1,17 @@
+# Scrapes FastAPI via Docker Desktop's host gateway.
+# Run uvicorn with: --host 0.0.0.0 --port 8989
+# (Still reachable on LAN as http://172.18.7.85:8989)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "cmf-scheduling-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "host.docker.internal:8989"
+        labels:
+          service: "cmf-scheduling"
+          env: "local"

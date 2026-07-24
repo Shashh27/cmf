@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
 from DB.models import Base, scheduling
 from DB.models import oms
@@ -9,8 +10,8 @@ from DB.minio_client import init_minio_client
 from routers.machine_scheduling import router as machine_scheduling_router
 # Import all routers
 from routers import (
-    machine_status, 
-    machines, 
+    machine_status,
+    machines,
     shift_hours,
     capacity_planning,
     machine_scheduling,
@@ -18,6 +19,7 @@ from routers import (
     operator_leaves,
     notifications,
     order_tracking,
+    unit_wise,
 )
 
 
@@ -45,6 +47,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Prometheus metrics — scrape at GET /metrics
+Instrumentator(
+    should_group_status_codes=True,
+    should_ignore_untemplated=True,
+    should_respect_env_var=False,
+    should_instrument_requests_inprogress=True,
+    excluded_handlers=["/metrics", "/health"],
+    inprogress_name="http_requests_inprogress",
+    inprogress_labels=True,
+).instrument(app).expose(app, endpoint="/metrics", include_in_schema=True)
+
 # Include routers
 app.include_router(machine_status.router, prefix="/api/v1")
 app.include_router(machines.router, prefix="/api/v1")
@@ -55,6 +68,7 @@ app.include_router(production_logs.router, prefix="/api/v1")
 app.include_router(operator_leaves.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(order_tracking.router, prefix="/api/v1")
+app.include_router(unit_wise.router, prefix="/api/v1")
 # app.include_router(machine_scheduling_engine_router, prefix="/api/v1")
 
 
@@ -97,11 +111,7 @@ async def startup_event():
 
     logger.info("CMF Backend API is ready")
     logger.info("Documentation available at /docs")
-
-
-
-
-
+    logger.info("Prometheus metrics available at /metrics")
 
 
 @app.get("/health")
@@ -112,8 +122,6 @@ def health_check():
         "database": "connected",
         "minio": "connected"
     }
-
-
 
 
 if __name__ == "__main__":

@@ -32,7 +32,12 @@ from machine_breakdown_helpers import (
     get_job_card_activation_block_message,
     get_machine_breakdown_block_message,
 )
-from production_log_helpers import get_operator_activation_block_reason
+from production_log_helpers import (
+    get_operator_activation_block_reason,
+    get_operation_work_due,
+    is_schedulable_operation,
+    total_approved_for_operation,
+)
 
 from datetime import datetime, timedelta, timezone, time as dtime
 from typing import Optional, List, Dict, Tuple
@@ -3631,6 +3636,28 @@ def generate_schedule_endpoint(
                 "result_message": result.get("message"),
             },
         )
+
+        unit_wise_result = None
+        try:
+            from unit_wise_scheduler import rebuild_unit_schedule, unit_wise_enabled
+
+            if unit_wise_enabled():
+                unit_wise_result = rebuild_unit_schedule(db, commit=True)
+                logger.info(
+                    "Unit-wise baseline built after generate-schedule",
+                    extra={
+                        "event": "unit_wise_rebuild_triggered",
+                        "trigger_source": "generate_schedule",
+                        "rows_inserted": unit_wise_result.get("rows_inserted"),
+                        "schedule_version": unit_wise_result.get("schedule_version"),
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "Unit-wise rebuild after generate-schedule failed",
+                extra={"event": "unit_wise_rebuild_failed"},
+            )
+
         return {
             "success":                   True,
             "message":                   result["message"],
@@ -3644,6 +3671,7 @@ def generate_schedule_endpoint(
             "skipped_parts":             result.get("skipped_parts", []),
             "parts_without_operations":  result.get("parts_without_operations", []),
             "schedule_items":            schedule_items,  # Added schedule items with remaining_quantity and part_name
+            "unit_wise":                 unit_wise_result,
         }
 
     except Exception as e:
@@ -5574,11 +5602,25 @@ def get_machine_operations(
             op_id = group["operation_id"]
             total_qty = group.get("total_quantity") or 0
 
+            work_due = get_operation_work_due(db, op_id, total_qty)
             activation_block = get_job_card_activation_block_message(
                 db,
                 machine_id,
                 start_time,
             )
+            # Partial handoff: qty already released from prior op — allow start
+            # before planned_start (material is ready). Breakdown still blocks.
+            # Only applies to downstream ops with upstream_approved >= 1.
+            if (
+                activation_block
+                and "scheduled start time" in activation_block.lower()
+                and work_due.get("has_predecessor")
+                and int(work_due.get("available_quantity") or 0) > 0
+            ):
+                activation_block = get_machine_breakdown_block_message(
+                    db, machine_id, datetime.now()
+                )
+
             production_block = get_operator_activation_block_reason(
                 db, op_id, total_qty
             )
@@ -5587,6 +5629,17 @@ def get_machine_operations(
 
             # Already started/completed — still block during breakdown / before schedule
             if current_status in ("inprogress", "completed"):
+                group["available_quantity"] = work_due.get("available_quantity")
+                group["upstream_approved"] = work_due.get("upstream_approved")
+                group["upstream_operation_id"] = work_due.get("upstream_operation_id")
+                group["upstream_operation_number"] = work_due.get(
+                    "upstream_operation_number"
+                )
+                group["remaining_to_close"] = work_due.get("remaining_to_close")
+                # Order progress (approved-based), not schedule-batch remaining.
+                rem_close = int(work_due.get("remaining_to_close") or 0)
+                group["remaining_quantity"] = rem_close
+                group["completed_quantity"] = max(0, int(total_qty) - rem_close)
 
                 if activation_block:
                     group["can_activate"] = False
@@ -5641,59 +5694,61 @@ def get_machine_operations(
                         prev_num = int(
                             prev_reschedule.operation_number
                         )
-
                         this_num = int(this_op_num)
-
                     except (ValueError, TypeError):
-
                         prev_num = (
                             prev_reschedule.operation_number
                         )
-
                         this_num = this_op_num
 
                     # Skip current and future ops
                     if prev_num >= this_num:
                         continue
 
+                    if prev_reschedule.operation_id in seen_blocking_op_ids:
+                        continue
+
+                    # Non-schedulable WCs (e.g. heat treat) do not gate handoff
+                    if not is_schedulable_operation(db, prev_op):
+                        continue
+
+                    # Partial flow: unlock when prior op has >= 1 approved unit
+                    # (do not wait for full OperationStatus=completed).
+                    prior_approved = total_approved_for_operation(
+                        db, prev_reschedule.operation_id
+                    )
                     prev_status_value = (
                         prev_status.status
                         if prev_status else "pending"
                     )
+                    prior_ok = prior_approved >= 1 or prev_status_value == "completed"
+                    if prior_ok:
+                        continue
 
-                    if prev_status_value != "completed":
-
-                        if prev_reschedule.operation_id in seen_blocking_op_ids:
-                            continue
-
-                        seen_blocking_op_ids.add(prev_reschedule.operation_id)
-
-                        blocking_ops.append({
-                            "operation_id":
-                                prev_reschedule.operation_id,
-
-                            "operation_number":
-                                prev_reschedule.operation_number,
-
-                            "operation_name":
-                                prev_op.operation_name,
-
-                            "status":
-                                prev_status_value,
-
-                            "machine_id":
-                                prev_reschedule.machine_id,
-                        })
+                    seen_blocking_op_ids.add(prev_reschedule.operation_id)
+                    blocking_ops.append({
+                        "operation_id":
+                            prev_reschedule.operation_id,
+                        "operation_number":
+                            prev_reschedule.operation_number,
+                        "operation_name":
+                            prev_op.operation_name,
+                        "status":
+                            prev_status_value,
+                        "approved_quantity":
+                            prior_approved,
+                        "machine_id":
+                            prev_reschedule.machine_id,
+                    })
 
                 if blocking_ops:
 
                     group["can_activate"] = False
                     group["blocked_by"] = blocking_ops
-
                     group["block_reason"] = (
                         f"Cannot activate — "
                         f"{len(blocking_ops)} prior "
-                        f"operation(s) must be completed first."
+                        f"operation(s) need at least 1 approved unit first."
                     )
 
                 elif activation_block:
@@ -5702,11 +5757,36 @@ def get_machine_operations(
                     group["blocked_by"] = []
                     group["block_reason"] = activation_block
 
+                elif (
+                    work_due.get("has_predecessor")
+                    and int(work_due.get("available_quantity") or 0) <= 0
+                ):
+
+                    group["can_activate"] = False
+                    group["blocked_by"] = []
+                    group["block_reason"] = (
+                        f"No quantity released from prior operation "
+                        f"{work_due.get('upstream_operation_number')} "
+                        f"(approved there: {work_due.get('upstream_approved', 0)})."
+                    )
+
                 else:
 
                     group["can_activate"] = True
                     group["blocked_by"] = []
                     group["block_reason"] = None
+
+                group["available_quantity"] = work_due.get("available_quantity")
+                group["upstream_approved"] = work_due.get("upstream_approved")
+                group["upstream_operation_id"] = work_due.get("upstream_operation_id")
+                group["upstream_operation_number"] = work_due.get(
+                    "upstream_operation_number"
+                )
+                group["remaining_to_close"] = work_due.get("remaining_to_close")
+                # Order progress (approved-based), not schedule-batch remaining.
+                rem_close = int(work_due.get("remaining_to_close") or 0)
+                group["remaining_quantity"] = rem_close
+                group["completed_quantity"] = max(0, int(total_qty) - rem_close)
 
             result.append({
                 **group,
@@ -6406,6 +6486,7 @@ def activate_job_card(
         
         # Check operation sequence dependency using Rescheduling
         operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        total_quantity = 0
         if operation:
             part_for_qty = db.query(Part).filter(Part.id == operation.part_id).first()
             total_quantity = (part_for_qty.qty or 0) if part_for_qty else 0
@@ -6413,118 +6494,28 @@ def activate_job_card(
                 db, operation_id, total_quantity
             )
             if production_block:
+                event = (
+                    "outsource_operation_pending_block"
+                    if "out-source" in production_block.lower()
+                    else "job_card_activation_blocked"
+                )
+                handoff_snapshot = get_operation_work_due(db, operation_id, total_quantity)
                 logger.warning(
                     "Job card activation blocked",
                     extra={
-                        "event": "job_card_activation_blocked",
+                        "event": event,
                         "operator_id": operator_id,
                         "operation_id": operation_id,
+                        "operation_number": getattr(operation, "operation_number", None),
+                        "available_quantity": handoff_snapshot.get("available_quantity"),
+                        "upstream_operation_number": handoff_snapshot.get(
+                            "upstream_operation_number"
+                        ),
+                        "upstream_approved": handoff_snapshot.get("upstream_approved"),
                         "reason": production_block,
                     },
                 )
                 raise HTTPException(400, production_block)
-
-        if operation:
-            all_ops = db.query(Operation).filter(
-                Operation.part_id == rescheduling_item.part_id
-            ).order_by(Operation.operation_number.asc()).all()
-            
-            this_op_num = int(operation.operation_number) if operation.operation_number else 0
-            
-            # Pre-load schedulability of each workcenter referenced by prior ops
-            # so non-schedulable WC operations (e.g. HEAT TREATMENT) don't gate
-            # activation — they are tracked outside the scheduling system.
-            from DB.models.configuration import WorkCenter
-            prior_wc_ids = {
-                op.workcenter_id for op in all_ops
-                if op.workcenter_id is not None
-            }
-            schedulable_wc_ids = set()
-            if prior_wc_ids:
-                schedulable_wc_ids = {
-                    row[0] for row in db.query(WorkCenter.id).filter(
-                        WorkCenter.id.in_(prior_wc_ids),
-                        WorkCenter.is_schedulable == True,
-                        WorkCenter.work_center_name != 'Default',
-                    ).all()
-                }
-
-            blocking_ops = []
-            for prev_op in all_ops:
-                try:
-                    prev_num = int(prev_op.operation_number)
-                except (ValueError, TypeError):
-                    continue
-                if prev_num >= this_op_num:
-                    continue
-
-                # Skip prior ops belonging to non-schedulable workcenters —
-                # they are not handled by the scheduler (no Rescheduling row,
-                # no production_logs). Treat them as N/A for this check.
-                if prev_op.workcenter_id is None or prev_op.workcenter_id not in schedulable_wc_ids:
-                    continue
-
-                # Check if there are approved production logs for previous operation
-                from sqlalchemy import text
-                total_approved = db.execute(text("""
-                    SELECT COALESCE(SUM(approved_quantity), 0)
-                    FROM scheduling.production_logs
-                    WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
-                """), {"op_id": prev_op.id}).scalar()
-                
-                # Also check if there's a completed OperationStatus (backward compatibility)
-                try:
-                    from DB.models.scheduling import OperationStatus
-                    prev_status = db.query(OperationStatus).filter(
-                        OperationStatus.operation_id == prev_op.id
-                    ).first()
-                    is_completed = prev_status and prev_status.status == "completed"
-                except:
-                    is_completed = False
-                
-                if not (total_approved > 0 or is_completed):
-                    if prev_op.part_type_id == OUT_SOURCE_TYPE_ID:
-                        os_row = (
-                            db.query(OutSourceOperationStatus)
-                            .filter(
-                                OutSourceOperationStatus.operation_id == prev_op.id,
-                                OutSourceOperationStatus.part_id == rescheduling_item.part_id,
-                                OutSourceOperationStatus.order_id == rescheduling_item.order_id,
-                            )
-                            .first()
-                        )
-                        os_status = os_row.status if os_row else "pending"
-                        if os_status != "delivered":
-                            logger.warning(
-                                "Job card activation blocked — out-source not returned",
-                                extra={
-                                    "event": "outsource_operation_pending_block",
-                                    "order_id": rescheduling_item.order_id,
-                                    "part_id": rescheduling_item.part_id,
-                                    "operation_id": operation_id,
-                                    "blocking_outsource_operation_id": prev_op.id,
-                                    "outsource_status": os_status,
-                                },
-                            )
-                    blocking_ops.append(
-                        f"Op {prev_op.operation_number} ({prev_op.operation_name})"
-                    )
-            
-        if blocking_ops:
-            logger.warning(
-                "Job card activation blocked",
-                extra={
-                    "event": "job_card_activation_blocked",
-                    "operator_id": operator_id,
-                    "operation_id": operation_id,
-                    "reason": "prior_operations_incomplete",
-                    "blocking_operations": blocking_ops,
-                },
-            )
-            raise HTTPException(
-                400,
-                f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
-            )
 
         breakdown_block = get_machine_breakdown_block_message(
             db, machine_id, datetime.now()
@@ -6597,15 +6588,34 @@ def activate_job_card(
             )
         
         db.commit()
+        handoff = get_operation_work_due(db, operation_id, total_quantity)
         logger.info(
             "Job card activated",
             extra={
                 "event": "job_card_activation_completed",
                 "operator_id": operator_id,
                 "operation_id": operation_id,
+                "operation_number": rescheduling_item.operation_number,
                 "machine_id": machine_id,
                 "order_id": rescheduling_item.order_id,
                 "part_id": rescheduling_item.part_id,
+                "available_quantity": handoff.get("available_quantity"),
+                "upstream_operation_number": handoff.get("upstream_operation_number"),
+                "upstream_approved": handoff.get("upstream_approved"),
+                "remaining_to_close": handoff.get("remaining_to_close"),
+                "result_message": (
+                    f"Op {rescheduling_item.operation_number} activated with "
+                    f"{handoff.get('available_quantity')} unit(s) released "
+                    f"from upstream "
+                    f"(Op {handoff.get('upstream_operation_number')} "
+                    f"approved={handoff.get('upstream_approved')})."
+                    if handoff.get("has_predecessor")
+                    else (
+                        f"Op {rescheduling_item.operation_number} activated "
+                        f"(first schedulable op; available="
+                        f"{handoff.get('available_quantity')})."
+                    )
+                ),
             },
         )
         

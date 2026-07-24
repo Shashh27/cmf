@@ -1,0 +1,42 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#e8f4fc',
+  'primaryTextColor': '#1a1a1a',
+  'primaryBorderColor': '#2b6cb0',
+  'lineColor': '#4a5568',
+  'secondaryColor': '#fef3c7',
+  'tertiaryColor': '#d1fae5'
+}}}%%
+
+flowchart TB
+  subgraph PEOPLE["👥 You / Plant users"]
+    U1["Use the web app<br/>or Swagger /docs"]
+    U2["Open Grafana<br/>to watch health"]
+  end
+
+  subgraph BACKEND["🟣 CMF Backend — FastAPI :8989"]
+    API["API endpoints<br/>activate · submit · review · schedule…"]
+    METRICS["/metrics endpoint<br/>numbers about every request"]
+    API -.->|"after each request<br/>updates counters"| METRICS
+  end
+
+  subgraph PROM["🟠 Prometheus — :9090"]
+    SCRAPE["Every 15 seconds<br/>asks: give me your numbers"]
+    STORE["Stores time-series data<br/>(history of rates & latency)"]
+    SCRAPE --> STORE
+  end
+
+  subgraph GRAF["🟢 Grafana — :3002"]
+    DASH["Dashboard<br/>CMF Scheduling API"]
+    PANELS["Panels you see:<br/>• Request rate<br/>• Latency p95<br/>• Status codes<br/>• In-progress"]
+    DASH --> PANELS
+  end
+
+  U1 -->|"HTTP calls"| API
+  SCRAPE -->|"GET /metrics"| METRICS
+  STORE -->|"Grafana asks<br/>for charts"| DASH
+  U2 -->|"Login & view"| DASH
+
+  style PEOPLE fill:#f7fafc,stroke:#718096
+  style BACKEND fill:#ebf8ff,stroke:#2b6cb0
+  style PROM fill:#fffbeb,stroke:#d69e2e
+  style GRAF fill:#ecfdf5,stroke:#059669

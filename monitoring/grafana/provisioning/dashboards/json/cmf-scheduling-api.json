@@ -1,0 +1,158 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0 },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 10,
+      "title": "Total requests (all time since API start)",
+      "type": "stat",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(http_requests_total{job=\"cmf-scheduling-api\"})",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0 },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 11,
+      "title": "Scrape health (1 = UP)",
+      "type": "stat",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"cmf-scheduling-api\"}",
+          "legendFormat": "up",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 1,
+      "title": "Request rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=\"cmf-scheduling-api\"}[5m])) by (handler, method)",
+          "legendFormat": "{{method}} {{handler}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "title": "Latency p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"cmf-scheduling-api\"}[5m])) by (le, handler))",
+          "legendFormat": "{{handler}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "title": "HTTP status codes (rate)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=\"cmf-scheduling-api\"}[5m])) by (status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 4,
+      "title": "In-progress requests",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(http_requests_inprogress{job=\"cmf-scheduling-api\"}) by (method, handler)",
+          "legendFormat": "{{method}} {{handler}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0 },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 5,
+      "title": "Request counts by endpoint (easier to read)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(http_requests_total{job=\"cmf-scheduling-api\"}) by (handler, method, status)",
+          "legendFormat": "{{method}} {{handler}} {{status}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["cmf", "scheduling"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "CMF Scheduling API",
+  "uid": "cmf-scheduling-api",
+  "version": 2
+}

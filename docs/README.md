@@ -11,6 +11,8 @@ Use this folder as the single reference. Older overlapping guides were removed t
 | **Manufacturing workflow** (plain English + diagrams) | [SCHEDULING_WORKFLOW_MANUFACTURING_GUIDE.md](./SCHEDULING_WORKFLOW_MANUFACTURING_GUIDE.md) |
 | **Logging design** (what events we log) | [LOGGING_DESIGN_PLAN_PPS.md](./LOGGING_DESIGN_PLAN_PPS.md) |
 | **How to test logging** | [LOGGING_TEST_CHECKLIST.md](./LOGGING_TEST_CHECKLIST.md) |
+| **Prometheus + Grafana (how to use)** | [PROMETHEUS_GRAFANA_USER_GUIDE.md](./PROMETHEUS_GRAFANA_USER_GUIDE.md) |
+| **Prometheus + Grafana (diagram viewer)** | [view-prometheus-grafana-workflow.html](./view-prometheus-grafana-workflow.html) |
 
 ---
 

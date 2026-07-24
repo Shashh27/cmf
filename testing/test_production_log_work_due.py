@@ -97,3 +97,17 @@ class TestSchedulerDurationSplit:
         full_hours = engine._operation_duration_hours(op, 3, skip_setup=False)
         assert rework_hours == pytest.approx(0.5)
         assert full_hours == pytest.approx(1.0)
+
+    def test_continuation_after_partial_approve_skips_setup(self):
+        """5 remaining after partial approve: cycle only (5h), not setup+cycle."""
+        engine = SchedulerEngine(MagicMock())
+        op = SimpleNamespace(
+            id=1,
+            operation_number="10",
+            setup_time=time(0, 25, 0),
+            cycle_time=time(1, 0, 0),  # 1 hour
+        )
+        continuation = engine._operation_duration_hours(op, 5, skip_setup=True)
+        with_setup = engine._operation_duration_hours(op, 5, skip_setup=False)
+        assert continuation == pytest.approx(5.0)
+        assert with_setup == pytest.approx(5.0 + 25 / 60)

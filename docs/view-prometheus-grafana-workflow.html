@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CMF — Prometheus & Grafana Workflow</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "loose",
+      flowchart: { htmlLabels: true, curve: "basis", padding: 16 },
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #f0f4f8;
+      --card: #ffffff;
+      --ink: #1a202c;
+      --muted: #4a5568;
+      --accent: #2b6cb0;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: linear-gradient(160deg, #e8f4fc 0%, #f0f4f8 40%, #ecfdf5 100%);
+      color: var(--ink);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.75rem 1.5rem 1rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    header h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.65rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 42rem;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.75rem;
+      max-width: 960px;
+      margin: 0 auto 1.25rem;
+      padding: 0 1.5rem;
+    }
+    .legend article {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .legend h2 {
+      margin: 0 0 0.35rem;
+      font-size: 0.95rem;
+    }
+    .legend p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .dot {
+      display: inline-block;
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 50%;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+    .dot.backend { background: #2b6cb0; }
+    .dot.prom { background: #d69e2e; }
+    .dot.graf { background: #059669; }
+    .dot.you { background: #718096; }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 1.5rem 2rem;
+    }
+    .diagram-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+      overflow-x: auto;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+
+    .steps {
+      max-width: 960px;
+      margin: 1.5rem auto 0;
+      padding: 0 1.5rem 2.5rem;
+    }
+    .steps h2 {
+      font-size: 1.15rem;
+      margin: 0 0 0.75rem;
+    }
+    ol.flow {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: step;
+      display: grid;
+      gap: 0.65rem;
+    }
+    ol.flow li {
+      counter-increment: step;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem 0.85rem 3rem;
+      position: relative;
+      font-size: 0.95rem;
+    }
+    ol.flow li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      padding-bottom: 2rem;
+    }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>How Backend → Prometheus → Grafana work together</h1>
+    <p>
+      Beginner view of our CMF monitoring setup.
+      Read the colored boxes left-to-right / top-to-bottom, then the numbered steps below.
+    </p>
+  </header>
+
+  <section class="legend" aria-label="What each color means">
+    <article>
+      <h2><span class="dot you"></span>You</h2>
+      <p>Use the app / Swagger, and open Grafana to watch.</p>
+    </article>
+    <article>
+      <h2><span class="dot backend"></span>Backend</h2>
+      <p>Your FastAPI on port <strong>8989</strong>. Serves APIs and <code>/metrics</code>.</p>
+    </article>
+    <article>
+      <h2><span class="dot prom"></span>Prometheus</h2>
+      <p>On port <strong>9090</strong>. Collects numbers every 15 seconds and stores them.</p>
+    </article>
+    <article>
+      <h2><span class="dot graf"></span>Grafana</h2>
+      <p>On port <strong>3002</strong>. Turns stored numbers into easy charts.</p>
+    </article>
+  </section>
+
+  <main>
+    <div class="diagram-card">
+      <pre class="mermaid">
+flowchart TB
+  subgraph PEOPLE["You / Plant users"]
+    U1["Use the web app<br/>or Swagger /docs"]
+    U2["Open Grafana<br/>to watch health"]
+  end
+
+  subgraph BACKEND["CMF Backend — FastAPI :8989"]
+    API["API endpoints<br/>activate · submit · review · schedule"]
+    METRICS["/metrics endpoint<br/>numbers about every request"]
+    API -.->|"after each request<br/>updates counters"| METRICS
+  end
+
+  subgraph PROM["Prometheus — :9090"]
+    SCRAPE["Every 15 seconds<br/>asks: give me your numbers"]
+    STORE["Stores history<br/>rates · latency · errors"]
+    SCRAPE --> STORE
+  end
+
+  subgraph GRAF["Grafana — :3002"]
+    DASH["Dashboard<br/>CMF Scheduling API"]
+    PANELS["What you see<br/>Request rate · Latency p95<br/>Status codes · In-progress"]
+    DASH --> PANELS
+  end
+
+  U1 -->|"1. HTTP calls"| API
+  SCRAPE -->|"2. GET /metrics"| METRICS
+  STORE -->|"3. Ask for chart data"| DASH
+  U2 -->|"4. Login and view"| DASH
+
+  style PEOPLE fill:#f7fafc,stroke:#718096
+  style BACKEND fill:#ebf8ff,stroke:#2b6cb0
+  style PROM fill:#fffbeb,stroke:#d69e2e
+  style GRAF fill:#ecfdf5,stroke:#059669
+      </pre>
+    </div>
+  </main>
+
+  <section class="steps">
+    <h2>Simple story (4 steps)</h2>
+    <ol class="flow">
+      <li><strong>You call an API</strong> (job card, production log, etc.). The backend does the work.</li>
+      <li><strong>Backend updates /metrics</strong> — silent counters like “how many requests” and “how long they took”.</li>
+      <li><strong>Prometheus scrapes /metrics</strong> every 15 seconds and keeps a history of those numbers.</li>
+      <li><strong>Grafana reads Prometheus</strong> and draws the dashboard so you can see rate, latency, and errors.</li>
+    </ol>
+  </section>
+
+  <footer>
+    Source: <a href="./prometheus-grafana-workflow.mmd">prometheus-grafana-workflow.mmd</a>
+    · Full guide: <a href="./PROMETHEUS_GRAFANA_USER_GUIDE.md">PROMETHEUS_GRAFANA_USER_GUIDE.md</a>
+  </footer>
+</body>
+</html>

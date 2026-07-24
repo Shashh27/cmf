@@ -1892,23 +1892,36 @@ class DynamicSchedulerEngine(SchedulerEngine):
         part_data:           Dict,
         order_total_qty:     int,
         order_remaining:     int,
+        setup_already_done:  bool = False,
     ) -> Tuple[List[PlannedScheduleItem], datetime]:
         """
         Schedule outstanding work with manufacturing-accurate durations:
-          rework              → cycle time only (same part, no setup)
-          reject + balance    → setup + cycle per unit (fresh manufacture)
+          rework                         → cycle only (same parts, no setup)
+          reject / fresh on first batch  → setup + cycle
+          reject / fresh after prior run → cycle only (setup already done on
+                                          the first units of this operation)
         """
         new_production_qty = max(0, order_remaining - rework_qty - reject_qty)
-        replacement_qty = reject_qty + new_production_qty
 
         all_items: List[PlannedScheduleItem] = []
         cur = op_start
         order_remaining_ref = [order_remaining]
 
-        work_batches = (
-            (rework_qty, True, "rework"),
-            (replacement_qty, False, "replacement"),
-        )
+        if setup_already_done:
+            # Continuation after partial complete: do not charge setup again.
+            work_batches = (
+                (rework_qty, True, "rework"),
+                (reject_qty, True, "reject_replacement"),
+                (new_production_qty, True, "fresh_remaining"),
+            )
+        else:
+            # First remaining plan for this op: one setup for scrap+fresh batch.
+            replacement_qty = reject_qty + new_production_qty
+            work_batches = (
+                (rework_qty, True, "rework"),
+                (replacement_qty, False, "replacement"),
+            )
+
         for batch_qty, skip_setup, label in work_batches:
             if batch_qty <= 0:
                 continue
@@ -2150,6 +2163,11 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 cascade_cursor         = earliest_part_start
                 part_rescheduled_rows: List[Rescheduling] = []
                 cascade_active         = False  # True once we start inserting rows
+                # Units released into the unfinished chain this pass. Shop-floor
+                # hard-cap still uses approved qty on the immediate predecessor;
+                # planning may cascade the same released units through pending
+                # downstream ops so Op 50 appears after Op 40 when Op 30 unlocks.
+                cascade_flow_qty       = 0
  
                 for operation in operations:
                     op_id       = operation.id
@@ -2239,19 +2257,46 @@ class DynamicSchedulerEngine(SchedulerEngine):
                                     f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
                                     f"COMPLETED — NO ACTUAL END OR BASELINE, keeping cursor={cascade_cursor}"
                                 )
+                        # Approved units on this op can be planned into downstream
+                        # pending ops in this same reschedule pass.
+                        cascade_flow_qty = max(0, int(approved))
                         continue
  
                     # ── in progress (has production logs, remaining work) ── #
                     elif has_logs:
-                        remaining_qty = max(0, total_qty - approved)
+                        from production_log_helpers import get_operation_handoff
 
-                        if remaining_qty == 0:
+                        handoff = get_operation_handoff(self.db, op_id, total_qty)
+                        rem = max(0, int(total_qty) - int(approved))
+                        remaining_qty = int(handoff["available_quantity"])
+                        # Plan units already flowing from upstream completed /
+                        # scheduled ops even when immediate predecessor has not
+                        # approved yet (shop-floor activate still hard-caps).
+                        if remaining_qty <= 0 and cascade_flow_qty > 0 and rem > 0:
+                            remaining_qty = min(rem, cascade_flow_qty)
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"REMAINING — using cascade_flow_qty={cascade_flow_qty} "
+                                f"for planning (upstream_approved="
+                                f"{handoff.get('upstream_approved')})."
+                            )
+
+                        if remaining_qty == 0 and approved >= total_qty:
                             actual = self._actual_end(op_id)
                             if actual:
                                 cascade_cursor = self.adjust_to_shift(actual)
+                            cascade_flow_qty = max(0, int(approved))
                             print(
                                 f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
                                 f"fully approved (status lag) — skip."
+                            )
+                            continue
+
+                        if remaining_qty == 0:
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"no released qty from upstream yet "
+                                f"(upstream_approved={handoff.get('upstream_approved')}) — skip."
                             )
                             continue
 
@@ -2331,10 +2376,14 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             part_data=part_data,
                             order_total_qty=total_qty,
                             order_remaining=remaining_qty,
+                            # Op already ran (has logs / partial approve) — setup
+                            # was charged on the first units; remaining is cycle only.
+                            setup_already_done=True,
                         )
                         self.machine_end_time[machine.id] = op_end
                         cascade_cursor = op_end
                         cascade_active = True
+                        cascade_flow_qty = remaining_qty
 
                         part_rescheduled_rows.extend(
                             self._to_rescheduling_rows(
@@ -2346,8 +2395,31 @@ class DynamicSchedulerEngine(SchedulerEngine):
                         )
                         continue
 
-                    # ── pending: schedule full qty from cascade_cursor ──── #
+                    # ── pending: schedule released qty from cascade_cursor ─ #
                     # Also handles: cascade_active=True (downstream of changed op)
+                    from production_log_helpers import get_operation_handoff
+
+                    handoff = get_operation_handoff(self.db, op_id, total_qty)
+                    rem = max(0, int(total_qty) - int(approved))
+                    sched_qty = int(handoff["available_quantity"])
+                    if sched_qty <= 0 and cascade_flow_qty > 0 and rem > 0:
+                        # Immediate predecessor not approved yet, but units were
+                        # released earlier in this chain (e.g. Op30→Op40→Op50).
+                        sched_qty = min(rem, cascade_flow_qty)
+                        print(
+                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                            f"PENDING — planning cascade_flow_qty={sched_qty} "
+                            f"(upstream_approved={handoff.get('upstream_approved')}; "
+                            f"shop-floor still hard-capped until prior approve)."
+                        )
+                    if sched_qty <= 0:
+                        print(
+                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                            f"PENDING — 0 units released from upstream "
+                            f"(upstream_approved={handoff.get('upstream_approved')}); skip."
+                        )
+                        continue
+
                     machine, cand_start = self._select_machine(
                         operation, all_machines, machines_by_wc, cascade_cursor
                     )
@@ -2360,13 +2432,14 @@ class DynamicSchedulerEngine(SchedulerEngine):
  
                     print(
                         f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
-                        f"PENDING — full {total_qty} units, start={cand_start}"
+                        f"PENDING — {sched_qty} released unit(s) "
+                        f"(part qty={total_qty}), start={cand_start}"
                     )
  
                     blocks, op_end = self._schedule_operation_blocks(
                         operation           = operation,
                         machine             = machine,
-                        quantity            = total_qty,
+                        quantity            = sched_qty,
                         op_start            = cand_start,
                         schedule_history_id = 0,
                         part_data           = part_data,
@@ -2374,6 +2447,7 @@ class DynamicSchedulerEngine(SchedulerEngine):
                     self.machine_end_time[machine.id] = op_end
                     cascade_cursor = op_end
                     cascade_active = True
+                    cascade_flow_qty = sched_qty
  
                     part_rescheduled_rows.extend(
                         self._to_rescheduling_rows(

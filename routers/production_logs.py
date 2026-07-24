@@ -25,6 +25,7 @@ from production_log_helpers import (
     apply_manufacturing_coordinator_scope,
     assert_exclusive_reviewer,
     build_cross_review_alert_message,
+    get_operation_handoff,
     get_operation_work_due,
     get_order_ids_for_manufacturing_coordinator,
     pending_reviewer_log_block_message,
@@ -752,6 +753,40 @@ def update_production_log_status(
                 )
             )
 
+    # Partial-flow handoff: cannot approve more on this op than prior op released
+    # (and other pending new-manufacture on this op already reserved).
+    handoff = get_operation_handoff(
+        db, db_log.operation_id, total_quantity, exclude_log_id=log_id
+    )
+    if handoff["has_predecessor"]:
+        max_approvable = int(handoff["available_quantity"] or 0)
+        if approved_qty > max_approvable:
+            logger.warning(
+                "Review approve blocked by upstream handoff cap",
+                extra={
+                    "event": "operation_handoff_approve_blocked",
+                    "log_id": log_id,
+                    "operation_id": db_log.operation_id,
+                    "operation_number": getattr(operation, "operation_number", None),
+                    "requested_approve": approved_qty,
+                    "available_quantity": max_approvable,
+                    "upstream_operation_id": handoff.get("upstream_operation_id"),
+                    "upstream_operation_number": handoff.get("upstream_operation_number"),
+                    "upstream_approved": handoff.get("upstream_approved"),
+                    "self_approved": handoff.get("self_approved"),
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot approve {approved_qty} unit(s). Only "
+                    f"{max_approvable} unit(s) are released from prior "
+                    f"operation {handoff['upstream_operation_number']} "
+                    f"(upstream approved={handoff['upstream_approved']}, "
+                    f"already approved here={handoff['self_approved']})."
+                ),
+            )
+
     # Update the production log fields
     db_log.approved_quantity = approved_qty
     db_log.rework_quantity = rework_qty
@@ -785,13 +820,36 @@ def update_production_log_status(
             "event": "production_log_reviewed",
             "log_id": log_id,
             "operation_id": db_log.operation_id,
+            "operation_number": getattr(operation, "operation_number", None),
             "reviewer_id": db_log.user_id,
             "approved_quantity": approved_qty,
             "rework_quantity": rework_qty,
             "rejected_quantity": rejected_qty,
+            "total_approved_on_operation": total_approved_now,
+            "total_quantity": total_quantity,
             "to_status": db_log.status,
         },
     )
+
+    # Approvals on this op are what unlock / raise the hard cap on the next op.
+    if approved_qty > 0:
+        logger.info(
+            "Operation quantity released for downstream handoff",
+            extra={
+                "event": "operation_qty_released",
+                "operation_id": db_log.operation_id,
+                "operation_number": getattr(operation, "operation_number", None),
+                "part_id": getattr(operation, "part_id", None),
+                "approved_this_review": approved_qty,
+                "total_approved_on_operation": total_approved_now,
+                "total_quantity": total_quantity,
+                "result_message": (
+                    f"Op {getattr(operation, 'operation_number', db_log.operation_id)} "
+                    f"now has {total_approved_now} approved unit(s) available "
+                    f"to unlock the next schedulable operation (hard cap)."
+                ),
+            },
+        )
 
     response = ProductionLogResponse(
         **production_log_response_for_operation(db, db_log, total_quantity)
@@ -834,6 +892,36 @@ def update_production_log_status(
                     "to_status": db_log.status,
                 },
             )
+
+            # Unit-wise greedy refresh (does not touch batch rescheduling_items)
+            try:
+                from unit_wise_scheduler import rebuild_unit_schedule, unit_wise_enabled
+
+                if unit_wise_enabled():
+                    uw = rebuild_unit_schedule(
+                        db,
+                        part_id=part_id,
+                        commit=True,
+                    )
+                    logger.info(
+                        "Unit-wise rebuild after production review",
+                        extra={
+                            "event": "unit_wise_rebuild_triggered",
+                            "trigger_source": "production_reviewed",
+                            "part_id": part_id,
+                            "rows_inserted": uw.get("rows_inserted"),
+                            "schedule_version": uw.get("schedule_version"),
+                        },
+                    )
+            except Exception as uw_err:
+                logger.exception(
+                    "Unit-wise rebuild failed after review (batch dynamic OK)",
+                    extra={
+                        "event": "unit_wise_rebuild_failed",
+                        "part_id": part_id,
+                        "error": str(uw_err),
+                    },
+                )
 
             # ── UPDATE PART STATUS TO COMPLETED IF ALL OPERATIONS DONE ──────────── #
             if part_id:
@@ -1086,11 +1174,29 @@ def submit_production_log(
         work = get_operation_work_due(
             db, operation_id, total_quantity, exclude_log_id=db_log.id
         )
-        validate_operator_submit(
-            work,
-            submit_data.produced_quantity,
-            submit_data.rework_submit_quantity,
-        )
+        try:
+            validate_operator_submit(
+                work,
+                submit_data.produced_quantity,
+                submit_data.rework_submit_quantity,
+            )
+        except HTTPException as exc:
+            if "released" in str(exc.detail).lower():
+                logger.warning(
+                    "Submit blocked by upstream handoff cap",
+                    extra={
+                        "event": "operation_handoff_submit_blocked",
+                        "operation_id": operation_id,
+                        "operation_number": getattr(operation, "operation_number", None),
+                        "produced_quantity": submit_data.produced_quantity,
+                        "available_quantity": work.get("available_quantity"),
+                        "upstream_operation_id": work.get("upstream_operation_id"),
+                        "upstream_operation_number": work.get("upstream_operation_number"),
+                        "upstream_approved": work.get("upstream_approved"),
+                        "reason": exc.detail,
+                    },
+                )
+            raise
         remaining_quantity = work["remaining_to_close"]
 
         current_time = datetime.now()
@@ -1112,10 +1218,14 @@ def submit_production_log(
                 "event": "production_log_submitted",
                 "log_id": db_log.id,
                 "operation_id": operation_id,
+                "operation_number": getattr(operation, "operation_number", None),
                 "operator_id": db_log.operator_id,
                 "machine_id": db_log.machine_id,
                 "produced_quantity": submit_data.produced_quantity,
                 "rework_submit_quantity": submit_data.rework_submit_quantity,
+                "available_quantity": work.get("available_quantity"),
+                "upstream_operation_number": work.get("upstream_operation_number"),
+                "upstream_approved": work.get("upstream_approved"),
             },
         )
 

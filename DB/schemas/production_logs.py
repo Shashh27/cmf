@@ -52,6 +52,22 @@ class ProductionLogBase(BaseModel):
     reject_due: Optional[int] = Field(
         None, description="Scrapped units requiring fresh manufacture from latest reviewer decision"
     )
+    available_quantity: Optional[int] = Field(
+        None,
+        description=(
+            "Units currently releasable on this operation "
+            "(min of remaining_to_close and upstream_approved − self_approved − pending)"
+        ),
+    )
+    upstream_operation_id: Optional[int] = Field(
+        None, description="Immediate prior schedulable operation id, if any"
+    )
+    upstream_operation_number: Optional[str] = Field(
+        None, description="Immediate prior schedulable operation number"
+    )
+    upstream_approved: Optional[int] = Field(
+        None, description="Approved quantity on the immediate prior operation"
+    )
 
 
 class ProductionLogCreate(ProductionLogBase):

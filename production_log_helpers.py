@@ -98,6 +98,69 @@ def remaining_to_close(total_quantity: int, total_approved: int) -> int:
     return max(0, int(total_quantity) - int(total_approved))
 
 
+def _operation_number_int(operation_number: Any) -> Optional[int]:
+    try:
+        return int(operation_number)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_schedulable_operation(db: Session, operation) -> bool:
+    """
+    True when the operation belongs to a schedulable work center.
+    Non-schedulable WCs (e.g. heat treatment) do not gate shop-floor handoff.
+    """
+    from DB.models.configuration import WorkCenter
+
+    if operation.workcenter_id is None:
+        return False
+    wc = (
+        db.query(WorkCenter)
+        .filter(
+            WorkCenter.id == operation.workcenter_id,
+            WorkCenter.is_schedulable == True,  # noqa: E712
+            WorkCenter.work_center_name != "Default",
+        )
+        .first()
+    )
+    return wc is not None
+
+
+def get_immediate_predecessor_operation(db: Session, operation_id: int):
+    """
+    Immediate prior *schedulable* operation on the same part (by operation_number).
+    Returns None for the first schedulable op or when the operation is missing.
+    """
+    from DB.models.oms import Operation
+
+    operation = db.query(Operation).filter(Operation.id == operation_id).first()
+    if not operation:
+        return None
+
+    this_num = _operation_number_int(operation.operation_number)
+    if this_num is None:
+        return None
+
+    candidates = (
+        db.query(Operation)
+        .filter(Operation.part_id == operation.part_id)
+        .order_by(Operation.operation_number.asc())
+        .all()
+    )
+    predecessor = None
+    for prev in candidates:
+        prev_num = _operation_number_int(prev.operation_number)
+        if prev_num is None or prev_num >= this_num:
+            continue
+        if not is_schedulable_operation(db, prev):
+            continue
+        if predecessor is None or prev_num > _operation_number_int(
+            predecessor.operation_number
+        ):
+            predecessor = prev
+    return predecessor
+
+
 def part_has_production_log_history(db: Session, part_id: int) -> bool:
     """True when any operation on the part still has production_logs rows."""
     from DB.models.oms import Operation
@@ -267,6 +330,104 @@ def _pending_operator_quantities(
         "pending_produced": pending_produced,
         "pending_rework": pending_rework,
     }
+
+
+def get_operation_handoff(
+    db: Session,
+    operation_id: int,
+    total_quantity: int,
+    exclude_log_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Quantity handoff from the immediate predecessor into this operation.
+
+    available_quantity =
+      for first schedulable op: remaining_to_close (part qty − self approved)
+      otherwise: max(0, min(
+          remaining_to_close,
+          upstream_approved − self_approved − pending_on_this_op
+      ))
+
+    Unlock rule for the next job card: upstream_approved >= 1.
+    """
+    self_approved = total_approved_for_operation(db, operation_id)
+    rem = remaining_to_close(total_quantity, self_approved)
+    pending = _pending_operator_quantities(db, operation_id, exclude_log_id)
+    # Only new manufacture awaiting review consumes upstream release.
+    # Pending same-part rework does not need additional upstream qty.
+    pending_produced = int(pending["pending_produced"])
+
+    predecessor = get_immediate_predecessor_operation(db, operation_id)
+    if predecessor is None:
+        return {
+            "upstream_operation_id": None,
+            "upstream_operation_number": None,
+            "upstream_approved": None,
+            "self_approved": self_approved,
+            "pending_on_operation": pending_produced,
+            "available_quantity": rem,
+            "has_predecessor": False,
+            "predecessor_unlocked": True,
+        }
+
+    upstream_approved = total_approved_for_operation(db, predecessor.id)
+    released = max(0, upstream_approved - self_approved - pending_produced)
+    available = min(rem, released)
+
+    return {
+        "upstream_operation_id": predecessor.id,
+        "upstream_operation_number": str(predecessor.operation_number),
+        "upstream_approved": upstream_approved,
+        "self_approved": self_approved,
+        "pending_on_operation": pending_produced,
+        "available_quantity": available,
+        "has_predecessor": True,
+        "predecessor_unlocked": upstream_approved >= 1,
+    }
+
+
+def prior_operation_blocks_activation(
+    db: Session, operation_id: int
+) -> Optional[str]:
+    """
+    Block activate when the immediate schedulable predecessor has not released
+    any approved quantity yet (or out-source not delivered).
+    """
+    predecessor = get_immediate_predecessor_operation(db, operation_id)
+    if predecessor is None:
+        return None
+
+    # Out-source predecessor: must be delivered.
+    if getattr(predecessor, "part_type_id", None) == 2:
+        from DB.models.oms import OutSourceOperationStatus, Operation
+
+        op = db.query(Operation).filter(Operation.id == operation_id).first()
+        os_row = None
+        if op:
+            os_row = (
+                db.query(OutSourceOperationStatus)
+                .filter(
+                    OutSourceOperationStatus.operation_id == predecessor.id,
+                    OutSourceOperationStatus.part_id == op.part_id,
+                )
+                .first()
+            )
+        if not os_row or os_row.status != "delivered":
+            return (
+                f"Cannot activate — prior out-source operation "
+                f"{predecessor.operation_number} ({predecessor.operation_name}) "
+                f"has not been delivered yet."
+            )
+        return None
+
+    upstream_approved = total_approved_for_operation(db, predecessor.id)
+    if upstream_approved < 1:
+        return (
+            f"Cannot activate — prior operation {predecessor.operation_number} "
+            f"({predecessor.operation_name}) has no approved quantity yet. "
+            f"At least 1 unit must be approved on the previous operation."
+        )
+    return None
 
 
 def adjust_work_due_for_pending_submissions(
@@ -462,6 +623,27 @@ def validate_operator_submit(
             ),
         )
 
+    # Partial-flow handoff: new manufacture cannot exceed qty released by prior op.
+    available = work.get("available_quantity")
+    if available is not None and produced > int(available):
+        upstream_op = work.get("upstream_operation_number")
+        upstream_approved = work.get("upstream_approved")
+        detail = (
+            f"Produced quantity allows at most {int(available)} unit(s) released "
+            f"from the previous operation"
+        )
+        if upstream_op is not None and upstream_approved is not None:
+            detail += (
+                f" (Op {upstream_op} approved={upstream_approved}). "
+                f"Got {produced}."
+            )
+        else:
+            detail += f". Got {produced}."
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail,
+        )
+
 
 def get_operation_work_due(
     db: Session,
@@ -484,13 +666,31 @@ def get_operation_work_due(
             pending["pending_rework"],
         )
 
-    return work_limits_from_breakdown(breakdown)
-
-
-def work_due_dict(breakdown: Dict[str, int]) -> Dict[str, int]:
-    """Stable keys for API responses."""
     limits = work_limits_from_breakdown(breakdown)
-    return {
+    handoff = get_operation_handoff(
+        db, operation_id, total_quantity, exclude_log_id=exclude_log_id
+    )
+    available = int(handoff["available_quantity"])
+    limits["available_quantity"] = available
+    limits["upstream_operation_id"] = handoff["upstream_operation_id"]
+    limits["upstream_operation_number"] = handoff["upstream_operation_number"]
+    limits["upstream_approved"] = handoff["upstream_approved"]
+    limits["has_predecessor"] = handoff["has_predecessor"]
+    limits["predecessor_unlocked"] = handoff["predecessor_unlocked"]
+    # New manufacture cannot exceed released upstream qty.
+    limits["max_produced_quantity"] = min(
+        int(limits["max_produced_quantity"]), available
+    )
+    return limits
+
+
+def work_due_dict(breakdown: Dict[str, Any]) -> Dict[str, Any]:
+    """Stable keys for API responses (accepts get_operation_work_due output)."""
+    if "max_produced_quantity" in breakdown:
+        limits = breakdown
+    else:
+        limits = work_limits_from_breakdown(breakdown)
+    payload: Dict[str, Any] = {
         "remaining_to_close": limits["remaining_to_close"],
         "rework_due": limits["rework_due"],
         "reject_due": limits["reject_due"],
@@ -498,6 +698,15 @@ def work_due_dict(breakdown: Dict[str, int]) -> Dict[str, int]:
         "max_produced_quantity": limits["max_produced_quantity"],
         "max_rework_submit_quantity": limits["max_rework_submit_quantity"],
     }
+    for key in (
+        "available_quantity",
+        "upstream_operation_id",
+        "upstream_operation_number",
+        "upstream_approved",
+    ):
+        if key in limits:
+            payload[key] = limits[key]
+    return payload
 
 
 def get_operator_activation_block_reason(
@@ -510,6 +719,10 @@ def get_operator_activation_block_reason(
     Blocks only while a log awaits reviewer action or production is fully approved.
     Operator acknowledgement of reviewer feedback is optional and does not gate activation.
     """
+    prior_block = prior_operation_blocks_activation(db, operation_id)
+    if prior_block:
+        return prior_block
+
     pending_review = get_pending_reviewer_log_block_reason(
         db, operation_id, action="activate job card"
     )
@@ -521,6 +734,16 @@ def get_operator_activation_block_reason(
         return (
             "Cannot activate job card. Operation production is fully approved — "
             "no remaining quantity to produce."
+        )
+
+    if work.get("has_predecessor") and int(work.get("available_quantity") or 0) <= 0:
+        upstream_op = work.get("upstream_operation_number") or "?"
+        upstream_approved = work.get("upstream_approved") or 0
+        return (
+            f"Cannot activate job card. No quantity is currently released from "
+            f"prior operation {upstream_op} "
+            f"(approved there: {upstream_approved}). "
+            f"Wait for more approvals on the previous operation."
         )
 
     return None

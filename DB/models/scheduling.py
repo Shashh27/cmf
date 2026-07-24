@@ -363,8 +363,33 @@ class Rescheduling(Base):
     completed_qty = Column(Integer, nullable=False) # Approved_qty from production logs 
     remaining_qty = Column(Integer, nullable=False) # Total - Approved
     status = Column(String, nullable=False)         # Status of the rescheduling item -- scheduled | rescheduled
-    schedule_version = Column(Integer, nullable=False, default=1) 
-    
-    
+    schedule_version = Column(Integer, nullable=False, default=1)
 
-    
+
+# =======================
+# Unit-wise schedule (greedy / future GA)
+# =======================
+class UnitScheduleItem(Base):
+    """
+    One segment for a single unit on one operation.
+    Separate from batch rescheduling_items — Batch Gantt unchanged.
+    """
+    __tablename__ = "unit_schedule_items"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    order_number = Column(String, nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    part_number = Column(String, nullable=False)
+    unit_index = Column(Integer, nullable=False)  # 1 .. part.qty
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+    operation_number = Column(String, nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    status = Column(String, nullable=False, default="unit_scheduled")
+    schedule_version = Column(Integer, nullable=False, default=1)
+    source = Column(String, nullable=False, default="greedy")
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
