@@ -171,13 +171,17 @@ def list_pending_component_issues_notifications(
 
 
 @router.put("/{notification_id}/ack", response_model=ComponentIssuesNotificationSchema)
-def acknowledge_component_issues_notification(notification_id: int, db: Session = Depends(get_db)):
+def acknowledge_component_issues_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     notif = db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     if not notif.is_ack:
         notif.is_ack = True
-        notif.ack_by = get_admin_username(db)
+        notif.ack_by = getattr(current_user, "user_name", None) or get_admin_username(db)
         notif.ack_at = datetime.now(IST)
         db.add(notif)
         db.commit()

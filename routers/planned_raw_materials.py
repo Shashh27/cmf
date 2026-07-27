@@ -17,7 +17,21 @@ router = APIRouter(
 )
 
 class PlannedRawMaterialRequest(BaseModel):
-    extracted_data_id: int
+    extracted_data_id: Optional[int] = None
+    planned_form_type: Optional[str] = None
+    planned_diameter: Optional[float] = None
+    planned_length: Optional[float] = None
+    planned_breadth: Optional[float] = None
+    planned_height: Optional[float] = None
+    planned_inner_diameter: Optional[float] = None
+    planned_outer_diameter: Optional[float] = None
+    planned_raw_material_id: Optional[int] = None
+    user_id: Optional[int] = None
+
+
+class ManualPlannedRawMaterialRequest(BaseModel):
+    """Plan raw material for a part with no 2D document / PDF extraction."""
+    part_id: int
     planned_form_type: Optional[str] = None
     planned_diameter: Optional[float] = None
     planned_length: Optional[float] = None
@@ -113,6 +127,42 @@ def _apply_planned_rm_fields(
     if request.user_id is not None:
         extracted_entry.planned_by = request.user_id
 
+
+def _validate_planned_raw_material_id(db: Session, planned_raw_material_id: Optional[int]) -> RawMaterialModel:
+    if planned_raw_material_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="planned_raw_material_id is required",
+        )
+    material = db.query(RawMaterialModel).filter(
+        RawMaterialModel.id == planned_raw_material_id
+    ).first()
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Raw material with id {planned_raw_material_id} not found",
+        )
+    return material
+
+
+def _planned_rm_response_data(extracted_entry: DocumentExtractedDataModel) -> dict:
+    return {
+        "id": extracted_entry.id,
+        "part_id": extracted_entry.part_id,
+        "document_id": extracted_entry.document_id,
+        "material": extracted_entry.material,
+        "planned_form_type": extracted_entry.planned_form_type,
+        "planned_diameter": extracted_entry.planned_diameter,
+        "planned_length": extracted_entry.planned_length,
+        "planned_breadth": extracted_entry.planned_breadth,
+        "planned_height": extracted_entry.planned_height,
+        "planned_inner_diameter": extracted_entry.planned_inner_diameter,
+        "planned_outer_diameter": extracted_entry.planned_outer_diameter,
+        "planned_raw_material_id": extracted_entry.planned_raw_material_id,
+        "planned_by": extracted_entry.planned_by,
+        "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None,
+    }
+
 @router.post("/recommend-materials")
 def recommend_materials(
     request: MaterialRecommendRequest,
@@ -197,6 +247,79 @@ def batch_get_planned_raw_materials(
     
     return result
 
+@router.post("/create-manual")
+def create_manual_planned_raw_material(
+    request: ManualPlannedRawMaterialRequest,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
+    """
+    Plan raw material for a part without a 2D document or PDF extraction.
+    Creates or updates a document_extracted_data row with document_id=NULL.
+    """
+    if request.user_id is None:
+        request.user_id = current_user.id
+
+    part = db.query(PartModel).filter(PartModel.id == request.part_id).first()
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+
+    material = _validate_planned_raw_material_id(db, request.planned_raw_material_id)
+
+    existing_manual = db.query(DocumentExtractedDataModel).filter(
+        DocumentExtractedDataModel.part_id == request.part_id,
+        DocumentExtractedDataModel.document_id.is_(None),
+    ).first()
+
+    if existing_manual:
+        _ensure_planned_rm_editable(db, existing_manual)
+        extracted_entry = existing_manual
+        extracted_entry.material = None  # keep Flow 1 distinct from Flow 3
+    else:
+        if _part_has_stock_assignment(db, request.part_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change planned raw material because stock is already assigned or procured. Unlink stock first.",
+            )
+        extracted_entry = DocumentExtractedDataModel(
+            document_id=None,
+            part_id=request.part_id,
+            material=None,  # Flows 1–2: keep extracted material empty; planned_* holds selection
+        )
+        db.add(extracted_entry)
+        db.flush()
+
+    planned_request = PlannedRawMaterialRequest(
+        extracted_data_id=extracted_entry.id,
+        planned_form_type=request.planned_form_type,
+        planned_diameter=request.planned_diameter,
+        planned_length=request.planned_length,
+        planned_breadth=request.planned_breadth,
+        planned_height=request.planned_height,
+        planned_inner_diameter=request.planned_inner_diameter,
+        planned_outer_diameter=request.planned_outer_diameter,
+        planned_raw_material_id=request.planned_raw_material_id,
+        user_id=request.user_id,
+    )
+    _apply_planned_rm_fields(extracted_entry, planned_request)
+    # Do not write planned material into extracted `material` (keeps Flow 1/2 vs Flow 3 distinct)
+    extracted_entry.updated_at = datetime.utcnow()
+
+    try:
+        db.commit()
+        db.refresh(extracted_entry)
+        return {
+            "success": True,
+            "message": "Planned raw material saved successfully (no 2D document)",
+            "data": _planned_rm_response_data(extracted_entry),
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save manual planned raw material: {str(e)}",
+        )
+
 @router.post("/create")
 def create_planned_raw_material(
     request: PlannedRawMaterialRequest,
@@ -208,6 +331,12 @@ def create_planned_raw_material(
         request.user_id = current_user.id
     
     # Get the existing extracted data entry to verify it exists
+    if not request.extracted_data_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="extracted_data_id is required",
+        )
+
     extracted_entry = db.query(DocumentExtractedDataModel).filter(
         DocumentExtractedDataModel.id == request.extracted_data_id
     ).first()
@@ -221,14 +350,9 @@ def create_planned_raw_material(
     _ensure_planned_rm_editable(db, extracted_entry)
 
     if request.planned_raw_material_id is not None:
-        material = db.query(RawMaterialModel).filter(
-            RawMaterialModel.id == request.planned_raw_material_id
-        ).first()
-        if not material:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Raw material with id {request.planned_raw_material_id} not found"
-            )
+        _validate_planned_raw_material_id(db, request.planned_raw_material_id)
+        # Do not overwrite extracted `material` — that field is OCR-only (Flow 3).
+        # Planned selection lives in planned_raw_material_id.
 
     _apply_planned_rm_fields(extracted_entry, request)
     
@@ -242,19 +366,7 @@ def create_planned_raw_material(
         return {
             "success": True,
             "message": "Planned raw material created successfully",
-            "data": {
-                "id": extracted_entry.id,
-                "planned_form_type": extracted_entry.planned_form_type,
-                "planned_diameter": extracted_entry.planned_diameter,
-                "planned_length": extracted_entry.planned_length,
-                "planned_breadth": extracted_entry.planned_breadth,
-                "planned_height": extracted_entry.planned_height,
-                "planned_inner_diameter": extracted_entry.planned_inner_diameter,
-                "planned_outer_diameter": extracted_entry.planned_outer_diameter,
-                "planned_raw_material_id": extracted_entry.planned_raw_material_id,
-                "planned_by": extracted_entry.planned_by,
-                "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None
-            }
+            "data": _planned_rm_response_data(extracted_entry),
         }
         
     except Exception as e:
@@ -289,14 +401,11 @@ def update_planned_raw_material(
     _ensure_planned_rm_editable(db, extracted_entry)
 
     if request.planned_raw_material_id is not None:
-        material = db.query(RawMaterialModel).filter(
-            RawMaterialModel.id == request.planned_raw_material_id
-        ).first()
-        if not material:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Raw material with id {request.planned_raw_material_id} not found"
-            )
+        _validate_planned_raw_material_id(db, request.planned_raw_material_id)
+        # Do not overwrite extracted `material` — OCR-only (Flow 3).
+        # If this row has no stock_size, clear polluted planned name from older saves.
+        if not extracted_entry.stock_size:
+            extracted_entry.material = None
 
     _apply_planned_rm_fields(extracted_entry, request)
     
@@ -310,19 +419,7 @@ def update_planned_raw_material(
         return {
             "success": True,
             "message": "Planned raw material updated successfully",
-            "data": {
-                "id": extracted_entry.id,
-                "planned_form_type": extracted_entry.planned_form_type,
-                "planned_diameter": extracted_entry.planned_diameter,
-                "planned_length": extracted_entry.planned_length,
-                "planned_breadth": extracted_entry.planned_breadth,
-                "planned_height": extracted_entry.planned_height,
-                "planned_inner_diameter": extracted_entry.planned_inner_diameter,
-                "planned_outer_diameter": extracted_entry.planned_outer_diameter,
-                "planned_raw_material_id": extracted_entry.planned_raw_material_id,
-                "planned_by": extracted_entry.planned_by,
-                "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None
-            }
+            "data": _planned_rm_response_data(extracted_entry),
         }
         
     except Exception as e:

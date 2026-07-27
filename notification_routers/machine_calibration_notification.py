@@ -79,14 +79,7 @@ def list_machine_calibration_notifications(
     for n in notifications:
         m = machine_map.get(n.machine_id)
         wc = wc_map.get(getattr(m, "work_center_id", None)) if m else None
-        # Filter based on role IDs - for machine calibration, filter by machine's user_id
-        machine_user_id = getattr(m, "user_id", None) if m else None
-        if mc_id and machine_user_id != mc_id:
-            continue
-        if pc_id and machine_user_id != pc_id:
-            continue
-        if admin_id and machine_user_id != admin_id:
-            continue
+        # Admin / MC / PC see all calibration alerts (no machines.user_id filter).
         response.append(MachineCalibrationNotificationWithDetails(
             id=n.id,
             machine_id=n.machine_id,
@@ -120,25 +113,7 @@ def list_pending_machine_calibration_notifications(
     pc_id = scope["pc_id"]
     mc_id = scope["mc_id"]
     q = db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False)  # noqa: E712
-    notifications = q.order_by(MachineCalibrationNotificationModel.id.desc()).all()
-    machine_ids = [n.machine_id for n in notifications]
-    if not machine_ids:
-        return []
-    machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all()
-    machine_map = {m.id: m for m in machines}
-    result = []
-    for n in notifications:
-        m = machine_map.get(n.machine_id)
-        machine_user_id = getattr(m, "user_id", None) if m else None
-        # Filter based on role IDs
-        if mc_id and machine_user_id != mc_id:
-            continue
-        if pc_id and machine_user_id != pc_id:
-            continue
-        if admin_id and machine_user_id != admin_id:
-            continue
-        result.append(n)
-    return result
+    return q.order_by(MachineCalibrationNotificationModel.id.desc()).all()
 
 
 @router.post("/generate", response_model=dict)
@@ -160,13 +135,17 @@ def generate_calibration_notifications_manually(db: Session = Depends(get_db)):
 
 
 @router.put("/{notification_id}/ack", response_model=MachineCalibrationNotificationSchema)
-def acknowledge_machine_calibration_notification(notification_id: int, db: Session = Depends(get_db)):
+def acknowledge_machine_calibration_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     notif = db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     if not notif.is_ack:
         notif.is_ack = True
-        notif.ack_by = get_admin_username(db)
+        notif.ack_by = getattr(current_user, "user_name", None) or get_admin_username(db)
         notif.ack_at = datetime.now(IST)
         db.add(notif)
         db.commit()

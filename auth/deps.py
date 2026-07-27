@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
 from DB.database import SessionLocal, get_db
+from DB.audit_context import reset_audit_user, set_audit_user
 from DB.models.access_control import AccessUser
 from auth.jwt import decode_token
 from auth.roles import normalize_role
@@ -163,4 +164,13 @@ async def jwt_auth_http_middleware(request: Request, call_next):
     finally:
         db.close()
 
-    return await call_next(request)
+    # Record who is acting so the DB audit trigger can attribute changes.
+    audit_token = set_audit_user(
+        user_id=getattr(user, "id", None),
+        name=getattr(user, "user_name", None),
+        role=getattr(user, "role", None),
+    )
+    try:
+        return await call_next(request)
+    finally:
+        reset_audit_user(audit_token)

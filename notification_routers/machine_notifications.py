@@ -83,16 +83,9 @@ def list_machine_notifications(
         bd = breakdown_map.get(n.machine_breakdown_id, {})
         m = machine_map.get(bd.get("machine_id"))
         op = operator_map.get(bd.get("reported_by"))
-        # Filter based on role IDs - for machine breakdowns, filter by reported_by
-        # Skip if breakdown not found and role filtering is requested
-        if (mc_id or pc_id or admin_id) and not bd:
-            continue
-        if mc_id and bd.get("reported_by") != mc_id:
-            continue
-        if pc_id and bd.get("reported_by") != pc_id:
-            continue
-        if admin_id and bd.get("reported_by") != admin_id:
-            continue
+        # Shop-floor alerts: Admin / MC / PC all see every breakdown.
+        # Do not filter by machines.user_id — that hid breakdowns for MC when
+        # machines were assigned to another user (or admin).
         response.append(MachineNotificationWithDetails(
             id=n.id,
             machine_breakdown_id=n.machine_breakdown_id,
@@ -123,43 +116,23 @@ def list_pending_machine_notifications(
     pc_id = scope["pc_id"]
     mc_id = scope["mc_id"]
     q = db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False)  # noqa: E712
-    notifications = q.order_by(MachineNotificationModel.id.desc()).all()
-    breakdown_ids = [n.machine_breakdown_id for n in notifications]
-    if not breakdown_ids:
-        return []
-    stmt = text("""
-        SELECT id, reported_by
-        FROM maintenance.machine_breakdown
-        WHERE id IN :ids
-    """).bindparams(bindparam("ids", expanding=True))
-    rows = db.execute(stmt, {"ids": breakdown_ids}).fetchall()
-    breakdown_map = {int(r[0]): r[1] for r in rows}
-    result = []
-    for n in notifications:
-        reported_by = breakdown_map.get(n.machine_breakdown_id)
-        # Filter based on role IDs - skip if breakdown not found and role filtering is requested
-        if (mc_id or pc_id or admin_id) and reported_by is None:
-            continue
-        if mc_id and reported_by != mc_id:
-            continue
-        if pc_id and reported_by != pc_id:
-            continue
-        if admin_id and reported_by != admin_id:
-            continue
-        result.append(n)
-    return result
+    return q.order_by(MachineNotificationModel.id.desc()).all()
 
 
 
 
 @router.put("/{notification_id}/ack", response_model=MachineNotificationSchema)
-def acknowledge_machine_notification(notification_id: int, db: Session = Depends(get_db)):
+def acknowledge_machine_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     notif = db.query(MachineNotificationModel).filter(MachineNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     if not notif.is_ack:
         notif.is_ack = True
-        notif.ack_by = get_admin_username(db)
+        notif.ack_by = getattr(current_user, "user_name", None) or get_admin_username(db)
         notif.ack_at = datetime.now(IST)
         db.add(notif)
         db.commit()

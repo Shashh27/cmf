@@ -1,20 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime, timedelta
-from pydantic import BaseModel
-import secrets
-import string
 
 from DB.database import get_db
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.access_control import AccessUserResponse, AccessUserCreate, AccessUserUpdate
-from auth.password import hash_password
-
-
-class PasswordResetRequest(BaseModel):
-    token: str
-    new_password: str
+from DB.utils.password import encrypt_password, decrypt_password, is_encrypted
 
 router = APIRouter(
     prefix="/access-users",
@@ -53,7 +44,7 @@ def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
         )
 
     user_data = user.model_dump()
-    user_data["password"] = hash_password(user_data["password"])
+    user_data["password"] = encrypt_password(user_data["password"])
     db_user = AccessUserModel(**user_data)
     db.add(db_user)
     db.commit()
@@ -112,7 +103,7 @@ def update_access_user(user_id: int, user: AccessUserUpdate, db: Session = Depen
     if not update_data.get("password"):
         update_data.pop("password", None)
     elif "password" in update_data:
-        update_data["password"] = hash_password(update_data["password"])
+        update_data["password"] = encrypt_password(update_data["password"])
     for field, value in update_data.items():
         setattr(db_user, field, value)
 
@@ -146,9 +137,9 @@ def delete_access_user(user_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/{user_id}/request-password-reset")
-def request_password_reset(user_id: int, db: Session = Depends(get_db)):
-    """Generate password reset token for a user"""
+@router.get("/{user_id}/password")
+def get_user_password(user_id: int, db: Session = Depends(get_db)):
+    """Get decrypted password for a user (only works for Fernet-encrypted passwords)"""
     db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
     if not db_user:
         raise HTTPException(
@@ -156,61 +147,29 @@ def request_password_reset(user_id: int, db: Session = Depends(get_db)):
             detail=f"User with id {user_id} not found",
         )
     
-    # Generate secure random token
-    alphabet = string.ascii_letters + string.digits
-    token = ''.join(secrets.choice(alphabet) for _ in range(32))
+    stored_password = db_user.password
     
-    # Set expiration to 1 hour from now
-    expires_at = datetime.utcnow() + timedelta(hours=1)
-    
-    # Update user with reset token
-    db_user.password_reset_token = token
-    db_user.password_reset_expires = expires_at
-    db_user.password_reset_used = False
-    
-    db.commit()
-    db.refresh(db_user)
-    
-    return {
-        "message": "Password reset token generated",
-        "token": token,  # In production, send this via email
-        "expires_at": expires_at.isoformat()
-    }
-
-
-@router.post("/reset-password")
-def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
-    """Reset password using token"""
-    from sqlalchemy import text
-    
-    # Find user with valid token
-    query = text("""
-        SELECT id FROM accesscontrol.access_users 
-        WHERE password_reset_token = :token 
-        AND password_reset_expires > :now 
-        AND password_reset_used = FALSE
-    """)
-    
-    result = db.execute(query, {
-        "token": request.token,
-        "now": datetime.utcnow()
-    }).fetchone()
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        )
-    
-    user_id = result[0]
-    db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
-    
-    # Update password
-    db_user.password = hash_password(request.new_password)
-    db_user.password_reset_token = None
-    db_user.password_reset_expires = None
-    db_user.password_reset_used = True
-    
-    db.commit()
-    
-    return {"message": "Password reset successfully"}
+    # Check if password is Fernet encrypted
+    if is_encrypted(stored_password):
+        decrypted = decrypt_password(stored_password)
+        return {
+            "user_id": user_id,
+            "user_name": db_user.user_name,
+            "password_type": "encrypted",
+            "password": decrypted
+        }
+    # Check if password is bcrypt hashed
+    elif stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
+        return {
+            "user_id": user_id,
+            "user_name": db_user.user_name,
+            "password_type": "hashed",
+            "password": "Cannot display - bcrypt hash cannot be reversed"
+        }
+    else:
+        return {
+            "user_id": user_id,
+            "user_name": db_user.user_name,
+            "password_type": "unknown",
+            "password": stored_password
+        }

@@ -6,7 +6,17 @@ load_dotenv()
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
+import os
+
+from DB.database import (
+    engine,
+    verify_database_connection,
+    MINIO_ENDPOINT,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_BUCKET_NAME,
+    MINIO_SECURE,
+)
 
 from DB.models import Base
 
@@ -188,7 +198,9 @@ async def startup_event():
 
     Startup event handler
 
-    - Creates database tables
+    - Verifies database connectivity (no DDL as cmf_app)
+
+    - Optionally bootstraps schema if ALLOW_AUTO_SCHEMA=true (local only)
 
     - Initializes MinIO client
 
@@ -204,19 +216,20 @@ async def startup_event():
 
 
 
-    # Create database tables
-
+    # Schema DDL is owned by cmf_owner via Alembic — not the runtime app role.
+    # ALLOW_AUTO_SCHEMA=true keeps old create_all behaviour for local bootstrap only.
     try:
-
-        Base.metadata.create_all(bind=engine)
-
-        ensure_refresh_tokens_schema()
-
-        print("SUCCESS: Database tables created/verified")
-
+        allow_auto = os.getenv("ALLOW_AUTO_SCHEMA", "false").lower() in ("1", "true", "yes")
+        if allow_auto:
+            Base.metadata.create_all(bind=engine)
+            ensure_refresh_tokens_schema()
+            print("SUCCESS: Database tables created/verified (ALLOW_AUTO_SCHEMA)")
+        else:
+            verify_database_connection()
+            ensure_refresh_tokens_schema()
+            print("SUCCESS: Database connection verified (schema managed by Alembic)")
     except Exception as e:
-
-        print(f"ERROR: Error creating database tables: {e}")
+        print(f"ERROR: Database startup check failed: {e}")
 
 
 
@@ -418,11 +431,9 @@ def system_info():
 
         "database": {
 
-            "host": "172.18.7.91",
+            "configured": bool(os.getenv("DATABASE_URL")),
 
-            "port": 5432,
-
-            "database": "cmf_backend"
+            "note": "Connection details are not exposed; use env DATABASE_URL (cmf_app role)",
 
         },
 

@@ -232,45 +232,116 @@ def get_inventory_view(
     unit_ids = [u.id for u in units]
 
     # 4. All usages for all units (bulk)
-    usages_by_unit = {}
+    usages_raw = []
     if unit_ids:
-        usages = (
+        usages_raw = (
             db.query(RawMaterialUsage)
             .options(joinedload(RawMaterialUsage.part))
             .filter(RawMaterialUsage.raw_material_unit_id.in_(unit_ids))
             .all()
         )
-        for usage in usages:
-            uid = usage.raw_material_unit_id
-            if uid not in usages_by_unit:
-                usages_by_unit[uid] = []
-            usages_by_unit[uid].append({
-                "id": usage.id,
-                "part_id": usage.part_id,
-                "used_length": usage.used_length,
-                "part_number": usage.part.part_number if usage.part else None,
-                "part_name": usage.part.part_name if usage.part else None,
-            })
 
-    # 5. All orders needed for source_order_number (bulk)
+    # 5. All parts needed for part_numbers + usage-linked parts (bulk)
+    all_part_ids = set()
+    for s in stocks:
+        if s.part_id:
+            for pid in s.part_id.split(","):
+                pid = pid.strip()
+                if pid.isdigit():
+                    all_part_ids.add(int(pid))
+    for usage in usages_raw:
+        if usage.part_id:
+            all_part_ids.add(usage.part_id)
+
+    part_map = {}
+    if all_part_ids:
+        parts = db.query(PartModel).filter(PartModel.id.in_(all_part_ids)).all()
+        part_map = {p.id: p for p in parts}
+
+    # 6. Orders: direct source_order_id + ONE order per part (for general stock)
+    # Do NOT attach every order for the product — that produced "2 orders / 1 part".
     source_order_ids = list({s.source_order_id for s in stocks if s.source_order_id})
     order_map = {}
     if source_order_ids:
         orders = db.query(OrderModel).filter(OrderModel.id.in_(source_order_ids)).all()
         order_map = {o.id: o.sale_order_number for o in orders}
 
-    # 6. All parts needed for part_numbers (bulk)
-    all_part_id_strs = set()
-    for s in stocks:
-        if s.part_id:
-            for pid in s.part_id.split(","):
-                pid = pid.strip()
-                if pid.isdigit():
-                    all_part_id_strs.add(int(pid))
-    part_map = {}
-    if all_part_id_strs:
-        parts = db.query(PartModel).filter(PartModel.id.in_(all_part_id_strs)).all()
-        part_map = {p.id: p for p in parts}
+    # Prefer order stored on material_linked history for this unit+part
+    history_order_by_unit_part = {}  # (unit_id, part_id) -> sale_order_number
+    if unit_ids:
+        hist_rows = (
+            db.query(RawMaterialHistoryModel)
+            .filter(
+                RawMaterialHistoryModel.activity_type == "material_linked",
+                RawMaterialHistoryModel.unit_id.in_(unit_ids),
+                RawMaterialHistoryModel.order_id.isnot(None),
+            )
+            .order_by(RawMaterialHistoryModel.id.desc())
+            .all()
+        )
+        hist_order_ids = {h.order_id for h in hist_rows if h.order_id}
+        hist_order_map = {}
+        if hist_order_ids:
+            for o in db.query(OrderModel).filter(OrderModel.id.in_(hist_order_ids)).all():
+                hist_order_map[o.id] = o.sale_order_number
+        for h in hist_rows:
+            key = (h.unit_id, h.part_id)
+            if key not in history_order_by_unit_part and h.order_id in hist_order_map:
+                history_order_by_unit_part[key] = hist_order_map[h.order_id]
+
+    # Prefer OrderPartPriority link (part belongs to specific order); else latest order for product
+    from DB.models.oms import OrderPartPriority as OrderPartPriorityModel
+    part_priority_order = {}  # part_id -> sale_order_number (most recent priority order)
+    if all_part_ids:
+        opp_rows = (
+            db.query(OrderPartPriorityModel)
+            .filter(OrderPartPriorityModel.part_id.in_(all_part_ids))
+            .order_by(OrderPartPriorityModel.id.desc())
+            .all()
+        )
+        opp_order_ids = {r.order_id for r in opp_rows if r.order_id}
+        opp_order_map = {}
+        if opp_order_ids:
+            for o in db.query(OrderModel).filter(OrderModel.id.in_(opp_order_ids)).all():
+                opp_order_map[o.id] = o.sale_order_number
+        for r in opp_rows:
+            if r.part_id not in part_priority_order and r.order_id in opp_order_map:
+                part_priority_order[r.part_id] = opp_order_map[r.order_id]
+
+    product_ids = {p.product_id for p in part_map.values() if p.product_id}
+    product_latest_order = {}  # product_id -> single latest sale_order_number
+    if product_ids:
+        product_orders = (
+            db.query(OrderModel)
+            .filter(OrderModel.product_id.in_(product_ids))
+            .order_by(OrderModel.id.desc())
+            .all()
+        )
+        for o in product_orders:
+            if o.product_id not in product_latest_order:
+                product_latest_order[o.product_id] = o.sale_order_number
+
+    usages_by_unit = {}
+    for usage in usages_raw:
+        uid = usage.raw_material_unit_id
+        part = part_map.get(usage.part_id) or usage.part
+        # Resolve exactly one order for this usage
+        order_number = history_order_by_unit_part.get((uid, usage.part_id))
+        if not order_number and usage.part_id:
+            order_number = part_priority_order.get(usage.part_id)
+        if not order_number and part and part.product_id:
+            order_number = product_latest_order.get(part.product_id)
+        if uid not in usages_by_unit:
+            usages_by_unit[uid] = []
+        usages_by_unit[uid].append({
+            "id": usage.id,
+            "part_id": usage.part_id,
+            "used_length": usage.used_length,
+            "part_number": part.part_number if part else None,
+            "part_name": part.part_name if part else None,
+            "order_number": order_number,
+            "order_numbers": [order_number] if order_number else [],
+        })
 
     # 7. Quality document counts for all stocks (bulk)
     doc_counts_by_stock = {}
@@ -330,11 +401,29 @@ def get_inventory_view(
         if s.form_type == "Round":
             dims = f"⌀{s.diameter} × {s.length}mm"
         elif s.form_type == "Square":
-            dims = f"{s.breadth} × {s.height} × {s.length}mm"
+            dims = f"{s.length} × {s.breadth} × {s.height}mm"
         elif s.form_type == "Pipe":
             dims = f"⌀{s.outer_diameter}/{s.inner_diameter} × {s.length}mm"
         else:
             dims = None
+
+        # Order number only from real order stock linkage — never invent from usages
+        # (usages carry their own order_number for filters / Exhausted Units)
+        source_order_number = order_map.get(s.source_order_id) if s.source_order_id else None
+        order_parts_mapping = {}
+        for u in stock_units:
+            if u.get("status") == "exhausted":
+                continue
+            for usage in u.get("usages") or []:
+                pn = usage.get("part_number")
+                on = usage.get("order_number")
+                ons = usage.get("order_numbers") or ([on] if on else [])
+                for order_no in ons:
+                    if not order_no:
+                        continue
+                    order_parts_mapping.setdefault(order_no, [])
+                    if pn and pn not in order_parts_mapping[order_no]:
+                        order_parts_mapping[order_no].append(pn)
 
         stocks_by_material.setdefault(s.material_id, []).append({
             "id": s.id,
@@ -354,7 +443,8 @@ def get_inventory_view(
             "cost": s.cost,
             "source_type": s.source_type,
             "order_status": s.order_status,
-            "source_order_number": order_map.get(s.source_order_id) if s.source_order_id else None,
+            "source_order_number": source_order_number,
+            "order_parts_mapping": order_parts_mapping,
             "part_numbers": part_numbers,
             "status": computed_status,
             "quality_document_count": doc_counts_by_stock.get(s.id, 0),

@@ -113,9 +113,10 @@ async def get_common_folders_tree(db: Session = Depends(get_db)):
 @router.post("/folders", response_model=CommonFolderSchema, status_code=status.HTTP_201_CREATED)
 async def create_common_folder(
     folder: CommonFolderCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
-    """Create a new common folder"""
+    """Create a new common folder (user_id from JWT)."""
     # Validate parent folder exists if parent_id is provided
     if folder.parent_id:
         parent = db.query(CommonFolder).filter(CommonFolder.id == folder.parent_id).first()
@@ -136,8 +137,10 @@ async def create_common_folder(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Folder with this name already exists under the specified parent"
         )
-    
-    db_folder = CommonFolder(**folder.model_dump())
+
+    payload = folder.model_dump()
+    payload["user_id"] = current_user.id
+    db_folder = CommonFolder(**payload)
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)

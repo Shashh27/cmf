@@ -681,7 +681,7 @@ class DocumentExtractedData(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    document_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
 

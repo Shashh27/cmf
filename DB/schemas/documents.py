@@ -6,7 +6,7 @@ from typing import Optional, List
 class GeneralFolderBase(BaseModel):
     folder_name: str
     parent_id: Optional[int] = None
-    user_id: int
+    user_id: Optional[int] = None
 
 class GeneralDocumentBase(BaseModel):
     file_name: str
@@ -89,7 +89,7 @@ class MachineFolderBase(BaseModel):
     folder_name: str
     machine_id: int
     parent_id: Optional[int] = None
-    user_id: int
+    user_id: Optional[int] = None
 
 class MachineDocumentBase(BaseModel):
     document_name: str
@@ -177,7 +177,7 @@ class MachineWithFolders(BaseModel):
 class CommonFolderBase(BaseModel):
     folder_name: str
     parent_id: Optional[int] = None
-    user_id: int
+    user_id: Optional[int] = None
 
 class CommonDocumentBase(BaseModel):
     document_name: str

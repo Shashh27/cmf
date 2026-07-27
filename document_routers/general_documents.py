@@ -104,8 +104,12 @@ def build_folder_tree(db: Session, parent_id: Optional[int] = None) -> List[Fold
 # =======================
 
 @router.post("/folders", response_model=GeneralFolderSchema, status_code=status.HTTP_201_CREATED)
-def create_folder(folder: GeneralFolderCreate, db: Session = Depends(get_db)):
-    """Create a new folder"""
+def create_folder(
+    folder: GeneralFolderCreate,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Create a new folder (user_id from JWT)."""
     # Validate parent folder exists if specified
     if folder.parent_id:
         parent_folder = db.query(GeneralFolder).filter(GeneralFolder.id == folder.parent_id).first()
@@ -114,8 +118,10 @@ def create_folder(folder: GeneralFolderCreate, db: Session = Depends(get_db)):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Parent folder with id {folder.parent_id} not found"
             )
-    
-    db_folder = GeneralFolder(**folder.model_dump())
+
+    payload = folder.model_dump()
+    payload["user_id"] = current_user.id
+    db_folder = GeneralFolder(**payload)
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)
