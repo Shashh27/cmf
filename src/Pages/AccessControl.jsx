@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Input, Typography, Tag, message, Space, Modal, Form } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined, KeyOutlined } from '@ant-design/icons';
+import { Table, Button, Input, Typography, Tag, message, Space, Modal } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import LockAnimation from '../assets/Unlocking.json';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -20,10 +20,8 @@ const AccessControl = () => {
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [editingUser, setEditingUser] = useState(null);
   const [users, setUsers] = useState([]);
-  const [resetPasswordModalVisible, setResetPasswordModalVisible] = useState(false);
-  const [resetPasswordUser, setResetPasswordUser] = useState(null);
-  const [resetToken, setResetToken] = useState('');
-  const [resetForm] = Form.useForm();
+  const [decryptedPasswords, setDecryptedPasswords] = useState({});
+  const [loadingPasswords, setLoadingPasswords] = useState({});
   const lockRef = React.useRef(null);
 
   useEffect(() => {
@@ -111,51 +109,32 @@ const AccessControl = () => {
     setIsModalVisible(true);
   };
 
-  const handleRequestPasswordReset = async (userId) => {
+  const fetchDecryptedPassword = async (userId) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/access-users/${userId}/request-password-reset`, {
-        method: 'POST',
-      });
+      setLoadingPasswords(prev => ({ ...prev, [userId]: true }));
+      const response = await authFetch(`${API_BASE_URL}/access-users/${userId}/password`);
       if (response.ok) {
         const data = await response.json();
-        setResetToken(data.token);
-        setResetPasswordUser(users.find(u => u.id === userId));
-        setResetPasswordModalVisible(true);
-        message.success('Password reset token generated');
+        setDecryptedPasswords(prev => ({ ...prev, [userId]: data }));
       } else {
-        message.error('Failed to generate reset token');
+        message.error('Failed to fetch password');
       }
     } catch (error) {
-      console.error('Error requesting password reset:', error);
-      message.error('Error requesting password reset');
+      console.error('Error fetching password:', error);
+      message.error('Error fetching password');
+    } finally {
+      setLoadingPasswords(prev => ({ ...prev, [userId]: false }));
     }
   };
 
-  const handleResetPassword = async (values) => {
-    try {
-      const response = await authFetch(`${API_BASE_URL}/access-users/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token: resetToken,
-          new_password: values.newPassword,
-        }),
-      });
-      if (response.ok) {
-        message.success('Password reset successfully');
-        setResetPasswordModalVisible(false);
-        resetForm.resetFields();
-        setResetToken('');
-        setResetPasswordUser(null);
-      } else {
-        message.error('Failed to reset password');
+  const handlePasswordVisibility = async (userId) => {
+    if (!visiblePasswords[userId]) {
+      // Fetch password if not already loaded
+      if (!decryptedPasswords[userId]) {
+        await fetchDecryptedPassword(userId);
       }
-    } catch (error) {
-      console.error('Error resetting password:', error);
-      message.error('Error resetting password');
     }
+    setVisiblePasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
   };
 
   const filteredUsers = users.filter(user =>
@@ -244,9 +223,63 @@ const AccessControl = () => {
       title: 'Password',
       dataIndex: 'password',
       key: 'password',
-      render: () => (
-        <span style={{ color: '#94a3b8' }}>Set via edit (never shown)</span>
-      ),
+      render: (_, record) => {
+        const passwordData = decryptedPasswords[record.id];
+        const isLoading = loadingPasswords[record.id];
+        const isVisible = visiblePasswords[record.id];
+        
+        if (isLoading) {
+          return <span style={{ color: '#94a3b8' }}>Loading...</span>;
+        }
+        
+        if (!passwordData) {
+          return (
+            <Button 
+              type="text" 
+              icon={<EyeOutlined />} 
+              onClick={() => handlePasswordVisibility(record.id)}
+              size="small"
+            >
+              Show
+            </Button>
+          );
+        }
+        
+        if (passwordData.password_type === 'hashed') {
+          return (
+            <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+              {passwordData.password}
+            </span>
+          );
+        }
+        
+        if (isVisible) {
+          return (
+            <Space size="small">
+              <span style={{ fontFamily: 'monospace', color: '#1890ff' }}>
+                {passwordData.password}
+              </span>
+              <Button 
+                type="text" 
+                icon={<EyeInvisibleOutlined />} 
+                onClick={() => handlePasswordVisibility(record.id)}
+                size="small"
+              />
+            </Space>
+          );
+        }
+        
+        return (
+          <Button 
+            type="text" 
+            icon={<EyeOutlined />} 
+            onClick={() => handlePasswordVisibility(record.id)}
+            size="small"
+          >
+            Show
+          </Button>
+        );
+      },
     },
     {
       title: 'Actions',
@@ -254,7 +287,6 @@ const AccessControl = () => {
       render: (_, record) => (
         <Space size="middle">
           <Button type="text" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
-          <Button type="text" icon={<KeyOutlined />} onClick={() => handleRequestPasswordReset(record.id)} />
           <Button type="text" icon={<DeleteOutlined />} danger onClick={() => handleDelete(record.id)} />
         </Space>
       ),
@@ -352,59 +384,6 @@ const AccessControl = () => {
         editingUser={editingUser}
         existingUsers={users}
       />
-
-      <Modal
-        title="Reset Password"
-        open={resetPasswordModalVisible}
-        onCancel={() => {
-          setResetPasswordModalVisible(false);
-          resetForm.resetFields();
-          setResetToken('');
-          setResetPasswordUser(null);
-        }}
-        footer={null}
-      >
-        {resetPasswordUser && (
-          <div>
-            <p>Resetting password for: <strong>{resetPasswordUser.username}</strong></p>
-            <Form form={resetForm} onFinish={handleResetPassword} layout="vertical">
-              <Form.Item
-                label="New Password"
-                name="newPassword"
-                rules={[
-                  { required: true, message: 'Please enter new password' },
-                  { min: 6, message: 'Password must be at least 6 characters' },
-                ]}
-              >
-                <Input.Password placeholder="Enter new password" />
-              </Form.Item>
-              <Form.Item
-                label="Confirm Password"
-                name="confirmPassword"
-                dependencies={['newPassword']}
-                rules={[
-                  { required: true, message: 'Please confirm password' },
-                  ({ getFieldValue }) => ({
-                    validator(_, value) {
-                      if (!value || getFieldValue('newPassword') === value) {
-                        return Promise.resolve();
-                      }
-                      return Promise.reject(new Error('Passwords do not match'));
-                    },
-                  }),
-                ]}
-              >
-                <Input.Password placeholder="Confirm new password" />
-              </Form.Item>
-              <Form.Item>
-                <Button type="primary" htmlType="submit" block>
-                  Reset Password
-                </Button>
-              </Form.Item>
-            </Form>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

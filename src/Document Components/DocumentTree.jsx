@@ -129,7 +129,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       const data = await response.json();
       setGeneralFolders(data);
     } catch (error) {
-      message.error('Failed to fetch general folders: ' + error.message);
+      console.error('Failed to fetch general folders:', error);
     }
   };
 
@@ -155,7 +155,6 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       setCommonRootDocumentCount(Array.isArray(docsData) ? docsData.length : 0);
     } catch (error) {
       console.error('Error fetching common folders or documents:', error);
-      message.error('Failed to fetch common folders: ' + error.message);
     }
   };
 
@@ -168,7 +167,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       const data = await response.json();
       setMachines(data || []);
     } catch (error) {
-      message.error('Failed to fetch machines: ' + error.message);
+      console.error('Failed to fetch machines:', error);
     }
   };
 
@@ -959,8 +958,6 @@ const uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
     if (commonUploadFolderId !== null && commonUploadFolderId !== undefined) {
       formData.append('folder_id', commonUploadFolderId.toString());
     }
-    {
-}
 
     try {
       setLoading(true);
@@ -1132,7 +1129,8 @@ const targetMachineId = machineParentMachineId;
     }
 
     const formData = new FormData();
-    formData.append('file', file, file.name);
+    // Backend expects repeated field name "files" (List[UploadFile])
+    formData.append('files', file, file.name);
     
     // Append folder_id or machine_id (one will be null, the other will have a value)
     if (machineUploadFolderId) {
@@ -1141,8 +1139,6 @@ const targetMachineId = machineParentMachineId;
     if (machineUploadMachineId) {
       formData.append('machine_id', machineUploadMachineId.toString());
     }
-    {
-}
 
     try {
       setLoading(true);

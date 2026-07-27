@@ -331,7 +331,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
 
   return (
     <Modal className="pdm-container" title={`Create ${actionLabel}`} open={open} onCancel={onCancel} footer={null} width="95%" style={{ maxWidth: 1000 }} destroyOnHidden centered>
-      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2E8B57!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
+      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{box-shadow:none!important;}`}</style>
 
       <div style={{ marginBottom: 16 }}>
         <Badge count={`For Part: ${selectedPart?.part_name}`} style={{ backgroundColor: '#e6f7ff', color: '#1890ff', padding: '0 12px', borderRadius: 0, border: '1px solid #91d5ff' }} />

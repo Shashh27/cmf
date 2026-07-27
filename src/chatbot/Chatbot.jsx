@@ -173,7 +173,7 @@ export default function ChatPanel() {
   const store = useChatStore();
   const { messages, loading, sessionId } = store;
   const { isMobile, isTablet } = useViewport();
-  const { accessToken, isAuthenticated, bootstrapping } = useAuth();
+  const { accessToken, isAuthenticated, bootstrapping, user } = useAuth();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState('');
@@ -214,8 +214,26 @@ export default function ChatPanel() {
   }, []);
 
   const loadSuggestions = useCallback(async () => {
-    // Wait for JWT — endpoint requires Bearer auth (no query-param identity).
-    if (bootstrapping || !isAuthenticated || !(accessToken || getAccessToken())) {
+    // Wait for JWT — identity comes from Bearer token only (no user_id query params).
+    // Chatbot is Admin / MC only; never call suggestions for other roles.
+    if (bootstrapping || !isAuthenticated) {
+      setPromptsLoading(false);
+      return;
+    }
+    const role = String(user?.role || user?.user_role || '')
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .trim();
+    const allowed =
+      role === 'admin' ||
+      role === 'mc' ||
+      role.includes('manufacturing coordinator');
+    if (!allowed) {
+      setPromptsLoading(false);
+      return;
+    }
+    const token = accessToken || getAccessToken();
+    if (!token) {
       setPromptsLoading(false);
       return;
     }
@@ -223,6 +241,7 @@ export default function ChatPanel() {
     try {
       const res = await authFetch(
         `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.SUGGESTIONS_ENDPOINT}`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -234,7 +253,7 @@ export default function ChatPanel() {
     finally {
       setPromptsLoading(false);
     }
-  }, [accessToken, isAuthenticated, bootstrapping]);
+  }, [accessToken, isAuthenticated, bootstrapping, user]);
 
   useEffect(() => {
     loadSuggestions();
@@ -329,15 +348,18 @@ export default function ChatPanel() {
     const timer = setTimeout(() => ctrl.abort(), 12000);
 
     try {
+      const token = getAccessToken();
       const res = await authFetch(
         `${CHATBOT_CONFIG.API_BASE_URL}${CHATBOT_CONFIG.CHAT_ENDPOINT}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             question: q,
             session_id: sessionId,
-            
           }),
           signal: ctrl.signal,
         },

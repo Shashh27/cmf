@@ -10,6 +10,8 @@ import { useSpring, animated } from '@react-spring/three';
 import { MeshStandardMaterial } from 'three';
 import { API_BASE_URL } from '../Config/auth';
 import { authFetch } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
+import { getApiWsUrl } from '../auth/apiUrl.js';
 
 const { Title, Text } = Typography;
 
@@ -27,33 +29,57 @@ function RotatingMachines({ children, speed = 0.0005 }) {
 }
 
 // Status Legend Component
-const StatusLegend = () => (
-  <div style={{
-    position: 'absolute',
-    top: '20px',
-    right: '20px',
-    background: 'white',
-    padding: '12px',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    zIndex: 1000
-  }}>
-    <Space direction="vertical">
-      <Space>
-        <Badge color="#22c55e" />
-        <Text>Production</Text>
+const StatusLegend = ({ machineStates, machines, selectedFilter, onFilterChange }) => {
+  // Count only machines shown on the floor (live EMS list), not every config machine
+  const statuses = machines.map((m) => machineStates[m.id]?.status?.toUpperCase());
+  const productionCount = statuses.filter((s) => s === 'PRODUCTION').length;
+  const onCount = statuses.filter((s) => s === 'ON').length;
+  const offCount = statuses.filter((s) => s === 'OFF' || !s).length;
+  const totalCount = machines.length;
+
+  const filterButtons = [
+    { key: 'total', label: 'Total', count: totalCount, color: '#6366f1' },
+    { key: 'production', label: 'Production', count: productionCount, color: '#22c55e' },
+    { key: 'idle', label: 'Idle (On)', count: onCount, color: '#eab308' },
+    { key: 'off', label: 'Off', count: offCount, color: '#94A3B8' },
+  ];
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '20px',
+      right: '20px',
+      background: 'white',
+      padding: '12px',
+      borderRadius: '8px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+      zIndex: 1000
+    }}>
+      <Space direction="vertical">
+        {filterButtons.map((btn) => (
+          <Button
+            key={btn.key}
+            type={selectedFilter === btn.key ? 'primary' : 'default'}
+            size="small"
+            onClick={() => onFilterChange(btn.key)}
+            style={{
+              backgroundColor: selectedFilter === btn.key ? btn.color : '#fff',
+              borderColor: btn.color,
+              color: selectedFilter === btn.key ? '#fff' : '#000',
+              width: '140px',
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <span>{btn.label}</span>
+              <strong>{btn.count}</strong>
+            </span>
+          </Button>
+        ))}
       </Space>
-      <Space>
-        <Badge color="#eab308" />
-        <Text>Idle (On)</Text>
-      </Space>
-      <Space>
-        <Badge color="#94A3B8" />
-        <Text>Off</Text>
-      </Space>
-    </Space>
-  </div>
-);
+    </div>
+  );
+};
 
 const getStatusColor = (status) => {
   switch (status?.toUpperCase()) {
@@ -268,9 +294,11 @@ function MachineModel({
             <div className="text-sm font-bold text-center text-gray-800">
               {data.name}
             </div>
-            <div className="text-xs text-center text-gray-600">
-              {data.workshop}
-            </div>
+            {data.workshop ? (
+              <div className="text-xs text-center text-gray-600">
+                {data.workshop}
+              </div>
+            ) : null}
           </div>
         </div>
       </Html>
@@ -350,6 +378,7 @@ function EnhancedLighting() {
 
 // Main Machines Component
 const Machines = ({ onBack }) => {
+  const { isAuthenticated, bootstrapping } = useAuth();
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [machineStates, setMachineStates] = useState({});
@@ -357,10 +386,12 @@ const Machines = ({ onBack }) => {
   const [selectedMachineName, setSelectedMachineName] = useState(null);
   const [hoveredMachine, setHoveredMachine] = useState(null);
   const [showProductivity, setShowProductivity] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('total');
 
   const fetchMachines = async () => {
     try {
       const response = await authFetch(`${API_BASE_URL}/energy-monitoring/machines/`);
+      if (!response.ok) return;
       const data = await response.json();
       setMachines(data || []);
     } catch (error) {
@@ -369,18 +400,15 @@ const Machines = ({ onBack }) => {
     }
   };
 
-  const fetchMachineStates = async () => {
-    try {
-      const response = await authFetch(`${API_BASE_URL}/energy-monitoring/all_machine_states`);
-      const data = await response.json();
-      const statesMap = {};
-      data.forEach(machine => {
-        statesMap[machine.machine_id] = { status: machine.state, lastUpdated: machine.timestamp };
-      });
-      setMachineStates(statesMap);
-    } catch (error) {
-      console.error('Error fetching machine states:', error);
-    }
+  const applyMachineStates = (data) => {
+    const statesMap = {};
+    (data || []).forEach((machine) => {
+      statesMap[machine.machine_id] = {
+        status: machine.state,
+        lastUpdated: machine.timestamp,
+      };
+    });
+    setMachineStates(statesMap);
   };
 
   // Calculate positions in a hexagonal pattern with increased radius
@@ -393,11 +421,44 @@ const Machines = ({ onBack }) => {
   };
 
   useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return undefined;
     fetchMachines();
-    fetchMachineStates();
-    const interval = setInterval(fetchMachineStates, 10000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, bootstrapping]);
+
+  useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return undefined;
+
+    let socket;
+    let reconnectTimer;
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      socket = new WebSocket(getApiWsUrl('energy-monitoring/all_machine_states/ws'));
+      socket.onmessage = (event) => {
+        try {
+          applyMachineStates(JSON.parse(event.data));
+        } catch (error) {
+          console.error('Error parsing machine states WS message:', error);
+        }
+      };
+      socket.onerror = () => {
+        socket?.close();
+      };
+      socket.onclose = () => {
+        if (closed) return;
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [isAuthenticated, bootstrapping]);
 
   const handleMachineClick = (machineId) => {
     const selectedMachine = machines.find(machine => machine.id === machineId);
@@ -408,6 +469,27 @@ const Machines = ({ onBack }) => {
     setSelectedMachineName(selectedMachine?.machine_name);
     // Reset the tab state to 'overview' when opening a new machine
     localStorage.setItem(`machine_${machineId}_tab`, 'overview');
+  };
+
+  // Filter machines based on selected filter
+  const getFilteredMachines = () => {
+    if (selectedFilter === 'total') return machines;
+    
+    return machines.filter(machine => {
+      const machineState = machineStates[machine.id];
+      const status = machineState?.status?.toUpperCase();
+      
+      switch (selectedFilter) {
+        case 'production':
+          return status === 'PRODUCTION';
+        case 'idle':
+          return status === 'ON';
+        case 'off':
+          return status === 'OFF' || !status;
+        default:
+          return true;
+      }
+    });
   };
 
   if (showProductivity) {
@@ -467,7 +549,12 @@ const Machines = ({ onBack }) => {
       }}>
         {!selectedMachineId ? (
           <>
-            <StatusLegend />
+            <StatusLegend 
+              machineStates={machineStates} 
+              machines={machines}
+              selectedFilter={selectedFilter}
+              onFilterChange={setSelectedFilter}
+            />
             <Canvas
               camera={{ position: [0, 35, 45], fov: 45 }}
               shadows
@@ -486,10 +573,11 @@ const Machines = ({ onBack }) => {
                 <CentralHub />
 
                 <RotatingMachines speed={0.0005}>
-                  {machines.map((machine, index) => {
+                  {getFilteredMachines().map((machine, index) => {
                     const machineState = machineStates[machine.id];
-                    const position = getMachinePosition(index, machines.length);
-                    const angle = (index / machines.length) * Math.PI * 2;
+                    const filteredMachines = getFilteredMachines();
+                    const position = getMachinePosition(index, filteredMachines.length);
+                    const angle = (index / filteredMachines.length) * Math.PI * 2;
                     
                     return (
                       <group key={machine.id}>
@@ -499,7 +587,7 @@ const Machines = ({ onBack }) => {
                           status={machineState?.status?.toUpperCase() || 'OFF'}
                           data={{
                             name: machine.machine_name,
-                            workshop: machine.workshop_name,
+                            workshop: machine.workshop_name || machine.work_center_name || '',
                           }}
                           onClick={() => handleMachineClick(machine.id)}
                           isHovered={hoveredMachine === machine.id}

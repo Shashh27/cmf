@@ -9,6 +9,7 @@ import {
   FileSearchOutlined,
 } from '@ant-design/icons';
 import { authFetch } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import dayjs from 'dayjs';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InspectionPlanNotifications from '../Notification Components/InspectionPlanNotifications';
@@ -28,6 +29,7 @@ import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificat
 const Notification = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAuthenticated, bootstrapping } = useAuth();
   /** Supervisors only see operator requests for inspection plans (no other notification tabs). */
   const supervisorInspectionOnly = location.pathname.startsWith('/supervisor');
 
@@ -96,7 +98,15 @@ const Notification = () => {
       const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
       const visibleOrders = filterOwnCreatedNotifications(orders, storedUser);
       setCounts({
-        orders: Array.isArray(visibleOrders) ? visibleOrders.filter((n) => !n.is_ack).length : 0,
+        orders: Array.isArray(visibleOrders)
+          ? visibleOrders.filter((n) => {
+              const role = String(storedUser?.role || storedUser?.user_role || '').toLowerCase();
+              if (role.includes('manufacturing')) return !n.mc_is_ack;
+              if (role.includes('project')) return !n.pc_is_ack;
+              if (role.includes('admin')) return !n.admin_is_ack;
+              return !n.is_ack;
+            }).length
+          : 0,
         machines: Array.isArray(machines) ? machines.filter((n) => !n.is_ack).length : 0,
         tools: Array.isArray(tools) ? tools.filter((n) => !n.is_ack).length : 0,
         components: Array.isArray(components) ? components.filter((n) => !n.is_ack).length : 0,
@@ -109,8 +119,9 @@ const Notification = () => {
   }, [dateRange, supervisorInspectionOnly]);
 
   useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return;
     fetchCounts();
-  }, [fetchCounts]);
+  }, [fetchCounts, isAuthenticated, bootstrapping]);
 
   const tabItems = [
     {

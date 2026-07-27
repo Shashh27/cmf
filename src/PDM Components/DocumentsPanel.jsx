@@ -926,7 +926,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   return (
     <div className="flex-1 bg-white overflow-hidden flex flex-col h-full pdm-container" style={{ height: '100%' }}>
       <style>{`
-        .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2E8B57!important;color:#fff!important;border:none!important;}
+        .primary-btn-sm,.no-hover-btn{/* use Ant Design default primary colors */}
         .docs-ops-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
         .docs-ops-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
         .docs-ebom-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}

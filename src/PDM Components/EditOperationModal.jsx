@@ -797,7 +797,7 @@ const EditOperationModal = ({
       styles={{ body: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden', padding: '8px 16px' } }}
       centered maskClosable={false} destroyOnHidden
     >
-      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2E8B57!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
+      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{box-shadow:none!important;}`}</style>
       <div className="mt-2">
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={filteredTabs} />
       </div>

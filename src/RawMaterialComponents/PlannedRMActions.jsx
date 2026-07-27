@@ -277,7 +277,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       return `${dims.diameter} DIA x ${dims.length} LENGTH`;
     }
     if (formType === 'Square' && dims.breadth != null && dims.height != null && dims.length != null) {
-      return `${dims.breadth} x ${dims.height} x ${dims.length}`;
+      return `${dims.length} x ${dims.breadth} x ${dims.height}`;
     }
     if (formType === 'Pipe' && dims.outer_diameter != null && dims.inner_diameter != null && dims.length != null) {
       return `${dims.outer_diameter} OD x ${dims.inner_diameter} ID x ${dims.length} LENGTH`;
@@ -711,10 +711,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
               {(getDimensionsToShow().showInnerDiameter || getDimensionsToShow().showOuterDiameter) && (
                 <tr>
                   <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }} colSpan={2}>Additional Dimensions</td>
-                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Inner Diameter</td>}
-                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }} colSpan={getDimensionsToShow().showOuterDiameter ? 1 : 2}>{planningData?.[row.key]?.dimensions?.inner_diameter} mm</td>}
                   {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Outer Diameter</td>}
-                  {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.outer_diameter} mm</td>}
+                  {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }} colSpan={getDimensionsToShow().showInnerDiameter ? 1 : 2}>{planningData?.[row.key]?.dimensions?.outer_diameter} mm</td>}
+                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Inner Diameter</td>}
+                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.inner_diameter} mm</td>}
                 </tr>
               )}
             </tbody>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Spin, Empty, Modal, App, Popconfirm, Upload, Button, Table, Tag, Space, Image } from "antd";
 import { UploadOutlined, FileOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FilePdfOutlined, FileImageOutlined, FileTextOutlined, InboxOutlined } from "@ant-design/icons";
 import { api } from '../../api/client.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 const { Dragger } = Upload;
 
@@ -13,21 +14,22 @@ const getFileIcon = (fileName) => {
   return <FileOutlined style={{ fontSize: 32, color: '#8c8c8c' }} />;
 };
 
-const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions }) => {
+const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions, onDocumentsChanged }) => {
   const { message } = App.useApp();
+  const { isAuthenticated, bootstrapping, user } = useAuth();
   const [qualityDocs, setQualityDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [previewModal, setPreviewModal] = useState({ open: false, url: null, type: null });
+  const [previewModal, setPreviewModal] = useState({ open: false, url: null, type: null, doc: null });
   const [selectedFiles, setSelectedFiles] = useState([]);
 
   useEffect(() => {
-    if (open && stock) {
+    if (open && stock && isAuthenticated && !bootstrapping) {
       fetchQualityDocs(stock.id);
-    } else {
+    } else if (!open) {
       setQualityDocs([]);
       setSelectedFiles([]);
     }
-  }, [open, stock]);
+  }, [open, stock, isAuthenticated, bootstrapping]);
 
   const fetchQualityDocs = async (stockId) => {
     setDocsLoading(true);
@@ -48,21 +50,23 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
 
     const formData = new FormData();
     formData.append('stock_id', stock.id);
+    if (user?.id) {
+      formData.append('user_id', String(user.id));
+    }
     
     fileList.forEach((file) => {
       formData.append('files', file.originFileObj || file);
     });
 
     try {
-      const response = await api.post(`/stock-quality-documents/upload-bulk`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const response = await api.post(`/stock-quality-documents/upload-bulk`, formData);
       
       const uploadedCount = response.data?.length || 0;
       message.success(`${uploadedCount} document(s) uploaded successfully`);
       
       await fetchQualityDocs(stock.id);
       setSelectedFiles([]);
+      onDocumentsChanged?.(stock.id);
     } catch (err) {
       if (err.response?.status === 207) {
         const data = err.response.data.detail;
@@ -76,6 +80,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
         }
         fetchQualityDocs(stock.id);
         setSelectedFiles([]);
+        onDocumentsChanged?.(stock.id);
       } else {
         message.error(err.response?.data?.detail || "Failed to upload documents");
       }
@@ -87,6 +92,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
       await api.delete(`/stock-quality-documents/${docId}`);
       message.success("Document deleted successfully");
       await fetchQualityDocs(stock.id);
+      onDocumentsChanged?.(stock.id);
     } catch (err) {
       if (err.response?.status === 400) {
         message.error(err.response?.data?.detail || "Cannot delete document with newer versions");
@@ -119,18 +125,18 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
   const handlePreviewQualityDoc = (doc) => {
     const fileExt = doc.document_name.split('.').pop().toLowerCase();
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg'];
-    
+
     if (imageExts.includes(fileExt)) {
-      setPreviewModal({ open: true, url: doc.document_url, type: 'image' });
+      setPreviewModal({ open: true, url: doc.document_url, type: 'image', doc });
     } else if (fileExt === 'pdf') {
-      setPreviewModal({ open: true, url: doc.document_url, type: 'pdf' });
+      setPreviewModal({ open: true, url: doc.document_url, type: 'pdf', doc });
     } else {
-      handleDownloadQualityDoc(doc);
+      setPreviewModal({ open: true, url: null, type: 'other', doc });
     }
   };
 
   const closePreviewModal = () => {
-    setPreviewModal({ open: false, url: null, type: null });
+    setPreviewModal({ open: false, url: null, type: null, doc: null });
   };
 
   return (
@@ -278,7 +284,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
         onCancel={closePreviewModal}
         width="95%"
         style={{ maxWidth: 800 }}
-        title="Document Preview"
+        title={previewModal.doc?.document_name || "Document Preview"}
         footer={null}
         destroyOnHidden
       >
@@ -296,6 +302,25 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions 
             style={{ width: "100%", height: "60vh", border: "none" }}
             title="PDF Preview"
           />
+        ) : previewModal.type === 'other' ? (
+          <div style={{ textAlign: "center", padding: "40px" }}>
+            <FileTextOutlined style={{ fontSize: 48, color: "#8c8c8c" }} />
+            <p style={{ marginTop: 16, fontWeight: 500, color: "#333" }}>
+              Preview is not available for this file type.
+            </p>
+            <p style={{ color: "#8c8c8c", marginBottom: 16 }}>
+              Please download the file to view it.
+            </p>
+            {previewModal.doc && (
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => handleDownloadQualityDoc(previewModal.doc)}
+              >
+                Download
+              </Button>
+            )}
+          </div>
         ) : null}
       </Modal>
     </>

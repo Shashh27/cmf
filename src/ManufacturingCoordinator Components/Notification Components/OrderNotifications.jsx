@@ -48,7 +48,18 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       const currentUser = getStoredUser();
       const filteredData = filterOwnCreatedNotifications(data, currentUser);
       setNotifications(filteredData);
-      if (onCount) onCount(Array.isArray(filteredData) ? filteredData.filter(n => !n.is_ack).length : 0);
+      if (onCount) {
+        const userRole = String(currentUser?.role || currentUser?.user_role || '').toLowerCase();
+        const pending = Array.isArray(filteredData)
+          ? filteredData.filter((n) => {
+              if (userRole.includes('manufacturing')) return !n.mc_is_ack;
+              if (userRole.includes('project')) return !n.pc_is_ack;
+              if (userRole.includes('admin')) return !n.admin_is_ack;
+              return !n.is_ack;
+            }).length
+          : 0;
+        onCount(pending);
+      }
     } catch (error) {
       message.error(error.message);
     } finally {

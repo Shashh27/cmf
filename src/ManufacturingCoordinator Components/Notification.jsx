@@ -6,6 +6,7 @@ import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
 import dayjs from 'dayjs';
 import { authFetch } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const { Title, Text } = Typography;
 import OrderNotifications from './Notification Components/OrderNotifications';
@@ -21,6 +22,7 @@ import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificat
 const Notification = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAuthenticated, bootstrapping } = useAuth();
   const [dateRange, setDateRange] = useState([null, null]);
   const [activeKey, setActiveKey] = useState('1');
   const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0, pokayoke: 0, productionLogs: 0 });
@@ -62,32 +64,36 @@ const Notification = () => {
       
       const visibleOrders = filterOwnCreatedNotifications(orders, user);
 
-      // Count pending notifications based on role-specific acknowledgment status
-      const countPending = (notifications) => {
+      // Orders use role-specific ack flags; other notification types use is_ack only.
+      const countPendingOrders = (notifications) => {
         if (!Array.isArray(notifications)) return 0;
         return notifications.filter((n) => {
           if (userRole.includes('manufacturing')) return !n.mc_is_ack;
           if (userRole.includes('project')) return !n.pc_is_ack;
           if (userRole.includes('admin')) return !n.admin_is_ack;
-          return !n.is_ack; // fallback for other roles
+          return !n.is_ack;
         }).length;
       };
+      const countPendingSimple = (notifications) =>
+        Array.isArray(notifications) ? notifications.filter((n) => !n.is_ack).length : 0;
       
-      setCounts({
-        orders: countPending(visibleOrders),
-        machines: countPending(machines),
-        tools: countPending(tools),
-        components: countPending(components),
-        calibrations: countPending(calibrations),
-      });
+      setCounts((c) => ({
+        ...c,
+        orders: countPendingOrders(visibleOrders),
+        machines: countPendingSimple(machines),
+        tools: countPendingSimple(tools),
+        components: countPendingSimple(components),
+        calibrations: countPendingSimple(calibrations),
+      }));
     } catch (e) {
       // silent fail; badges will update when tabs are visited
     }
   }, [dateRange]);
 
   useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return;
     fetchCounts();
-  }, [fetchCounts]);
+  }, [fetchCounts, isAuthenticated, bootstrapping]);
 
   const tabItems = [
     {

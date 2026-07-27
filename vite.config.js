@@ -13,13 +13,12 @@ export default defineConfig({
     host: true,
     port: 5175,
     strictPort: true,
-    // Proxy ONLY for chatbot — all other APIs call backend IP directly in Config/
+    // Optional chatbot proxy (Config/chatbot.js calls backend directly with JWT).
     proxy: {
       '/api/chatbot': {
         target: 'http://172.18.7.86:3000',
         changeOrigin: true,
         ws: true,
-        // Keep Authorization when proxying chatbot JWT requests
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {
             const auth = req.headers.authorization;

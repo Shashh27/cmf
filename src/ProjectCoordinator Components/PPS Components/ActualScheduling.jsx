@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
 import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
-import { authFetch } from '../../api/client.js';
+import { api } from '../../api/client.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
@@ -71,8 +71,6 @@ const ActualScheduling = () => {
   const [parts, setParts] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
   const [skippedData, setSkippedData] = useState({
     skipped_orders: [],
     skipped_parts: [],
@@ -128,34 +126,6 @@ const ActualScheduling = () => {
     } catch (e) { console.error(e); }
   };
 
-  const handleUpdateSchedule = async () => {
-    setUpdateScheduleLoading(true);
-    try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/dynamic-reschedule`, {
-        method: 'POST',
-        headers: { 'accept': 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUpdateModalOpen(false);
-        message.success('Schedule updated');
-        setSkippedData({
-          skipped_orders: data.skipped_orders || [],
-          skipped_parts: data.skipped_parts || [],
-          parts_without_operations: data.parts_without_operations || []
-        });
-        await fetchSchedule();
-      } else {
-        const err = await res.text().catch(() => '');
-        message.error(err || 'Failed to update schedule');
-      }
-    } catch (e) {
-      console.error(e);
-      message.error('Update failed: ' + e.message);
-    } finally {
-      setUpdateScheduleLoading(false);
-    }
-  };
 
   const availableMachines = useMemo(() => {
     return (scheduleData.machines || [])
@@ -172,8 +142,8 @@ const ActualScheduling = () => {
   useEffect(() => {
     const fetchMachines = async () => {
       try {
-        const mRes = await authFetch(`/api/v1/machines/`);
-        const machines = mRes.ok ? await mRes.json() : [];
+        const mRes = await api.get('/machines/');
+        const machines = mRes.data || [];
         const formatted = (machines || []).map(m => {
           const modelName = m.make && m.model
             ? `(${m.make}) ${m.model}`
@@ -185,11 +155,9 @@ const ActualScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const res = await authFetch(`/api/v1/orders/`);
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(Array.isArray(data) ? data : []);
-        }
+        const res = await api.get('/orders/');
+        const data = res.data;
+        setOrders(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }
     };
     fetchMachines();
@@ -236,9 +204,9 @@ const ActualScheduling = () => {
     }
 
     if (so) {
-      authFetch(`/api/v1/orders/sale-order/${so}/parts`)
-        .then(r => r.ok ? r.json() : [])
-        .then(d => {
+      api.get(`/orders/sale-order/${so}/parts`)
+        .then((r) => r.data)
+        .then((d) => {
           const list = Array.isArray(d) ? d : (d.parts || []);
           setParts(list);
         })
@@ -377,7 +345,6 @@ const ActualScheduling = () => {
           </Button.Group>
 
           <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-          <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update Actual Schedule</Button>
           <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
         </motion.div>
 
@@ -484,30 +451,6 @@ const ActualScheduling = () => {
           </div>
         </Modal>
 
-        <Modal
-          title={
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
-              Update Actual Schedule
-            </span>
-          }
-          open={updateModalOpen}
-          onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
-          footer={[
-            <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
-              Cancel
-            </Button>,
-            <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
-              OK
-            </Button>,
-          ]}
-          closable={!updateScheduleLoading}
-          maskClosable={!updateScheduleLoading}
-        >
-          <p style={{ margin: 0 }}>
-            Do you want to update the actual schedule? Please wait while we update the schedule.
-          </p>
-        </Modal>
       </Content>
     </Layout>
   );

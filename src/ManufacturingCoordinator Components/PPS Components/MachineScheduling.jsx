@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ActualScheduling from './ActualScheduling.jsx';
 import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
 import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
-import { authFetch } from '../../api/client.js';
+import { api } from '../../api/client.js';
 import useLenis from '../../hooks/useLenis.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -176,8 +176,8 @@ const MachineScheduling = () => {
   useEffect(() => {
     const fetchMachines = async () => {
       try {
-        const mRes = await authFetch(`/api/v1/machines/`);
-        const machines = mRes.ok ? await mRes.json() : [];
+        const mRes = await api.get('/machines/');
+        const machines = mRes.data || [];
         const formatted = (machines || []).map(m => {
           const modelName = m.make && m.model
             ? `(${m.make}) ${m.model}`
@@ -189,11 +189,9 @@ const MachineScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const res = await authFetch(`/api/v1/orders/`);
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(Array.isArray(data) ? data : []);
-        }
+        const res = await api.get('/orders/');
+        const data = res.data;
+        setOrders(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }
     };
     fetchMachines();
@@ -240,9 +238,9 @@ const MachineScheduling = () => {
     }
 
     if (so) {
-      authFetch(`/api/v1/orders/sale-order/${so}/parts`)
-        .then(r => r.ok ? r.json() : [])
-        .then(d => {
+      api.get(`/orders/sale-order/${so}/parts`)
+        .then((r) => r.data)
+        .then((d) => {
           const list = Array.isArray(d) ? d : (d.parts || []);
           setParts(list);
         })

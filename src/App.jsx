@@ -130,28 +130,26 @@ import QMSInspector from "./Quality Management Components/QMSInspector";
 
 /** Floating chatbot only after login — hidden on /login and when not authenticated. */
 /** Only shown for Admin and Manufacturing Coordinator roles. */
+function isChatbotAllowedRole(user) {
+  const role = String(user?.role || user?.user_role || '')
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .trim();
+  if (!role) return false;
+  if (role === 'admin') return true;
+  if (role === 'mc' || role.includes('manufacturing coordinator')) return true;
+  return false;
+}
+
 function AuthenticatedChatPanel() {
   const location = useLocation();
-  const { isAuthenticated, user } = useAuth();
-  if (!isAuthenticated || location.pathname === '/login') {
+  const { isAuthenticated, user, bootstrapping } = useAuth();
+  if (bootstrapping || !isAuthenticated || location.pathname === '/login') {
     return null;
   }
-  
-  // Check user role - only show for admin and manufacturing_coordinator
-  try {
-    const role = String(user?.role || '')
-      .toLowerCase()
-      .replace(/_/g, ' ')
-      .trim();
-    const isAdmin = role === 'admin';
-    const isMc = role.includes('manufacturing coordinator') || role === 'mc';
-    if (!isAdmin && !isMc) {
-      return null;
-    }
-  } catch {
+  if (!isChatbotAllowedRole(user)) {
     return null;
   }
-  
   return <ChatPanel />;
 }
 

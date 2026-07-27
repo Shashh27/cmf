@@ -116,7 +116,7 @@ const RawMaterialsContent = () => {
 
       label: <span className="flex items-center gap-2 px-2"><DatabaseOutlined /> Raw Material Inventory</span>,
 
-      children: <RawMaterialInventoryTab />
+      children: <RawMaterialInventoryTab rawMaterials={sharedRawMaterials} />
 
     },
 

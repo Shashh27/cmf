@@ -10,6 +10,8 @@ import {
 , AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined } from "@ant-design/icons";
 import { Link, useLocation } from "react-router-dom";
 import { api, authFetch } from '../../api/client.js';
+import { API_BASE_URL } from '../../Config/auth';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -30,6 +32,7 @@ const getNotificationScopeParams = () => new URLSearchParams();
 const Sidebar = ({ collapsed, onCollapse }) => {
 
   const location = useLocation();
+  const { isAuthenticated, bootstrapping } = useAuth();
 
   const selectedKey = location.pathname;
 
@@ -138,6 +141,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   // Fetch notification count for sidebar badge
 
   useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return;
 
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
     if (!storedUser?.id && prefix !== '/operator' && prefix !== '/supervisor') {
@@ -166,7 +170,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     }
 
-  }, [prefix]);
+  }, [prefix, isAuthenticated, bootstrapping]);
 
 
 
@@ -206,7 +210,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       const [productionResponse, pokayokeChecklistResponse, otResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
-        authFetch(`/api/v1/operation-checklists/submissions?operator=${operatorId}`),
+        authFetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
         fetch(`${SCHEDULING_API_BASE_URL}/notifications/operator/${operatorId}?unread_only=true&limit=50`),
       ]);
 

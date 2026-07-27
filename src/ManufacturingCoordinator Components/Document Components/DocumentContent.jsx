@@ -221,7 +221,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       setSelectedVersions({});
       setDocuments(normalizedData);
     } catch (error) {
-      message.error('Failed to fetch documents: ' + error.message);
+      console.error('Failed to fetch documents:', error);
     } finally {
       setLoading(false);
     }
@@ -688,11 +688,15 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
@@ -799,44 +803,34 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       
       if (selectedNode.type === 'general-folder') {
         url = `${config.API_BASE_URL}/general-documents/upload`;
+        // general-documents expects singular "file"
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('folder_id', selectedNode.folderId.toString());
-        formData.append('file_name', addFileList[0].originFileObj.name);
+        formData.append('file_name', first.name);
         formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'common-folder') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading common documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'common-root') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('user_id', userId.toString());
-        console.log('Uploading common documents to root:', {
-          url,
-          folderId: null,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents directly to machine:', {
-          url,
-          machineId: selectedNode.machineId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         // For part-category, still use single file upload as it expects 'document_name'

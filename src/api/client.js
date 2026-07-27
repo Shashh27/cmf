@@ -1,5 +1,5 @@
 /**
- * Shared Axios client: access token in memory, refresh + user profile in sessionStorage.
+ * Shared Axios client: access token in memory, refresh + user profile in localStorage.
  */
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth.js';
@@ -16,7 +16,7 @@ let isBootstrapping = false;
 
 function readStoredRefreshToken() {
   try {
-    return sessionStorage.getItem(REFRESH_STORAGE_KEY);
+    return localStorage.getItem(REFRESH_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -25,9 +25,9 @@ function readStoredRefreshToken() {
 function writeStoredRefreshToken(token) {
   try {
     if (token) {
-      sessionStorage.setItem(REFRESH_STORAGE_KEY, token);
+      localStorage.setItem(REFRESH_STORAGE_KEY, token);
     } else {
-      sessionStorage.removeItem(REFRESH_STORAGE_KEY);
+      localStorage.removeItem(REFRESH_STORAGE_KEY);
     }
   } catch {
     // ignore storage errors
@@ -36,7 +36,7 @@ function writeStoredRefreshToken(token) {
 
 export function readStoredUser() {
   try {
-    const raw = sessionStorage.getItem(USER_STORAGE_KEY);
+    const raw = localStorage.getItem(USER_STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -46,9 +46,9 @@ export function readStoredUser() {
 export function writeStoredUser(user) {
   try {
     if (user) {
-      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
     } else {
-      sessionStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem(USER_STORAGE_KEY);
     }
   } catch {
     // ignore storage errors
@@ -96,7 +96,11 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  // Wait for session restore on page load before sending protected requests.
+  if (!accessToken && sessionRestorePromise) {
+    await sessionRestorePromise;
+  }
   config.headers = config.headers || {};
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -165,6 +169,18 @@ api.interceptors.response.use(
     if (url.includes('/login') || url.includes('/auth/refresh')) {
       return Promise.reject(error);
     }
+    if (isBootstrapping && sessionRestorePromise) {
+      try {
+        await sessionRestorePromise;
+        original.headers = original.headers || {};
+        if (accessToken) {
+          original.headers.Authorization = `Bearer ${accessToken}`;
+        }
+        return api(original);
+      } catch {
+        return Promise.reject(error);
+      }
+    }
     if (isBootstrapping) {
       return Promise.reject(error);
     }
@@ -189,10 +205,28 @@ api.interceptors.response.use(
 );
 
 export async function authFetch(input, init = {}) {
-  const headers = new Headers(init.headers || {});
-  if (accessToken) {
-    headers.set('Authorization', `Bearer ${accessToken}`);
+  if (!accessToken && sessionRestorePromise) {
+    await sessionRestorePromise;
   }
+  // Proactively refresh before calling if memory token is gone but refresh exists
+  // (new tab, HMR, or access token cleared while page stayed open).
+  if (!accessToken && getRefreshToken()) {
+    try {
+      await refreshAccessToken();
+    } catch {
+      // handled below
+    }
+  }
+  if (!accessToken) {
+    // Do not spam the API without a Bearer token (EMS polls were doing this).
+    return new Response(JSON.stringify({ detail: 'Not authenticated' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const headers = new Headers(init.headers || {});
+  headers.set('Authorization', `Bearer ${accessToken}`);
   const opts = { ...init, headers };
   let res = await fetch(input, opts);
   if (res.status !== 401) return res;
@@ -202,7 +236,11 @@ export async function authFetch(input, init = {}) {
 
   try {
     const result = await refreshAccessToken();
-    if (!result?.access_token) return res;
+    if (!result?.access_token) {
+      clearStoredSession();
+      if (onUnauthorized) onUnauthorized();
+      return res;
+    }
     headers.set('Authorization', `Bearer ${result.access_token}`);
     res = await fetch(input, { ...opts, headers });
   } catch {

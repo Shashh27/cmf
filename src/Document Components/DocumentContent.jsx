@@ -120,6 +120,8 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   // Preview state
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewingDocument, setPreviewingDocument] = useState(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // // Add Document state
   // const [addModalVisible, setAddModalVisible] = useState(false);
@@ -258,7 +260,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       setSelectedVersions({});
       setDocuments(normalizedData);
     } catch (error) {
-      message.error('Failed to fetch documents: ' + error.message);
+      console.error('Failed to fetch documents:', error);
     } finally {
       setLoading(false);
     }
@@ -487,42 +489,68 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   };
 
   const isPreviewable = (document) => {
-    const ext = getFileExtension(document.url);
+    const ext = getFileExtension(document.url || document.file_name || document.document_name);
     const previewableTypes = ['pdf', 'jpg', 'jpeg', 'png', 'gif'];
     return previewableTypes.includes(ext);
   };
 
+  // Fetch API preview endpoints with JWT; MinIO URLs can be used directly.
+  useEffect(() => {
+    let revoked = null;
+    if (!previewModalVisible || !previewingDocument) {
+      setPreviewBlobUrl(null);
+      return undefined;
+    }
+
+    const apiPreview = getDocumentPreviewUrl(previewingDocument, config.API_BASE_URL);
+    const isApiPreview =
+      previewingDocument.doc_source_type === 'general-folder' ||
+      (typeof apiPreview === 'string' && apiPreview.includes('/api/v1/') && apiPreview.includes('/preview'));
+
+    if (!isApiPreview) {
+      setPreviewBlobUrl(apiPreview || previewingDocument.url || null);
+      setPreviewLoading(false);
+      return undefined;
+    }
+
+    setPreviewLoading(true);
+    setPreviewBlobUrl(null);
+    authFetch(apiPreview)
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Preview failed');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        revoked = url;
+        setPreviewBlobUrl(url);
+      })
+      .catch(() => setPreviewBlobUrl(null))
+      .finally(() => setPreviewLoading(false));
+
+    return () => {
+      if (revoked) window.URL.revokeObjectURL(revoked);
+      setPreviewBlobUrl(null);
+    };
+  }, [previewModalVisible, previewingDocument]);
+
   const getPreviewContent = (document) => {
-    const ext = getFileExtension(document.url);
-    const previewUrl = getDocumentPreviewUrl(document, config.API_BASE_URL);
-    
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) {
+    const ext = getFileExtension(document.url || document.file_name || document.document_name);
+
+    if (previewLoading) {
       return (
-        <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-          <img 
-            src={previewUrl} 
-            alt={document.file_name} 
-            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-          />
+        <div className="flex items-center justify-center h-full">
+          <LoadingOutlined style={{ fontSize: 32 }} />
+          <span className="ml-3">Loading preview…</span>
         </div>
       );
-    } else if (ext === 'pdf') {
-      return (
-        <iframe
-          src={`${previewUrl}#toolbar=0`}
-          title={document.file_name}
-          width="100%"
-          height="100%"
-          style={{ border: 'none' }}
-        />
-      );
-    } else {
+    }
+
+    if ((['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext) || ext === 'pdf') && !previewBlobUrl) {
       return (
         <div className="flex flex-col items-center justify-center h-full">
-          <Empty description="Preview not available for this file type" />
-          <Button 
-            type="primary" 
-            icon={<DownloadOutlined />} 
+          <Empty description="Preview unavailable" />
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
             onClick={() => handleDownloadDocument(document)}
           >
             Download to View
@@ -530,6 +558,41 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         </div>
       );
     }
+
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) {
+      return (
+        <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+          <img
+            src={previewBlobUrl}
+            alt={document.file_name}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+        </div>
+      );
+    }
+    if (ext === 'pdf') {
+      return (
+        <iframe
+          src={`${previewBlobUrl}#toolbar=0`}
+          title={document.file_name}
+          width="100%"
+          height="100%"
+          style={{ border: 'none' }}
+        />
+      );
+    }
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <Empty description="Preview not available for this file type" />
+        <Button
+          type="primary"
+          icon={<DownloadOutlined />}
+          onClick={() => handleDownloadDocument(document)}
+        >
+          Download to View
+        </Button>
+      </div>
+    );
   };
 
   const handleEditDocument = (document) => {
@@ -726,11 +789,15 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
@@ -869,6 +936,47 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         return;
       }
 
+      if (selectedNode.type === 'common-folder' || selectedNode.type === 'common-root') {
+        for (const fileObj of addFileList) {
+          const file = fileObj.originFileObj || fileObj;
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          if (selectedNode.type === 'common-folder') {
+            formData.append('folder_id', selectedNode.folderId.toString());
+          }
+          formData.append('user_id', userId.toString());
+
+          const response = await authFetch(`${config.API_BASE_URL}/common-documents/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            let errorData;
+            try {
+              errorData = JSON.parse(errorText);
+            } catch {
+              errorData = { detail: errorText };
+            }
+            throw new Error(parseApiError(errorData, response.status));
+          }
+        }
+
+        message.success(
+          addFileList.length > 1
+            ? `${addFileList.length} documents uploaded successfully`
+            : 'Document added successfully',
+        );
+        setAddModalVisible(false);
+        setAddFileList([]);
+        setCustomDocType('');
+        setAddDocType('General');
+        fetchDocuments();
+        notifyDocumentsChange();
+        return;
+      }
+
       const formData = new FormData();
       addFileList.forEach((fileObj) => {
         const file = fileObj.originFileObj || fileObj;
@@ -877,24 +985,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
 
       let url = '';
       
-      if (selectedNode.type === 'common-folder') {
-        url = `${config.API_BASE_URL}/common-documents/upload`;
-        formData.append('folder_id', selectedNode.folderId.toString());
-        formData.append('user_id', userId.toString());
-        console.log('Uploading common documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
-      } else if (selectedNode.type === 'common-root') {
-        url = `${config.API_BASE_URL}/common-documents/upload`;
-        formData.append('user_id', userId.toString());
-        console.log('Uploading common documents to root:', {
-          url,
-          folderId: null,
-          fileCount: addFileList.length
-        });
-      } else if (selectedNode.type === 'machine-folder') {
+      if (selectedNode.type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
@@ -1192,6 +1283,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         onCancel={() => {
           setPreviewModalVisible(false);
           setPreviewingDocument(null);
+          setPreviewBlobUrl(null);
         }}
         footer={[
           <Button key="download" icon={<DownloadOutlined />} onClick={() => {
@@ -1204,6 +1296,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           <Button key="close" type="primary" onClick={() => {
             setPreviewModalVisible(false);
             setPreviewingDocument(null);
+            setPreviewBlobUrl(null);
           }}>
             Close
           </Button>

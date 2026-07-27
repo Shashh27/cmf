@@ -6,18 +6,20 @@ import ExhaustedUnitsModal from "./ExhaustedUnitsModal";
 
 const { Option } = Select;
 
-const RawMaterialInventoryTab = () => {
+const RawMaterialInventoryTab = ({ rawMaterials = [] }) => {
   const [invSearch, setInvSearch] = useState("");
   const [invFilters, setInvFilters] = useState({ fMaterial: [], fSource: [], fOrder: [], fPart: [], fStockStatus: [], fUnitStatus: [] });
   const [invFilterOptions, setInvFilterOptions] = useState({ materials: [], orders: [], partsByOrder: {} });
   const [invRows, setInvRows] = useState([]);
   const [exhaustedModalOpen, setExhaustedModalOpen] = useState(false);
   const [inventoryData, setInventoryData] = useState([]);
+  const [invRefreshKey, setInvRefreshKey] = useState(0);
 
   const setF = (key, val) => setInvFilters(prev => ({ ...prev, [key]: val || [] }));
   const handleFilterOptionsReady = useCallback((opts) => setInvFilterOptions(opts), []);
   const handleRowsReady = useCallback((r) => setInvRows(r), []);
   const handleInventoryDataReady = useCallback((data) => setInventoryData(data), []);
+  const handleDocumentsChanged = useCallback(() => setInvRefreshKey((k) => k + 1), []);
 
   return (
     <div className="mt-4">
@@ -77,6 +79,8 @@ const RawMaterialInventoryTab = () => {
       </div>
 
       <RawMaterialInventoryView
+        rawMaterials={rawMaterials}
+        refreshKey={invRefreshKey}
         searchText={invSearch}
         fMaterial={invFilters.fMaterial}
         fSource={invFilters.fSource}
@@ -93,6 +97,7 @@ const RawMaterialInventoryTab = () => {
         open={exhaustedModalOpen}
         onClose={() => setExhaustedModalOpen(false)}
         inventoryData={inventoryData}
+        onDocumentsChanged={handleDocumentsChanged}
       />
     </div>
   );

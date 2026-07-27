@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Row, Col, Typography, Spin, Badge, Space, Alert, Select, DatePicker, Button } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Card, Row, Col, Typography, Spin, Badge, Space, Alert, Select, DatePicker, Button, Empty } from 'antd';
 import { ThunderboltOutlined, SearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area } from 'recharts';
 import dayjs from 'dayjs';
@@ -24,12 +24,26 @@ const RealtimeGraph = ({ machineId, machineName }) => {
     dayjs()
   ]);
   const [chartLoading, setChartLoading] = useState(false);
+  const lastLiveTimestampRef = React.useRef(null);
+
+  const formatDbTimestamp = (isoTimestamp) => {
+    if (!isoTimestamp) return null;
+    const date = new Date(isoTimestamp);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+  };
 
   const handleLiveToggle = () => {
-    setIsLive(!isLive);
-    if (!isLive) {
-      setChartData([]);
-    }
+    const next = !isLive;
+    setIsLive(next);
+    lastLiveTimestampRef.current = null;
+    setChartData([]);
+    setChartError(null);
   };
 
   const handleSubmitFilteredData = async () => {
@@ -42,6 +56,7 @@ const RealtimeGraph = ({ machineId, machineName }) => {
     setChartError(null);
     setChartData([]);
     setIsLive(false);
+    lastLiveTimestampRef.current = null;
 
     try {
       const apiParamMap = {
@@ -72,35 +87,21 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       }
 
       const formattedData = data.map((point, index) => {
-        let formattedTimestamp;
-        try {
-          const date = new Date(point.timestamp);
-          formattedTimestamp = date.toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit'
-          });
-        } catch (error) {
-          formattedTimestamp = `Point ${index + 1}`;
-        }
-        
+        const label = formatDbTimestamp(point.timestamp) || `Point ${index + 1}`;
         const paramValue = point[apiParamName];
-        let numericValue;
-        
-        if (typeof paramValue === 'string') {
-          numericValue = parseFloat(paramValue);
-        } else if (typeof paramValue === 'number') {
-          numericValue = paramValue;
-        } else {
-          numericValue = getDefaultValue(selectedParameter);
-        }
-        
+        const numericValue = typeof paramValue === 'number'
+          ? paramValue
+          : (paramValue != null && paramValue !== '' ? parseFloat(paramValue) : null);
+
+        if (numericValue === null || Number.isNaN(numericValue)) return null;
+
         return {
-          key: index,
-          timestamp: formattedTimestamp,
+          key: `${point.timestamp}-${index}`,
+          timestamp: label,
           rawTimestamp: point.timestamp,
-          value: isNaN(numericValue) ? getDefaultValue(selectedParameter) : numericValue
+          value: numericValue
         };
-      });
+      }).filter(Boolean);
 
       if (formattedData.length === 0) {
         setChartError(`No valid data points available`);
@@ -116,29 +117,6 @@ const RealtimeGraph = ({ machineId, machineName }) => {
       setChartLoading(false);
     }
   };
-
-  const getDefaultValue = useCallback((paramKey) => {
-    switch(paramKey) {
-      case 'phaseAVoltage':
-      case 'phaseBVoltage':
-      case 'phaseCVoltage':
-      case 'avgPhaseVoltage':
-        return 220;
-      case 'phaseACurrent':
-      case 'phaseBCurrent':
-      case 'phaseCCurrent':
-      case 'avgThreePhaseCurrent':
-        return 10;
-      case 'frequency':
-        return 50;
-      case 'totalInstantaneousPower':
-        return 8;
-      case 'activeEnergyDelivered':
-        return 350;
-      default:
-        return 100;
-    }
-  }, []);
 
   const getParameterDisplayName = (paramKey) => {
     const parameterMap = {
@@ -159,19 +137,27 @@ const RealtimeGraph = ({ machineId, machineName }) => {
   };
 
   useEffect(() => {
+    lastLiveTimestampRef.current = null;
+    setChartData([]);
+    setParameters(null);
+    setInitialLoad(true);
+
     const fetchData = async () => {
       try {
         setApiError(null);
         const response = await authFetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
-        const data = await response.json();
-        
-        if (data) {
-          setParameters(data);
+        if (!response.ok) {
+          setParameters(null);
           setInitialLoad(false);
+          return;
         }
+        const data = await response.json();
+        setParameters(data?.offline ? null : data);
+        setInitialLoad(false);
       } catch (error) {
         console.error("Error fetching machine data:", error);
         setApiError(error.message || "Failed to fetch machine data");
+        setInitialLoad(false);
       }
     };
     
@@ -184,36 +170,35 @@ const RealtimeGraph = ({ machineId, machineName }) => {
   }, [machineId, isLive]);
 
   useEffect(() => {
-    if (isLive && selectedParameter && parameters) {
-      const paramValue = parameters[mapParamName(selectedParameter)];
-      let numericValue;
-      
-      if (typeof paramValue === 'string') {
-        numericValue = parseFloat(paramValue);
-      } else if (typeof paramValue === 'number') {
-        numericValue = paramValue;
-      } else {
-        numericValue = getDefaultValue(selectedParameter);
-      }
-      
-      if (numericValue !== undefined && !isNaN(numericValue)) {
-        const now = new Date();
-        const formattedTimestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        const newDataPoint = {
-          key: Date.now(),
-          timestamp: formattedTimestamp,
-          rawTimestamp: now.toISOString(),
-          value: numericValue
-        };
-        
-        setChartData(prevData => {
-          const newData = [...prevData, newDataPoint];
-          return newData.length > 20 ? newData.slice(-20) : newData;
-        });
-      }
-    }
-  }, [parameters, selectedParameter, getDefaultValue, isLive]);
+    if (!isLive || !selectedParameter || !parameters?.timestamp) return;
+
+    const rawTimestamp = parameters.timestamp;
+    if (lastLiveTimestampRef.current === rawTimestamp) return;
+
+    const paramValue = parameters[mapParamName(selectedParameter)];
+    const numericValue = typeof paramValue === 'number'
+      ? paramValue
+      : (paramValue != null && paramValue !== '' ? parseFloat(paramValue) : null);
+
+    if (numericValue === null || Number.isNaN(numericValue)) return;
+
+    const label = formatDbTimestamp(rawTimestamp);
+    if (!label) return;
+
+    lastLiveTimestampRef.current = rawTimestamp;
+    setChartData((prevData) => {
+      const newData = [
+        ...prevData,
+        {
+          key: rawTimestamp,
+          timestamp: label,
+          rawTimestamp,
+          value: numericValue,
+        },
+      ];
+      return newData.length > 50 ? newData.slice(-50) : newData;
+    });
+  }, [parameters, selectedParameter, isLive]);
 
   const mapParamName = (param) => {
     const map = {
@@ -274,11 +259,31 @@ const RealtimeGraph = ({ machineId, machineName }) => {
     }
   };
 
-  if (initialLoad || !parameters) {
+  if (initialLoad) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', flexDirection: 'column', gap: '16px' }}>
         <Spin size="large" />
         <Text type="secondary">Loading machine data...</Text>
+      </div>
+    );
+  }
+
+  if (!parameters) {
+    return (
+      <div style={{ padding: '0 4px' }}>
+        <Alert
+          type="warning"
+          showIcon
+          message="No live data for the selected machine"
+          description={`${machineName || `Machine ${machineId}`} has no live EMS data in ems.machine_ems_live.`}
+          style={{ marginBottom: 12 }}
+        />
+        <Card style={{ borderRadius: '6px' }}>
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="No live data for the selected machine"
+          />
+        </Card>
       </div>
     );
   }
@@ -300,7 +305,9 @@ const RealtimeGraph = ({ machineId, machineName }) => {
           </Col>
           <Col xs={24} sm={8}>
             <Space size="small" wrap style={{ justifyContent: 'flex-end' }}>
-              <Text type="secondary" style={{ fontSize: '12px' }}>Updated: {new Date().toLocaleTimeString()}</Text>
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                Updated: {parameters?.timestamp ? formatDbTimestamp(parameters.timestamp) : '--'}
+              </Text>
             </Space>
           </Col>
         </Row>
@@ -408,7 +415,20 @@ const RealtimeGraph = ({ machineId, machineName }) => {
           </Col>
           <Col xs={24} sm={12}>
             <Space size="small" wrap style={{ justifyContent: 'flex-end' }}>
-              <Select style={{ width: '180px' }} placeholder="Select Parameter" value={selectedParameter} onChange={setSelectedParameter} allowClear={false} size="small">
+              <Select
+                style={{ width: '180px' }}
+                placeholder="Select Parameter"
+                value={selectedParameter}
+                onChange={(value) => {
+                  setSelectedParameter(value);
+                  if (isLive) {
+                    lastLiveTimestampRef.current = null;
+                    setChartData([]);
+                  }
+                }}
+                allowClear={false}
+                size="small"
+              >
                 <Option value="phaseAVoltage">Phase A Voltage</Option>
                 <Option value="phaseBVoltage">Phase B Voltage</Option>
                 <Option value="phaseCVoltage">Phase C Voltage</Option>
@@ -459,7 +479,7 @@ const RealtimeGraph = ({ machineId, machineName }) => {
             </>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '250px', color: '#666' }}>
-              <Text type="secondary" style={{ fontSize: '14px', marginBottom: '4px' }}>{isLive ? 'Waiting for live data...' : 'Select dates and click Submit to view historical data'}</Text>
+              <Text type="secondary" style={{ fontSize: '14px', marginBottom: '4px' }}>{isLive ? 'No live data for the selected machine' : 'Select dates and click Submit to view historical data'}</Text>
             </div>
           )}
         </div>

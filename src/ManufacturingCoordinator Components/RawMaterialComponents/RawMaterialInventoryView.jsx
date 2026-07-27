@@ -19,9 +19,36 @@ const tdStyle = {
 const fmtDim = (s) => {
   if (!s) return "-";
   if (s.form_type === "Round") return `⌀${s.diameter} × ${s.length}mm`;
-  if (s.form_type === "Square") return `${s.breadth} × ${s.height} × ${s.length}mm`;
+  if (s.form_type === "Square") return `${s.length} × ${s.breadth} × ${s.height}mm`;
   if (s.form_type === "Pipe") return `⌀${s.outer_diameter}/${s.inner_diameter} × ${s.length}mm`;
   return "-";
+};
+
+/** Orders linked to a non-exhausted unit (usage) or order-sourced stock */
+const getUnitOrders = (unit, stock) => {
+  const fromUsage = (unit?.usages || []).map((u) => u.order_number).filter(Boolean);
+  if (fromUsage.length) return fromUsage;
+  if (stock?.source_type === "order" && stock.source_order_number) {
+    return stock.source_order_number.split(",").map((o) => o.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+/** Parts linked to a non-exhausted unit (usage) or order-sourced stock */
+const getUnitParts = (unit, stock) => {
+  const fromUsage = (unit?.usages || []).map((u) => u.part_number).filter(Boolean);
+  if (fromUsage.length) return fromUsage;
+  if (stock?.source_type === "order" && stock.part_numbers?.length) return stock.part_numbers;
+  return [];
+};
+
+const unitMatchesOrderPart = (unit, stock, ordArr, prtArr) => {
+  if (ordArr.length === 0 && prtArr.length === 0) return true;
+  const orders = getUnitOrders(unit, stock);
+  const parts = getUnitParts(unit, stock);
+  if (ordArr.length > 0 && !ordArr.some((o) => orders.includes(o))) return false;
+  if (prtArr.length > 0 && !prtArr.some((p) => parts.includes(p))) return false;
+  return true;
 };
 
 const statusColor = (s) => {
@@ -71,6 +98,7 @@ const RawMaterialInventoryView = ({
   searchText = "", refreshKey = 0,
   fMaterial = [], fSource = [], fOrder = [],
   fPart = [], fStockStatus = [], fUnitStatus = [],
+  rawMaterials = [],
   onFilterOptionsReady, onRowsReady, onInventoryDataReady,
 }) => {
   const [inventoryData, setInventoryData] = useState([]);
@@ -154,37 +182,50 @@ const RawMaterialInventoryView = ({
     };
   }, [allStock, allUnits]);
 
-  // Derive filter options dynamically — only values that exist in data
+  // Derive filter options — Order/Part from order stocks + non-exhausted unit usages only
   useEffect(() => {
     if (!onFilterOptionsReady) return;
     const srcArr = JSON.parse(fSourceKey);
     const ssArr = JSON.parse(fStockStatusKey);
     const orderSet = new Set();
     const partsByOrder = {};
-    const materialIds = new Set();
+
+    const addPart = (orderNo, partNo) => {
+      if (!orderNo || !partNo) return;
+      if (!partsByOrder[orderNo]) partsByOrder[orderNo] = new Set();
+      partsByOrder[orderNo].add(partNo);
+    };
 
     Object.entries(allStock).forEach(([matId, stocks]) => {
-      stocks.forEach(s => {
+      stocks.forEach((s) => {
+        if (s.status === "not_available") return;
         if (srcArr.length > 0 && !srcArr.includes(s.source_type)) return;
         if (ssArr.length > 0 && !ssArr.includes(s.status)) return;
-        materialIds.add(Number(matId));
-        if (s.source_order_number) {
-          s.source_order_number.split(',').map(o => o.trim()).filter(Boolean).forEach(o => {
+
+        if (s.source_type === "order" && s.source_order_number) {
+          s.source_order_number.split(",").map((o) => o.trim()).filter(Boolean).forEach((o) => {
             orderSet.add(o);
-            if (!partsByOrder[o]) partsByOrder[o] = new Set();
-            if (s.order_parts_mapping?.[o]) {
-              s.order_parts_mapping[o].forEach(p => partsByOrder[o].add(p));
-            } else if (s.part_numbers) {
-              s.part_numbers.forEach(p => partsByOrder[o].add(p));
-            }
+            (s.part_numbers || []).forEach((p) => addPart(o, p));
           });
         }
+
+        (allUnits[s.id] || []).forEach((u) => {
+          if (u.status === "exhausted") return;
+          (u.usages || []).forEach((usage) => {
+            const o = usage.order_number;
+            if (o) {
+              orderSet.add(o);
+              addPart(o, usage.part_number);
+            }
+          });
+        });
       });
     });
 
-    const materials = inventoryData
-      .filter(m => materialIds.size === 0 || materialIds.has(m.id))
-      .map(m => ({ id: m.id, name: m.material_name }));
+    const materialSource = rawMaterials.length > 0 ? rawMaterials : inventoryData;
+    const materials = materialSource
+      .map((m) => ({ id: m.id, name: m.material_name }))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
     onFilterOptionsReady({
       materials,
@@ -192,7 +233,7 @@ const RawMaterialInventoryView = ({
       partsByOrder: Object.fromEntries(Object.entries(partsByOrder).map(([k, v]) => [k, Array.from(v).sort()])),
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inventoryData, allStock, fSourceKey, fStockStatusKey, onFilterOptionsReady]);
+  }, [inventoryData, rawMaterials, allStock, allUnits, fSourceKey, fStockStatusKey, onFilterOptionsReady]);
 
   // Build flat rows with all filters applied
   const rows = useMemo(() => {
@@ -224,16 +265,21 @@ const RawMaterialInventoryView = ({
         if (colSource.length > 0 && !colSource.includes(srcLabel)) return false;
         const ssLabel = s.status?.replace(/_/g, " ");
         if (colStockStatus.length > 0 && !colStockStatus.includes(ssLabel)) return false;
-        if (ordArr.length > 0) {
-          const stockOrders = s.source_order_number ? s.source_order_number.split(',').map(o => o.trim()) : [];
-          if (!ordArr.some(o => stockOrders.includes(o))) return false;
-        }
-        if (prtArr.length > 0) {
-          const hasPart = prtArr.some(p =>
-            s.part_numbers?.includes(p) ||
-            (s.order_parts_mapping && Object.values(s.order_parts_mapping).some(ps => ps.includes(p)))
-          );
-          if (!hasPart) return false;
+        if (ordArr.length > 0 || prtArr.length > 0) {
+          const visibleUnits = (allUnits[s.id] || []).filter((u) => u.status !== "exhausted");
+          const anyUnit = visibleUnits.some((u) => unitMatchesOrderPart(u, s, ordArr, prtArr));
+          if (!anyUnit) {
+            if (s.source_type === "order") {
+              const stockOrders = s.source_order_number
+                ? s.source_order_number.split(",").map((o) => o.trim()).filter(Boolean)
+                : [];
+              const orderOk = ordArr.length === 0 || ordArr.some((o) => stockOrders.includes(o));
+              const partOk = prtArr.length === 0 || prtArr.some((p) => (s.part_numbers || []).includes(p));
+              if (!(orderOk && partOk)) return false;
+            } else {
+              return false;
+            }
+          }
         }
         if (searchText && !matchesMaterial) {
           return (
@@ -247,23 +293,34 @@ const RawMaterialInventoryView = ({
         return true;
       });
 
-      if (!matchesMaterial && matchingStocks.length === 0) return;
-      slNo += 1;
-
       if (matchingStocks.length === 0) {
+        const hasStockFilters = ordArr.length > 0 || prtArr.length > 0 || srcArr.length > 0 || ssArr.length > 0 || usArr.length > 0;
+        if (hasStockFilters) return;
+        if (!matchesMaterial) return;
+        slNo += 1;
         result.push({ type: "no-stock", material, slNo, matRowSpan: 1, stockRowSpan: 0 });
         return;
       }
+      slNo += 1;
+
+      const filterUnits = (s) =>
+        (allUnits[s.id] || []).filter(
+          (u) =>
+            u.status !== "exhausted" &&
+            (usArr.length === 0 || usArr.includes(u.status)) &&
+            (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))) &&
+            unitMatchesOrderPart(u, s, ordArr, prtArr)
+        );
 
       let matTotalRows = 0;
       matchingStocks.forEach((s) => {
-        const units = (allUnits[s.id] || []).filter(u => u.status !== "exhausted" && (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
+        const units = filterUnits(s);
         matTotalRows += units.length > 0 ? units.length : 1;
       });
 
       let matFirstRow = true;
       matchingStocks.forEach((stock) => {
-        const units = (allUnits[stock.id] || []).filter(u => u.status !== "exhausted" && (usArr.length === 0 || usArr.includes(u.status)) && (colUnitStatus.length === 0 || colUnitStatus.includes(u.status?.replace(/_/g, " "))));
+        const units = filterUnits(stock);
         const stockRowSpan = units.length > 0 ? units.length : 1;
 
         if (units.length === 0) {
@@ -347,13 +404,13 @@ const RawMaterialInventoryView = ({
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 50 }}>Qty</th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 70 }}>Mass (kg)</th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 70 }}><FilterHeader label="Source" options={colFilterOptions.source} value={colSource} onChange={setColSource} /></th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}>Order No</th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}><FilterHeader label="Stock Status" options={colFilterOptions.stockStatus} value={colStockStatus} onChange={setColStockStatus} /></th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 60, background: "#fff1f0" }}>Del Stock</th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 60 }}>Docs</th>
-                <th colSpan={6} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
+                <th colSpan={7} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
               </tr>
               <tr>
+                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Order No</th>
                 <th style={{ ...thStyle, minWidth: 55, background: "#f0fff4" }}>Unit</th>
                 <th style={{ ...thStyle, minWidth: 80, background: "#f0fff4" }}>Total Len</th>
                 <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Remaining</th>
@@ -386,7 +443,7 @@ const RawMaterialInventoryView = ({
 
                   {/* Stock cells — rowspan across all its unit rows */}
                   {row.type === "no-stock" ? (
-                    <td colSpan={8} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No stock available</td>
+                    <td colSpan={7} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No stock available</td>
                   ) : (
                     <>
                       {row.stockRowSpan > 0 && (
@@ -397,7 +454,6 @@ const RawMaterialInventoryView = ({
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.quantity ?? "-"}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.mass != null ? row.stock.mass.toFixed(3) : "-"}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.source_type === "order" ? "Order" : "General"}</td>
-                          <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.source_order_number || "-"}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>
                             <span style={statusColor(row.stock.status)}>{row.stock.status?.replace(/_/g, " ")}</span>
                           </td>
@@ -437,11 +493,15 @@ const RawMaterialInventoryView = ({
                           </td>
                         </>
                       )}
-                      {/* Unit cells — one per row */}
                       {row.type === "no-unit" ? (
-                        <td colSpan={6} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No units</td>
+                        <td colSpan={7} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No units</td>
                       ) : (
                         <>
+                          <td style={tdStyle}>
+                            {row.stock.source_type === "order"
+                              ? (row.stock.source_order_number || "-")
+                              : (getUnitOrders(row.unit, row.stock)[0] || "-")}
+                          </td>
                           <td style={tdStyle}>Unit {row.unitSeq}</td>
                           <td style={tdStyle}>{row.unit.total_length?.toFixed(2) ?? "-"}</td>
                           <td style={tdStyle}>{row.unit.remaining_length?.toFixed(2) ?? "-"}</td>
@@ -503,6 +563,7 @@ const RawMaterialInventoryView = ({
         stock={qualityDocsModal.stock}
         materialName={qualityDocsModal.materialName}
         dimensions={qualityDocsModal.dimensions}
+        onDocumentsChanged={() => fetchAll()}
       />
     </div>
     </App>

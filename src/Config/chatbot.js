@@ -1,7 +1,6 @@
-// Chatbot — uses Vite proxy only (/api/chatbot → backend:3000).
-// Override with a full URL if you need to hit chatbot without the proxy.
+// Chatbot — call backend directly (same host as auth.js). JWT via authFetch.
 export const CHATBOT_CONFIG = {
-  API_BASE_URL: '/api/chatbot',
+  API_BASE_URL: 'http://172.18.7.86:3000/api/chatbot',
   CHAT_ENDPOINT: '/chat',
   STREAM_ENDPOINT: '/chat/stream',
   HISTORY_ENDPOINT: '/history',

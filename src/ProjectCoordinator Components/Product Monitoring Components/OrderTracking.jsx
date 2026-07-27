@@ -30,7 +30,7 @@ const getStatusTag = (status) => {
 };
 
 /* ─── MAIN COMPONENT ─────────────────────────────────────────────────────── */
-const OrderTracking = () => {
+const OrderTracking = ({ productId }) => {
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedPartId, setSelectedPartId] = useState(null);
@@ -157,9 +157,17 @@ const OrderTracking = () => {
     try {
       const res = await api.get(`/orders/`);
       const data = Array.isArray(res.data) ? res.data : [];
-      setOrders(data);
-      if (data.length > 0 && !selectedOrderId) {
-        setSelectedOrderId(data[0].id);
+      
+      // Filter orders by productId if provided
+      const filteredOrders = productId 
+        ? data.filter(order => order.product_id?.toString() === productId?.toString())
+        : data;
+      
+      setOrders(filteredOrders);
+      
+      // Auto-select the order matching the current product, or the first order
+      if (filteredOrders.length > 0 && !selectedOrderId) {
+        setSelectedOrderId(filteredOrders[0].id);
       }
     } catch { message.error('Failed to fetch orders'); setOrders([]); }
     finally { setInitialLoading(false); }

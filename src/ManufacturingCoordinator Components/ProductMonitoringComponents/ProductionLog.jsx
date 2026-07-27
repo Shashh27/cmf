@@ -3,7 +3,7 @@ import {
   Table, Typography, Tag, message, Button, Space,
   Tooltip, Empty, Input, Select, DatePicker, Modal,
 } from 'antd';
-import { authFetch } from '../../api/client.js';
+import { api } from '../../api/client.js';
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
   SyncOutlined, ReloadOutlined, DownloadOutlined, EditOutlined,
@@ -172,11 +172,9 @@ const ProductionLog = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const res = await authFetch(`/api/v1/orders/`);
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(Array.isArray(data) ? data : []);
-        }
+        const res = await api.get('/orders/');
+        const data = res.data;
+        setOrders(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error('Error fetching orders:', e);
       }
@@ -219,8 +217,8 @@ const ProductionLog = () => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    authFetch(`/api/v1/orders/sale-order/${saleOrder}/parts`)
-      .then((r) => (r.ok ? r.json() : []))
+    api.get(`/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => r.data)
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);
         setParts(list);
