@@ -391,7 +391,8 @@ def prior_operation_blocks_activation(
 ) -> Optional[str]:
     """
     Block activate when the immediate schedulable predecessor has not released
-    any approved quantity yet (or out-source not delivered).
+    any approved quantity yet (or out-source not delivered), or when the predecessor
+    has unreviewed production logs awaiting reviewer action.
     """
     predecessor = get_immediate_predecessor_operation(db, operation_id)
     if predecessor is None:
@@ -419,6 +420,15 @@ def prior_operation_blocks_activation(
                 f"has not been delivered yet."
             )
         return None
+
+    # Check if predecessor has unreviewed production logs
+    if operation_has_unreviewed_production_log(db, predecessor.id):
+        return (
+            f"Cannot activate — prior operation {predecessor.operation_number} "
+            f"({predecessor.operation_name}) has production logs awaiting review "
+            f"by a supervisor or manufacturing_coordinator. Please wait until the reviewer "
+            f"has reviewed and updated the production log."
+        )
 
     upstream_approved = total_approved_for_operation(db, predecessor.id)
     if upstream_approved < 1:
@@ -507,6 +517,29 @@ def operation_has_unreviewed_production_log(db: Session, operation_id: int) -> b
     return count > 0
 
 
+def machine_has_unreviewed_production_log(db: Session, machine_id: int) -> bool:
+    """
+    True when any operation on the machine has a production log awaiting reviewer action.
+    Used to block all job cards on a machine when any one has unreviewed logs.
+    """
+    count = (
+        db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM scheduling.production_logs
+                WHERE machine_id = :machine_id AND (
+                    operator_status = 'inprogress'
+                    OR (operator_status = 'completed' AND status = 'pending')
+                )
+                """
+            ),
+            {"machine_id": machine_id},
+        ).scalar()
+        or 0
+    )
+    return count > 0
+
+
 def pending_reviewer_log_block_message(
     action: str = "activate job card or submit production log",
 ) -> str:
@@ -516,6 +549,19 @@ def pending_reviewer_log_block_message(
         f"(supervisor or manufacturing_coordinator). Please wait until the reviewer "
         f"has reviewed and updated the production log."
     )
+
+
+def get_machine_pending_reviewer_log_block_reason(
+    db: Session, machine_id: int, action: str = "activate job card"
+) -> Optional[str]:
+    """Block reason when any operation on the machine has an unreviewed production log, else None."""
+    if machine_has_unreviewed_production_log(db, machine_id):
+        return (
+            f"Cannot {action}. Previous job card log status is yet to be updated by reviewer "
+            f"(supervisor or manufacturing_coordinator). Please wait until the reviewer "
+            f"has reviewed and updated the production log."
+        )
+    return None
 
 
 def get_pending_reviewer_log_block_reason(

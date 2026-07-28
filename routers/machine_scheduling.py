@@ -33,6 +33,7 @@ from machine_breakdown_helpers import (
     get_machine_breakdown_block_message,
 )
 from production_log_helpers import (
+    get_machine_pending_reviewer_log_block_reason,
     get_operator_activation_block_reason,
     get_operation_work_due,
     is_schedulable_operation,
@@ -5627,6 +5628,13 @@ def get_machine_operations(
             if production_block:
                 activation_block = production_block
 
+            # Machine-wide check: block all job cards if any operation on the machine has unreviewed logs
+            machine_pending_review = get_machine_pending_reviewer_log_block_reason(
+                db, machine_id, action="activate job card"
+            )
+            if machine_pending_review:
+                activation_block = machine_pending_review
+
             # Already started/completed — still block during breakdown / before schedule
             if current_status in ("inprogress", "completed"):
                 group["available_quantity"] = work_due.get("available_quantity")
@@ -6516,6 +6524,23 @@ def activate_job_card(
                     },
                 )
                 raise HTTPException(400, production_block)
+
+            # Machine-wide check: block activation if any operation on the machine has unreviewed logs
+            machine_pending_review = get_machine_pending_reviewer_log_block_reason(
+                db, machine_id, action="activate job card"
+            )
+            if machine_pending_review:
+                logger.warning(
+                    "Job card activation blocked — machine has unreviewed logs",
+                    extra={
+                        "event": "job_card_activation_blocked",
+                        "operator_id": operator_id,
+                        "operation_id": operation_id,
+                        "machine_id": machine_id,
+                        "reason": machine_pending_review,
+                    },
+                )
+                raise HTTPException(400, machine_pending_review)
 
         breakdown_block = get_machine_breakdown_block_message(
             db, machine_id, datetime.now()
