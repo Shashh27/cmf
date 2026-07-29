@@ -1,7 +1,7 @@
-# GitLab CI/CD Pipeline - Phase 1 Setup
+# GitHub Actions CI/CD Pipeline Setup
 
 ## Overview
-This pipeline builds Docker images when you push code to GitLab. Images are stored in GitLab Container Registry for you to pull and test locally in Docker Desktop.
+This pipeline builds Docker images when you push code to GitHub. Images are stored in GitHub Container Registry (ghcr.io) for you to pull and test locally in Docker Desktop.
 
 ## Branch Structure
 - **Backend branch**: `backend-oms_pdm-microservice`
@@ -12,12 +12,12 @@ Each branch has its own CI/CD pipeline that builds only the respective component
 ## Pipeline Stages
 1. **test**: Runs tests for the specific branch (backend or frontend)
 2. **build**: Builds Docker image for the specific branch
-3. **push**: Pushes image to GitLab Container Registry
+3. **push**: Pushes image to GitHub Container Registry
 4. **deploy**: Manual deployment to Docker Desktop Kubernetes
 
 ## How It Works
 
-### 1. Push Code to GitLab (Backend)
+### 1. Push Code to GitHub (Backend)
 When you push code to `backend-oms_pdm-microservice` branch:
 ```bash
 git checkout backend-oms_pdm-microservice
@@ -26,7 +26,7 @@ git commit -m "Backend changes"
 git push origin backend-oms_pdm-microservice
 ```
 
-### 2. Push Code to GitLab (Frontend)
+### 2. Push Code to GitHub (Frontend)
 When you push code to `frontend` branch:
 ```bash
 git checkout frontend
@@ -38,26 +38,27 @@ git push origin frontend
 ### 3. Pipeline Runs Automatically
 - When pushing to `backend-oms_pdm-microservice`: Backend tests → Build backend image → Push backend image
 - When pushing to `frontend`: Frontend tests → Build frontend image → Push frontend image
-- Images are pushed to GitLab Container Registry
+- Images are pushed to GitHub Container Registry (ghcr.io)
 
 ### 4. Pull Images to Local Docker Desktop
 After pipeline completes, pull images to your local machine:
 
 ```bash
-# Login to GitLab Container Registry
-# Username: vinodoguboyina
-# Password: Suhmitha@7207026931
-docker login registry.gitlab.com
+# Login to GitHub Container Registry
+# Username: Shashh27 (your GitHub username)
+# Password: Your GitHub personal access token (with write:packages scope)
+# Note: Docker Hub username (vinny520) is NOT used for GitHub Container Registry
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u Shashh27 --password-stdin
 
 # Pull backend image (use latest or specific commit)
-docker pull registry.gitlab.com/vinodoguboyina/cmf/backend:latest
+docker pull ghcr.io/Shashh27/cmf/backend:latest
 # OR
-docker pull registry.gitlab.com/vinodoguboyina/cmf/backend:<commit-sha>
+docker pull ghcr.io/Shashh27/cmf/backend:<commit-sha>
 
 # Pull frontend image
-docker pull registry.gitlab.com/vinodoguboyina/cmf/frontend:latest
+docker pull ghcr.io/Shashh27/cmf/frontend:latest
 # OR
-docker pull registry.gitlab.com/vinodoguboyina/cmf/frontend:<commit-sha>
+docker pull ghcr.io/Shashh27/cmf/frontend:<commit-sha>
 ```
 
 ### 5. Run in Docker Desktop Kubernetes
@@ -73,44 +74,44 @@ kubectl get pods
 kubectl get services
 ```
 
-## GitLab CI/CD Configuration
+## GitHub Actions Configuration
 
-### Required GitLab Settings
-1. Enable GitLab Container Registry in your project settings
-2. No additional configuration needed - uses built-in GitLab CI/CD
+### Required GitHub Settings
+1. GitHub Actions is automatically enabled for public repositories
+2. No additional configuration needed - uses built-in GitHub Actions
+3. Images are stored in GitHub Container Registry (ghcr.io)
 
 ### Pipeline Triggers
 - Push to `backend-oms_pdm-microservice` branch → Builds backend image
 - Push to `frontend` branch → Builds frontend image
-- Merge requests (tests only)
+- Pull requests (tests only)
 
 ### Image Tags
 - `latest`: Always points to the most recent build
 - `<commit-sha>`: Specific commit version for reproducibility
 
 ## Viewing Pipeline Status
-1. Go to your GitLab project
-2. Click "CI/CD" → "Pipelines"
-3. View pipeline status, logs, and artifacts
+1. Go to your GitHub repository
+2. Click "Actions" tab
+3. View workflow runs, logs, and artifacts
 
 ## Troubleshooting
 
 ### Pipeline Not Triggering
-- Check `.gitlab-ci.yml` is in repository root
-- Verify GitLab CI/CD is enabled in project settings
+- Check `.github/workflows/ci-cd.yml` exists in repository
+- Verify GitHub Actions is enabled in repository settings
 
 ### Docker Login Fails
 ```bash
-# Use GitLab personal access token if password login fails
-docker login registry.gitlab.com
-# Username: <your-gitlab-username>
-# Password: <your-gitlab-personal-access-token>
+# Create GitHub personal access token with write:packages scope
+# Settings → Developer settings → Personal access tokens → Tokens (classic)
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u Shashh27 --password-stdin
 ```
 
 ### Images Not Found
-- Check pipeline completed successfully
-- Verify image name matches your GitLab project path
-- Check GitLab Container Registry → Packages & Registries → Container Registry
+- Check workflow completed successfully
+- Verify image name matches your GitHub repository
+- Check GitHub Container Registry → Packages
 
 ## Next Steps (Phase 2)
 After Phase 1 is working:
