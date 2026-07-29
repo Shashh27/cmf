@@ -13,7 +13,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ toLower(github.repository_owner) }}/cmf/backend
+  IMAGE_NAME: shashh27/cmf/backend
 
 jobs:
   test:
