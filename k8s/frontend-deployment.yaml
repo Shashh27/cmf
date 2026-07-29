@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cmf-frontend
+  namespace: default
+  labels:
+    app: cmf-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cmf-frontend
+  template:
+    metadata:
+      labels:
+        app: cmf-frontend
+    spec:
+      containers:
+      - name: cmf-frontend
+        image: registry.gitlab.com/vinodoguboyina/cmf/frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "1000m"
