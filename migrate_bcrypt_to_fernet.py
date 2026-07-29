@@ -8,9 +8,13 @@ def migrate_bcrypt_to_fernet():
     
     # Users with bcrypt passwords (from current analysis)
     bcrypt_users = [
+        {"id": 3, "user_name": "operator1"},
+        {"id": 12, "user_name": "operator"},
         {"id": 16, "user_name": "admin"},
         {"id": 20, "user_name": "Ramesh"},
-        {"id": 32, "user_name": "bharath"}
+        {"id": 30, "user_name": "supervisor"},
+        {"id": 32, "user_name": "bharath"},
+        {"id": 34, "user_name": "vignesh"}
     ]
     
     print("=" * 80)

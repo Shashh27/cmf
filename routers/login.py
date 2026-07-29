@@ -19,7 +19,8 @@ from auth.config import REFRESH_COOKIE_NAME
 from auth.cookies import clear_refresh_cookie, set_refresh_cookie
 from auth.deps import get_current_user
 from auth.jwt import create_access_token, create_refresh_token, decode_token
-from auth.password import hash_password, verify_and_needs_rehash
+from auth.password import verify_and_needs_rehash
+from DB.utils.password import encrypt_password
 from auth.refresh_store import (
     get_valid_refresh_row,
     revoke_all_for_user,
@@ -85,7 +86,7 @@ def login(
         )
 
     if needs_rehash:
-        user.password = hash_password(login_data.password)
+        user.password = encrypt_password(login_data.password)
         db.add(user)
         db.commit()
         db.refresh(user)

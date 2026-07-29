@@ -1,4 +1,5 @@
 import re
+import math
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Tuple
 from DB.models.inventory import (
@@ -354,6 +355,43 @@ class StockRecommendationService:
                 dimensions["height"] = float(h_match.group(1))
                 return dimensions, form_type
 
+            # Check for Square patterns with various labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+            # Handle formats: 20Lx20Bx20H, 20lengthx20breadthx20height, 20Lx20Wx20H
+            square_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)', cleaned, re.IGNORECASE)
+            if square_pattern_match:
+                vals = [float(square_pattern_match.group(1)), float(square_pattern_match.group(2)), float(square_pattern_match.group(3))]
+                labels = re.findall(r'(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)', cleaned, re.IGNORECASE) or []
+                # Try to assign based on labels
+                if len(labels) >= 3:
+                    label_lower = [l.lower() for l in labels]
+                    l_idx = next((i for i, l in enumerate(label_lower) if l in ['l', 'len', 'length']), None)
+                    b_idx = next((i for i, l in enumerate(label_lower) if l in ['b', 'br', 'breadth', 'w', 'wid', 'width']), None)
+                    h_idx = next((i for i, l in enumerate(label_lower) if l in ['h', 'ht', 'height']), None)
+                    if l_idx is not None:
+                        dimensions["length"] = vals[l_idx]
+                    if b_idx is not None:
+                        dimensions["breadth"] = vals[b_idx]
+                    if h_idx is not None:
+                        dimensions["height"] = vals[h_idx]
+                else:
+                    # Default: assume order is length x breadth x height
+                    dimensions["length"] = vals[0]
+                    dimensions["breadth"] = vals[1]
+                    dimensions["height"] = vals[2]
+                form_type = "Square"
+                if dimensions.get("length") and dimensions.get("breadth") and dimensions.get("height"):
+                    return dimensions, form_type
+
+            # Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+            # Handle formats: 50ODx30IDx1000, 50odx30idx1000, 50outerx30innerx1000
+            pipe_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:OD|OUTER|OUTERDIA|OUTERDIAMETER)\s*X\s*(\d+(?:\.\d+)?)\s*(?:ID|INNER|INNERDIA|INNERDIAMETER)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH)?', cleaned, re.IGNORECASE)
+            if pipe_pattern_match:
+                dimensions["outer_diameter"] = float(pipe_pattern_match.group(1))
+                dimensions["inner_diameter"] = float(pipe_pattern_match.group(2))
+                dimensions["length"] = float(pipe_pattern_match.group(3))
+                form_type = "Pipe"
+                return dimensions, form_type
+
             # Check for pattern like 260(DIA)x50(LENGTH) with parentheses
             dia_match = re.search(r'(\d+)\(DIA\)', cleaned)
             len_match = re.search(r'(\d+)\(LENGTH\)', cleaned)
@@ -363,6 +401,32 @@ class StockRecommendationService:
                 dimensions["diameter"] = float(dia_match.group(1))
                 dimensions["length"] = float(len_match.group(1))
                 return dimensions, form_type
+
+            # Handle Ø symbol and other diameter indicators: Ø70x155, phi70x155, Φ70x155, dia70x155
+            # Also handle formats like "70 dia x 155", "70d x 155", "70Ø x 155", "70x155Ø"
+            # Match both: symbol before number (Ø70) and number before symbol (70Ø)
+            diameter_symbol_match = re.search(r'(?:ø|phi|Φ|dia|d)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:ø|phi|Φ|dia|d)', cleaned, re.IGNORECASE)
+            if diameter_symbol_match:
+                dia_val = float(diameter_symbol_match.group(1) or diameter_symbol_match.group(2))
+                # Find the length - look for other numbers in the string
+                all_numbers = re.findall(r'[\d.]+', cleaned)
+                other_nums = []
+                for n in all_numbers:
+                    try:
+                        val = float(n)
+                        if val != dia_val:
+                            other_nums.append(val)
+                    except (ValueError, TypeError):
+                        continue
+                if other_nums:
+                    dimensions["diameter"] = dia_val
+                    dimensions["length"] = other_nums[0]
+                    form_type = "Round"
+                    return dimensions, form_type
+                else:
+                    dimensions["diameter"] = dia_val
+                    form_type = "Round"
+                    return dimensions, form_type
 
             # Remove parentheses and labels (DIA, LENGTH, etc.)
             cleaned = re.sub(r'\([^)]*\)', '', cleaned)  # Remove anything in parentheses

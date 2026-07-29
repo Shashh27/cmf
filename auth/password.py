@@ -20,7 +20,8 @@ def hash_password(plain_password: str) -> str:
 def verify_and_needs_rehash(plain_password: str, stored_password: str) -> tuple[bool, bool]:
     """
     Returns (ok, needs_rehash).
-    Legacy Fernet / plaintext passwords verify via Fernet helper and need rehash.
+    Fernet-encrypted passwords are kept as-is (no rehashing).
+    Bcrypt passwords may need rehashing if bcrypt parameters are outdated.
     """
     if not stored_password or not plain_password:
         return False, False
@@ -30,8 +31,13 @@ def verify_and_needs_rehash(plain_password: str, stored_password: str) -> tuple[
         needs = ok and pwd_context.needs_update(stored_password)
         return ok, needs
 
-    # Legacy Fernet-encrypted or plaintext
-    if is_encrypted(stored_password) or not stored_password.startswith("$"):
+    # Fernet-encrypted passwords - verify but don't rehash
+    if is_encrypted(stored_password):
+        ok = verify_fernet_password(plain_password, stored_password)
+        return ok, False  # Never rehash Fernet passwords
+
+    # Legacy plaintext
+    if not stored_password.startswith("$"):
         ok = verify_fernet_password(plain_password, stored_password)
         return ok, ok
 
