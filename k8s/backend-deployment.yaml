@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cmf-backend
+  namespace: default
+  labels:
+    app: cmf-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cmf-backend
+  template:
+    metadata:
+      labels:
+        app: cmf-backend
+    spec:
+      containers:
+      - name: cmf-backend
+        image: registry.gitlab.com/vinodoguboyina/cmf/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        # Environment variables are already in the backend image via .env file during build
+        # No need to override them here unless you want to change them for Kubernetes deployment
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
