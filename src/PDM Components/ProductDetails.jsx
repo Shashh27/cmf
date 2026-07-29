@@ -72,33 +72,19 @@ const ProductDetails = ({ selectedItem }) => {
           .join("|");
 
         const buildRows = (extractedList) => {
-          const grouped = new Map();
+          const rows = [];
           (extractedList || []).forEach((ex) => {
             const doc = docById.get(ex.document_id);
             if (!doc) return;
-            const rootId = doc.parent_id || doc.id || ex.document_id;
-            const versionNum = parseV(doc.document_version);
-            const entry = grouped.get(rootId) || { rootId, variants: [] };
-            entry.variants.push({ ex, doc, versionNum });
-            grouped.set(rootId, entry);
+            rows.push({
+              ...ex,
+              document_id: ex.document_id,
+              document_name: doc?.document_name || "N/A",
+              document_version: doc?.document_version || "1.0",
+            });
           });
-          return Array.from(grouped.values()).map(({ rootId, variants }) => {
-            // FIFO by document id (oldest first)
-            const sorted = [...variants].sort((a, b) => (a.doc?.id || 0) - (b.doc?.id || 0));
-            const chosen = sorted[0];
-            return {
-              ...chosen.ex,
-              _rootId: rootId,
-              _variants: sorted.map((v) => ({
-                document_id: v.ex.document_id,
-                document_name: v.doc?.document_name || "N/A",
-                document_version: v.doc?.document_version || "1.0",
-                ex: v.ex,
-              })),
-              document_name: chosen.doc?.document_name || "N/A",
-              document_version: chosen.doc?.document_version || "1.0",
-            };
-          });
+          // Sort by document id (oldest first)
+          return rows.sort((a, b) => (a.document_id || 0) - (b.document_id || 0));
         };
 
         const partId = selectedItem.id;
@@ -566,6 +552,13 @@ const ProductDetails = ({ selectedItem }) => {
                             render: (text) => cellWithTooltip(text, 'N/A')
                           },
                           {
+                            title: 'Version',
+                            dataIndex: 'document_version',
+                            key: 'document_version',
+                            width: 60,
+                            render: (text) => cellWithTooltip(text, '1.0')
+                          },
+                          {
                             title: 'Material',
                             dataIndex: 'material',
                             key: 'material',
@@ -610,7 +603,7 @@ const ProductDetails = ({ selectedItem }) => {
                             ),
                           },
                         ]}
-                        rowKey="_rootId"
+                        rowKey="id"
                         size="small"
                         pagination={false}
                         scroll={{ x: 'max-content', y: 'calc(100% - 20px)' }}

@@ -355,8 +355,21 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       return 'Square';
     }
 
+    // Check for Square patterns with labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+    if (/(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height).*x.*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height).*x.*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/.test(cleaned)) {
+      return 'Square';
+    }
+
+    // Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+    if (/(?:od|outer|outerdia|outerdiameter).*x.*(?:id|inner|innerdia|innerdiameter)/.test(cleaned)) {
+      return 'Pipe';
+    }
+
     // Parenthesized dia pattern -> Round
     if (/\(dia\)/i.test(cleaned)) return 'Round';
+
+    // Ø symbol or other diameter indicators -> Round
+    if (/(?:ø|phi|Φ|dia|d)/.test(cleaned)) return 'Round';
 
     if (cleanedNoParens.includes('/')) return 'Pipe';
     const parts = cleanedNoParens.split('x').filter(p => p.trim() !== '');
@@ -383,6 +396,42 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         return dimensions;
       }
 
+      // Check for Square patterns with various labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+      // Handle formats: 20Lx20Bx20H, 20lengthx20breadthx20height, 20Lx20Wx20H
+      const squarePatternMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/i);
+      if (squarePatternMatch) {
+        const vals = [parseFloat(squarePatternMatch[1]), parseFloat(squarePatternMatch[2]), parseFloat(squarePatternMatch[3])];
+        const labels = cleaned.match(/(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/gi) || [];
+        // Try to assign based on labels
+        if (labels.length >= 3) {
+          const labelLower = labels.map(l => l.toLowerCase());
+          const lIdx = labelLower.findIndex(l => ['l', 'len', 'length'].includes(l));
+          const bIdx = labelLower.findIndex(l => ['b', 'br', 'breadth', 'w', 'wid', 'width'].includes(l));
+          const hIdx = labelLower.findIndex(l => ['h', 'ht', 'height'].includes(l));
+          if (lIdx >= 0) dimensions.length = vals[lIdx];
+          if (bIdx >= 0) dimensions.breadth = vals[bIdx];
+          if (hIdx >= 0) dimensions.height = vals[hIdx];
+        } else {
+          // Default: assume order is length x breadth x height
+          dimensions.length = vals[0];
+          dimensions.breadth = vals[1];
+          dimensions.height = vals[2];
+        }
+        if (dimensions.length && dimensions.breadth && dimensions.height) {
+          return dimensions;
+        }
+      }
+
+      // Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+      // Handle formats: 50ODx30IDx1000, 50odx30idx1000, 50outerx30innerx1000
+      const pipePatternMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:od|outer|outerdia|outerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:id|inner|innerdia|innerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length)?/i);
+      if (pipePatternMatch) {
+        dimensions.outer_diameter = parseFloat(pipePatternMatch[1]);
+        dimensions.inner_diameter = parseFloat(pipePatternMatch[2]);
+        dimensions.length = parseFloat(pipePatternMatch[3]);
+        return dimensions;
+      }
+
       // Check for pattern like 260(dia)x50(length) or 110(dia)x25(thick) with parentheses
       const diaMatch = cleaned.match(/(\d+(?:\.\d+)?)\(dia(?:meter)?\)/i);
       // Accept length / len / thick / thickness / t as the second dimension label
@@ -402,6 +451,25 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         if (otherNums.length > 0) {
           dimensions.diameter = diaVal;
           dimensions.length = otherNums[0];
+          return dimensions;
+        }
+      }
+
+      // Handle Ø symbol and other diameter indicators: Ø70x155, phi70x155, Φ70x155, dia70x155
+      // Also handle formats like "70 dia x 155", "70d x 155", "70Ø x 155", "70x155Ø"
+      // Match both: symbol before number (Ø70) and number before symbol (70Ø)
+      const diameterSymbolMatch = cleaned.match(/(?:ø|phi|Φ|dia|d)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:ø|phi|Φ|dia|d)/i);
+      if (diameterSymbolMatch) {
+        const diaVal = parseFloat(diameterSymbolMatch[1] || diameterSymbolMatch[2]);
+        // Find the length - look for other numbers in the string
+        const allNumbers = cleaned.match(/[\d.]+/g) || [];
+        const otherNums = allNumbers.map(parseFloat).filter(n => n !== diaVal && !Number.isNaN(n));
+        if (otherNums.length > 0) {
+          dimensions.diameter = diaVal;
+          dimensions.length = otherNums[0];
+          return dimensions;
+        } else {
+          dimensions.diameter = diaVal;
           return dimensions;
         }
       }

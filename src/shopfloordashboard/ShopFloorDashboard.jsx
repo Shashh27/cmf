@@ -6,7 +6,8 @@ import { TableOutlined, CalendarOutlined, AppstoreOutlined, LineChartOutlined } 
 
 import { MachineGrid } from './MachineComponents';
 import { SchedulingAnalytics } from './SchedulingAnalytics';
-import { api } from '../api/client.js';
+import { api, getIsBootstrapping, restoreSessionFromStorage } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext';
 
 const { Title, Text } = Typography;
 
@@ -57,6 +58,7 @@ const mapLiveMachinesFor2D = (liveMachines) => {
 
 // Main ShopFloorDashboard Component
 const ShopFloorDashboard = ({ onBack }) => {
+  const { bootstrapping } = useAuth();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [liveMachines, setLiveMachines] = useState([]);
@@ -119,8 +121,10 @@ const ShopFloorDashboard = ({ onBack }) => {
   };
 
   useEffect(() => {
-    fetchShopFloorData({ background: true });
-  }, []);
+    if (!bootstrapping) {
+      fetchShopFloorData({ background: true });
+    }
+  }, [bootstrapping]);
 
   useEffect(() => {
     let socket;
