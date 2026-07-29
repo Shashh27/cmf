@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: cmf-frontend
-        image: registry.gitlab.com/vinodoguboyina/cmf/frontend:latest
+        image: ghcr.io/Shashh27/cmf/frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 80

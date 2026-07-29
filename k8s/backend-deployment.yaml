@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: cmf-backend
-        image: registry.gitlab.com/vinodoguboyina/cmf/backend:latest
+        image: ghcr.io/Shashh27/cmf/backend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
