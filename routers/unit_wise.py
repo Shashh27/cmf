@@ -1,4 +1,4 @@
-"""Unit-wise schedule API (Phase 1–4: greedy + GA + compare)."""
+"""Unit-wise schedule API — NSGA-II + Policy Engine."""
 
 import logging
 from typing import Optional
@@ -25,7 +25,23 @@ class UnitWiseRebuildRequest(BaseModel):
     order_id: Optional[int] = Field(None, description="Limit rebuild to one order")
     optimizer: Optional[str] = Field(
         None,
-        description='optimizer: "greedy" | "ga" | "ga_research" (ga uses research-grade engine)',
+        description='optimizer: "greedy" | "nsga2" (default: greedy)',
+    )
+    policy: Optional[str] = Field(
+        "balanced",
+        description=(
+            "Policy Engine selection policy. "
+            'Options: "balanced" | "throughput" | "minimum_setup" | '
+            '"minimum_makespan" | "rush_order" | "energy_efficient". '
+            "Default: balanced"
+        ),
+    )
+    debug: Optional[bool] = Field(
+        False,
+        description=(
+            "Developer mode: attach optimizer profiling metrics to the response. "
+            "Must NOT be used in production API calls."
+        ),
     )
 
 
@@ -43,16 +59,25 @@ def rebuild_unit_wise_schedule(
     db: Session = Depends(get_db),
 ):
     """
-    Generate / refresh unit-wise schedule.
+    Generate / refresh unit-wise production schedule.
 
-    - greedy — list scheduling / earliest start
-    - ga / ga_research — research-grade activity-permutation GA (OX, multi-obj, multi-run)
+    Optimization path: Greedy → NSGA-II → Pareto Front → Policy Engine → Final Schedule
+
+    - **greedy** — list scheduling / earliest start (no GA)
+    - **nsga2** — NSGA-II multi-objective optimizer with Policy Engine selection
+
+    The `policy` field controls how the Policy Engine selects one schedule from
+    the NSGA-II Pareto front. The default policy is `balanced`.
+
+    The production response contains business-relevant fields only.
+    Set `debug=true` to include optimizer profiling metrics (dev mode).
     """
     _require_enabled()
     body = body or UnitWiseRebuildRequest()
     optimizer = (body.optimizer or "greedy").lower().strip()
-    if optimizer not in ("greedy", "ga", "ga_research"):
-        raise HTTPException(400, 'optimizer must be "greedy", "ga", or "ga_research"')
+    if optimizer not in ("greedy", "nsga2", "ga", "ga_research"):
+        raise HTTPException(400, 'optimizer must be "greedy" or "nsga2"')
+    policy = (body.policy or "balanced").lower().strip()
     try:
         result = rebuild_unit_schedule(
             db,
@@ -60,6 +85,8 @@ def rebuild_unit_wise_schedule(
             order_id=body.order_id,
             commit=True,
             optimizer=optimizer,
+            policy=policy,
+            debug=bool(body.debug),
         )
         logger.info(
             "Unit-wise rebuild API",
@@ -67,7 +94,10 @@ def rebuild_unit_wise_schedule(
                 "event": "unit_wise_rebuild_api",
                 "part_id": body.part_id,
                 "order_id": body.order_id,
-                "optimizer": optimizer,
+                "optimizer": result.get("optimizer"),
+                "policy": result.get("policy"),
+                "selected": result.get("selected"),
+                "improved": result.get("improved"),
                 "source": result.get("source"),
                 "rows_inserted": result.get("rows_inserted"),
                 "schedule_version": result.get("schedule_version"),
@@ -91,7 +121,7 @@ def compare_batch_vs_unit_wise(
     db: Session = Depends(get_db),
 ):
     """
-    Phase 3: side-by-side KPIs for batch dynamic vs unit-wise (greedy or GA plan).
+    Side-by-side KPIs for batch dynamic vs unit-wise (greedy or NSGA-II plan).
     Provide part_id and/or order_id.
     """
     _require_enabled()
@@ -141,7 +171,7 @@ def get_unit_wise_schedule(
         latest_only=latest_only,
     )
     items = [unit_item_to_dict(r) for r in rows]
-    version = items[0]["schedule_version"] if items else None
+    version = max((i["schedule_version"] for i in items if i.get("schedule_version") is not None), default=None)
     sources = sorted({str(i.get("source") or "greedy") for i in items})
     return {
         "total": len(items),

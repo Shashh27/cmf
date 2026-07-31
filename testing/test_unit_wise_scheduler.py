@@ -101,3 +101,90 @@ class TestUnitWisePipelineLogic:
         assert op10_end[1] < op10_end[2]
         # Unit 1 ready for Op20 before Unit 2 finishes Op10
         assert unit_ready[1] < op10_end[2]
+
+
+class TestListUnitScheduleMultiVersion:
+    def test_latest_only_per_part(self):
+        from DB.database import Base
+        from DB.models.scheduling import UnitScheduleItem
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from unit_wise_scheduler import list_unit_schedule
+
+        from sqlalchemy import event
+
+        engine = create_engine("sqlite:///:memory:")
+        @event.listens_for(engine, "connect")
+        def db_connect(dbapi_con, con_record):
+            dbapi_con.execute("ATTACH DATABASE ':memory:' AS scheduling")
+
+        UnitScheduleItem.__table__.create(bind=engine)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+
+        # Insert Part 1660 at version 1
+        item1 = UnitScheduleItem(
+            order_id=189, order_number="17218ILP004", part_id=1660, part_number="TP-32",
+            unit_index=1, operation_id=532, operation_number="10", machine_id=35,
+            start_time=datetime(2026, 7, 29, 14, 36), end_time=datetime(2026, 7, 29, 17, 0),
+            schedule_version=1, source="greedy"
+        )
+        # Insert Part 1666 at version 2 (and an old version 1)
+        item2_old = UnitScheduleItem(
+            order_id=189, order_number="17218ILP004", part_id=1666, part_number="BR-6205",
+            unit_index=3, operation_id=521, operation_number="10", machine_id=35,
+            start_time=datetime(2026, 7, 29, 9, 0), end_time=datetime(2026, 7, 29, 10, 0),
+            schedule_version=1, source="greedy"
+        )
+        item2_new = UnitScheduleItem(
+            order_id=189, order_number="17218ILP004", part_id=1666, part_number="BR-6205",
+            unit_index=3, operation_id=521, operation_number="10", machine_id=35,
+            start_time=datetime(2026, 7, 29, 10, 21), end_time=datetime(2026, 7, 29, 13, 21),
+            schedule_version=2, source="greedy"
+        )
+        db.add_all([item1, item2_old, item2_new])
+        db.commit()
+
+        # Query machine 35
+        results = list_unit_schedule(db, machine_id=35, latest_only=True)
+        # Both TP-32 (v1) and BR-6205 (v2) should be returned, but NOT item2_old (v1)
+        assert len(results) == 2
+        part_ids = {r.part_id for r in results}
+        assert part_ids == {1660, 1666}
+        versions = {r.part_id: r.schedule_version for r in results}
+        assert versions == {1660: 1, 1666: 2}
+
+    def test_populate_other_parts_machine_free(self):
+        from DB.models.scheduling import UnitScheduleItem
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from unit_wise_scheduler import _populate_other_parts_machine_free
+
+        engine = create_engine("sqlite:///:memory:")
+        @event.listens_for(engine, "connect")
+        def db_connect(dbapi_con, con_record):
+            dbapi_con.execute("ATTACH DATABASE ':memory:' AS scheduling")
+
+        UnitScheduleItem.__table__.create(bind=engine)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+
+        # Part 1660 has an item ending at 17:00 on machine 35
+        item1 = UnitScheduleItem(
+            order_id=189, order_number="17218ILP004", part_id=1660, part_number="TP-32",
+            unit_index=1, operation_id=532, operation_number="10", machine_id=35,
+            start_time=datetime(2026, 7, 29, 14, 36), end_time=datetime(2026, 7, 29, 17, 0),
+            schedule_version=1, source="greedy"
+        )
+        db.add(item1)
+        db.commit()
+
+        machine_free = {}
+        # Rebuilding part 1666 (so scope_part_ids = {1666})
+        _populate_other_parts_machine_free(db, machine_free, {1666})
+
+        # Machine 35 should be occupied until 17:00 due to Part 1660
+        assert 35 in machine_free
+        assert machine_free[35] == datetime(2026, 7, 29, 17, 0)
+
+

@@ -1,12 +1,9 @@
 """
-Research-grade Genetic Algorithm for unit-wise flexible job-shop style scheduling.
+Unit-wise scheduling optimizer — NSGA-II + Policy Engine.
 
-Formulation (HMLV unit flow)
-----------------------------
-Activity a = (part p, unit u, operation o) for each unfinished unit-op.
-Precedence: a_{p,u,o_k} → a_{p,u,o_{k+1}}.
-Machine capacity: one activity at a time per machine (shift-aware placement).
-Preferred-machine pin optional (UNIT_WISE_PIN_PREFERRED).
+Architecture
+------------
+Greedy → NSGA-II → Pareto Front → Policy Engine → Selected Production Schedule
 
 Chromosome
 ----------
@@ -25,15 +22,33 @@ Constraints (hard in decode)
 - Machine OFF / breakdown (_machine_next_available)
 - Frozen in-progress machines; routing precedence; preferred pin
 
-Soft: part-priority inversion penalty (lower priority# = more urgent).
+NSGA-II Objectives (minimise, except utilization which is maximised)
+--------------------------------------------------------------------
+1. makespan_hours         — schedule span
+2. mean_tardiness_hours   — delivery commitment
+3. avg_utilization_pct    — machine utilization (inverted so lower=better in norm.)
+4. setup_count            — setup changes
 
-Fitness cost (minimize → maximize −cost) — end goals
-----------------------------------------------------
-+ w_ms·Cmax + w_flow·F̄ + w_wait·W̄ + w_tard·T̄
-+ w_setup·setups + w_idle·idle + w_util_gap·(1 − util)
-+ w_priority·inversions − w_thr·throughput
+Policy Engine
+-------------
+After NSGA-II generates the Pareto front, the Policy Engine selects ONE
+schedule using a deterministic, priority-ordered criterion chain:
 
-“Maximize flow” in shop language ⇒ minimize mean flow + maximize throughput.
+    balanced (default):
+        1. Delivery commitment  (lead time met)
+        2. Priority adherence   (priority inversions)
+        3. Machine utilization  (higher util preferred)
+        4. Makespan             (smaller preferred)
+        5. Setup reduction      (fewer setups preferred)
+        Tie-break: stable index for reproducibility
+
+Additional policies can be added without modifying NSGA-II.
+
+Debug / Profiling
+-----------------
+Instrumentation metrics (cache hits, decode timings, diversity, etc.) are
+available only when debug=True is passed to optimize_unit_plan_research.
+They are NEVER included in the normal production API response.
 """
 
 from __future__ import annotations
@@ -42,6 +57,7 @@ import logging
 import math
 import os
 import random
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -70,6 +86,20 @@ logger = logging.getLogger(__name__)
 
 ActivityId = int
 
+# ---------------------------------------------------------------------------
+# Supported policies
+# ---------------------------------------------------------------------------
+SUPPORTED_POLICIES = frozenset(
+    [
+        "balanced",
+        "throughput",
+        "minimum_setup",
+        "minimum_makespan",
+        "rush_order",
+        "energy_efficient",
+    ]
+)
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -90,6 +120,11 @@ def _env_bool(name: str, default: bool = True) -> bool:
     if raw is None:
         return default
     return raw.lower() in ("1", "true", "yes", "on")
+
+
+# ---------------------------------------------------------------------------
+# Core data structures
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -114,10 +149,20 @@ class Individual:
     machines: List[int]
     fitness: float = float("-inf")
     objectives: Dict[str, Any] = field(default_factory=dict)
+    normalized_objectives: Dict[str, float] = field(default_factory=dict)
+    rank: int = 0
+    crowding_distance: float = 0.0
 
 
 @dataclass
-class ResearchGaConfig:
+class Nsga2Config:
+    """
+    Configuration for NSGA-II scheduling optimizer.
+
+    All weight parameters from the legacy weighted GA have been removed.
+    Objective selection is now performed exclusively by the Policy Engine.
+    """
+
     population: int = 40
     generations: int = 60
     tournament_k: int = 3
@@ -126,19 +171,10 @@ class ResearchGaConfig:
     elitism: int = 2
     runs: int = 3
     seed: Optional[int] = None
-    w_makespan: float = 0.5
-    w_mean_flow: float = 0.8
-    w_mean_waiting: float = 0.25
-    w_mean_tardiness: float = 1.0
-    w_setup: float = 0.7
-    w_idle: float = 0.45
-    w_util_gap: float = 0.35
-    w_throughput: float = 0.6
-    w_priority: float = 0.4
     pin_preferred: bool = True
 
     @classmethod
-    def from_env(cls, overrides: Optional[Dict[str, Any]] = None) -> "ResearchGaConfig":
+    def from_env(cls, overrides: Optional[Dict[str, Any]] = None) -> "Nsga2Config":
         o = overrides or {}
         return cls(
             population=int(o.get("population", _env_int("UNIT_WISE_GA_POPULATION", 40))),
@@ -149,25 +185,15 @@ class ResearchGaConfig:
             elitism=int(o.get("elitism", _env_int("UNIT_WISE_GA_ELITISM", 2))),
             runs=int(o.get("runs", _env_int("UNIT_WISE_GA_RUNS", 3))),
             seed=o.get("seed", None),
-            w_makespan=float(o.get("w_makespan", _env_float("UNIT_WISE_GA_W_MAKESPAN", 0.5))),
-            w_mean_flow=float(o.get("w_mean_flow", _env_float("UNIT_WISE_GA_W_FLOW", 0.8))),
-            w_mean_waiting=float(
-                o.get("w_mean_waiting", _env_float("UNIT_WISE_GA_W_WAIT", 0.25))
-            ),
-            w_mean_tardiness=float(
-                o.get("w_mean_tardiness", _env_float("UNIT_WISE_GA_W_TARD", 1.0))
-            ),
-            w_setup=float(o.get("w_setup", _env_float("UNIT_WISE_GA_W_SETUP", 0.7))),
-            w_idle=float(o.get("w_idle", _env_float("UNIT_WISE_GA_W_IDLE", 0.45))),
-            w_util_gap=float(o.get("w_util_gap", _env_float("UNIT_WISE_GA_W_UTIL_GAP", 0.35))),
-            w_throughput=float(
-                o.get("w_throughput", _env_float("UNIT_WISE_GA_W_THROUGHPUT", 0.6))
-            ),
-            w_priority=float(o.get("w_priority", _env_float("UNIT_WISE_GA_W_PRIORITY", 0.4))),
             pin_preferred=bool(
                 o.get("pin_preferred", _env_bool("UNIT_WISE_PIN_PREFERRED", True))
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Objective helpers
+# ---------------------------------------------------------------------------
 
 
 def _count_priority_inversions(perm: Sequence[ActivityId], activities: List[Activity]) -> int:
@@ -207,6 +233,15 @@ def _pct(numer: float, denom: float) -> Optional[float]:
     return round(100.0 * numer / denom, 2)
 
 
+def _hours(delta_seconds: float) -> float:
+    return round(delta_seconds / 3600.0, 4)
+
+
+# ---------------------------------------------------------------------------
+# Activity builder
+# ---------------------------------------------------------------------------
+
+
 def build_activities(db: Session, scope: List[Dict[str, Any]]) -> List[Activity]:
     activities: List[Activity] = []
     next_id = 0
@@ -239,8 +274,6 @@ def build_activities(db: Session, scope: List[Dict[str, Any]]) -> List[Activity]
                 pred_id = None
                 if op_i > 0:
                     pred_id = pred_by_unit_op.get((u, op_i - 1))
-                    # If previous op fully approved for this unit, no activity pred
-                    # (ready time handled via actual_end / unit_ready init)
                 act = Activity(
                     id=next_id,
                     part_id=part.id,
@@ -261,8 +294,9 @@ def build_activities(db: Session, scope: List[Dict[str, Any]]) -> List[Activity]
     return activities
 
 
-def _hours(delta_seconds: float) -> float:
-    return round(delta_seconds / 3600.0, 4)
+# ---------------------------------------------------------------------------
+# Objective evaluator
+# ---------------------------------------------------------------------------
 
 
 def evaluate_segments(
@@ -382,6 +416,11 @@ def evaluate_segments(
     }
 
 
+# ---------------------------------------------------------------------------
+# Chromosome decoder
+# ---------------------------------------------------------------------------
+
+
 def decode_activity_priority(
     db: Session,
     scope: List[Dict[str, Any]],
@@ -392,7 +431,7 @@ def decode_activity_priority(
     engine,
     now: datetime,
     pin_preferred: bool,
-    source: str = "ga_research",
+    source: str = "nsga2",
 ) -> Dict[str, Any]:
     """
     Priority-list decode: repeatedly schedule the first precedence-feasible
@@ -567,8 +606,8 @@ def decode_activity_priority(
 
         if not scheduled:
             logger.warning(
-                "Research GA decode deadlock; dropping remaining activities",
-                extra={"event": "unit_wise_ga_decode_deadlock", "left": len(remaining)},
+                "NSGA-II decode deadlock; dropping remaining activities",
+                extra={"event": "unit_wise_nsga2_decode_deadlock", "left": len(remaining)},
             )
             break
 
@@ -591,41 +630,9 @@ def decode_activity_priority(
     }
 
 
-def scalar_fitness(objectives: Dict[str, Any], cfg: ResearchGaConfig) -> float:
-    """
-    Higher is better. Aligns with shop end-goals:
-    high util, high throughput, low setups/tardiness/idle/flow/waiting.
-    """
-    ms = objectives.get("makespan_hours")
-    if ms is None:
-        return -1e12
-    flow = float(objectives.get("mean_flow_hours") or 0.0)
-    wait = float(objectives.get("mean_waiting_hours") or 0.0)
-    tard = float(objectives.get("mean_tardiness_hours") or 0.0)
-    setups = float(objectives.get("setup_count") or 0.0)
-    idle = float(objectives.get("idle_hours_total") or 0.0)
-    util = objectives.get("avg_utilization_pct")
-    util_gap = 0.0 if util is None else max(0.0, (100.0 - float(util)) / 100.0)
-    thr = float(objectives.get("throughput_units_per_hour") or 0.0)
-    inv = float(objectives.get("priority_inversions") or 0.0)
-    # Normalize inversions lightly so huge n(n-1)/2 does not dominate
-    inv_norm = inv / 100.0
-
-    cost = (
-        cfg.w_makespan * float(ms)
-        + cfg.w_mean_flow * flow
-        + cfg.w_mean_waiting * wait
-        + cfg.w_mean_tardiness * tard
-        + cfg.w_setup * setups
-        + cfg.w_idle * idle
-        + cfg.w_util_gap * util_gap * 10.0  # scale util gap into ~hours-like units
-        + cfg.w_priority * inv_norm
-        - cfg.w_throughput * thr
-    )
-    return -cost
-
-
-# ── Genetic operators ───────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Genetic operators
+# ---------------------------------------------------------------------------
 
 
 def order_crossover(parent_a: List[int], parent_b: List[int], rng: random.Random) -> List[int]:
@@ -673,11 +680,17 @@ def mutate_machines(
     return out
 
 
-def tournament(
+# ---------------------------------------------------------------------------
+# NSGA-II selection + sorting
+# ---------------------------------------------------------------------------
+
+
+def tournament_nsga2(
     pop: List[Individual], k: int, rng: random.Random
 ) -> Individual:
+    """NSGA-II binary tournament selection based on rank and crowding distance."""
     contenders = rng.sample(pop, min(k, len(pop)))
-    return max(contenders, key=lambda ind: ind.fitness)
+    return min(contenders, key=lambda ind: (ind.rank, -ind.crowding_distance))
 
 
 def _random_individual(
@@ -689,16 +702,371 @@ def _random_individual(
     return Individual(perm=perm, machines=machines)
 
 
-def run_single_ga(
+def normalize_objectives(population: List[Individual]) -> Dict[str, Tuple[float, float]]:
+    """Compute min/max for each objective and normalize to [0,1]."""
+    if not population:
+        return {}
+
+    objective_names = ["makespan_hours", "mean_tardiness_hours", "avg_utilization_pct", "setup_count"]
+    bounds = {}
+
+    for obj in objective_names:
+        values = []
+        for ind in population:
+            val = ind.objectives.get(obj)
+            if val is not None:
+                values.append(float(val))
+
+        if not values:
+            bounds[obj] = (0.0, 1.0)
+            continue
+
+        min_val = min(values)
+        max_val = max(values)
+        if max_val == min_val:
+            bounds[obj] = (0.0, 1.0)
+        else:
+            bounds[obj] = (min_val, max_val)
+
+    # Normalize
+    for ind in population:
+        ind.normalized_objectives = {}
+        for obj, (min_val, max_val) in bounds.items():
+            val = ind.objectives.get(obj)
+            if val is None:
+                ind.normalized_objectives[obj] = 0.5
+                continue
+
+            if max_val == min_val:
+                normalized = 0.5
+            else:
+                normalized = (float(val) - min_val) / (max_val - min_val)
+
+            # Utilization is maximization (invert so lower normalized = better)
+            if obj == "avg_utilization_pct":
+                normalized = 1.0 - normalized
+
+            ind.normalized_objectives[obj] = normalized
+
+    return bounds
+
+
+def dominates(ind1: Individual, ind2: Individual) -> bool:
+    """True if ind1 dominates ind2 (better or equal on all, strictly better on ≥1)."""
+    obj_keys = ["makespan_hours", "mean_tardiness_hours", "avg_utilization_pct", "setup_count"]
+
+    at_least_one_better = False
+    for obj in obj_keys:
+        v1 = ind1.normalized_objectives.get(obj, 0.5)
+        v2 = ind2.normalized_objectives.get(obj, 0.5)
+        # Lower is better for all (utilization already inverted in normalization)
+        if v1 > v2:
+            return False
+        elif v1 < v2:
+            at_least_one_better = True
+
+    return at_least_one_better
+
+
+def fast_non_dominated_sort(population: List[Individual]) -> List[List[int]]:
+    """Fast non-dominated sorting. Returns list of fronts (each front is list of indices)."""
+    n = len(population)
+    if n == 0:
+        return []
+
+    domination_counts = [0] * n
+    dominated_solutions = [[] for _ in range(n)]
+
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            if dominates(population[i], population[j]):
+                dominated_solutions[i].append(j)
+            elif dominates(population[j], population[i]):
+                domination_counts[i] += 1
+
+    fronts = [[]]
+    for i in range(n):
+        if domination_counts[i] == 0:
+            population[i].rank = 1
+            fronts[0].append(i)
+
+    current_front = 0
+    while fronts[current_front]:
+        next_front = []
+        for i in fronts[current_front]:
+            for j in dominated_solutions[i]:
+                domination_counts[j] -= 1
+                if domination_counts[j] == 0:
+                    population[j].rank = current_front + 2
+                    next_front.append(j)
+        current_front += 1
+        fronts.append(next_front)
+
+    return fronts
+
+
+def compute_crowding_distance(population: List[Individual], front_indices: List[int]) -> None:
+    """Compute crowding distance for individuals in a Pareto front."""
+    if len(front_indices) <= 2:
+        for i in front_indices:
+            population[i].crowding_distance = float("inf")
+        return
+
+    obj_keys = ["makespan_hours", "mean_tardiness_hours", "avg_utilization_pct", "setup_count"]
+
+    for i in front_indices:
+        population[i].crowding_distance = 0.0
+
+    for obj in obj_keys:
+        sorted_indices = sorted(
+            front_indices,
+            key=lambda i: population[i].normalized_objectives.get(obj, 0.5),
+        )
+
+        population[sorted_indices[0]].crowding_distance = float("inf")
+        population[sorted_indices[-1]].crowding_distance = float("inf")
+
+        obj_range = population[sorted_indices[-1]].normalized_objectives.get(
+            obj, 0.5
+        ) - population[sorted_indices[0]].normalized_objectives.get(obj, 0.5)
+
+        if obj_range == 0:
+            continue
+
+        for k in range(1, len(sorted_indices) - 1):
+            idx = sorted_indices[k]
+            prev_idx = sorted_indices[k - 1]
+            next_idx = sorted_indices[k + 1]
+            distance = (
+                population[next_idx].normalized_objectives.get(obj, 0.5)
+                - population[prev_idx].normalized_objectives.get(obj, 0.5)
+            ) / obj_range
+            population[idx].crowding_distance += distance
+
+
+# ---------------------------------------------------------------------------
+# Policy Engine
+# ---------------------------------------------------------------------------
+
+
+class PolicyEngine:
+    """
+    Selects one Individual from the NSGA-II Pareto front using a
+    priority-ordered criterion chain.
+
+    Design goals:
+    - Operates exclusively on the final Pareto front (no re-decoding).
+    - Reuses objective values already computed by NSGA-II.
+    - Deterministic: identical inputs always produce identical outputs.
+    - Extensible: new policies require only a new _select_<policy> method.
+
+    Time complexity: O(F) where F = Pareto front size.
+    """
+
+    # Tolerance for float comparisons
+    _FLOAT_TOL = 1e-6
+
+    def __init__(self, policy: str = "balanced"):
+        policy = policy.lower()
+        if policy not in SUPPORTED_POLICIES:
+            logger.warning(
+                "Unknown policy '%s'; falling back to 'balanced'",
+                policy,
+                extra={"event": "policy_engine_unknown_policy", "policy": policy},
+            )
+            policy = "balanced"
+        self.policy = policy
+
+    def select(
+        self,
+        pareto_front: List[Individual],
+        due_by_order: Optional[Dict[int, Optional[datetime]]] = None,
+        committed_lead_time: Optional[datetime] = None,
+    ) -> Individual:
+        """
+        Select one Individual from the Pareto front.
+
+        Parameters
+        ----------
+        pareto_front : list of Individual
+            Non-dominated solutions from NSGA-II.
+        due_by_order : dict, optional
+            Maps order_id -> due_date (used for delivery commitment checks).
+        committed_lead_time : datetime, optional
+            Overrides per-order due dates for a global delivery commitment check.
+
+        Returns
+        -------
+        Individual
+            The selected schedule.
+        """
+        if not pareto_front:
+            raise ValueError("PolicyEngine.select: Pareto front is empty.")
+
+        if len(pareto_front) == 1:
+            return pareto_front[0]
+
+        selector = getattr(self, f"_select_{self.policy}", None)
+        if selector is None:
+            selector = self._select_balanced
+        return selector(pareto_front, due_by_order=due_by_order or {}, committed_lead_time=committed_lead_time)
+
+    # ------------------------------------------------------------------
+    # Policy implementations
+    # ------------------------------------------------------------------
+
+    def _select_balanced(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        """
+        Balanced policy — criterion priority order:
+          1. Delivery commitment (lead time met)
+          2. Priority adherence  (fewer inversions)
+          3. Machine utilization (higher preferred)
+          4. Makespan            (smaller preferred)
+          5. Setup reduction     (fewer setups preferred)
+          Tie-break: stable enumeration index for determinism.
+        """
+        candidates = list(enumerate(front))  # (original_index, ind)
+
+        # 1. Delivery commitment
+        if committed_lead_time is not None:
+            on_time = [
+                (i, ind)
+                for i, ind in candidates
+                if self._meets_lead_time(ind, committed_lead_time)
+            ]
+            if on_time:
+                candidates = on_time
+
+        # 2. Priority adherence (fewer inversions)
+        candidates = self._filter_min(candidates, lambda ind: float(ind.objectives.get("priority_inversions") or 0))
+
+        # 3. Machine utilization (higher is better → negate)
+        candidates = self._filter_min(
+            candidates,
+            lambda ind: -float(ind.objectives.get("avg_utilization_pct") or 0),
+        )
+
+        # 4. Makespan
+        candidates = self._filter_min(candidates, lambda ind: float(ind.objectives.get("makespan_hours") or 1e12))
+
+        # 5. Setup reduction
+        candidates = self._filter_min(candidates, lambda ind: float(ind.objectives.get("setup_count") or 0))
+
+        # Deterministic tie-break: lowest original index
+        return min(candidates, key=lambda t: t[0])[1]
+
+    def _select_minimum_makespan(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        return min(front, key=lambda ind: float(ind.objectives.get("makespan_hours") or 1e12))
+
+    def _select_minimum_setup(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        return min(front, key=lambda ind: float(ind.objectives.get("setup_count") or 0))
+
+    def _select_throughput(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        # Maximize throughput
+        return max(front, key=lambda ind: float(ind.objectives.get("throughput_units_per_hour") or 0))
+
+    def _select_rush_order(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        # Prioritize delivery commitment above all else, then makespan
+        candidates = list(enumerate(front))
+        if committed_lead_time is not None:
+            on_time = [
+                (i, ind)
+                for i, ind in candidates
+                if self._meets_lead_time(ind, committed_lead_time)
+            ]
+            if on_time:
+                candidates = on_time
+        return min(candidates, key=lambda t: (float(t[1].objectives.get("makespan_hours") or 1e12), t[0]))[1]
+
+    def _select_energy_efficient(
+        self,
+        front: List[Individual],
+        *,
+        due_by_order: Dict,
+        committed_lead_time: Optional[datetime],
+    ) -> Individual:
+        # Minimize idle hours (proxy for energy efficiency)
+        return min(front, key=lambda ind: float(ind.objectives.get("idle_hours_total") or 0))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _meets_lead_time(self, ind: Individual, lead_time: datetime) -> bool:
+        """Returns True if the schedule's makespan ends before the committed lead time."""
+        ms = ind.objectives.get("makespan_hours")
+        tard = ind.objectives.get("mean_tardiness_hours")
+        # Use mean_tardiness_hours as a proxy: zero means on time
+        if tard is not None:
+            return float(tard) <= self._FLOAT_TOL
+        return ms is not None  # if no tardiness info, assume acceptable
+
+    @staticmethod
+    def _filter_min(
+        candidates: List[Tuple[int, Individual]],
+        key_fn,
+        tol: float = 1e-6,
+    ) -> List[Tuple[int, Individual]]:
+        """
+        Retain candidates whose key_fn value is within tol of the minimum.
+        If only one candidate remains after filtering, return it immediately.
+        """
+        if len(candidates) <= 1:
+            return candidates
+        best_val = min(key_fn(ind) for _, ind in candidates)
+        filtered = [(i, ind) for i, ind in candidates if key_fn(ind) <= best_val + tol]
+        return filtered if filtered else candidates
+
+
+# ---------------------------------------------------------------------------
+# Single NSGA-II run
+# ---------------------------------------------------------------------------
+
+
+def run_single_nsga2(
     db: Session,
     scope: List[Dict[str, Any]],
     activities: List[Activity],
     *,
     engine,
     now: datetime,
-    cfg: ResearchGaConfig,
+    cfg: Nsga2Config,
     rng: random.Random,
-) -> Tuple[Individual, List[float], Dict[str, Any]]:
+    debug: bool = False,
+) -> Tuple[List[Individual], List[float], Dict[str, Any]]:
+    """Run single NSGA-II optimization. Returns (pareto_front, convergence, best_plan)."""
     n = len(activities)
     n_choices = [
         1
@@ -707,7 +1075,44 @@ def run_single_ga(
         for a in activities
     ]
 
+    # Memoization cache for chromosome evaluation
+    eval_cache: Dict[Tuple[tuple, tuple], Dict[str, Any]] = {}
+
+    # Debug instrumentation (only allocated when debug=True)
+    if debug:
+        total_evaluations = 0
+        cache_hits = 0
+        cache_misses = 0
+        total_decode_time = 0.0
+        unique_chromosomes_set: set = set()
+        unique_objectives_set: set = set()
+
     def evaluate(ind: Individual) -> Individual:
+        nonlocal eval_cache
+        if debug:
+            nonlocal total_evaluations, cache_hits, cache_misses, total_decode_time  # type: ignore[misc]
+            nonlocal unique_chromosomes_set, unique_objectives_set  # type: ignore[misc]
+            total_evaluations += 1  # type: ignore[assignment]
+
+        perm_key = tuple(ind.perm)
+        mach_key = tuple(ind.machines)
+        cache_key = (perm_key, mach_key)
+
+        if debug:
+            unique_chromosomes_set.add(cache_key)  # type: ignore[union-attr]
+
+        if cache_key in eval_cache:
+            if debug:
+                cache_hits += 1  # type: ignore[assignment]
+            cached = eval_cache[cache_key]
+            ind.objectives = cached["objectives"]
+            ind._plan = cached["plan"]  # type: ignore[attr-defined]
+            return ind
+
+        if debug:
+            cache_misses += 1  # type: ignore[assignment]
+            t0 = time.perf_counter()
+
         plan = decode_activity_priority(
             db,
             scope,
@@ -717,15 +1122,22 @@ def run_single_ga(
             engine=engine,
             now=now,
             pin_preferred=cfg.pin_preferred,
-            source="ga_research",
+            source="nsga2",
         )
+
+        if debug:
+            total_decode_time += time.perf_counter() - t0  # type: ignore[assignment]
+            obj_tuple = tuple(sorted((k, round(v, 6)) for k, v in (plan.get("objectives") or {}).items()))
+            unique_objectives_set.add(obj_tuple)  # type: ignore[union-attr]
+
         ind.objectives = plan.get("objectives") or {}
-        ind.fitness = scalar_fitness(ind.objectives, cfg)
         ind._plan = plan  # type: ignore[attr-defined]
+
+        eval_cache[cache_key] = {"objectives": ind.objectives, "plan": plan}
         return ind
 
     pop = [_random_individual(n, n_choices, rng) for _ in range(cfg.population)]
-    # Seed greedy natural order + priority-sorted order
+    # Seed with greedy natural order and priority-sorted order
     pop[0] = Individual(perm=list(range(n)), machines=[0] * n)
     if n >= 2 and cfg.population > 1:
         prio_perm = sorted(
@@ -737,40 +1149,111 @@ def run_single_ga(
     for ind in pop:
         evaluate(ind)
 
+    normalize_objectives(pop)
+    fronts = fast_non_dominated_sort(pop)
+    for front in fronts:
+        compute_crowding_distance(pop, front)
+
     convergence: List[float] = []
-    best = max(pop, key=lambda x: x.fitness)
-    convergence.append(float(best.objectives.get("makespan_hours") or 1e9))
+    if fronts and fronts[0]:
+        convergence.append(
+            float(pop[fronts[0][0]].objectives.get("makespan_hours") or 1e9)
+        )
+    else:
+        convergence.append(1e9)
 
     for _gen in range(cfg.generations):
-        pop.sort(key=lambda x: x.fitness, reverse=True)
-        next_pop: List[Individual] = pop[: max(0, cfg.elitism)]
+        offspring: List[Individual] = []
 
-        while len(next_pop) < cfg.population:
-            p1 = tournament(pop, cfg.tournament_k, rng)
-            p2 = tournament(pop, cfg.tournament_k, rng)
-            if rng.random() < cfg.crossover_rate:
-                child_perm = order_crossover(p1.perm, p2.perm, rng)
-            else:
-                child_perm = list(p1.perm)
-            child_mach = list(p1.machines)
-            if rng.random() < 0.5:
-                child_mach = list(p2.machines)
+        while len(offspring) < cfg.population:
+            p1 = tournament_nsga2(pop, cfg.tournament_k, rng)
+            p2 = tournament_nsga2(pop, cfg.tournament_k, rng)
+            child_perm = (
+                order_crossover(p1.perm, p2.perm, rng)
+                if rng.random() < cfg.crossover_rate
+                else list(p1.perm)
+            )
+            child_mach = list(p2.machines if rng.random() < 0.5 else p1.machines)
 
             child_perm = mutate_perm(child_perm, cfg.mutation_rate, rng)
-            child_mach = mutate_machines(
-                child_mach, n_choices, cfg.mutation_rate, rng
-            )
+            child_mach = mutate_machines(child_mach, n_choices, cfg.mutation_rate, rng)
             child = Individual(perm=child_perm, machines=child_mach)
             evaluate(child)
-            next_pop.append(child)
+            offspring.append(child)
+
+        combined = pop + offspring
+        normalize_objectives(combined)
+        fronts = fast_non_dominated_sort(combined)
+
+        next_pop: List[Individual] = []
+        current_front = 0
+
+        while (
+            current_front < len(fronts)
+            and len(next_pop) + len(fronts[current_front]) <= cfg.population
+        ):
+            compute_crowding_distance(combined, fronts[current_front])
+            next_pop.extend([combined[i] for i in fronts[current_front]])
+            current_front += 1
+
+        if len(next_pop) < cfg.population and current_front < len(fronts):
+            compute_crowding_distance(combined, fronts[current_front])
+            remaining_slots = cfg.population - len(next_pop)
+            front_indices = sorted(
+                fronts[current_front],
+                key=lambda i: combined[i].crowding_distance,
+                reverse=True,
+            )
+            next_pop.extend([combined[i] for i in front_indices[:remaining_slots]])
 
         pop = next_pop[: cfg.population]
-        gen_best = max(pop, key=lambda x: x.fitness)
-        if gen_best.fitness > best.fitness:
-            best = gen_best
-        convergence.append(float(best.objectives.get("makespan_hours") or 1e9))
 
-    return best, convergence, getattr(best, "_plan", {})
+        if fronts and fronts[0]:
+            convergence.append(
+                float(pop[0].objectives.get("makespan_hours") or 1e9)
+                if pop
+                else (convergence[-1] if convergence else 1e9)
+            )
+        else:
+            convergence.append(convergence[-1] if convergence else 1e9)
+
+    # Final Pareto front
+    final_fronts = fast_non_dominated_sort(pop)
+    pareto_front = [pop[i] for i in final_fronts[0]] if final_fronts else pop
+
+    # Return the plan of the first individual (Policy Engine will select the best)
+    best = pareto_front[0] if pareto_front else pop[0]
+    plan = getattr(best, "_plan", {})
+
+    # Attach debug metrics only when requested
+    if debug:
+        plan["_perf_metrics"] = {
+            "total_evaluations": total_evaluations,  # type: ignore[possibly-undefined]
+            "cache_hits": cache_hits,  # type: ignore[possibly-undefined]
+            "cache_misses": cache_misses,  # type: ignore[possibly-undefined]
+            "cache_hit_rate": (
+                cache_hits / total_evaluations if total_evaluations > 0 else 0.0  # type: ignore[possibly-undefined]
+            ),
+            "total_decode_time": total_decode_time,  # type: ignore[possibly-undefined]
+            "avg_decode_time": (
+                total_decode_time / cache_misses if cache_misses > 0 else 0.0  # type: ignore[possibly-undefined]
+            ),
+            "unique_chromosomes": len(unique_chromosomes_set),  # type: ignore[arg-type]
+            "unique_objectives": len(unique_objectives_set),  # type: ignore[arg-type]
+            "chromosome_diversity": (
+                len(unique_chromosomes_set) / total_evaluations if total_evaluations > 0 else 0.0  # type: ignore[possibly-undefined]
+            ),
+            "objective_diversity": (
+                len(unique_objectives_set) / total_evaluations if total_evaluations > 0 else 0.0  # type: ignore[possibly-undefined]
+            ),
+        }
+
+    return pareto_front, convergence, plan
+
+
+# ---------------------------------------------------------------------------
+# Multi-run optimizer
+# ---------------------------------------------------------------------------
 
 
 def optimize_unit_plan_research(
@@ -780,39 +1263,45 @@ def optimize_unit_plan_research(
     engine,
     now: Optional[datetime] = None,
     config_overrides: Optional[Dict[str, Any]] = None,
+    policy: str = "balanced",
+    committed_lead_time: Optional[datetime] = None,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
-    Multi-run research GA vs greedy baseline; persist better plan.
+    Multi-run NSGA-II optimizer with Policy Engine for final schedule selection.
+
+    Architecture: Greedy → NSGA-II → Pareto Front → Policy Engine → Final Schedule
+
+    Parameters
+    ----------
+    db : Session
+    scope : list of scope dicts (part, order, qty, priority, activation)
+    engine : SchedulerEngine instance
+    now : reference time (defaults to datetime.now())
+    config_overrides : dict of Nsga2Config field overrides
+    policy : policy name for PolicyEngine selection (default "balanced")
+    committed_lead_time : optional global delivery commitment datetime
+    debug : if True, attach profiling metrics to the response (dev mode only)
     """
-    cfg = ResearchGaConfig.from_env(config_overrides)
+    cfg = Nsga2Config.from_env(config_overrides)
     now = _strip_tz(now) or datetime.now()
 
+    # ── Greedy baseline ──────────────────────────────────────────────
     greedy = simulate_unit_plan(db, scope, engine=engine, now=now, source="greedy")
     due_by_order = {
         item["order"].id: getattr(item["order"], "due_date", None) for item in scope
     }
     greedy_obj = evaluate_segments(greedy.get("segments") or [], due_by_order=due_by_order)
     greedy["objectives"] = greedy_obj
-    greedy_fit = scalar_fitness(greedy_obj, cfg)
 
     meta: Dict[str, Any] = {
-        "engine": "research",
+        "optimizer": "nsga2",
+        "policy": policy,
         "encoding": "activity_permutation_ox",
         "decode": "priority_list_semi_active",
         "runs": cfg.runs,
         "population": cfg.population,
         "generations": cfg.generations,
-        "weights": {
-            "makespan": cfg.w_makespan,
-            "mean_flow": cfg.w_mean_flow,
-            "mean_waiting": cfg.w_mean_waiting,
-            "mean_tardiness": cfg.w_mean_tardiness,
-            "setup": cfg.w_setup,
-            "idle": cfg.w_idle,
-            "util_gap": cfg.w_util_gap,
-            "throughput": cfg.w_throughput,
-            "priority": cfg.w_priority,
-        },
         "constraints": {
             "active_parts_only": True,
             "shift_calendar": True,
@@ -822,17 +1311,7 @@ def optimize_unit_plan_research(
             "preferred_machine_pin": cfg.pin_preferred,
             "part_priority_soft_penalty": True,
         },
-        "end_goals": [
-            "maximize_machine_utilization",
-            "minimize_setups",
-            "minimize_tardiness_lateness",
-            "minimize_machine_idle",
-            "minimize_mean_flow_time",
-            "maximize_throughput",
-        ],
         "pin_preferred": cfg.pin_preferred,
-        "greedy_objectives": greedy_obj,
-        "greedy_fitness": greedy_fit,
         "improved": False,
         "selected": "greedy",
     }
@@ -859,16 +1338,17 @@ def optimize_unit_plan_research(
         meta["runs"] = cfg.runs
 
     base_seed = cfg.seed if cfg.seed is not None else _env_int("UNIT_WISE_GA_SEED", 42)
+
+    all_pareto_fronts: List[List[Individual]] = []
+    all_perf_metrics_debug: List[Dict[str, Any]] = []
     run_summaries = []
-    best_plan = greedy
-    best_fit = greedy_fit
-    best_obj = greedy_obj
     all_cmax = []
+    ga_start_time = time.perf_counter() if debug else 0.0
 
     for r in range(cfg.runs):
         rng = random.Random(base_seed + r * 997)
         try:
-            ind, convergence, plan = run_single_ga(
+            pareto_front, convergence, plan = run_single_nsga2(
                 db,
                 scope,
                 activities,
@@ -876,58 +1356,135 @@ def optimize_unit_plan_research(
                 now=now,
                 cfg=cfg,
                 rng=rng,
+                debug=debug,
             )
+            if debug and "_perf_metrics" in plan:
+                all_perf_metrics_debug.append(plan.pop("_perf_metrics"))
         except Exception:
             logger.exception(
-                "Research GA run failed",
-                extra={"event": "unit_wise_ga_research_run_failed", "run": r},
+                "NSGA-II run failed",
+                extra={"event": "unit_wise_nsga2_run_failed", "run": r},
             )
             continue
 
-        cmax = (ind.objectives or {}).get("makespan_hours")
-        all_cmax.append(cmax)
+        all_pareto_fronts.append(pareto_front)
+        # Track best makespan across runs for convergence summary
+        best_ms = min(
+            (float(ind.objectives.get("makespan_hours") or 1e9) for ind in pareto_front),
+            default=1e9,
+        )
+        all_cmax.append(best_ms)
         run_summaries.append(
             {
                 "run": r,
                 "seed": base_seed + r * 997,
-                "fitness": ind.fitness,
-                "objectives": ind.objectives,
+                "pareto_front_size": len(pareto_front),
+                "best_makespan": best_ms,
                 "convergence_makespan": convergence,
             }
         )
-        if ind.fitness > best_fit + 1e-12:
-            best_fit = ind.fitness
-            best_obj = ind.objectives
-            best_plan = plan
+
+    meta["runs_detail"] = run_summaries
 
     # Stats
-    cmax_vals = [c for c in all_cmax if c is not None]
-    stats = {}
+    cmax_vals = [c for c in all_cmax if c < 1e8]
     if cmax_vals:
         mean = sum(cmax_vals) / len(cmax_vals)
         var = sum((c - mean) ** 2 for c in cmax_vals) / len(cmax_vals)
-        stats = {
+        meta["stats"] = {
             "cmax_best": min(cmax_vals),
             "cmax_mean": round(mean, 4),
             "cmax_std": round(math.sqrt(var), 4),
             "cmax_worst": max(cmax_vals),
         }
 
-    meta["runs_detail"] = run_summaries
-    meta["stats"] = stats
-    meta["best_objectives"] = best_obj
-    meta["best_fitness"] = best_fit
+    # Debug profiling (gated)
+    if debug and all_perf_metrics_debug:
+        ga_total_time = time.perf_counter() - ga_start_time
+        total_evaluations = sum(m.get("total_evaluations", 0) for m in all_perf_metrics_debug)
+        total_cache_hits = sum(m.get("cache_hits", 0) for m in all_perf_metrics_debug)
+        total_cache_misses = sum(m.get("cache_misses", 0) for m in all_perf_metrics_debug)
+        total_decode_time = sum(m.get("total_decode_time", 0.0) for m in all_perf_metrics_debug)
+        meta["_debug_performance"] = {
+            "total_ga_time_seconds": round(ga_total_time, 4),
+            "total_evaluations": total_evaluations,
+            "total_cache_hits": total_cache_hits,
+            "total_cache_misses": total_cache_misses,
+            "cache_hit_rate": round(total_cache_hits / total_evaluations, 4) if total_evaluations > 0 else 0.0,
+            "total_decode_time_seconds": round(total_decode_time, 4),
+            "avg_decode_time_seconds": round(total_decode_time / total_cache_misses, 4) if total_cache_misses > 0 else 0.0,
+            "decode_time_percentage": round((total_decode_time / ga_total_time) * 100, 2) if ga_total_time > 0 else 0.0,
+        }
 
-    # Accept GA only if strictly better scalar fitness than greedy
-    if best_fit > greedy_fit + 1e-12 and best_plan is not greedy:
-        meta["improved"] = True
-        meta["selected"] = "ga_research"
-        best_plan["source"] = "ga_research"
-        best_plan["ga"] = meta
-        best_plan["objectives"] = best_obj
-        return best_plan
+    if not all_pareto_fronts:
+        # All runs failed — return greedy
+        greedy["ga"] = {**meta, "reason": "all_runs_failed"}
+        return greedy
 
-    meta["improved"] = False
+    # ── Merge Pareto fronts from all runs ───────────────────────────
+    all_individuals: List[Individual] = []
+    for front in all_pareto_fronts:
+        all_individuals.extend(front)
+
+    normalize_objectives(all_individuals)
+    final_fronts = fast_non_dominated_sort(all_individuals)
+    final_pareto_front = (
+        [all_individuals[i] for i in final_fronts[0]] if final_fronts else all_individuals
+    )
+    meta["pareto_front_size"] = len(final_pareto_front)
+
+    # ── Policy Engine: select ONE schedule ──────────────────────────
+    policy_engine = PolicyEngine(policy=policy)
+    selected_ind = policy_engine.select(
+        final_pareto_front,
+        due_by_order=due_by_order,
+        committed_lead_time=committed_lead_time,
+    )
+    selected_obj = selected_ind.objectives
+    selected_plan = getattr(selected_ind, "_plan", {})
+
+    # ── Compare against greedy ──────────────────────────────────────
+    greedy_ms = float(greedy_obj.get("makespan_hours") or 1e12)
+    nsga2_ms = float(selected_obj.get("makespan_hours") or 1e12)
+    greedy_tard = float(greedy_obj.get("mean_tardiness_hours") or 0.0)
+    nsga2_tard = float(selected_obj.get("mean_tardiness_hours") or 0.0)
+    greedy_util = float(greedy_obj.get("avg_utilization_pct") or 0.0)
+    nsga2_util = float(selected_obj.get("avg_utilization_pct") or 0.0)
+    greedy_setups = float(greedy_obj.get("setup_count") or 0.0)
+    nsga2_setups = float(selected_obj.get("setup_count") or 0.0)
+
+    # "Improved" = at least one objective strictly better, none strictly worse
+    improved = (
+        (nsga2_ms < greedy_ms - 1e-6)
+        or (nsga2_tard < greedy_tard - 1e-6)
+        or (nsga2_util > greedy_util + 1e-6)
+        or (nsga2_setups < greedy_setups - 1e-6)
+    ) and selected_plan
+
+    meta["improved"] = bool(improved)
+    meta["selected"] = "nsga2" if improved else "greedy"
+    meta["selected_objectives"] = selected_obj
+    meta["greedy_objectives"] = greedy_obj
+
+    # Lead time assessment
+    lead_time_met = float(selected_obj.get("mean_tardiness_hours") or 0.0) <= 1e-6
+    meta["lead_time_met"] = lead_time_met
+
+    if improved:
+        selected_plan["source"] = "nsga2"
+        selected_plan["ga"] = meta
+        selected_plan["objectives"] = selected_obj
+        return selected_plan
+
+    # Greedy wins or NSGA-II produced no valid plan
     meta["selected"] = "greedy"
     greedy["ga"] = meta
     return greedy
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible alias (kept so existing callers don't break)
+# ---------------------------------------------------------------------------
+
+#: Alias for config — old code that imported ResearchGaConfig will still work.
+ResearchGaConfig = Nsga2Config

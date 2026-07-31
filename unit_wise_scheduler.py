@@ -1,5 +1,9 @@
 """
-Unit-wise greedy scheduler (Phase 1–2) + Phase 4 GA entry via rebuild(optimizer=...).
+Unit-wise greedy scheduler + NSGA-II optimizer entry via rebuild(optimizer=...).
+
+Architecture
+------------
+Greedy → NSGA-II → Pareto Front → Policy Engine → Selected Production Schedule
 
 Baseline: after parts are activated, rebuild plans every unit through
 schedulable ops with pipeline overlap (Unit 1 can enter Op20 while Unit 2
@@ -15,8 +19,9 @@ Phase 2:
   - Rework slots after review use cycle-only (no re-setup)
 
 Phase 4:
-  - optimizer=ga uses unit_wise_ga (PyGAD) over unit order / free machines
-  - Best of greedy vs GA is persisted (source=greedy|ga)
+  - optimizer=nsga2 runs NSGA-II multi-objective optimization
+  - Policy Engine selects the best schedule from the Pareto front
+  - Best of greedy vs NSGA-II is persisted (source=greedy|nsga2)
 
 Batch rescheduling_items are never modified here.
 """
@@ -26,9 +31,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, time, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from DB.models.configuration import Machine, WorkCenter
@@ -247,6 +252,50 @@ def _freeze_active_machines(
         machine_free[mid] = max(machine_free.get(mid, now), now)
 
 
+def _populate_other_parts_machine_free(
+    db: Session, machine_free: Dict[int, datetime], scope_part_ids: Set[int]
+) -> None:
+    """
+    Ensure machines respect end times of existing scheduled items for parts
+    outside the current rebuild scope.
+    """
+    if not scope_part_ids:
+        return
+
+    subq = (
+        db.query(
+            UnitScheduleItem.part_id,
+            func.max(UnitScheduleItem.schedule_version).label("max_version"),
+        )
+        .filter(UnitScheduleItem.part_id.notin_(scope_part_ids))
+        .group_by(UnitScheduleItem.part_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(
+            UnitScheduleItem.machine_id,
+            func.max(UnitScheduleItem.end_time).label("max_end"),
+        )
+        .join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
+        .filter(UnitScheduleItem.machine_id.isnot(None))
+        .group_by(UnitScheduleItem.machine_id)
+        .all()
+    )
+
+    for mid, max_end in rows:
+        if mid and max_end:
+            dt = _strip_tz(max_end)
+            if dt:
+                machine_free[int(mid)] = max(machine_free.get(int(mid), dt), dt)
+
+
 def _rework_due_for_operation(db: Session, operation_id: int) -> int:
     latest = get_latest_reviewed_log(db, operation_id)
     if not latest:
@@ -341,9 +390,9 @@ def _load_active_scope(
             Part.type_id == IN_HOUSE_TYPE_ID,
         )
     )
-    if part_id is not None:
+    if part_id is not None and part_id > 0:
         q = q.filter(Part.id == part_id)
-    if order_id is not None:
+    if order_id is not None and order_id > 0:
         q = q.filter(Order.id == order_id)
 
     rows = q.all()
@@ -401,6 +450,8 @@ def simulate_unit_plan(
     machine_free: Dict[int, datetime] = {}
     machine_last_ctx: Dict[int, Tuple[int, int]] = {}
     _freeze_active_machines(db, machine_free, now)
+    scope_part_ids = {item["part"].id for item in scope if item.get("part")}
+    _populate_other_parts_machine_free(db, machine_free, scope_part_ids)
 
     segments_out: List[Dict[str, Any]] = []
 
@@ -543,11 +594,20 @@ def rebuild_unit_schedule(
     order_id: Optional[int] = None,
     commit: bool = True,
     optimizer: Optional[str] = None,
+    policy: str = "balanced",
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
     Delete existing unit rows for scope and insert a fresh plan.
 
-    optimizer: "greedy" (default) | "ga"
+    Single optimization path: Greedy → NSGA-II → Policy Engine → Final Schedule
+
+    optimizer: "greedy" (default) | "nsga2" | "ga" | "ga_research" (all GA variants
+               use NSGA-II internally)
+    policy: Policy Engine selection policy (default "balanced").
+            Options: balanced, throughput, minimum_setup, minimum_makespan,
+                     rush_order, energy_efficient
+    debug: if True, include profiling metrics in the ga metadata (dev mode only).
     Env UNIT_WISE_OPTIMIZER overrides default when optimizer is None.
     """
     if not unit_wise_enabled():
@@ -560,8 +620,10 @@ def rebuild_unit_schedule(
         }
 
     opt = (optimizer or os.getenv("UNIT_WISE_OPTIMIZER", "greedy") or "greedy").lower()
-    if opt not in ("greedy", "ga", "ga_research"):
+    # All GA-mode aliases use NSGA-II
+    if opt not in ("greedy", "nsga2", "ga", "ga_research"):
         opt = "greedy"
+    use_nsga2 = opt in ("nsga2", "ga", "ga_research")
 
     scope = _load_active_scope(db, part_id=part_id, order_id=order_id)
     if not scope:
@@ -571,7 +633,7 @@ def rebuild_unit_schedule(
             "rows_inserted": 0,
             "schedule_version": None,
             "parts": 0,
-            "optimizer": opt,
+            "optimizer": "nsga2" if use_nsga2 else "greedy",
         }
 
     part_ids = [item["part"].id for item in scope]
@@ -590,11 +652,17 @@ def rebuild_unit_schedule(
     now = _strip_tz(datetime.now()) or datetime.now()
 
     ga_meta: Dict[str, Any] = {}
-    if opt in ("ga", "ga_research"):
-        # Research-grade GA is the default GA path
+    if use_nsga2:
         from unit_wise_ga_research import optimize_unit_plan_research
 
-        plan = optimize_unit_plan_research(db, scope, engine=engine, now=now)
+        plan = optimize_unit_plan_research(
+            db,
+            scope,
+            engine=engine,
+            now=now,
+            policy=policy,
+            debug=debug,
+        )
         ga_meta = plan.get("ga") or {}
     else:
         plan = simulate_unit_plan(
@@ -628,7 +696,9 @@ def rebuild_unit_schedule(
     else:
         db.flush()
 
-    source = plan.get("source") or opt
+    source = plan.get("source") or ("nsga2" if use_nsga2 else "greedy")
+    objectives = plan.get("objectives") or {}
+
     logger.info(
         "Unit-wise rebuild completed",
         extra={
@@ -639,28 +709,50 @@ def rebuild_unit_schedule(
             "schedule_version": version,
             "part_id": part_id,
             "order_id": order_id,
-            "optimizer": opt,
+            "optimizer": "nsga2" if use_nsga2 else "greedy",
+            "policy": policy if use_nsga2 else None,
             "source": source,
             "makespan_hours": plan.get("makespan_hours"),
         },
     )
 
-    return {
+    # ── Production API response ─────────────────────────────────────
+    # Business-relevant fields only. Debug/profiling data is behind debug=True.
+    response: Dict[str, Any] = {
         "success": True,
         "message": (
             f"Unit-wise ({source}) schedule built for {len(scope)} part(s), "
             f"{len(new_rows)} segment(s), version {version}."
+        ),
+        "optimizer": "nsga2" if use_nsga2 else "greedy",
+        "policy": policy if use_nsga2 else None,
+        "selected": ga_meta.get("selected", source),
+        "improved": ga_meta.get("improved", False),
+        "lead_time_met": ga_meta.get("lead_time_met", None),
+        "makespan_hours": plan.get("makespan_hours"),
+        "machine_utilization": objectives.get("avg_utilization_pct"),
+        "setup_count": objectives.get("setup_count"),
+        "priority_adherence": (
+            objectives.get("priority_inversions") == 0
+            if objectives.get("priority_inversions") is not None
+            else None
         ),
         "rows_inserted": len(new_rows),
         "rows_deleted": deleted,
         "schedule_version": version,
         "parts": len(scope),
         "part_ids": part_ids,
-        "optimizer": opt,
         "source": source,
-        "makespan_hours": plan.get("makespan_hours"),
-        "ga": ga_meta or None,
     }
+
+    # Expose debug data only in dev mode
+    if debug and ga_meta:
+        response["_debug"] = {
+            "ga_meta": ga_meta,
+            "performance": ga_meta.get("_debug_performance"),
+        }
+
+    return response
 
 
 def list_unit_schedule(
@@ -671,18 +763,29 @@ def list_unit_schedule(
     latest_only: bool = True,
 ) -> List[UnitScheduleItem]:
     q = db.query(UnitScheduleItem)
-    if part_id is not None:
+    if part_id is not None and part_id > 0:
         q = q.filter(UnitScheduleItem.part_id == part_id)
-    if order_id is not None:
+    if order_id is not None and order_id > 0:
         q = q.filter(UnitScheduleItem.order_id == order_id)
-    if machine_id is not None:
+    if machine_id is not None and machine_id > 0:
         q = q.filter(UnitScheduleItem.machine_id == machine_id)
 
     if latest_only:
-        max_ver = q.with_entities(func.max(UnitScheduleItem.schedule_version)).scalar()
-        if max_ver is None:
-            return []
-        q = q.filter(UnitScheduleItem.schedule_version == max_ver)
+        subq = (
+            db.query(
+                UnitScheduleItem.part_id,
+                func.max(UnitScheduleItem.schedule_version).label("max_version"),
+            )
+            .group_by(UnitScheduleItem.part_id)
+            .subquery()
+        )
+        q = q.join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
 
     return (
         q.order_by(
