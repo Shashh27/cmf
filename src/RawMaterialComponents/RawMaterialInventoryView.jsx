@@ -99,7 +99,7 @@ const RawMaterialInventoryView = ({
   fMaterial = [], fSource = [], fOrder = [],
   fPart = [], fStockStatus = [], fUnitStatus = [],
   rawMaterials = [],
-  onFilterOptionsReady, onRowsReady, onInventoryDataReady,
+  onFilterOptionsReady, onRowsReady, onInventoryDataReady, onLoadingChange,
 }) => {
   const [inventoryData, setInventoryData] = useState([]);
   const [allStock, setAllStock] = useState({});
@@ -129,6 +129,7 @@ const RawMaterialInventoryView = ({
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    if (onLoadingChange) onLoadingChange(true);
     try {
       const uid = getCurrentUserId();
       const role = String(JSON.parse(localStorage.getItem('user') || '{}')?.role || '').toLowerCase();
@@ -153,8 +154,9 @@ const RawMaterialInventoryView = ({
       if (onInventoryDataReady) onInventoryDataReady(data);
     } finally {
       setLoading(false);
+      if (onLoadingChange) onLoadingChange(false);
     }
-  }, []);
+  }, [onLoadingChange]);
 
   useEffect(() => { fetchAll(); }, [fetchAll, refreshKey]);
 

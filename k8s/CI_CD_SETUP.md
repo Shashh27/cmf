@@ -51,14 +51,14 @@ After pipeline completes, pull images to your local machine:
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u Shashh27 --password-stdin
 
 # Pull backend image (use latest or specific commit)
-docker pull ghcr.io/Shashh27/cmf/backend:latest
+docker pull ghcr.io/shashh27/cmf/backend:latest
 # OR
-docker pull ghcr.io/Shashh27/cmf/backend:<commit-sha>
+docker pull ghcr.io/shashh27/cmf/backend:<commit-sha>
 
 # Pull frontend image
-docker pull ghcr.io/Shashh27/cmf/frontend:latest
+docker pull ghcr.io/shashh27/cmf/frontend:latest
 # OR
-docker pull ghcr.io/Shashh27/cmf/frontend:<commit-sha>
+docker pull ghcr.io/shashh27/cmf/frontend:<commit-sha>
 ```
 
 ### 5. Run in Docker Desktop Kubernetes

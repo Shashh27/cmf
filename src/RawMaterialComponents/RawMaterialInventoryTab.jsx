@@ -1,8 +1,10 @@
 import React, { useState, useCallback } from "react";
-import { Input, Select, Space, Button } from "antd";
+import { Input, Select, Space, Button, Switch } from "antd";
 import { StockDetailsPdfDownload } from "../DownloadReports/StockDetailsPdfDownload";
 import RawMaterialInventoryView from "./RawMaterialInventoryView";
+import RawMaterialInventoryAnalytics from "./RawMaterialInventoryAnalytics";
 import ExhaustedUnitsModal from "./ExhaustedUnitsModal";
+import { BarChart3, Table } from "lucide-react";
 
 const { Option } = Select;
 
@@ -14,6 +16,8 @@ const RawMaterialInventoryTab = ({ rawMaterials = [] }) => {
   const [exhaustedModalOpen, setExhaustedModalOpen] = useState(false);
   const [inventoryData, setInventoryData] = useState([]);
   const [invRefreshKey, setInvRefreshKey] = useState(0);
+  const [viewMode, setViewMode] = useState("table"); // "table" or "analytics"
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   const setF = (key, val) => setInvFilters(prev => ({ ...prev, [key]: val || [] }));
   const handleFilterOptionsReady = useCallback((opts) => setInvFilterOptions(opts), []);
@@ -26,6 +30,17 @@ const RawMaterialInventoryTab = ({ rawMaterials = [] }) => {
       <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 mb-4">
         <div className="flex flex-wrap gap-2 items-center justify-between">
           <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+              <Table className={`w-4 h-4 ${viewMode === "table" ? "text-blue-600" : "text-gray-400"}`} />
+              <Switch
+                checked={viewMode === "analytics"}
+                onChange={(checked) => setViewMode(checked ? "analytics" : "table")}
+                size="small"
+                checkedChildren="Analytics"
+                unCheckedChildren="Table"
+              />
+              <BarChart3 className={`w-4 h-4 ${viewMode === "analytics" ? "text-blue-600" : "text-gray-400"}`} />
+            </div>
             <Input.Search
               placeholder="Search material / stock..."
               allowClear
@@ -78,20 +93,28 @@ const RawMaterialInventoryTab = ({ rawMaterials = [] }) => {
         </div>
       </div>
 
-      <RawMaterialInventoryView
-        rawMaterials={rawMaterials}
-        refreshKey={invRefreshKey}
-        searchText={invSearch}
-        fMaterial={invFilters.fMaterial}
-        fSource={invFilters.fSource}
-        fOrder={invFilters.fOrder}
-        fPart={invFilters.fPart}
-        fStockStatus={invFilters.fStockStatus}
-        fUnitStatus={invFilters.fUnitStatus}
-        onFilterOptionsReady={handleFilterOptionsReady}
-        onRowsReady={handleRowsReady}
-        onInventoryDataReady={handleInventoryDataReady}
-      />
+      {viewMode === "table" ? (
+        <RawMaterialInventoryView
+          rawMaterials={rawMaterials}
+          refreshKey={invRefreshKey}
+          searchText={invSearch}
+          fMaterial={invFilters.fMaterial}
+          fSource={invFilters.fSource}
+          fOrder={invFilters.fOrder}
+          fPart={invFilters.fPart}
+          fStockStatus={invFilters.fStockStatus}
+          fUnitStatus={invFilters.fUnitStatus}
+          onFilterOptionsReady={handleFilterOptionsReady}
+          onRowsReady={handleRowsReady}
+          onInventoryDataReady={handleInventoryDataReady}
+          onLoadingChange={setAnalyticsLoading}
+        />
+      ) : (
+        <RawMaterialInventoryAnalytics
+          inventoryData={inventoryData}
+          loading={analyticsLoading}
+        />
+      )}
 
       <ExhaustedUnitsModal
         open={exhaustedModalOpen}
