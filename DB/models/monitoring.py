@@ -8,7 +8,7 @@ class MachineLiveStatus(Base):
     __table_args__ = {'schema': 'production_monitoring'}
 
     id = Column(Integer, primary_key=True, index=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"),  nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"),  nullable=False)
     status = Column(String, nullable=False, default="OFF")  # PRODUCTION, ON, OFF
     last_updated = Column(DateTime, default=datetime.now, nullable=False)
     
@@ -27,7 +27,7 @@ class MachineLiveHistory(Base):
     __table_args__ = {'schema': 'production_monitoring'}
 
     
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     
     last_updated = Column(DateTime, primary_key=True, default=datetime.now)
     

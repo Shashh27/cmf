@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
 from DB.models.notifications import ToolIssuesNotification as ToolIssuesNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.inventory import ToolsList
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from sqlalchemy import text
 from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
@@ -27,13 +29,18 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[ToolIssuesNotificationWithDetails])
 def list_tool_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(ToolIssuesNotificationModel)
     if start_date:
         q = q.filter(ToolIssuesNotificationModel.created_at >= start_date)
@@ -76,16 +83,8 @@ def list_tool_issues_notifications(
         issue = issues_map.get(n.tool_issues_id, {})
         tool = tool_map.get(issue.get("tool_id"))
         op = operator_map.get(issue.get("operator_id"))
-        # Filter based on role IDs - for tool issues, filter by operator_id
-        # Skip if issue not found and role filtering is requested
-        if (mc_id or pc_id or admin_id) and not issue:
-            continue
-        if mc_id and issue.get("operator_id") != mc_id:
-            continue
-        if pc_id and issue.get("operator_id") != pc_id:
-            continue
-        if admin_id and issue.get("operator_id") != admin_id:
-            continue
+        # Shop-floor alerts: Admin / MC / PC see all tool-issue notifications.
+        # operator_id is who filed the issue — not the viewer role id.
         response.append(ToolIssuesNotificationWithDetails(
             id=n.id,
             tool_issues_id=n.tool_issues_id,
@@ -104,49 +103,40 @@ def list_tool_issues_notifications(
 
 @router.get("/pending", response_model=List[ToolIssuesNotificationSchema])
 def list_pending_tool_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(ToolIssuesNotificationModel.id.desc()).all()
     issue_ids = [n.tool_issues_id for n in notifications]
     if not issue_ids:
         return []
-    stmt = text("""
-        SELECT id, operator_id
-        FROM inventory.tool_issues
-        WHERE id IN :ids
-    """).bindparams(bindparam("ids", expanding=True))
-    rows = db.execute(stmt, {"ids": issue_ids}).fetchall()
-    issue_map = {int(r[0]): r[1] for r in rows}
-    result = []
-    for n in notifications:
-        operator_id = issue_map.get(n.tool_issues_id)
-        # Filter based on role IDs - skip if issue not found and role filtering is requested
-        if (mc_id or pc_id or admin_id) and operator_id is None:
-            continue
-        if mc_id and operator_id != mc_id:
-            continue
-        if pc_id and operator_id != pc_id:
-            continue
-        if admin_id and operator_id != admin_id:
-            continue
-        result.append(n)
-    return result
+    # Pending list for Admin/MC/PC: return all unacked tool-issue notifications
+    # (no operator_id == viewer filter — that hid every row after JWT scoping).
+    return notifications
 
 
 
 
 @router.put("/{notification_id}/ack", response_model=ToolIssuesNotificationSchema)
-def acknowledge_tool_issues_notification(notification_id: int, db: Session = Depends(get_db)):
+def acknowledge_tool_issues_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     notif = db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     if not notif.is_ack:
         notif.is_ack = True
-        notif.ack_by = get_admin_username(db)
+        notif.ack_by = getattr(current_user, "user_name", None) or get_admin_username(db)
         notif.ack_at = datetime.now(IST)
         db.add(notif)
         db.commit()

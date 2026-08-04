@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, text
 from typing import List, Optional
@@ -15,6 +15,8 @@ from DB.models.inventory import (
     StockQualityDocument as StockQualityDocumentModel,
 )
 from DB.models.access_control import AccessUser as AccessUserModel
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user, apply_order_role_scope
 from DB.schemas.inventory import (
     RawMaterialStock,
     RawMaterialStockCreate,
@@ -46,7 +48,11 @@ router = APIRouter(
 # ==================== Order Raw Material Linking ====================
 
 @router.post("/order-materials/link")
-def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depends(get_db)):
+def link_material_to_order(
+    request: OrderMaterialLinkRequest,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     """
     Link raw material to an order with parts and required lengths.
     
@@ -59,6 +65,8 @@ def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depe
     - Stock status changes to 'available'
     - Units are created with status='available'
     """
+    request.user_id = current_user.id
+
     # Validate raw material
     material = db.query(RawMaterialModel).filter(RawMaterialModel.id == request.raw_material_id).first()
     if not material:
@@ -662,13 +670,19 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
 
 @router.get("/order-parts-raw-material-linked/")
 def get_order_parts_raw_material_linked(
-    manufacturing_coordinator_id: Optional[int] = None,
-    admin_id: Optional[int] = None,
-    project_coordinator_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    admin_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
-    """Get order-linked raw materials filtered by order association (admin, PC, or MC involved in order)"""
+    """Get order-linked raw materials scoped to the JWT user's role."""
     from routers.rawmaterials import _stock_with_details
+
+    scope = scope_ids_from_user(current_user)
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
+    admin_id = scope["admin_id"]
+    project_coordinator_id = scope["project_coordinator_id"]
     
     # Query order-type stock items
     query = db.query(RawMaterialStockModel).options(
@@ -677,19 +691,10 @@ def get_order_parts_raw_material_linked(
         joinedload(RawMaterialStockModel.vendor),
     ).filter(RawMaterialStockModel.source_type == "order")
     
-    # Filter by order association: get orders where user is admin, PC, or manufacturing coordinator
+    # Filter by order association from JWT role
     if manufacturing_coordinator_id or admin_id or project_coordinator_id:
         # Get order IDs where the user is admin, PC, or manufacturing coordinator
-        order_query = db.query(OrderModel.id)
-        
-        if manufacturing_coordinator_id:
-            order_query = order_query.filter(OrderModel.manufacturing_coordinator_id == manufacturing_coordinator_id)
-        
-        if admin_id:
-            order_query = order_query.filter(OrderModel.admin_id == admin_id)
-        
-        if project_coordinator_id:
-            order_query = order_query.filter(OrderModel.project_coordinator_id == project_coordinator_id)
+        order_query = apply_order_role_scope(db.query(OrderModel.id), OrderModel, current_user)
         
         order_ids = [order[0] for order in order_query.all()]
         
@@ -907,11 +912,14 @@ def update_order_parts_status_group(
     group_id: str,
     update_data: dict,
     user_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """Update status for a group of order-linked stock items with full logic"""
     from routers.rawmaterials import _stock_with_details
     from DB.models.oms import Part as PartModel
+
+    user_id = current_user.id
     
     # Parse group_id (might be comma-separated)
     stock_ids = [int(id.strip()) for id in group_id.split(',') if id.strip()]
@@ -1128,12 +1136,15 @@ def bulk_create_order_parts_raw_material_linked(
 @router.delete("/order-parts-raw-material-linked/{stock_id}")
 def delete_order_parts_raw_material_linked(
     stock_id: int,
-    user_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: Optional[int] = Query(None),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """Delete order-linked stock item and all related data"""
     from DB.models.oms import Part as PartModel
-    
+
+    user_id = current_user.id
+
     stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
     if not stock:
         raise HTTPException(
@@ -1180,23 +1191,21 @@ def delete_order_parts_raw_material_linked(
                 detail=f"Sorry, this order material cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this material, please inactivate the schedule status of these parts first."
             )
     
-    # Optional user authorization verification
-    # User can delete if: 1) They created the stock, OR 2) They are admin or MC of the associated order
-    if user_id:
-        if stock.user_id != user_id:
-            # Check if user is admin or manufacturing_coordinator of the order
-            if stock.source_order_id:
-                order = db.query(OrderModel).filter(OrderModel.id == stock.source_order_id).first()
-                if order and order.admin_id != user_id and order.manufacturing_coordinator_id != user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not authorized to delete this stock item"
-                    )
-            else:
+    # Authorization: if user_id provided, require creator or admin/MC of the associated order
+    if user_id is not None and stock.user_id != user_id:
+        # Check if user is admin or manufacturing_coordinator of the order
+        if stock.source_order_id:
+            order = db.query(OrderModel).filter(OrderModel.id == stock.source_order_id).first()
+            if order and order.admin_id != user_id and order.manufacturing_coordinator_id != user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not authorized to delete this stock item"
                 )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to delete this stock item"
+            )
     
     try:
         # Rule 3: Delete all related data
@@ -1591,18 +1600,24 @@ class AutoExtractRequest(BaseModel):
     stock_size: Optional[str] = None
     quantity: int = 1
     required_length: Optional[float] = None
-    user_id: int
+    user_id: Optional[int] = None
     process_type: Optional[str] = 'Barstocks'
     form_type: Optional[str] = None
     dimensions: Optional[dict] = None
 
 
 @router.post("/auto-extract-process")
-def process_auto_extract_material(request: AutoExtractRequest, db: Session = Depends(get_db)):
+def process_auto_extract_material(
+    request: AutoExtractRequest,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     """
     Process extracted material for a part - creates stock in database.
     This should only be called when user clicks Procure button.
     """
+    request.user_id = current_user.id
+
     # Get part
     part = db.query(PartModel).filter(PartModel.id == request.part_id).first()
     if not part:

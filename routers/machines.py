@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 
 from DB.database import SessionLocal, get_db
-from DB.models.configuration import Machine as MachineModel, workcenter as workcenterModel
+from DB.models.configuration import Machine as MachineModel, workcenter as workcenterModel, MachineMHRValue as MachineMHRValueModel, MHRParticular as MHRParticularModel
 from DB.schemas.configuration import (
     Machine,
     MachineCreate,
@@ -105,6 +105,26 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_machine)
 
+    # Auto-assign all active MHR particulars to the new machine
+    try:
+        particulars = db.query(MHRParticularModel).filter(MHRParticularModel.is_active == True).all()
+        for particular in particulars:
+            mhr_value = MachineMHRValueModel(
+                machine_id=db_machine.id,
+                particular_id=particular.id,
+                is_applicable=True,
+                input_value=None,
+                computed_value=None,
+                sequence_override=None,
+                updated_by=16  # Default user ID
+            )
+            db.add(mhr_value)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        # Non-blocking: machine creation should not fail if MHR assignment fails
+        print(f"Warning: Failed to assign MHR particulars to machine {db_machine.id}: {e}")
+
     # Create calibration notification immediately if due within 10 days
     try:
         if db_machine.calibration_due_date:
@@ -174,6 +194,76 @@ def verify_machine(machine_id: int, password: str, db: Session = Depends(get_db)
             detail="Invalid machine ID or password"
         )
     return machine
+
+
+@router.get("/with-mhr")
+def get_all_machines_with_mhr(db: Session = Depends(get_db)):
+    """Get all machines with their MHR details (calculated, recommended, and particulars)"""
+    # Get all machines with basic info
+    query = text("""
+        SELECT
+            m.id, m.work_center_id, m.type, m.make, m.model,
+            m.year_of_installation, m.cnc_controller, m.cnc_controller_service,
+            m.remarks, m.mhr, m.recommended_mhr, m.mhr_calculated_at, m.calibration_date, m.calibration_due_date,
+            m.calibration_frequency,
+            CASE
+                WHEN mls.status IS NULL OR BTRIM(mls.status) = '' THEN 'OFF'
+                WHEN UPPER(BTRIM(mls.status)) = 'ON' THEN 'IDLE'
+                ELSE UPPER(BTRIM(mls.status))
+            END AS machine_state,
+            wc.work_center_name AS work_center_name,
+            wc.code AS work_center_code,
+            wc.description AS work_center_description,
+            wc.is_schedulable AS work_center_is_schedulable
+        FROM configuration.machines m
+        LEFT JOIN production_monitoring.machine_live_status mls ON mls.machine_id = m.id
+        LEFT JOIN configuration.work_centers wc ON wc.id = m.work_center_id
+        ORDER BY wc.work_center_name, m.type, m.make, m.model ASC
+    """)
+    machines = db.execute(query).mappings().all()
+    
+    # Get MHR particulars for all machines
+    machine_ids = [m['id'] for m in machines]
+    if machine_ids:
+        particulars_query = text("""
+            SELECT 
+                mv.machine_id,
+                mv.id as value_id,
+                mv.particular_id,
+                p.code,
+                p.name,
+                p.is_input,
+                p.formula,
+                p.unit,
+                mv.is_applicable,
+                mv.sequence_override,
+                mv.input_value,
+                mv.computed_value
+            FROM configuration.machine_mhr_values mv
+            JOIN configuration.mhr_particulars p ON p.id = mv.particular_id
+            WHERE mv.machine_id = ANY(:machine_ids) AND mv.is_applicable = true
+            ORDER BY mv.machine_id, COALESCE(mv.sequence_override, p.default_sequence)
+        """)
+        particulars = db.execute(particulars_query, {"machine_ids": machine_ids}).mappings().all()
+        
+        # Group particulars by machine_id
+        particulars_by_machine = {}
+        for p in particulars:
+            machine_id = p['machine_id']
+            if machine_id not in particulars_by_machine:
+                particulars_by_machine[machine_id] = []
+            particulars_by_machine[machine_id].append(dict(p))
+    else:
+        particulars_by_machine = {}
+    
+    # Add particulars to each machine
+    result = []
+    for machine in machines:
+        machine_dict = dict(machine)
+        machine_dict['mhr_particulars'] = particulars_by_machine.get(machine['id'], [])
+        result.append(machine_dict)
+    
+    return result
 
 
 @router.get("/{machine_id}", response_model=MachinePublic)

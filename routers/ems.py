@@ -6,15 +6,16 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from DB.database import get_db
+from DB.database import SessionLocal, get_db
 from DB.models.ems import MachineEMSLive, MachineEMSHistory, ShiftwiseEnergyLive, ShiftwiseEnergyHistory
-from DB.models.configuration import Machine
+from DB.models.configuration import Machine, workcenter
 from DB.schemas.ems import ShiftwiseEnergyResponse
 
 router = APIRouter(prefix="/energy-monitoring", tags=["Energy Monitoring"])
@@ -92,9 +93,8 @@ class MachineStatusTracker:
 class MachineParameterTracker:
     PARAMS = [
         'phase_a_voltage', 'phase_b_voltage', 'phase_c_voltage', 'avg_phase_voltage',
-        'line_ab_voltage', 'line_bc_voltage', 'line_ca_voltage', 'avg_line_voltage',
         'phase_a_current', 'phase_b_current', 'phase_c_current', 'avg_three_phase_current',
-        'power_factor', 'frequency', 'total_instantaneous_power', 'active_energy_delivered', 'status'
+        'frequency', 'total_instantaneous_power', 'active_energy_delivered', 'status'
     ]
 
     def __init__(self):
@@ -146,23 +146,20 @@ def _live_row_parameters(row):
     return {
         "machine_id": row.machine_id,
         "status": row.status,
-        "timestamp": row.timestamp.isoformat(),
+        "timestamp": row.timestamp.isoformat() if row.timestamp is not None else None,
         "phase_a_voltage": row.phase_a_voltage,
         "phase_b_voltage": row.phase_b_voltage,
         "phase_c_voltage": row.phase_c_voltage,
         "avg_phase_voltage": _mean(row.phase_a_voltage, row.phase_b_voltage, row.phase_c_voltage),
-        "line_ab_voltage": None,
-        "line_bc_voltage": None,
-        "line_ca_voltage": None,
-        "avg_line_voltage": None,
         "phase_a_current": row.phase_a_current,
         "phase_b_current": row.phase_b_current,
         "phase_c_current": row.phase_c_current,
         "avg_three_phase_current": _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current),
-        "power_factor": None,
         "frequency": row.frequency,
         "total_instantaneous_power": row.total_instantaneous_power,
         "active_energy_delivered": row.active_energy_delivered,
+        "power": row.total_instantaneous_power,
+        "energy": row.active_energy_delivered,
     }
 
 
@@ -219,10 +216,17 @@ def _single_machine_params(db: Session, machine_id: int):
     name = machine.make if machine else f"Machine-{machine_id}"
     row = db.query(MachineEMSLive).filter(MachineEMSLive.machine_id == machine_id).first()
     if not row:
-        return {"machine_id": machine_id, "machine_name": name, "status": "OFFLINE", "timestamp": datetime.now().isoformat()}
+        return {
+            "machine_id": machine_id,
+            "machine_name": name,
+            "status": None,
+            "offline": True,
+            "timestamp": None,
+        }
     return {
         "machine_id": machine_id,
         "machine_name": name,
+        "offline": False,
         **_live_row_parameters(row),
     }
 
@@ -357,17 +361,93 @@ def shiftwise_live(db: Session = Depends(get_db)):
 
 
 @router.get("/shiftwise-energy/history", response_model=ShiftwiseEnergyResponse)
-def shiftwise_history(machine_id: Optional[int] = None, db: Session = Depends(get_db)):
+def shiftwise_history(
+    start_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    machine_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Historical energy for Productivity page.
+    Prefer ems.machine_ems_history (timestamp column) for a date range;
+    fall back to ems.shiftwise_energy_history when no range is given.
+    """
     from DB.models.configuration import Machine
+
     machine_names = {m.id: m.make for m in db.query(Machine.id, Machine.make).all()}
+
+    start_dt = end_dt = None
+    if start_date or end_date:
+        try:
+            start_dt = datetime.strptime(start_date or end_date, "%Y-%m-%d")
+            end_day = datetime.strptime(end_date or start_date, "%Y-%m-%d")
+            end_dt = end_day + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    # Date-range history from machine_ems_history (energy delta per machine)
+    if start_dt is not None and end_dt is not None:
+        params = {"start": start_dt, "end": end_dt}
+        machine_filter = ""
+        if machine_id is not None:
+            machine_filter = "AND machine_id = :machine_id"
+            params["machine_id"] = machine_id
+
+        rows = db.execute(
+            text(
+                f"""
+                SELECT
+                    machine_id,
+                    MAX(timestamp) AS last_ts,
+                    MIN(active_energy_delivered) AS min_energy,
+                    MAX(active_energy_delivered) AS max_energy
+                FROM ems.machine_ems_history
+                WHERE timestamp >= :start
+                  AND timestamp < :end
+                  {machine_filter}
+                GROUP BY machine_id
+                ORDER BY machine_id
+                """
+            ),
+            params,
+        ).fetchall()
+
+        data = []
+        for r in rows:
+            mid = r[0]
+            min_e = r[2]
+            max_e = r[3]
+            total = None
+            if min_e is not None and max_e is not None:
+                total = round(float(max_e) - float(min_e), 4)
+                if total < 0:
+                    total = round(float(max_e), 4)
+            data.append(
+                {
+                    "machine_id": mid,
+                    "machine_name": machine_names.get(mid, f"Machine-{mid}"),
+                    "timestamp": r[1].isoformat() if r[1] is not None else None,
+                    "first_shift": 0.0,
+                    "second_shift": 0.0,
+                    "total_energy": total if total is not None else 0.0,
+                }
+            )
+        return ShiftwiseEnergyResponse(data=data, timestamp=datetime.now().isoformat())
+
+    # No date filter — return shiftwise_energy_history rows
     q = db.query(ShiftwiseEnergyHistory)
     if machine_id:
         q = q.filter(ShiftwiseEnergyHistory.machine_id == machine_id)
     rows = q.order_by(ShiftwiseEnergyHistory.timestamp.desc()).all()
     data = [
-        {"machine_id": r.machine_id, "machine_name": machine_names.get(r.machine_id, f"Machine-{r.machine_id}"),
-         "timestamp": r.timestamp.isoformat(),
-         "first_shift": r.first_shift, "second_shift": r.second_shift, "total_energy": r.total_energy}
+        {
+            "machine_id": r.machine_id,
+            "machine_name": machine_names.get(r.machine_id, f"Machine-{r.machine_id}"),
+            "timestamp": r.timestamp.isoformat(),
+            "first_shift": r.first_shift,
+            "second_shift": r.second_shift,
+            "total_energy": r.total_energy,
+        }
         for r in rows
     ]
     return ShiftwiseEnergyResponse(data=data, timestamp=datetime.now().isoformat())
@@ -382,15 +462,10 @@ class ParameterEnum(str, Enum):
     phase_b_voltage = "phase_b_voltage"
     phase_c_voltage = "phase_c_voltage"
     avg_phase_voltage = "avg_phase_voltage"
-    line_ab_voltage = "line_ab_voltage"
-    line_bc_voltage = "line_bc_voltage"
-    line_ca_voltage = "line_ca_voltage"
-    avg_line_voltage = "avg_line_voltage"
     phase_a_current = "phase_a_current"
     phase_b_current = "phase_b_current"
     phase_c_current = "phase_c_current"
     avg_three_phase_current = "avg_three_phase_current"
-    power_factor = "power_factor"
     frequency = "frequency"
     total_instantaneous_power = "total_instantaneous_power"
     active_energy_delivered = "active_energy_delivered"
@@ -411,53 +486,85 @@ def energy_summary(db: Session = Depends(get_db)):
 
 @router.get("/machines/")
 def list_machines(db: Session = Depends(get_db)):
-    machines = db.query(Machine).all()
-    return [{"id": m.id, "machine_name": m.make} for m in machines]
+    """Return only machines present in ems.machine_ems_live (not all configuration machines)."""
+    live_ids = {
+        mid for (mid,) in db.query(MachineEMSLive.machine_id).distinct().all() if mid is not None
+    }
+    if not live_ids:
+        return []
+
+    rows = (
+        db.query(Machine, workcenter.work_center_name)
+        .outerjoin(workcenter, workcenter.id == Machine.work_center_id)
+        .filter(Machine.id.in_(live_ids))
+        .order_by(Machine.id)
+        .all()
+    )
+    return [
+        {
+            "id": m.id,
+            "machine_name": m.make or m.model or f"Machine-{m.id}",
+            "workshop_name": wc_name,  # work center name (no separate workshop column)
+            "work_center_name": wc_name,
+        }
+        for m, wc_name in rows
+    ]
 
 
 @router.get("/live_recent")
 @router.get("/live_recent/")
 def live_recent(machine_id: int, db: Session = Depends(get_db)):
-    row = db.query(MachineEMSLive).filter(MachineEMSLive.machine_id == machine_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No live data for machine {machine_id}")
-    machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    return {
-        "machine_id": machine_id,
-        "machine_name": machine.make if machine else f"Machine-{machine_id}",
-        "power": row.total_instantaneous_power,
-        "energy": row.active_energy_delivered,
-        "frequency": row.frequency,
-        "timestamp": row.timestamp.isoformat(),
-        "status": row.status,
-        "phase_a_voltage": row.phase_a_voltage,
-        "phase_b_voltage": row.phase_b_voltage,
-        "phase_c_voltage": row.phase_c_voltage,
-        "phase_a_current": row.phase_a_current,
-        "phase_b_current": row.phase_b_current,
-        "phase_c_current": row.phase_c_current,
-        "avg_three_phase_current": _mean(row.phase_a_current, row.phase_b_current, row.phase_c_current),
-    }
+    """Latest snapshot from ems.machine_ems_live for one machine."""
+    return _single_machine_params(db, machine_id)
+
+
+def _ems_status_label(status: Optional[int]) -> str:
+    """Map ems.machine_ems_live.status integer → shop-floor label.
+    0 = OFF, 1 = ON, 2 = PRODUCTION
+    """
+    if status == 0:
+        return "OFF"
+    if status == 1:
+        return "ON"
+    if status == 2:
+        return "PRODUCTION"
+    return "OFF"
+
+
+def build_all_machine_states(db: Session):
+    """Live status snapshot from ems.machine_ems_live (source of truth for shop floor)."""
+    rows = db.query(MachineEMSLive).order_by(MachineEMSLive.machine_id).all()
+    return [
+        {
+            "machine_id": row.machine_id,
+            "state": _ems_status_label(row.status),
+            "timestamp": row.timestamp.isoformat() if row.timestamp is not None else None,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/all_machine_states")
 @router.get("/all_machine_states/")
 def all_machine_states(db: Session = Depends(get_db)):
-    # Fetch status from production_monitoring.machine_live_status
-    query = text("""
-        SELECT machine_id, status, last_updated
-        FROM production_monitoring.machine_live_status
-        ORDER BY machine_id
-    """)
-    rows = db.execute(query).fetchall()
-    return [
-        {
-            "machine_id": row[0],
-            "state": row[1],  # This will be "OFF", "ON", "PRODUCTION"
-            "timestamp": row[2].isoformat()
-        }
-        for row in rows
-    ]
+    return build_all_machine_states(db)
+
+
+@router.websocket("/all_machine_states/ws")
+async def all_machine_states_ws(websocket: WebSocket):
+    """Push machine status snapshot every few seconds (replaces polling GET)."""
+    await websocket.accept()
+    try:
+        while True:
+            db = SessionLocal()
+            try:
+                snapshot = build_all_machine_states(db)
+            finally:
+                db.close()
+            await websocket.send_json(jsonable_encoder(snapshot))
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
 
 
 @router.get("/get_machine_history/{machine_id}")

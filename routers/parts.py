@@ -25,7 +25,7 @@ from DB.models.oms import (
 
 from DB.models.inventory import RawMaterial, RawMaterialStock, RawMaterialUnit, Vendors
 from DB.models.access_control import AccessUser
-from DB.schemas.oms import Part, PartCreate, PartUpdate
+from DB.schemas.oms import Part, PartCreate, PartUpdate, PartMove
 from services.stock_auto_update import StockAutoUpdateService
 from services.notification_service import NotificationService
 from services.raw_material_history_service import RawMaterialHistoryService
@@ -274,6 +274,98 @@ def get_parts_by_type(type_id: int, user_id: int | None = None, db: Session = De
     return [_part_to_dict(p, type_map, rm_map, unit_map, user_map, vendor_map) for p in parts]
 
 
+def _assert_part_not_schedule_active(part_id: int, db: Session) -> None:
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this part cannot be modified because it is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+        )
+
+
+@router.put("/{part_id}/move", response_model=Part)
+def move_part(part_id: int, payload: PartMove, db: Session = Depends(get_db)):
+    """
+    Move a part to another parent within the same product without recreate.
+    - assembly_id = null  → direct under product
+    - assembly_id = <id>  → under that assembly / sub-assembly
+    Operations, documents, tools, and raw-material links stay on the same part.id.
+    """
+    db_part = db.query(PartModel).filter(PartModel.id == part_id).first()
+    if not db_part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Part with id {part_id} not found"
+        )
+
+    if db_part.recycle_bin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot move a part that is in the recycle bin. Restore it first."
+        )
+
+    _assert_part_not_schedule_active(part_id, db)
+
+    old_assembly_id = db_part.assembly_id
+    new_assembly_id = payload.assembly_id
+
+    if old_assembly_id == new_assembly_id:
+        type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+        return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
+
+    if new_assembly_id is not None:
+        target_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == new_assembly_id).first()
+        if not target_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Assembly with id {new_assembly_id} not found"
+            )
+        if target_assembly.product_id != db_part.product_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot move part to an assembly under a different product"
+            )
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(new_assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot move part under assembly '{recycle_bin_assembly}' because it is in the recycle bin"
+            )
+
+    db_part.assembly_id = new_assembly_id
+    db.commit()
+    db.refresh(db_part)
+
+    user_name = None
+    user_role = None
+    if db_part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+
+    NotificationService.log_part_change(
+        db=db,
+        part_id=db_part.id,
+        action="updated",
+        user_id=db_part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={
+            "part_name": db_part.part_name,
+            "part_number": db_part.part_number,
+            "changes": {
+                "assembly_id": {"old": old_assembly_id, "new": new_assembly_id}
+            },
+        },
+    )
+
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
+
+
 @router.put("/{part_id}", response_model=Part)
 def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
     """Update a part"""
@@ -284,17 +376,7 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
             detail=f"Part with id {part_id} not found"
         )
 
-    # Check if part is scheduled (status is "active")
-    schedule_status = db.execute(
-        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
-        {"pid": part_id}
-    ).fetchone()
-    
-    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sorry, this part cannot be modified because it is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
-        )
+    _assert_part_not_schedule_active(part_id, db)
 
     update_data = part.model_dump(exclude_unset=True)
     

@@ -5,9 +5,10 @@ import redis
 import decimal
 import datetime
 import asyncio
+from contextvars import ContextVar
 import concurrent.futures
 from typing import Dict, List, Any, Tuple, AsyncGenerator, Optional
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -17,6 +18,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from DB.database import engine
 from DB.models.chatbot import ChatRequest, ChatResponse
+from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
 from chatbot.schema_knowledge import OUT_OF_SCOPE_MESSAGE, build_system_prompt
 from chatbot.intent import get_intent_hints
 from chatbot.broad_search import is_clearly_off_topic, try_broad_search, extract_search_terms
@@ -28,6 +31,10 @@ from chatbot.user_context import (
     personalized_greeting,
     get_role_suggestions,
     get_user_intent_hints,
+)
+
+_chat_user_context: ContextVar[Optional[UserContext]] = ContextVar(
+    "chat_user_context", default=None
 )
 from chatbot.query_patterns import (
     PARTS_FOR_ORDER_SQL,
@@ -54,6 +61,7 @@ from chatbot.result_validator import (
     results_look_wrong,
 )
 from chatbot.order_sql import try_order_query
+from chatbot.tool_sql import try_tool_query
 from chatbot.context_resolver import resolve_follow_up_question, try_machines_for_order_query
 from chatbot.groq_client import groq_follow_ups, is_groq_enabled
 
@@ -518,7 +526,65 @@ def run_broad_search(question: str) -> Tuple[Optional[str], List[Dict]]:
     return sql, data
 
 
+def scope_order_sql(sql: str, ctx: Optional[UserContext]) -> str:
+    """Restrict order-backed tables to orders assigned to the current Admin/MC."""
+    if not ctx or not ctx.user_id:
+        return sql
+    scope_column = ctx.order_scope_column()
+    if not scope_column:
+        return sql
+
+    uid = int(ctx.user_id)
+    predicate = f"{scope_column} = {uid}"
+
+    # Scope the canonical orders table. Replacing the table expression works for
+    # both FROM and JOIN clauses without having to parse their ON/WHERE syntax.
+    scoped = re.sub(
+        r"\boms\.orders\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+        rf"(SELECT * FROM oms.orders WHERE {predicate}) \1",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+    # Some order-related queries start from downstream tables and never join
+    # oms.orders. Scope those sources through their order foreign key.
+    table_scopes = (
+        (
+            r"\bscheduling\.planned_schedule_items\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "scheduling.planned_schedule_items",
+            "sale_order_id",
+        ),
+        (
+            r"\boms\.order_part_priorities\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "oms.order_part_priorities",
+            "order_id",
+        ),
+        (
+            r"\bscheduling\.part_schedule_status\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "scheduling.part_schedule_status",
+            "sale_order_id",
+        ),
+        (
+            r"\bquality\.stage_inspection\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+            "quality.stage_inspection",
+            "sale_order_id",
+        ),
+    )
+    for pattern, table, order_key in table_scopes:
+        def _replace(match, source=table, key=order_key):
+            alias = match.group(1)
+            return (
+                f"(SELECT scoped_source.* FROM {source} scoped_source "
+                f"JOIN oms.orders scoped_order ON scoped_order.id = scoped_source.{key} "
+                f"WHERE scoped_order.{predicate}) {alias}"
+            )
+
+        scoped = re.sub(pattern, _replace, scoped, flags=re.IGNORECASE)
+    return scoped
+
+
 def execute_sql(sql: str) -> Tuple[List[Dict], str]:
+    sql = scope_order_sql(sql, _chat_user_context.get())
     ok, err = SQLValidator.validate(sql)
     if not ok:
         return [], err
@@ -638,6 +704,7 @@ class ChatService:
 
     def process(self, question: str, session_id: str, ctx: Optional[UserContext] = None) -> Dict:
         ctx = ctx or UserContext()
+        context_token = _chat_user_context.set(ctx)
         try:
             return self._process(question, session_id, ctx)
         except Exception:
@@ -651,6 +718,8 @@ class ChatService:
             suggestions = get_role_suggestions(ctx)[:3]
             self.history.save(session_id, question, answer)
             return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
+        finally:
+            _chat_user_context.reset(context_token)
 
     def _process(self, question: str, session_id: str, ctx: UserContext) -> Dict:
         hist = self.history.get(session_id)
@@ -865,7 +934,7 @@ class ChatService:
 # ══════════════════════════════════════════════════════════════════════════════
 
 limiter = Limiter(key_func=get_remote_address)
-router = APIRouter()
+router = APIRouter(tags=["Chatbot"])
 
 _svc: ChatService = None
 
@@ -876,20 +945,43 @@ def get_svc():
     return _svc
 
 
-def _ctx_from_body(body: ChatRequest) -> UserContext:
+def _ctx_from_request(request: Request, body: ChatRequest = None) -> UserContext:
+    """Build user context from JWT user (request.state.current_user or body ignored for identity)."""
+    user = getattr(request.state, "current_user", None)
+    if user is None:
+        return UserContext(
+            user_id=None,
+            user_name=None,
+            role=None,
+            center=None,
+        )
     return UserContext(
-        user_id=body.user_id,
-        user_name=body.user_name,
-        role=body.role,
-        center=body.center,
+        user_id=int(user.id),
+        user_name=getattr(user, "user_name", None),
+        role=getattr(user, "role", None),
+        center=getattr(user, "center", None),
     )
+
+
+def _require_chatbot_role(ctx: UserContext) -> None:
+    if not ctx.user_id or ctx.role_key() not in {"admin", "mc"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Chatbot access is limited to Admin and Manufacturing Coordinator users.",
+        )
 
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
-async def chat(request: Request, body: ChatRequest):
+async def chat(
+    request: Request,
+    body: ChatRequest,
+    current_user: AccessUser = Depends(get_current_user),
+):
+    request.state.current_user = current_user
+    ctx = _ctx_from_request(request, body)
+    _require_chatbot_role(ctx)
     try:
-        ctx = _ctx_from_body(body)
         result = await asyncio.to_thread(
             get_svc().process, body.question, body.session_id, ctx,
         )
@@ -899,7 +991,7 @@ async def chat(request: Request, body: ChatRequest):
     except Exception:
         import logging
         logging.exception("Chatbot API error")
-        ctx = _ctx_from_body(body)
+        ctx = _ctx_from_request(request, body)
         from chatbot.user_context import get_role_suggestions
         return ChatResponse(
             answer=(
@@ -915,8 +1007,14 @@ async def chat(request: Request, body: ChatRequest):
 
 @router.post("/chat/stream")
 @limiter.limit("30/minute")
-async def chat_stream(request: Request, body: ChatRequest):
-    ctx = _ctx_from_body(body)
+async def chat_stream(
+    request: Request,
+    body: ChatRequest,
+    current_user: AccessUser = Depends(get_current_user),
+):
+    request.state.current_user = current_user
+    ctx = _ctx_from_request(request, body)
+    _require_chatbot_role(ctx)
 
     async def generate():
         result = await asyncio.to_thread(
@@ -940,13 +1038,19 @@ async def clear_history(session_id: str):
 
 @router.get("/suggestions")
 async def suggestions(
+    request: Request,
     user_id: Optional[int] = None,
     user_name: Optional[str] = None,
     role: Optional[str] = None,
     center: Optional[str] = None,
+    current_user: AccessUser = Depends(get_current_user),
 ):
     from chatbot.suggestions import get_dynamic_suggestions
-    ctx = UserContext(user_id=user_id, user_name=user_name, role=role, center=center)
+
+    request.state.current_user = current_user
+    _ = (user_id, user_name, role, center)  # ignore client identity
+    ctx = _ctx_from_request(request)
+    _require_chatbot_role(ctx)
     return await asyncio.to_thread(get_dynamic_suggestions, ctx)
 
 

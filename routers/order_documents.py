@@ -8,6 +8,7 @@ from DB.models.access_control import AccessUser
 from DB.minio_client import get_minio_client
 from DB.schemas.oms import OrderDocument as OrderDocumentResponse, OrderDocumentCreate, OrderDocumentUpdate
 from services.notification_service import NotificationService
+from auth.deps import get_current_user
 import uuid
 import os
 from datetime import datetime, timedelta
@@ -39,12 +40,14 @@ async def upload_order_document(
     document_version: str = Form(""),
     parent_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload an order document to MinIO.
-    user_id must be one of the order's project_coordinator_id, admin_id, or manufacturing_coordinator_id.
+    Uploader identity is taken from the JWT user.
     """
+    user_id = current_user.id
     # Check if order exists
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
@@ -150,6 +153,7 @@ async def upload_order_documents_bulk(
     parent_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload multiple order documents in a single request (multipart/form-data).
@@ -160,6 +164,7 @@ async def upload_order_documents_bulk(
     - document_version: <ver1>, <ver2>, ...
     - document_name: <name1>, <name2>, ...
     """
+    user_id = current_user.id
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -433,11 +438,15 @@ async def replace_order_document_with_metadata(
         raise HTTPException(status_code=500, detail=f"Failed to replace document: {str(e)}")
 
 @router.get("/", response_model=List[OrderDocumentResponse])
-def get_order_documents(user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all order documents. Filter by user_id (uploader) for module-specific views."""
+def get_order_documents(
+    user_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Get order documents for the authenticated uploader (client user_id ignored)."""
+    user_id = current_user.id
     query = db.query(OrderDocument).order_by(OrderDocument.id.asc())
-    if user_id is not None:
-        query = query.filter(OrderDocument.user_id == user_id)
+    query = query.filter(OrderDocument.user_id == user_id)
     return query.all()
 
 
@@ -508,8 +517,15 @@ async def download_order_document(document_id: int, db: Session = Depends(get_db
 
 
 @router.get("/order/{order_id}", response_model=List[OrderDocumentResponse])
-def get_documents_by_order(order_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all documents for a specific order. Filter by user_id (uploader) for module-specific views."""
+def get_documents_by_order(
+    order_id: int,
+    user_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Get all documents for a specific order. Client user_id ignored (JWT required for auth)."""
+    _ = current_user
+    user_id = None
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")

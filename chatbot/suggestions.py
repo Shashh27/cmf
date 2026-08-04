@@ -73,10 +73,22 @@ def get_dynamic_suggestions(ctx: Optional[UserContext] = None) -> Dict[str, Any]
     ctx = ctx or UserContext()
     role_prompts = get_role_suggestions(ctx)
     from_db: List[str] = []
+    scope_column = ctx.order_scope_column()
+    scope_filter = (
+        f" AND {scope_column} = {int(ctx.user_id)}"
+        if scope_column and ctx.user_id
+        else ""
+    )
+    joined_scope_filter = (
+        f" AND o.{scope_column} = {int(ctx.user_id)}"
+        if scope_column and ctx.user_id
+        else ""
+    )
 
     for so in _safe_rows(
         "SELECT sale_order_number FROM oms.orders "
-        "WHERE sale_order_number IS NOT NULL ORDER BY created_at DESC LIMIT 5"
+        f"WHERE sale_order_number IS NOT NULL{scope_filter} "
+        "ORDER BY created_at DESC LIMIT 5"
     ):
         from_db.append(f"Show order {so}")
         from_db.append(f"Parts for order {so}")
@@ -88,8 +100,10 @@ def get_dynamic_suggestions(ctx: Optional[UserContext] = None) -> Dict[str, Any]
         from_db.append(f"Stock for {material}")
 
     for product in _safe_rows(
-        "SELECT product_name FROM oms.products "
-        "WHERE product_name IS NOT NULL ORDER BY product_name LIMIT 3"
+        "SELECT DISTINCT p.product_name FROM oms.products p "
+        "JOIN oms.orders o ON o.product_id = p.id "
+        f"WHERE p.product_name IS NOT NULL{joined_scope_filter} "
+        "ORDER BY p.product_name LIMIT 3"
     ):
         from_db.append(f"Orders for product {product}")
 
@@ -102,8 +116,10 @@ def get_dynamic_suggestions(ctx: Optional[UserContext] = None) -> Dict[str, Any]
     from_db.append("Are all required tools and parts in stock for scheduled operations?")
 
     scheduled_count = _safe_rows(
-        "SELECT COUNT(*)::text FROM scheduling.planned_schedule_items "
-        "WHERE machine_id IS NOT NULL LIMIT 1"
+        "SELECT COUNT(*)::text FROM scheduling.planned_schedule_items psi "
+        "JOIN oms.orders o ON o.id = psi.sale_order_id "
+        f"WHERE psi.machine_id IS NOT NULL{joined_scope_filter} "
+        "LIMIT 1"
     )
     if scheduled_count and scheduled_count[0] not in ("0", "None"):
         from_db.append("Tools for scheduled operations on machines")

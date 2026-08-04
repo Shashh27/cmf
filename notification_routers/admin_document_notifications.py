@@ -9,6 +9,7 @@ from DB.models.notifications import MCNotification as MCNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Document as DocumentModel, Part as PartModel
 from services.notification_service import NotificationService
+from auth.deps import get_current_user
 
 router = APIRouter(prefix="/admin-document-notifications", tags=["admin-document-notifications"])
 
@@ -30,8 +31,10 @@ def get_all_document_notifications(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
     """Get ALL document notifications for Admin (not filtered by user)"""
+    _ = current_user  # require JWT
     # Build query - fetch all notifications
     q = db.query(MCNotificationModel)
     
@@ -123,8 +126,12 @@ def get_all_document_notifications(
 
 
 @router.get("/pending-count")
-def get_pending_count(db: Session = Depends(get_db)):
+def get_pending_count(
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     """Get count of pending document notifications for Admin"""
+    _ = current_user
     count = db.query(MCNotificationModel).filter(
         MCNotificationModel.is_acknowledged == False,  # noqa: E712
         MCNotificationModel.is_rejected == False  # noqa: E712

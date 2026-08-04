@@ -18,6 +18,7 @@ from .step_converter import StepConverter
 from .rawmaterial_extract import extract_pdf_data
 from services.notification_service import NotificationService
 from DB.models.oms import Assembly as AssemblyModel
+from auth.deps import get_current_user
 
 
 router = APIRouter(
@@ -244,7 +245,8 @@ async def create_document(
         parent_id: Optional[int] = Form(None),
         user_id: Optional[int] = Form(None),
         background_tasks: BackgroundTasks = None,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Create a new document with file upload to MinIO
@@ -259,6 +261,8 @@ async def create_document(
         assembly_id: ID of the associated assembly (optional)
         parent_id: Optional parent document ID
     """
+    user_id = current_user.id
+
     # Ensure at least one of part_id or assembly_id is provided
     if part_id is None and assembly_id is None:
         raise HTTPException(
@@ -452,7 +456,8 @@ async def create_documents_bulk(
         assembly_id: Optional[int] = Form(None),
         user_id: Optional[int] = Form(None),
         background_tasks: BackgroundTasks = None,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Bulk create documents with file upload to MinIO (multipart/form-data).
@@ -464,6 +469,8 @@ async def create_documents_bulk(
     - document_version: <ver1>, <ver2>, ...
     - parent_id: <pid1>, <pid2>, ... (optional per file)
     """
+    user_id = current_user.id
+
     # Ensure at least one of part_id or assembly_id is provided
     if part_id is None and assembly_id is None:
         raise HTTPException(
@@ -670,11 +677,15 @@ async def create_documents_bulk(
 
 
 @router.get("/", response_model=List[Document])
-def get_documents(user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all documents. Filter by user_id (uploader) for module-specific views."""
+def get_documents(
+    user_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Get documents for the authenticated uploader (client user_id ignored)."""
+    user_id = current_user.id
     query = db.query(DocumentModel).order_by(DocumentModel.id.asc())
-    if user_id is not None:
-        query = query.filter(DocumentModel.user_id == user_id)
+    query = query.filter(DocumentModel.user_id == user_id)
     return query.all()
 
 
@@ -837,8 +848,17 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/part/{part_id}", response_model=List[Document])
-def get_documents_by_part(part_id: int, user_id: int | None = None, acknowledged_only: bool = False, db: Session = Depends(get_db)):
-    """Get all documents for a specific part. Filter by user_id (uploader) for module-specific views."""
+def get_documents_by_part(
+    part_id: int,
+    user_id: int | None = None,
+    acknowledged_only: bool = False,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Get all documents for a specific part. Client user_id ignored (JWT required for auth)."""
+    _ = current_user  # auth via Depends
+    # Ignore client-supplied user_id for scoping (IDOR prevention); list by part only
+    user_id = None
     query = db.query(DocumentModel).outerjoin(AccessUser, DocumentModel.user_id == AccessUser.id).filter(DocumentModel.part_id == part_id)
     if user_id is not None:
         query = query.filter(DocumentModel.user_id == user_id)
@@ -883,8 +903,15 @@ def get_documents_by_part(part_id: int, user_id: int | None = None, acknowledged
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Document])
-def get_documents_by_assembly(assembly_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all documents for a specific assembly. Filter by user_id (uploader) for module-specific views."""
+def get_documents_by_assembly(
+    assembly_id: int,
+    user_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    """Get all documents for a specific assembly. Client user_id ignored (JWT required for auth)."""
+    _ = current_user  # auth via Depends
+    user_id = None
     query = db.query(DocumentModel).filter(DocumentModel.assembly_id == assembly_id)
     if user_id is not None:
         query = query.filter(DocumentModel.user_id == user_id)
