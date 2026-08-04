@@ -142,6 +142,11 @@ class PartUpdate(BaseModel):
     recycle_bin: Optional[bool] = None  # Soft delete flag for recycle bin
 
 
+class PartMove(BaseModel):
+    """Reparent a part within the same product. assembly_id=None means direct under product."""
+    assembly_id: Optional[int] = None
+
+
 class Part(PartBase):
     id: int
     type_name: Optional[str] = None
@@ -427,6 +432,7 @@ class PartLightweight(BaseModel):
     raw_material_id: Optional[int] = None
     raw_material_name: Optional[str] = None
     raw_material_status: Optional[str] = None
+    part_detail: Optional[str] = None
     vendor_id: Optional[int] = None
     vendor_name: Optional[str] = None
     user_id: Optional[int] = None
@@ -709,7 +715,7 @@ class OrderWisePriority(BaseModel):
 # Document Extracted Data Schemas
 # =======================
 class DocumentExtractedDataBase(BaseModel):
-    document_id: int
+    document_id: Optional[int] = None
     part_id: int
     note: Optional[str] = None
     title: Optional[str] = None

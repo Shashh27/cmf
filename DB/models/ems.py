@@ -42,7 +42,7 @@ class MachineEMSLive(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
 
-    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=False)
+    machine_id = Column(Integer, ForeignKey('configuration.machines.id', ondelete="CASCADE"), nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
     
     status = Column(Integer)
@@ -72,7 +72,7 @@ class ShiftwiseEnergyLive(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     
-    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=False)
+    machine_id = Column(Integer, ForeignKey('configuration.machines.id', ondelete="CASCADE"), nullable=False)
     
     timestamp = Column(DateTime, default=datetime.now)
 

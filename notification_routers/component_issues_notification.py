@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
@@ -9,6 +9,8 @@ from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.inventory import ToolsList
 from DB.models.configuration import Machine
 from DB.models.oms import Order, Part
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from sqlalchemy import text
 from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
@@ -29,13 +31,18 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[ComponentIssuesNotificationWithDetails])
 def list_component_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(ComponentIssuesNotificationModel)
     if start_date:
         q = q.filter(ComponentIssuesNotificationModel.created_at >= start_date)
@@ -116,11 +123,16 @@ def list_component_issues_notifications(
 
 @router.get("/pending", response_model=List[ComponentIssuesNotificationSchema])
 def list_pending_component_issues_notifications(
-    mc_id: int | None = None,
-    pc_id: int | None = None,
-    admin_id: int | None = None,
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = None,
+    pc_id: Optional[int] = None,
+    mc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    pc_id = scope["pc_id"]
+    mc_id = scope["mc_id"]
     q = db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.is_ack == False)  # noqa: E712
     notifications = q.order_by(ComponentIssuesNotificationModel.id.desc()).all()
     comp_issue_ids = [n.comp_issues_id for n in notifications]
@@ -159,13 +171,17 @@ def list_pending_component_issues_notifications(
 
 
 @router.put("/{notification_id}/ack", response_model=ComponentIssuesNotificationSchema)
-def acknowledge_component_issues_notification(notification_id: int, db: Session = Depends(get_db)):
+def acknowledge_component_issues_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
     notif = db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     if not notif.is_ack:
         notif.is_ack = True
-        notif.ack_by = get_admin_username(db)
+        notif.ack_by = getattr(current_user, "user_name", None) or get_admin_username(db)
         notif.ack_at = datetime.now(IST)
         db.add(notif)
         db.commit()

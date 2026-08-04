@@ -78,6 +78,64 @@ class AutoExtractService:
                 if len_match:
                     dimensions['length'] = float(len_match.group(1))
                 return dimensions
+
+            # Handle Ø symbol and other diameter indicators: Ø70x155, phi70x155, Φ70x155, dia70x155
+            # Also handle formats like "70 dia x 155", "70d x 155", "70Ø x 155", "70x155Ø"
+            # Match both: symbol before number (Ø70) and number before symbol (70Ø)
+            diameter_symbol_match = re.search(r'(?:ø|phi|Φ|dia|d)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:ø|phi|Φ|dia|d)', stock_size, re.IGNORECASE)
+            if diameter_symbol_match:
+                dia_val = float(diameter_symbol_match.group(1) or diameter_symbol_match.group(2))
+                # Find the length - look for other numbers in the string
+                all_numbers = re.findall(r'[\d.]+', stock_size)
+                other_nums = []
+                for n in all_numbers:
+                    try:
+                        val = float(n)
+                        if val != dia_val:
+                            other_nums.append(val)
+                    except (ValueError, TypeError):
+                        continue
+                if other_nums:
+                    dimensions['diameter'] = dia_val
+                    dimensions['length'] = other_nums[0]
+                else:
+                    dimensions['diameter'] = dia_val
+                return dimensions
+
+            # Check for Square patterns with various labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+            # Handle formats: 20Lx20Bx20H, 20lengthx20breadthx20height, 20Lx20Wx20H
+            square_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)', stock_size, re.IGNORECASE)
+            if square_pattern_match:
+                vals = [float(square_pattern_match.group(1)), float(square_pattern_match.group(2)), float(square_pattern_match.group(3))]
+                labels = re.findall(r'(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)', stock_size, re.IGNORECASE) or []
+                # Try to assign based on labels
+                if len(labels) >= 3:
+                    label_lower = [l.lower() for l in labels]
+                    l_idx = next((i for i, l in enumerate(label_lower) if l in ['l', 'len', 'length']), None)
+                    b_idx = next((i for i, l in enumerate(label_lower) if l in ['b', 'br', 'breadth', 'w', 'wid', 'width']), None)
+                    h_idx = next((i for i, l in enumerate(label_lower) if l in ['h', 'ht', 'height']), None)
+                    if l_idx is not None:
+                        dimensions['length'] = vals[l_idx]
+                    if b_idx is not None:
+                        dimensions['breadth'] = vals[b_idx]
+                    if h_idx is not None:
+                        dimensions['height'] = vals[h_idx]
+                else:
+                    # Default: assume order is length x breadth x height
+                    dimensions['length'] = vals[0]
+                    dimensions['breadth'] = vals[1]
+                    dimensions['height'] = vals[2]
+                if dimensions.get('length') and dimensions.get('breadth') and dimensions.get('height'):
+                    return dimensions
+
+            # Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+            # Handle formats: 50ODx30IDx1000, 50odx30idx1000, 50outerx30innerx1000
+            pipe_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:od|outer|outerdia|outerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:id|inner|innerdia|innerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length)?', stock_size, re.IGNORECASE)
+            if pipe_pattern_match:
+                dimensions['outer_diameter'] = float(pipe_pattern_match.group(1))
+                dimensions['inner_diameter'] = float(pipe_pattern_match.group(2))
+                dimensions['length'] = float(pipe_pattern_match.group(3))
+                return dimensions
             
             # Try different formats
             if '/' in stock_size:

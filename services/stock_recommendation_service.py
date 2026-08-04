@@ -1,4 +1,5 @@
 import re
+import math
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Tuple
 from DB.models.inventory import (
@@ -282,6 +283,44 @@ class StockRecommendationService:
         return float("inf")
 
     @staticmethod
+    def _cross_section_within_near_range(
+        extracted_dims: Dict,
+        stock_dims: Dict,
+        form_type: str,
+        max_excess_ratio: float = 0.5,
+    ) -> bool:
+        """
+        Keep only near-range stock (e.g. planned 35 → allow up to 35*1.5=52.5).
+        Rejects far sizes like 85 when planned is 35.
+        """
+        if max_excess_ratio is None or max_excess_ratio < 0:
+            return True
+        if not StockRecommendationService._cross_section_meets_minimum(extracted_dims, stock_dims, form_type):
+            return False
+
+        def within(planned: Optional[float], stock: float) -> bool:
+            if planned is None or planned <= 0:
+                return False
+            return stock <= planned * (1.0 + max_excess_ratio)
+
+        if form_type == "Round":
+            return within(extracted_dims.get("diameter"), stock_dims.get("diameter", 0))
+
+        if form_type == "Square":
+            return (
+                within(extracted_dims.get("breadth"), stock_dims.get("breadth", 0))
+                and within(extracted_dims.get("height"), stock_dims.get("height", 0))
+            )
+
+        if form_type == "Pipe":
+            return (
+                within(extracted_dims.get("outer_diameter"), stock_dims.get("outer_diameter", 0))
+                and within(extracted_dims.get("inner_diameter"), stock_dims.get("inner_diameter", 0))
+            )
+
+        return False
+
+    @staticmethod
     def parse_extracted_dimensions(stock_size: str) -> Tuple[Dict, str]:
         """
         Parse extracted dimension string to dimensions dictionary and detect form type.
@@ -316,6 +355,43 @@ class StockRecommendationService:
                 dimensions["height"] = float(h_match.group(1))
                 return dimensions, form_type
 
+            # Check for Square patterns with various labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+            # Handle formats: 20Lx20Bx20H, 20lengthx20breadthx20height, 20Lx20Wx20H
+            square_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)', cleaned, re.IGNORECASE)
+            if square_pattern_match:
+                vals = [float(square_pattern_match.group(1)), float(square_pattern_match.group(2)), float(square_pattern_match.group(3))]
+                labels = re.findall(r'(?:L|LEN|LENGTH|W|WID|WIDTH|B|BR|BREADTH|H|HT|HEIGHT)', cleaned, re.IGNORECASE) or []
+                # Try to assign based on labels
+                if len(labels) >= 3:
+                    label_lower = [l.lower() for l in labels]
+                    l_idx = next((i for i, l in enumerate(label_lower) if l in ['l', 'len', 'length']), None)
+                    b_idx = next((i for i, l in enumerate(label_lower) if l in ['b', 'br', 'breadth', 'w', 'wid', 'width']), None)
+                    h_idx = next((i for i, l in enumerate(label_lower) if l in ['h', 'ht', 'height']), None)
+                    if l_idx is not None:
+                        dimensions["length"] = vals[l_idx]
+                    if b_idx is not None:
+                        dimensions["breadth"] = vals[b_idx]
+                    if h_idx is not None:
+                        dimensions["height"] = vals[h_idx]
+                else:
+                    # Default: assume order is length x breadth x height
+                    dimensions["length"] = vals[0]
+                    dimensions["breadth"] = vals[1]
+                    dimensions["height"] = vals[2]
+                form_type = "Square"
+                if dimensions.get("length") and dimensions.get("breadth") and dimensions.get("height"):
+                    return dimensions, form_type
+
+            # Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+            # Handle formats: 50ODx30IDx1000, 50odx30idx1000, 50outerx30innerx1000
+            pipe_pattern_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:OD|OUTER|OUTERDIA|OUTERDIAMETER)\s*X\s*(\d+(?:\.\d+)?)\s*(?:ID|INNER|INNERDIA|INNERDIAMETER)\s*X\s*(\d+(?:\.\d+)?)\s*(?:L|LEN|LENGTH)?', cleaned, re.IGNORECASE)
+            if pipe_pattern_match:
+                dimensions["outer_diameter"] = float(pipe_pattern_match.group(1))
+                dimensions["inner_diameter"] = float(pipe_pattern_match.group(2))
+                dimensions["length"] = float(pipe_pattern_match.group(3))
+                form_type = "Pipe"
+                return dimensions, form_type
+
             # Check for pattern like 260(DIA)x50(LENGTH) with parentheses
             dia_match = re.search(r'(\d+)\(DIA\)', cleaned)
             len_match = re.search(r'(\d+)\(LENGTH\)', cleaned)
@@ -325,6 +401,32 @@ class StockRecommendationService:
                 dimensions["diameter"] = float(dia_match.group(1))
                 dimensions["length"] = float(len_match.group(1))
                 return dimensions, form_type
+
+            # Handle Ø symbol and other diameter indicators: Ø70x155, phi70x155, Φ70x155, dia70x155
+            # Also handle formats like "70 dia x 155", "70d x 155", "70Ø x 155", "70x155Ø"
+            # Match both: symbol before number (Ø70) and number before symbol (70Ø)
+            diameter_symbol_match = re.search(r'(?:ø|phi|Φ|dia|d)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:ø|phi|Φ|dia|d)', cleaned, re.IGNORECASE)
+            if diameter_symbol_match:
+                dia_val = float(diameter_symbol_match.group(1) or diameter_symbol_match.group(2))
+                # Find the length - look for other numbers in the string
+                all_numbers = re.findall(r'[\d.]+', cleaned)
+                other_nums = []
+                for n in all_numbers:
+                    try:
+                        val = float(n)
+                        if val != dia_val:
+                            other_nums.append(val)
+                    except (ValueError, TypeError):
+                        continue
+                if other_nums:
+                    dimensions["diameter"] = dia_val
+                    dimensions["length"] = other_nums[0]
+                    form_type = "Round"
+                    return dimensions, form_type
+                else:
+                    dimensions["diameter"] = dia_val
+                    form_type = "Round"
+                    return dimensions, form_type
 
             # Remove parentheses and labels (DIA, LENGTH, etc.)
             cleaned = re.sub(r'\([^)]*\)', '', cleaned)  # Remove anything in parentheses
@@ -411,16 +513,24 @@ class StockRecommendationService:
         max_recommendations: int = 10,
         required_length: Optional[float] = None,
         material_id: Optional[int] = None,
+        max_cross_section_excess_ratio: float = 0.5,
+        max_length_multiplier: float = 3.0,
     ) -> List[Dict]:
         """
         Recommend stocks based on extracted raw material dimensions.
 
         When required_length is provided (planned cut length), recommendations only
-        include stocks that have at least one unit with remaining_length >= required_length.
-        Cross-section dimensions still must match; length is validated on live units.
+        include stocks that have at least one unit with remaining_length >= required_length
+        and remaining_length <= required_length * max_length_multiplier
+        (default 3x — e.g. planned 200 → unit remaining up to 600; 1500 is rejected).
 
-        material_id: optional planned_raw_material_id — used directly when set.
-        Otherwise fuzzy-matches extracted_material_name against the master list.
+        Cross-section must be >= planned and within near range
+        (default: stock <= planned * 1.5, e.g. 35 dia → up to ~52.5).
+
+        Match % blends cross-section fit and length fit (so exact dia + huge bar
+        is not shown as 100%).
+
+        Sorted nearest cross-section first, then lowest length waste.
         """
         # Parse extracted dimensions
         extracted_dims, form_type = StockRecommendationService.parse_extracted_dimensions(extracted_dimensions_str)
@@ -460,17 +570,22 @@ class StockRecommendationService:
             if not StockRecommendationService._cross_section_meets_minimum(extracted_dims, stock_dims, form_type):
                 continue
 
-            score = StockRecommendationService.calculate_dimension_match_score(
+            if not StockRecommendationService._cross_section_within_near_range(
+                extracted_dims,
+                stock_dims,
+                form_type,
+                max_excess_ratio=max_cross_section_excess_ratio,
+            ):
+                continue
+
+            cross_score = StockRecommendationService.calculate_dimension_match_score(
                 extracted_dims,
                 stock_dims,
                 form_type,
                 check_stock_length=not use_unit_length_check,
             )
 
-            if score <= 0:
-                continue
-
-            if not use_unit_length_check and score < min_score:
+            if cross_score <= 0:
                 continue
 
             usable_units = StockRecommendationService._get_usable_units(
@@ -491,14 +606,33 @@ class StockRecommendationService:
                 extracted_dims, stock_dims, form_type
             )
             available_units = len(usable_units)
+            # Prefer unit with least waste (smallest remaining >= required), not longest bar
+            best_remaining = min((unit.remaining_length for unit in usable_units), default=0)
             max_remaining_length = max((unit.remaining_length for unit in usable_units), default=0)
             length_excess_mm = 0.0
-            if use_unit_length_check and effective_required_length:
-                length_excess_mm = max(0.0, max_remaining_length - effective_required_length)
-            elif extracted_dims.get("length"):
-                length_excess_mm = max(0.0, max_remaining_length - extracted_dims["length"])
+            length_score = 1.0
 
-            sort_fit = length_excess_mm if use_unit_length_check else cross_section_excess
+            if use_unit_length_check and effective_required_length:
+                # Reject far-length bars (e.g. 1500 remaining for planned 200)
+                if best_remaining > effective_required_length * max_length_multiplier:
+                    continue
+
+                length_excess_mm = max(0.0, best_remaining - effective_required_length)
+                # 0 excess → 1.0; at max_length_multiplier (e.g. 3x) → 0.0
+                denom = max(max_length_multiplier - 1.0, 0.01)
+                excess_ratio = length_excess_mm / effective_required_length
+                length_score = max(0.0, 1.0 - (excess_ratio / denom))
+            elif extracted_dims.get("length"):
+                length_excess_mm = max(0.0, best_remaining - extracted_dims["length"])
+
+            # Blend diameter/cross-section with length so exact dia + huge bar ≠ 100%
+            if use_unit_length_check:
+                score = (cross_score + length_score) / 2.0
+            else:
+                score = cross_score
+
+            if score < min_score:
+                continue
 
             recommendations.append({
                 "stock_id": stock.id,
@@ -508,18 +642,27 @@ class StockRecommendationService:
                 "dimensions": stock_dims,
                 "match_score": score,
                 "match_score_percent": round(score * 100, 1),
-                "nearest_fit": sort_fit,
+                "cross_section_score": round(cross_score * 100, 1),
+                "length_score": round(length_score * 100, 1),
+                "nearest_fit": cross_section_excess,
                 "length_excess_mm": length_excess_mm,
                 "cross_section_excess_mm": cross_section_excess,
                 "available_quantity": stock.available_quantity,
                 "available_units": available_units,
                 "usable_units": len(usable_units),
-                "best_remaining_length": max_remaining_length,
+                "best_remaining_length": best_remaining,
                 "max_remaining_length": max_remaining_length,
                 "required_length": effective_required_length,
                 "stock_size": f"{stock.diameter if stock.diameter else stock.breadth or stock.inner_diameter}x{stock.length}" if stock.length else "",
                 "status": "available",
             })
 
-        recommendations.sort(key=lambda x: (x["nearest_fit"], -x["match_score"]))
+        # Best overall match first, then nearest diameter, then least length waste
+        recommendations.sort(
+            key=lambda x: (
+                -x["match_score"],
+                x["cross_section_excess_mm"],
+                x["length_excess_mm"],
+            )
+        )
         return recommendations[:max_recommendations]

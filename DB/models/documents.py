@@ -65,7 +65,7 @@ class MachineFolder(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     folder_name = Column(String(255), nullable=False)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     parent_id = Column(Integer, ForeignKey("documents.machine_folders.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
@@ -87,7 +87,7 @@ class MachineDocument(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     machine_folder_id = Column(Integer, ForeignKey("documents.machine_folders.id"), nullable=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=True)
     document_name = Column(String(255), nullable=False)
     document_url = Column(String(500), nullable=False)
     version = Column(Float, nullable=False, default=1.0)

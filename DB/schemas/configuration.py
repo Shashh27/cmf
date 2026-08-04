@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time, date
 from typing_extensions import Self
@@ -51,6 +51,9 @@ class MachineBase(BaseModel):
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
     mhr: Optional[int] = None
+    mhr_calculated_at: Optional[datetime] = None
+    mhr_updated_by: Optional[int] = None
+    recommended_mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     calibration_frequency: Optional[str] = None  # e.g., '6 months', '1 year', '2 years'
@@ -59,21 +62,13 @@ class MachineBase(BaseModel):
 
 
 class MachineCreate(MachineBase):
-    @field_validator('calibration_date', 'calibration_frequency')
-    @classmethod
-    def validate_calibration_fields(cls, v, info):
-        calibration_date = info.data.get('calibration_date')
-        calibration_frequency = info.data.get('calibration_frequency')
-        
-        # If calibration_date is provided, calibration_frequency must also be provided
-        if calibration_date and not calibration_frequency:
+    @model_validator(mode='after')
+    def validate_calibration_fields(self) -> Self:
+        if self.calibration_date and not self.calibration_frequency:
             raise ValueError('Calibration frequency must be provided when calibration date is specified')
-        
-        # If calibration_frequency is provided, calibration_date must also be provided
-        if calibration_frequency and not calibration_date:
+        if self.calibration_frequency and not self.calibration_date:
             raise ValueError('Calibration date must be provided when calibration frequency is specified')
-        
-        return v
+        return self
 
 
 class MachineUpdate(BaseModel):
@@ -86,27 +81,22 @@ class MachineUpdate(BaseModel):
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
     mhr: Optional[int] = None
+    mhr_calculated_at: Optional[datetime] = None
+    mhr_updated_by: Optional[int] = None
+    recommended_mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     calibration_frequency: Optional[str] = None
     password: Optional[str] = None
     user_id: Optional[int] = None
 
-    @field_validator('calibration_date', 'calibration_frequency')
-    @classmethod
-    def validate_calibration_fields(cls, v, info):
-        calibration_date = info.data.get('calibration_date')
-        calibration_frequency = info.data.get('calibration_frequency')
-        
-        # If calibration_date is provided, calibration_frequency must also be provided
-        if calibration_date and not calibration_frequency:
+    @model_validator(mode='after')
+    def validate_calibration_fields(self) -> Self:
+        if self.calibration_date and not self.calibration_frequency:
             raise ValueError('Calibration frequency must be provided when calibration date is specified')
-        
-        # If calibration_frequency is provided, calibration_date must also be provided
-        if calibration_frequency and not calibration_date:
+        if self.calibration_frequency and not self.calibration_date:
             raise ValueError('Calibration date must be provided when calibration frequency is specified')
-        
-        return v
+        return self
 
 
 class Machine(MachineBase):
@@ -125,6 +115,9 @@ class MachinePublic(BaseModel):
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
     mhr: Optional[int] = None
+    mhr_calculated_at: Optional[datetime] = None
+    mhr_updated_by: Optional[int] = None
+    recommended_mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     calibration_frequency: Optional[str] = None
@@ -140,6 +133,91 @@ class MachinePublicWithStatus(MachinePublic):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Machine MHR Schemas
+# =======================
+class MHRParticularBase(BaseModel):
+    code: str
+    name: str
+    is_input: bool = True
+    formula: Optional[str] = None
+    default_sequence: int
+    unit: Optional[str] = None
+    is_active: bool = True
+    created_by: int
+
+
+class MHRParticularCreate(MHRParticularBase):
+    pass
+
+
+class MHRParticularUpdate(BaseModel):
+    name: Optional[str] = None
+    is_input: Optional[bool] = None
+    formula: Optional[str] = None
+    default_sequence: Optional[int] = None
+    unit: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class MHRParticular(MHRParticularBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MachineMHRValueBase(BaseModel):
+    machine_id: int
+    particular_id: int
+    is_applicable: bool = True
+    sequence_override: Optional[int] = None
+    input_value: Optional[float] = None
+    computed_value: Optional[float] = None
+    updated_by: int
+
+
+class MachineMHRValueCreate(MachineMHRValueBase):
+    pass
+
+
+class MachineMHRValueUpdate(BaseModel):
+    is_applicable: Optional[bool] = None
+    sequence_override: Optional[int] = None
+    input_value: Optional[float] = None
+
+
+class MHRValueUpdate(BaseModel):
+    particular_id: int
+    value: Optional[float] = None
+
+
+class MachineMHRValue(MachineMHRValueBase):
+    id: int
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MachineMHRValueWithDetails(MachineMHRValue):
+    particular: Optional[MHRParticular] = None
+
+
+class MachineMHRResponse(BaseModel):
+    machine_id: int
+    values: List[MachineMHRValueWithDetails] = []
+    final_mhr: Optional[int] = None
+    recommended_mhr: Optional[int] = None
+    mhr_calculated_at: Optional[datetime] = None
+
+
+class MHRRecalculationResponse(BaseModel):
+    context: dict
+    final_mhr: Optional[float] = None
 
 
 class MachineWithworkcenter(Machine):

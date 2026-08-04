@@ -4,7 +4,9 @@ from typing import List, Optional
 import io
 
 from DB.database import get_db
+from DB.models.access_control import AccessUser
 from DB.models.inventory import StockQualityDocument as StockQualityDocumentModel
+from auth.deps import get_current_user
 from DB.schemas.inventory import (
     StockQualityDocument,
     StockQualityDocumentCreate,
@@ -26,16 +28,18 @@ router = APIRouter(
 async def upload_quality_document(
     stock_id: int = Form(...),
     file: UploadFile = File(...),
-    user_id: int = Form(...),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload a quality document for a stock item
     
     - stock_id: ID of the stock item
     - file: The file to upload
-    - user_id: ID of the user uploading
+    - user_id: Legacy optional field; identity is taken from JWT
     """
+    user_id = current_user.id
     # Validate file
     if not is_allowed_file(file.filename):
         raise HTTPException(
@@ -75,16 +79,18 @@ async def upload_quality_document(
 async def upload_quality_documents_bulk(
     stock_id: int = Form(...),
     files: List[UploadFile] = File(...),
-    user_id: int = Form(...),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload multiple quality documents for a stock item in a single request
     
     - stock_id: ID of the stock item
     - files: List of files to upload
-    - user_id: ID of the user uploading
+    - user_id: Legacy optional field; identity is taken from JWT
     """
+    user_id = current_user.id
     uploaded_documents = []
     failed_files = []
     
@@ -134,7 +140,8 @@ async def upload_quality_documents_bulk(
 @router.get("/stock/{stock_id}", response_model=List[StockQualityDocument])
 def get_documents_by_stock(
     stock_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Get all quality documents for a stock item
@@ -181,7 +188,8 @@ def get_latest_document(
 @router.delete("/{document_id}")
 def delete_document(
     document_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Delete a quality document

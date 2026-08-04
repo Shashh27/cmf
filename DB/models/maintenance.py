@@ -12,7 +12,7 @@ class OEEIssue(Base):
     __table_args__ = {"schema": "maintenance"}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     reported_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     issue_category = Column(String, nullable=False)
     issue_reason = Column(Text, nullable=False)
@@ -27,7 +27,7 @@ class MachineBreakdown(Base):
     __table_args__ = {"schema": "maintenance"}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     reported_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     issue_category = Column(String, nullable=False)
     machine_status = Column(String, nullable=False)
@@ -42,7 +42,7 @@ class ComponentIssue(Base):
     __table_args__ = {"schema": "maintenance"}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     reported_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     component_status = Column(String, nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
@@ -58,7 +58,7 @@ class HelpSupport(Base):
     __table_args__ = {"schema": "maintenance"}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
     reported_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)

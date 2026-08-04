@@ -55,6 +55,9 @@ class Machine(Base):
     cnc_controller_service = Column(String)
     remarks = Column(String)
     mhr = Column(Integer, nullable=True)
+    mhr_calculated_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    mhr_updated_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    recommended_mhr = Column(Integer, nullable=True)
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
     calibration_frequency = Column(String)  # e.g., '6 months', '1 year', '2 years'
@@ -62,7 +65,8 @@ class Machine(Base):
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     work_center = relationship("workcenter", back_populates="machines")
-    user = relationship("AccessUser")
+    user = relationship("AccessUser", foreign_keys=[user_id])
+    mhr_updater = relationship("AccessUser", foreign_keys=[mhr_updated_by])
 
 
 # =======================
@@ -215,7 +219,7 @@ class PMMachineAssignment(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False, index=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False, index=True)
     checklist_id = Column(Integer, ForeignKey("configuration.pm_checklists.id", ondelete="CASCADE"), nullable=False, index=True)
     assigned_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     assigned_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -280,3 +284,48 @@ class PMCheckpointSubmission(Base):
     schedule = relationship("PMSchedule", back_populates="submissions")
     assignment_item = relationship("PMAssignmentItem", back_populates="submissions")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
+
+
+# =======================
+# Machine MHR (Machine Hour Rate)
+# =======================
+class MHRParticular(Base):
+    """Master template for MHR calculation particulars - admin-defined once."""
+    __tablename__ = "mhr_particulars"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False)
+    is_input = Column(Boolean, nullable=False, default=True)
+    formula = Column(String, nullable=True)
+    default_sequence = Column(Integer, nullable=False)
+    unit = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    creator = relationship("AccessUser", foreign_keys=[created_by])
+
+
+class MachineMHRValue(Base):
+    """Per-machine sparse MHR values - only applicable rows stored."""
+    __tablename__ = "machine_mhr_values"
+    __table_args__ = (
+        UniqueConstraint('machine_id', 'particular_id', name='uq_machine_particular'),
+        {'schema': 'configuration'},
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    particular_id = Column(Integer, ForeignKey("configuration.mhr_particulars.id"), nullable=False)
+    is_applicable = Column(Boolean, nullable=False, default=True)
+    sequence_override = Column(Integer, nullable=True)
+    input_value = Column(Float, nullable=True)
+    computed_value = Column(Float, nullable=True)
+    updated_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    machine = relationship("Machine")
+    particular = relationship("MHRParticular")
+    updater = relationship("AccessUser", foreign_keys=[updated_by])

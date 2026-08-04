@@ -31,6 +31,15 @@ class UserContext(BaseModel):
             return "operator"
         return "user"
 
+    def order_scope_column(self) -> Optional[str]:
+        """Database column used to restrict this user's assigned orders."""
+        role = self.role_key()
+        if role == "admin":
+            return "admin_id"
+        if role == "mc":
+            return "manufacturing_coordinator_id"
+        return None
+
 
 ROLE_SUGGESTIONS: Dict[str, List[str]] = {
     "admin": [
@@ -165,7 +174,7 @@ def try_user_scoped_query(question: str, ctx: UserContext) -> Tuple[Optional[str
         elif role == "pc":
             where = f"o.project_coordinator_id = {uid}"
         elif role == "admin":
-            where = "1=1"
+            where = f"o.admin_id = {uid}"
         else:
             where = f"(o.user_id = {uid} OR o.manufacturing_coordinator_id = {uid} OR o.project_coordinator_id = {uid})"
         return f"""

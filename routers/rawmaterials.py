@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import List, Optional
@@ -9,6 +9,9 @@ from DB.database import get_db
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel, RawMaterialUnit as RawMaterialUnitModel, RawMaterialUsage as RawMaterialUsageModel, RawMaterialHistory as RawMaterialHistoryModel, StockQualityDocument as StockQualityDocumentModel
 from DB.models.oms import Order as OrderModel, Part as PartModel, OutSourcePartStatus, Product as ProductModel
 from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
+from DB.models.access_control import AccessUser
+from auth.deps import get_current_user
+from auth.scope import scope_ids_from_user
 from DB.schemas.inventory import (
     RawMaterial, RawMaterialCreate, RawMaterialUpdate,
     RawMaterialStock, RawMaterialStockCreate, RawMaterialStockUpdate, RawMaterialStockWithDetails,
@@ -92,20 +95,10 @@ def create_raw_material(raw_material: RawMaterialCreate, db: Session = Depends(g
 
 @router.get("/", response_model=List[RawMaterial])
 def get_raw_materials(
-    user_id: int = None,
-    manufacturing_coordinator_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Get all raw materials with stock status, optionally filtered by user or manufacturing coordinator"""
+    """Get all raw materials with stock status."""
     materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
-    
-    # For manufacturing coordinator, show all raw materials (not just order-linked ones)
-    # This allows them to see and work with general materials too
-    if manufacturing_coordinator_id is not None:
-        # Manufacturing coordinators can see all raw materials
-        # No filtering applied - they get full access to materials catalog
-        pass
-    # If no specific filter, return all materials (default behavior)
     
     # Add stock status to each material
     materials_with_status = []
@@ -156,22 +149,22 @@ def get_raw_materials(
 
 @router.get("/inventory-view")
 def get_inventory_view(
-    admin_id: int | None = None,
-    manufacturing_coordinator_id: int | None = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Single endpoint returning full inventory hierarchy:
     materials -> stocks (general + order) -> units (with usages).
-    Replaces multiple /stock/ and /stock/{id}/units calls.
-    
-    Filters stocks based on user role:
-    - If admin_id provided: shows general stocks + order stocks where admin is involved
-    - If manufacturing_coordinator_id provided: shows general stocks + order stocks where MC is involved
-    - If neither provided: shows all stocks (for superadmin or testing)
+    Scoped from JWT role (client admin_id / MC id ignored).
     """
     from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
     from sqlalchemy.orm import joinedload
+
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
 
     # 1. All materials
     materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
@@ -239,45 +232,116 @@ def get_inventory_view(
     unit_ids = [u.id for u in units]
 
     # 4. All usages for all units (bulk)
-    usages_by_unit = {}
+    usages_raw = []
     if unit_ids:
-        usages = (
+        usages_raw = (
             db.query(RawMaterialUsage)
             .options(joinedload(RawMaterialUsage.part))
             .filter(RawMaterialUsage.raw_material_unit_id.in_(unit_ids))
             .all()
         )
-        for usage in usages:
-            uid = usage.raw_material_unit_id
-            if uid not in usages_by_unit:
-                usages_by_unit[uid] = []
-            usages_by_unit[uid].append({
-                "id": usage.id,
-                "part_id": usage.part_id,
-                "used_length": usage.used_length,
-                "part_number": usage.part.part_number if usage.part else None,
-                "part_name": usage.part.part_name if usage.part else None,
-            })
 
-    # 5. All orders needed for source_order_number (bulk)
+    # 5. All parts needed for part_numbers + usage-linked parts (bulk)
+    all_part_ids = set()
+    for s in stocks:
+        if s.part_id:
+            for pid in s.part_id.split(","):
+                pid = pid.strip()
+                if pid.isdigit():
+                    all_part_ids.add(int(pid))
+    for usage in usages_raw:
+        if usage.part_id:
+            all_part_ids.add(usage.part_id)
+
+    part_map = {}
+    if all_part_ids:
+        parts = db.query(PartModel).filter(PartModel.id.in_(all_part_ids)).all()
+        part_map = {p.id: p for p in parts}
+
+    # 6. Orders: direct source_order_id + ONE order per part (for general stock)
+    # Do NOT attach every order for the product — that produced "2 orders / 1 part".
     source_order_ids = list({s.source_order_id for s in stocks if s.source_order_id})
     order_map = {}
     if source_order_ids:
         orders = db.query(OrderModel).filter(OrderModel.id.in_(source_order_ids)).all()
         order_map = {o.id: o.sale_order_number for o in orders}
 
-    # 6. All parts needed for part_numbers (bulk)
-    all_part_id_strs = set()
-    for s in stocks:
-        if s.part_id:
-            for pid in s.part_id.split(","):
-                pid = pid.strip()
-                if pid.isdigit():
-                    all_part_id_strs.add(int(pid))
-    part_map = {}
-    if all_part_id_strs:
-        parts = db.query(PartModel).filter(PartModel.id.in_(all_part_id_strs)).all()
-        part_map = {p.id: p for p in parts}
+    # Prefer order stored on material_linked history for this unit+part
+    history_order_by_unit_part = {}  # (unit_id, part_id) -> sale_order_number
+    if unit_ids:
+        hist_rows = (
+            db.query(RawMaterialHistoryModel)
+            .filter(
+                RawMaterialHistoryModel.activity_type == "material_linked",
+                RawMaterialHistoryModel.unit_id.in_(unit_ids),
+                RawMaterialHistoryModel.order_id.isnot(None),
+            )
+            .order_by(RawMaterialHistoryModel.id.desc())
+            .all()
+        )
+        hist_order_ids = {h.order_id for h in hist_rows if h.order_id}
+        hist_order_map = {}
+        if hist_order_ids:
+            for o in db.query(OrderModel).filter(OrderModel.id.in_(hist_order_ids)).all():
+                hist_order_map[o.id] = o.sale_order_number
+        for h in hist_rows:
+            key = (h.unit_id, h.part_id)
+            if key not in history_order_by_unit_part and h.order_id in hist_order_map:
+                history_order_by_unit_part[key] = hist_order_map[h.order_id]
+
+    # Prefer OrderPartPriority link (part belongs to specific order); else latest order for product
+    from DB.models.oms import OrderPartPriority as OrderPartPriorityModel
+    part_priority_order = {}  # part_id -> sale_order_number (most recent priority order)
+    if all_part_ids:
+        opp_rows = (
+            db.query(OrderPartPriorityModel)
+            .filter(OrderPartPriorityModel.part_id.in_(all_part_ids))
+            .order_by(OrderPartPriorityModel.id.desc())
+            .all()
+        )
+        opp_order_ids = {r.order_id for r in opp_rows if r.order_id}
+        opp_order_map = {}
+        if opp_order_ids:
+            for o in db.query(OrderModel).filter(OrderModel.id.in_(opp_order_ids)).all():
+                opp_order_map[o.id] = o.sale_order_number
+        for r in opp_rows:
+            if r.part_id not in part_priority_order and r.order_id in opp_order_map:
+                part_priority_order[r.part_id] = opp_order_map[r.order_id]
+
+    product_ids = {p.product_id for p in part_map.values() if p.product_id}
+    product_latest_order = {}  # product_id -> single latest sale_order_number
+    if product_ids:
+        product_orders = (
+            db.query(OrderModel)
+            .filter(OrderModel.product_id.in_(product_ids))
+            .order_by(OrderModel.id.desc())
+            .all()
+        )
+        for o in product_orders:
+            if o.product_id not in product_latest_order:
+                product_latest_order[o.product_id] = o.sale_order_number
+
+    usages_by_unit = {}
+    for usage in usages_raw:
+        uid = usage.raw_material_unit_id
+        part = part_map.get(usage.part_id) or usage.part
+        # Resolve exactly one order for this usage
+        order_number = history_order_by_unit_part.get((uid, usage.part_id))
+        if not order_number and usage.part_id:
+            order_number = part_priority_order.get(usage.part_id)
+        if not order_number and part and part.product_id:
+            order_number = product_latest_order.get(part.product_id)
+        if uid not in usages_by_unit:
+            usages_by_unit[uid] = []
+        usages_by_unit[uid].append({
+            "id": usage.id,
+            "part_id": usage.part_id,
+            "used_length": usage.used_length,
+            "part_number": part.part_number if part else None,
+            "part_name": part.part_name if part else None,
+            "order_number": order_number,
+            "order_numbers": [order_number] if order_number else [],
+        })
 
     # 7. Quality document counts for all stocks (bulk)
     doc_counts_by_stock = {}
@@ -337,11 +401,29 @@ def get_inventory_view(
         if s.form_type == "Round":
             dims = f"⌀{s.diameter} × {s.length}mm"
         elif s.form_type == "Square":
-            dims = f"{s.breadth} × {s.height} × {s.length}mm"
+            dims = f"{s.length} × {s.breadth} × {s.height}mm"
         elif s.form_type == "Pipe":
             dims = f"⌀{s.outer_diameter}/{s.inner_diameter} × {s.length}mm"
         else:
             dims = None
+
+        # Order number only from real order stock linkage — never invent from usages
+        # (usages carry their own order_number for filters / Exhausted Units)
+        source_order_number = order_map.get(s.source_order_id) if s.source_order_id else None
+        order_parts_mapping = {}
+        for u in stock_units:
+            if u.get("status") == "exhausted":
+                continue
+            for usage in u.get("usages") or []:
+                pn = usage.get("part_number")
+                on = usage.get("order_number")
+                ons = usage.get("order_numbers") or ([on] if on else [])
+                for order_no in ons:
+                    if not order_no:
+                        continue
+                    order_parts_mapping.setdefault(order_no, [])
+                    if pn and pn not in order_parts_mapping[order_no]:
+                        order_parts_mapping[order_no].append(pn)
 
         stocks_by_material.setdefault(s.material_id, []).append({
             "id": s.id,
@@ -361,7 +443,8 @@ def get_inventory_view(
             "cost": s.cost,
             "source_type": s.source_type,
             "order_status": s.order_status,
-            "source_order_number": order_map.get(s.source_order_id) if s.source_order_id else None,
+            "source_order_number": source_order_number,
+            "order_parts_mapping": order_parts_mapping,
             "part_numbers": part_numbers,
             "status": computed_status,
             "quality_document_count": doc_counts_by_stock.get(s.id, 0),
@@ -503,36 +586,27 @@ def get_raw_material_history(
     year: int = None,
     month: int = None,
     day: int = None,
-    admin_id: int = None,  # Filter by admin ID
-    manufacturing_coordinator_id: int = None,  # Filter by manufacturing coordinator ID
     source_type: str = None,  # "general" or "order"
     order_id: int = None,
     material_id: int = None,
     activity_type: str = None,  # "stock_created", "material_linked", "order_status_changed", "stock_updated", "material_unlinked"
-    db: Session = Depends(get_db)
+    admin_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
-    Get comprehensive raw material history from database with date filtering.
-    
-    Fetches all raw material activities from the raw_material_history table including:
-    - Material creation, updates, deletion
-    - Stock creation, updates, deletion
-    - Unit creation, deletion
-    - Material linking to parts
-    - Material unlinking from parts
-    - Order status changes
-    - Vendor changes
-    
-    Date filtering options:
-    - start_date and end_date: Range filter (YYYY-MM-DD format)
-    - year, month, day: Specific date filter
-    
-    User filtering:
-    - admin_id: Filter by admin's orders
-    - manufacturing_coordinator_id: Filter by manufacturing coordinator's orders
+    Get comprehensive raw material history.
+    Role ids overridden from JWT (currently unused in filter; kept for API compat).
     """
     from datetime import datetime
     from sqlalchemy import and_, or_
+
+    scope = scope_ids_from_user(current_user)
+    admin_id = scope["admin_id"]
+    manufacturing_coordinator_id = scope["manufacturing_coordinator_id"]
+    # Note: admin_id / manufacturing_coordinator_id currently unused — both Admin and MC see all history
+    _ = (admin_id, manufacturing_coordinator_id)
     
     # Build query with joins
     history_query = db.query(RawMaterialHistoryModel).options(
@@ -1881,10 +1955,12 @@ def assign_material_to_part(
     part_id: int,
     required_length: float,
     user_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """Assign material unit to a part and track usage"""
-    
+    user_id = current_user.id
+
     # Get part first to check schedule status
     part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not part:
@@ -2075,8 +2151,14 @@ def assign_material_to_part(
 
 
 @router.delete("/parts/{part_id}/unlink-material")
-def unlink_material_from_part(part_id: int, user_id: int = None, db: Session = Depends(get_db)):
+def unlink_material_from_part(
+    part_id: int,
+    user_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Unlink material from part - restore unit length and delete part/usage details"""
+    user_id = current_user.id
     # Get part
     part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not part:

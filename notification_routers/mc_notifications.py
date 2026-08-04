@@ -9,6 +9,7 @@ from DB.models.notifications import MCNotification as MCNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Document as DocumentModel, Part as PartModel, Order as OrderModel
 from services.notification_service import NotificationService
+from auth.deps import get_current_user
 
 router = APIRouter(prefix="/mc-notifications", tags=["mc-notifications"])
 
@@ -31,8 +32,12 @@ def get_mc_notifications(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
 ):
-    """Get document notifications for a Manufacturing Coordinator"""
+    """Get document notifications for the authenticated Manufacturing Coordinator."""
+    if mc_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
+    mc_user_id = current_user.id
     # Verify user exists and is an MC
     user = db.query(AccessUserModel).filter(AccessUserModel.id == mc_user_id).first()
     if not user:
@@ -120,8 +125,15 @@ def get_mc_notifications(
 
 
 @router.get("/{mc_user_id}/pending-count")
-def get_pending_count(mc_user_id: int, db: Session = Depends(get_db)):
-    """Get count of pending document notifications for an MC user"""
+def get_pending_count(
+    mc_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
+    """Get count of pending document notifications for the authenticated MC."""
+    if mc_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
+    mc_user_id = current_user.id
     count = db.query(MCNotificationModel).filter(
         MCNotificationModel.mc_user_id == mc_user_id,
         MCNotificationModel.is_acknowledged == False,  # noqa: E712

@@ -21,6 +21,8 @@ from DB.schemas.documents import (
     CommonDocumentVersionResponse
 )
 from DB.minio_client import get_minio_client
+from auth.deps import get_current_user
+from DB.models.access_control import AccessUser
 
 router = APIRouter(
     prefix="/common-documents",
@@ -111,9 +113,10 @@ async def get_common_folders_tree(db: Session = Depends(get_db)):
 @router.post("/folders", response_model=CommonFolderSchema, status_code=status.HTTP_201_CREATED)
 async def create_common_folder(
     folder: CommonFolderCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
-    """Create a new common folder"""
+    """Create a new common folder (user_id from JWT)."""
     # Validate parent folder exists if parent_id is provided
     if folder.parent_id:
         parent = db.query(CommonFolder).filter(CommonFolder.id == folder.parent_id).first()
@@ -134,8 +137,10 @@ async def create_common_folder(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Folder with this name already exists under the specified parent"
         )
-    
-    db_folder = CommonFolder(**folder.model_dump())
+
+    payload = folder.model_dump()
+    payload["user_id"] = current_user.id
+    db_folder = CommonFolder(**payload)
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)
@@ -271,8 +276,9 @@ async def upload_common_document(
     file: UploadFile = File(...),
     folder_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
-    user_id: int = Form(...),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload a new common document with automatic versioning
@@ -280,6 +286,7 @@ async def upload_common_document(
     - If parent_id is None, creates a new document with version 1.0
     - If parent_id is provided, creates a new version (auto-incremented)
     """
+    user_id = current_user.id
     if folder_id is not None:
         folder = db.query(CommonFolder).filter(CommonFolder.id == folder_id).first()
         if not folder:

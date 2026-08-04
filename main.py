@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter, Depends
 
 from dotenv import load_dotenv
 
@@ -6,7 +6,17 @@ load_dotenv()
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
+import os
+
+from DB.database import (
+    engine,
+    verify_database_connection,
+    MINIO_ENDPOINT,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_BUCKET_NAME,
+    MINIO_SECURE,
+)
 
 from DB.models import Base
 
@@ -61,6 +71,8 @@ from routers import (
     access_control_router,
 
     login_router,
+
+    auth_router,
 
     inventory_requests_router,
 
@@ -125,6 +137,9 @@ from notification_routers import (
 
 from routers.ems import router as ems_router
 
+# Import MHR router
+from services.machine_mhr_router import router as machine_mhr_router
+
 
 # Import document routers
 
@@ -154,21 +169,22 @@ app = FastAPI(
 
 
 
-# Configure CORS
+from auth.deps import jwt_auth_http_middleware
+from auth.migrate_refresh_tokens import ensure_refresh_tokens_schema
+from auth.openapi import configure_openapi_jwt
 
+configure_openapi_jwt(app)
+
+# Open CORS — allow all origins (no credentials; Bearer JWT in Authorization header)
 app.add_middleware(
-
     CORSMiddleware,
-
-    allow_origins=["*"],  # Configure this with your frontend URL in production
-
-    allow_credentials=True,
-
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
-
     allow_headers=["*"],
-
 )
+
+app.middleware("http")(jwt_auth_http_middleware)
 
 
 
@@ -182,7 +198,9 @@ async def startup_event():
 
     Startup event handler
 
-    - Creates database tables
+    - Verifies database connectivity (no DDL as cmf_app)
+
+    - Optionally bootstraps schema if ALLOW_AUTO_SCHEMA=true (local only)
 
     - Initializes MinIO client
 
@@ -198,17 +216,20 @@ async def startup_event():
 
 
 
-    # Create database tables
-
+    # Schema DDL is owned by cmf_owner via Alembic — not the runtime app role.
+    # ALLOW_AUTO_SCHEMA=true keeps old create_all behaviour for local bootstrap only.
     try:
-
-        Base.metadata.create_all(bind=engine)
-
-        print("SUCCESS: Database tables created/verified")
-
+        allow_auto = os.getenv("ALLOW_AUTO_SCHEMA", "false").lower() in ("1", "true", "yes")
+        if allow_auto:
+            Base.metadata.create_all(bind=engine)
+            ensure_refresh_tokens_schema()
+            print("SUCCESS: Database tables created/verified (ALLOW_AUTO_SCHEMA)")
+        else:
+            verify_database_connection()
+            ensure_refresh_tokens_schema()
+            print("SUCCESS: Database connection verified (schema managed by Alembic)")
     except Exception as e:
-
-        print(f"ERROR: Error creating database tables: {e}")
+        print(f"ERROR: Database startup check failed: {e}")
 
 
 
@@ -275,109 +296,67 @@ async def shutdown_event():
 
 
 
-# Include all routers with api/v1 prefix
+# Unified API router — JWT enforced via HTTP middleware (WebSockets exempt)
+api_router = APIRouter()
 
-app.include_router(products_router, prefix="/api/v1")
+# Include all routers in the unified router
+api_router.include_router(products_router)
+api_router.include_router(assemblies_router)
+api_router.include_router(part_types_router)
+api_router.include_router(parts_router)
+api_router.include_router(operations_router)
+api_router.include_router(documents_router)
+api_router.include_router(tools_router)
+api_router.include_router(customers_router)
+api_router.include_router(orders_router)
+api_router.include_router(order_documents_router)
+api_router.include_router(rawmaterials_router)
+api_router.include_router(order_raw_materials_router, prefix="/rawmaterials")
+api_router.include_router(workcenter_router)
+api_router.include_router(general_documents_router)
+api_router.include_router(machine_documents_router)
+api_router.include_router(common_documents_router)
+api_router.include_router(access_control_router)
+api_router.include_router(login_router)
+api_router.include_router(auth_router)
+api_router.include_router(machines_router)
+api_router.include_router(operation_documents_router)
+api_router.include_router(tools_list_router)
+api_router.include_router(inventory_requests_router)
+api_router.include_router(inventory_return_requests_router)
+api_router.include_router(transaction_history_router)
+api_router.include_router(tool_issues_router)
+api_router.include_router(out_source_parts_status_router)
+api_router.include_router(maintenance_router)
+api_router.include_router(ems_router)
+api_router.include_router(order_tracking_router)
+api_router.include_router(monitoring_router)
+api_router.include_router(production_analytics_router)
+api_router.include_router(order_additional_costs_router)
+api_router.include_router(stock_quality_documents_router)
+api_router.include_router(pm_router)
+api_router.include_router(operation_checklists_router)
+api_router.include_router(machine_mhr_router)
+api_router.include_router(recycle_bin_router)
+api_router.include_router(planned_raw_materials_router)
 
-app.include_router(assemblies_router, prefix="/api/v1")
+# Include notification routers
+api_router.include_router(component_issues_notification_router)
+api_router.include_router(machine_calibration_notification_router)
+api_router.include_router(machine_notifications_router)
+api_router.include_router(order_notifications_router)
+api_router.include_router(tool_issues_notification_router)
+api_router.include_router(pc_notifications_router)
+api_router.include_router(mc_notifications_router)
+api_router.include_router(admin_document_notifications_router)
 
-app.include_router(part_types_router, prefix="/api/v1")
+# Include unified router with single prefix
+app.include_router(api_router, prefix="/api/v1")
 
-app.include_router(parts_router, prefix="/api/v1")
-
-app.include_router(operations_router, prefix="/api/v1")
-
-
-
-app.include_router(documents_router, prefix="/api/v1")
-
-app.include_router(tools_router, prefix="/api/v1")
-
-app.include_router(customers_router, prefix="/api/v1")
-
-app.include_router(orders_router, prefix="/api/v1")
-
-app.include_router(order_documents_router, prefix="/api/v1")
-
-app.include_router(rawmaterials_router, prefix="/api/v1")
-
-app.include_router(order_raw_materials_router, prefix="/api/v1/rawmaterials")
-
-app.include_router(workcenter_router, prefix="/api/v1")
-
-app.include_router(general_documents_router, prefix="/api/v1")
-
-app.include_router(machine_documents_router, prefix="/api/v1")
-
-app.include_router(common_documents_router, prefix="/api/v1")
-
-app.include_router(access_control_router, prefix="/api/v1")
-
-app.include_router(login_router, prefix="/api/v1")
-
-app.include_router(machines_router, prefix="/api/v1")
-
-app.include_router(operation_documents_router, prefix="/api/v1")
-
-app.include_router(tools_list_router, prefix="/api/v1")
-
-app.include_router(inventory_requests_router, prefix="/api/v1")
-
-app.include_router(inventory_return_requests_router, prefix="/api/v1")
-
-app.include_router(transaction_history_router, prefix="/api/v1")
-
-
-app.include_router(tool_issues_router, prefix="/api/v1")
-
-app.include_router(out_source_parts_status_router, prefix="/api/v1")
-
-app.include_router(maintenance_router, prefix="/api/v1")
-
-app.include_router(ems_router, prefix="/api/v1")
-
-app.include_router(order_tracking_router, prefix="/api/v1")
-
-app.include_router(monitoring_router, prefix="/api/v1")
-
-app.include_router(production_analytics_router, prefix="/api/v1")
-
-app.include_router(order_additional_costs_router, prefix="/api/v1")
-
-app.include_router(stock_quality_documents_router, prefix="/api/v1")
-
-app.include_router(pm_router, prefix="/api/v1")
-
-app.include_router(operation_checklists_router, prefix="/api/v1")
-
-app.include_router(recycle_bin_router, prefix="/api/v1")
-
-app.include_router(planned_raw_materials_router, prefix="/api/v1")
-
+# Include chatbot router separately (JWT via HTTP middleware + get_current_user on routes)
 app.include_router(chatbot_router, prefix="/api/chatbot")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
-
-
-
-# Include notification routers
-
-app.include_router(component_issues_notification_router, prefix="/api/v1")
-
-app.include_router(machine_calibration_notification_router, prefix="/api/v1")
-
-app.include_router(machine_notifications_router, prefix="/api/v1")
-
-app.include_router(order_notifications_router, prefix="/api/v1")
-
-app.include_router(tool_issues_notification_router, prefix="/api/v1")
-
-app.include_router(pc_notifications_router, prefix="/api/v1")
-
-app.include_router(mc_notifications_router, prefix="/api/v1")
-
-app.include_router(admin_document_notifications_router, prefix="/api/v1")
-
 
 
 
@@ -452,11 +431,9 @@ def system_info():
 
         "database": {
 
-            "host": "172.18.7.91",
+            "configured": bool(os.getenv("DATABASE_URL")),
 
-            "port": 5432,
-
-            "database": "cmf_backend"
+            "note": "Connection details are not exposed; use env DATABASE_URL (cmf_app role)",
 
         },
 

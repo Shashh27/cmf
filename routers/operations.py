@@ -48,6 +48,19 @@ def _normalize_header(name: str) -> str:
     return name.strip().lower().replace("\n", " ").replace("\r", " ")
 
 
+def _assert_part_not_schedule_active(part_id: int, db: Session) -> None:
+    """Check if part has active schedule status and raise error if so."""
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, operations cannot be swapped because this part is currently scheduled for production. To swap operations, please inactivate the part's schedule status first."
+        )
+
+
 def _match_column(header: str) -> Optional[str]:
     h = _normalize_header(header)
     if "op" in h and ("number" in h or "num" in h or "#" in h):
@@ -751,6 +764,9 @@ def swap_operation_numbers(op1_id: int, op2_id: int, db: Session = Depends(get_d
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Operations must belong to the same part to swap numbers"
         )
+    
+    # Check if part has active schedule status
+    _assert_part_not_schedule_active(op1.part_id, db)
     
     # Swap the operation numbers
     temp_number = op1.operation_number
