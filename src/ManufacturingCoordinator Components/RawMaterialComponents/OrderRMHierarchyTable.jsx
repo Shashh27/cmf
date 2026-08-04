@@ -1,12 +1,25 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../../Config/auth';
 import { Spin, Empty, Alert, Select, Modal, Button, Image, Input, message } from 'antd';
 import { EyeOutlined, FileTextOutlined, PlusOutlined, SaveOutlined, CheckOutlined } from '@ant-design/icons';
 import PlannedRMActions from './PlannedRMActions';
 import PlanProcureRMDownload from '../../DownloadReports/PlanProcureRMDownload';
 import { getMaterialMatchInfo, formatMaterialMatchLabel, stripMaterialMatchLabel } from './materialMatchUtils';
+import { api } from '../../api/client.js';
 const { Option } = Select;
+
+const NO_2D_DOCUMENT_LABEL = 'No 2D Document';
+const NO_2D_GROUP_PREFIX = '__no_2d_';
+const EXTRACTION_PENDING_LABEL = 'Material Not Extracted';
+const EXTRACTION_PENDING_PREFIX = '__extraction_pending_';
+
+/** Flow 3 only: OCR extracted both material name and dimensions (stock_size). */
+const hasExtractedMaterialFrom2D = (latest) =>
+  !!(latest?.material && latest?.stock_size);
+
+const is2DDocumentType = (documentType) => {
+  const t = (documentType || '').toLowerCase().trim();
+  return t === '2d' || t === '2d drawing' || t === 'drawing';
+};
 
 // ── Column filter dropdown ───────────────────────────────────────────────────
 const FilterHeader = ({ label, options, value, onChange, style = {} }) => {
@@ -50,9 +63,20 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
       e.preventDefault();
       return;
     }
-    if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) return;
+    if (e.keyCode === 38 || e.keyCode === 40) {
+      e.preventDefault();
+      return;
+    }
+    if ([8, 9, 27, 13, 37, 39].includes(e.keyCode)) return;
     if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) return;
+    if (e.key === '.') return;
     if (e.key && !/^\d$/.test(e.key)) e.preventDefault();
+  };
+
+  const parseDimensionValue = (raw) => {
+    if (raw === '' || raw == null) return 0;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : 0;
   };
 
   const inputStyle = {
@@ -63,137 +87,63 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
     borderRadius: '2px',
     textAlign: 'center',
     MozAppearance: 'textfield',
-    WebkitAppearance: 'none',
     ...(disabled ? { backgroundColor: '#f5f5f5', color: '#999', cursor: 'not-allowed' } : {}),
   };
   const labelStyle = { fontSize: isMobile ? 9 : 10, color: '#333', fontWeight: 500, marginRight: 3 };
   const rowStyle = { display: 'flex', alignItems: 'center', gap: isMobile ? 5 : 8 };
 
+  const dimInput = (field, value) => (
+    <input
+      type="text"
+      inputMode="decimal"
+      style={inputStyle}
+      value={value ?? ''}
+      onChange={(e) => {
+        const val = e.target.value;
+        if (val === '' || /^\d*\.?\d*$/.test(val)) {
+          onChange(field, val === '' ? 0 : parseDimensionValue(val));
+        }
+      }}
+      onKeyDown={handleInputKeyDown}
+      placeholder="0"
+      disabled={disabled}
+    />
+  );
+
   if (formType === 'Round') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Dia</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.diameter || ''}
-            onChange={(e) => onChange('diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Dia</span>
+        {dimInput('diameter', dimensions?.diameter)}
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+      </div>
     );
   }
 
   if (formType === 'Square') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Br</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.breadth || ''}
-            onChange={(e) => onChange('breadth', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Ht</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.height || ''}
-            onChange={(e) => onChange('height', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+        <span style={labelStyle}>Br</span>
+        {dimInput('breadth', dimensions?.breadth)}
+        <span style={labelStyle}>Ht</span>
+        {dimInput('height', dimensions?.height)}
+      </div>
     );
   }
 
   if (formType === 'Pipe') {
     return (
-      <>
-        <style>{`
-          input[type=number]::-webkit-outer-spin-button,
-          input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-        `}</style>
-        <div style={rowStyle}>
-          <span style={labelStyle}>ID</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.inner_diameter || ''}
-            onChange={(e) => onChange('inner_diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>OD</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.outer_diameter || ''}
-            onChange={(e) => onChange('outer_diameter', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-          <span style={labelStyle}>Len</span>
-          <input
-            type="number"
-            style={inputStyle}
-            value={dimensions?.length || ''}
-            onChange={(e) => onChange('length', parseFloat(e.target.value) || 0)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="0"
-            disabled={disabled}
-          />
-        </div>
-      </>
+      <div style={rowStyle}>
+        <span style={labelStyle}>OD</span>
+        {dimInput('outer_diameter', dimensions?.outer_diameter)}
+        <span style={labelStyle}>ID</span>
+        {dimInput('inner_diameter', dimensions?.inner_diameter)}
+        <span style={labelStyle}>Len</span>
+        {dimInput('length', dimensions?.length)}
+      </div>
     );
   }
 
@@ -206,8 +156,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState([]);
   const [selectedRM, setSelectedRM] = useState([]);
+  const [selectedPartName, setSelectedPartName] = useState([]);
   const [selectedPartNumber, setSelectedPartNumber] = useState([]);
   const [selectedStockSource, setSelectedStockSource] = useState([]);
+  const [selectedDocStatus, setSelectedDocStatus] = useState('all'); // 'all' | 'no_2d'
   const [previewModal, setPreviewModal] = useState({ visible: false, document: null });
   const [planningData, setPlanningData] = useState({});
   const [stockRecommendations, setStockRecommendations] = useState({});
@@ -221,11 +173,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   // ── Column header filters ──────────────────────────────────────────────────
   const [colOrder, setColOrder] = useState([]);
   const [colRM, setColRM] = useState([]);
+  const [colPartName, setColPartName] = useState([]);
   const [colPartNumber, setColPartNumber] = useState([]);
   const [colFormType, setColFormType] = useState([]);
   const [colSource, setColSource] = useState([]);
-  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const userId = storedUser?.id;
   const plannedRmFetchKeyRef = useRef('');
 
   useEffect(() => { fetchAllOrdersHierarchy(); }, []);
@@ -261,13 +212,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     try {
       setLoading(true);
       setError(null);
-      const ordersResponse = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: userId != null ? { manufacturing_coordinator_id: userId } : undefined,
-      });
+      const ordersResponse = await api.get(`/orders/`);
       const orders = ordersResponse.data || [];
       const ordersWithHierarchy = await Promise.all(orders.map(async (order) => {
         try {
-          const hierarchyResponse = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${order.id}`);
+          const hierarchyResponse = await api.get(`/rawmaterials/order-raw-material-hierarchy/${order.id}`);
           return { ...order, hierarchy: hierarchyResponse.data.product_hierarchy };
         } catch { return { ...order, hierarchy: null }; }
       }));
@@ -359,21 +308,36 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     return [...arr].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
   };
 
+  /** Skip STANDARD parts and parts marked WITHOUT_RAW_MATERIAL — not relevant to RM planning. */
+  const isRmRelevantPart = (partNode) => {
+    const part = partNode?.part;
+    if (!part) return false;
+    const typeName = String(part.type_name || '').trim().toUpperCase();
+    const partDetail = String(part.part_detail || '').trim().toUpperCase();
+    if (typeName === 'STANDARD') return false;
+    if (partDetail === 'WITHOUT_RAW_MATERIAL') return false;
+    return true;
+  };
+
   const getAllParts = (hierarchy) => {
     const parts = [];
     const processAssembly = (assembly, path = []) => {
       const currentPath = [...path, assembly.assembly.assembly_name];
-      assembly.parts?.forEach(p => parts.push({ ...p, path: currentPath.join(' > ') }));
+      assembly.parts?.forEach(p => {
+        if (isRmRelevantPart(p)) parts.push({ ...p, path: currentPath.join(' > ') });
+      });
       assembly.subassemblies?.forEach(sub => processAssembly(sub, currentPath));
     };
-    hierarchy?.direct_parts?.forEach(p => parts.push({ ...p, path: 'Direct Parts' }));
+    hierarchy?.direct_parts?.forEach(p => {
+      if (isRmRelevantPart(p)) parts.push({ ...p, path: 'Direct Parts' });
+    });
     hierarchy?.assemblies?.forEach(a => processAssembly(a));
     return parts;
   };
 
   const getLatest2DDocument = (documents) => {
     if (!documents || !Array.isArray(documents) || documents.length === 0) return null;
-    const docs2D = documents.filter(doc => doc.document_type?.toLowerCase() === '2d');
+    const docs2D = documents.filter(doc => is2DDocumentType(doc.document_type));
     if (docs2D.length === 0) return null;
     return [...docs2D].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
   };
@@ -390,8 +354,21 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       return 'Square';
     }
 
+    // Check for Square patterns with labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+    if (/(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height).*x.*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height).*x.*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/.test(cleaned)) {
+      return 'Square';
+    }
+
+    // Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+    if (/(?:od|outer|outerdia|outerdiameter).*x.*(?:id|inner|innerdia|innerdiameter)/.test(cleaned)) {
+      return 'Pipe';
+    }
+
     // Parenthesized dia pattern -> Round
     if (/\(dia\)/i.test(cleaned)) return 'Round';
+
+    // Ø symbol or other diameter indicators -> Round
+    if (/(?:ø|phi|Φ|dia|d)/.test(cleaned)) return 'Round';
 
     if (cleanedNoParens.includes('/')) return 'Pipe';
     const parts = cleanedNoParens.split('x').filter(p => p.trim() !== '');
@@ -418,6 +395,42 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         return dimensions;
       }
 
+      // Check for Square patterns with various labels: LxWxH, LxBxH, LengthxBreadthxHeight, etc.
+      // Handle formats: 20Lx20Bx20H, 20lengthx20breadthx20height, 20Lx20Wx20H
+      const squarePatternMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/i);
+      if (squarePatternMatch) {
+        const vals = [parseFloat(squarePatternMatch[1]), parseFloat(squarePatternMatch[2]), parseFloat(squarePatternMatch[3])];
+        const labels = cleaned.match(/(?:l|len|length|w|wid|width|b|br|breadth|h|ht|height)/gi) || [];
+        // Try to assign based on labels
+        if (labels.length >= 3) {
+          const labelLower = labels.map(l => l.toLowerCase());
+          const lIdx = labelLower.findIndex(l => ['l', 'len', 'length'].includes(l));
+          const bIdx = labelLower.findIndex(l => ['b', 'br', 'breadth', 'w', 'wid', 'width'].includes(l));
+          const hIdx = labelLower.findIndex(l => ['h', 'ht', 'height'].includes(l));
+          if (lIdx >= 0) dimensions.length = vals[lIdx];
+          if (bIdx >= 0) dimensions.breadth = vals[bIdx];
+          if (hIdx >= 0) dimensions.height = vals[hIdx];
+        } else {
+          // Default: assume order is length x breadth x height
+          dimensions.length = vals[0];
+          dimensions.breadth = vals[1];
+          dimensions.height = vals[2];
+        }
+        if (dimensions.length && dimensions.breadth && dimensions.height) {
+          return dimensions;
+        }
+      }
+
+      // Check for Pipe patterns: ODxIDxLen, OuterDiameterxInnerDiameterxLength, etc.
+      // Handle formats: 50ODx30IDx1000, 50odx30idx1000, 50outerx30innerx1000
+      const pipePatternMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:od|outer|outerdia|outerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:id|inner|innerdia|innerdiameter)\s*x\s*(\d+(?:\.\d+)?)\s*(?:l|len|length)?/i);
+      if (pipePatternMatch) {
+        dimensions.outer_diameter = parseFloat(pipePatternMatch[1]);
+        dimensions.inner_diameter = parseFloat(pipePatternMatch[2]);
+        dimensions.length = parseFloat(pipePatternMatch[3]);
+        return dimensions;
+      }
+
       // Check for pattern like 260(dia)x50(length) or 110(dia)x25(thick) with parentheses
       const diaMatch = cleaned.match(/(\d+(?:\.\d+)?)\(dia(?:meter)?\)/i);
       // Accept length / len / thick / thickness / t as the second dimension label
@@ -437,6 +450,25 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         if (otherNums.length > 0) {
           dimensions.diameter = diaVal;
           dimensions.length = otherNums[0];
+          return dimensions;
+        }
+      }
+
+      // Handle Ø symbol and other diameter indicators: Ø70x155, phi70x155, Φ70x155, dia70x155
+      // Also handle formats like "70 dia x 155", "70d x 155", "70Ø x 155", "70x155Ø"
+      // Match both: symbol before number (Ø70) and number before symbol (70Ø)
+      const diameterSymbolMatch = cleaned.match(/(?:ø|phi|Φ|dia|d)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:ø|phi|Φ|dia|d)/i);
+      if (diameterSymbolMatch) {
+        const diaVal = parseFloat(diameterSymbolMatch[1] || diameterSymbolMatch[2]);
+        // Find the length - look for other numbers in the string
+        const allNumbers = cleaned.match(/[\d.]+/g) || [];
+        const otherNums = allNumbers.map(parseFloat).filter(n => n !== diaVal && !Number.isNaN(n));
+        if (otherNums.length > 0) {
+          dimensions.diameter = diaVal;
+          dimensions.length = otherNums[0];
+          return dimensions;
+        } else {
+          dimensions.diameter = diaVal;
           return dimensions;
         }
       }
@@ -487,12 +519,27 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   };
 
   const getMaterialSelectOptions = (row) => {
-    const optionMap = new Map();
     const selectedId = getSelectedMaterialId(row);
+    const isSaved = !!savedRows[row.key];
 
+    if (row.needsManualPlanning) {
+      return [...rawMaterialsList]
+        .sort((a, b) => (a.material_name || '').localeCompare(b.material_name || ''))
+        .map((rm) => {
+          const rmId = Number(rm.id);
+          return {
+            value: rmId,
+            label: isSaved && selectedId != null && rmId === Number(selectedId)
+              ? `${rm.material_name} (planned)`
+              : rm.material_name,
+          };
+        });
+    }
+
+    const optionMap = new Map();
     (row.materialRecommendations || []).forEach((rec) => {
       const recId = Number(rec.id);
-      const isPlanned = selectedId != null && recId === Number(selectedId);
+      const isPlanned = isSaved && selectedId != null && recId === Number(selectedId);
       optionMap.set(recId, {
         value: recId,
         label: isPlanned
@@ -504,9 +551,12 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     if (selectedId && !optionMap.has(selectedId)) {
       const material = rawMaterialsList.find((rm) => Number(rm.id) === selectedId);
       if (material) {
+        const rec = row.materialRecommendations?.find((m) => Number(m.id) === selectedId);
         optionMap.set(selectedId, {
           value: selectedId,
-          label: `${material.material_name} (planned)`,
+          label: isSaved
+            ? `${material.material_name} (planned)`
+            : formatMaterialMatchLabel(material.material_name, rec?.match_type),
         });
       }
     }
@@ -537,7 +587,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       return `${dims.diameter} DIA x ${dims.length} LENGTH`;
     }
     if (planning.formType === 'Square' && dims.breadth && dims.height && dims.length) {
-      return `${dims.breadth} x ${dims.height} x ${dims.length}`;
+      return `${dims.length} x ${dims.breadth} x ${dims.height}`;
     }
     if (planning.formType === 'Pipe' && dims.outer_diameter && dims.inner_diameter && dims.length) {
       return `${dims.outer_diameter} OD x ${dims.inner_diameter} ID x ${dims.length} LENGTH`;
@@ -627,7 +677,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
   const fetchStockRecommendations = async (materialName, dimensionsStr, key, materialId = null) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks`, {
         material_name: materialName,
         dimensions_str: dimensionsStr,
         min_score: 0.3,
@@ -659,7 +709,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
       if (requests.length === 0) return;
 
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks/batch`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks/batch`, {
         requests
       });
 
@@ -684,7 +734,6 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       extracted_data_id: row.extractedDataId,
       planned_form_type: planning.formType,
       planned_raw_material_id: resolvedMaterialId,
-      user_id: userId,
       planned_diameter: null,
       planned_length: null,
       planned_breadth: null,
@@ -709,6 +758,15 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     return payload;
   };
 
+  const buildManualPlannedRMPayload = (row, planning, resolvedMaterialId) => {
+    const payload = buildPlannedRMPayload(row, planning, resolvedMaterialId);
+    delete payload.extracted_data_id;
+    return {
+      part_id: row.partId,
+      ...payload,
+    };
+  };
+
   const savePlannedRM = async (row) => {
     try {
       setLoadingSave(prev => ({ ...prev, [row.key]: true }));
@@ -718,39 +776,60 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         return;
       }
 
-      const matchInfo = resolveRowMaterialMatch(
-        row.rmName,
-        row.key,
-        row.plannedRawMaterialId,
-        !!savedRows[row.key]
-      );
-      if (!matchInfo.materialExists) {
-        message.error('No matching raw material found in master list. Please create it first.');
+      const resolvedMaterialId = getSelectedMaterialId(row);
+      if (!resolvedMaterialId) {
+        message.error(
+          row.needsManualPlanning
+            ? 'Please select a raw material from the master list.'
+            : 'Please select a raw material from the suggestions.'
+        );
         return;
       }
 
-      const resolvedMaterialId = getSelectedMaterialId(row);
-      if (!resolvedMaterialId) {
-        message.error('Please select a raw material from the suggestions.');
-        return;
+      if (!row.needsManualPlanning) {
+        const matchInfo = resolveRowMaterialMatch(
+          row.rmName,
+          row.key,
+          row.plannedRawMaterialId,
+          !!savedRows[row.key]
+        );
+        if (!matchInfo.materialExists) {
+          message.error('No matching raw material found in master list. Please create it first.');
+          return;
+        }
       }
       
       const planning = planningData[row.key] || {};
       const updateData = buildPlannedRMPayload(row, planning, resolvedMaterialId);
+      const isManualFirstSave = !row.extractedDataId;
+      const isUpdate = !!savedRows[row.key] && !!row.extractedDataId;
 
-      const isUpdate = !!savedRows[row.key];
-      const saveRequest = isUpdate
-        ? axios.put(`${API_BASE_URL}/planned-raw-materials/update/${row.extractedDataId}`, updateData)
-        : axios.post(`${API_BASE_URL}/planned-raw-materials/create`, updateData);
+      const saveRequest = isManualFirstSave
+        ? api.post('/planned-raw-materials/create-manual', buildManualPlannedRMPayload(row, planning, resolvedMaterialId))
+        : isUpdate
+          ? api.put(`/planned-raw-materials/update/${row.extractedDataId}`, updateData)
+          : api.post('/planned-raw-materials/create', updateData);
 
       await saveRequest;
 
       setSelectedMaterialIds(prev => ({ ...prev, [row.key]: resolvedMaterialId }));
       setSavedRows(prev => ({ ...prev, [row.key]: true }));
       message.success(isUpdate ? 'Planned raw material updated successfully' : 'Planned raw material saved successfully');
-      
-      // Fetch stock recommendations based on planned dimensions
-      await fetchPlannedBasedRecommendations({ ...row, resolvedMaterialId }, planning);
+
+      if (isManualFirstSave) {
+        await fetchAllOrdersHierarchy();
+      }
+
+      const selectedMaterialName = getSelectedMaterialLabel(row, true);
+      await fetchPlannedBasedRecommendations(
+        {
+          ...row,
+          resolvedMaterialId,
+          rmName: selectedMaterialName || row.rmName,
+          resolvedMaterialName: selectedMaterialName,
+        },
+        planning
+      );
     } catch (err) {
       console.error('Failed to save planned RM:', err);
       message.error('Failed to save planned raw material');
@@ -773,18 +852,24 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         dimensionStr = `${dimensions.outer_diameter}x${dimensions.inner_diameter}x${dimensions.length}`;
       }
       
-      if (!dimensionStr || !row.rmName) {
+      if (!dimensionStr) {
+        return;
+      }
+
+      const materialName = row.resolvedMaterialName || row.rmName;
+      const materialId = row.resolvedMaterialId || row.rmId || null;
+      if (!materialName || materialName === NO_2D_DOCUMENT_LABEL) {
         return;
       }
       
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/recommend-stocks/batch`, {
+      const response = await api.post(`/rawmaterials/recommend-stocks/batch`, {
         requests: [{
-          material_name: row.rmName,
+          material_name: materialName,
           dimensions_str: dimensionStr,
           min_score: 0.3,
           max_recommendations: 5,
           required_length: dimensions.length || null,
-          material_id: row.resolvedMaterialId || null,
+          material_id: materialId,
         }]
       });
       
@@ -801,7 +886,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     try {
       if (extractedDataIds.length === 0) return;
 
-      const response = await axios.post(`${API_BASE_URL}/planned-raw-materials/batch-get`, {
+      const response = await api.post(`/planned-raw-materials/batch-get`, {
         extracted_data_ids: extractedDataIds
       });
       
@@ -873,11 +958,26 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     const groups = {};
     parts.forEach(part => {
       const latest = getLatestExtractedData(part.extracted_data);
-      const name = latest?.material || '2D Document Not Uploaded';
+      const doc2D = getLatest2DDocument(part.documents);
+      let name;
+      // Flow 3: group by extracted material. Flows 1–2: keep manual labels (never show planned name as extracted).
+      if (hasExtractedMaterialFrom2D(latest)) {
+        name = latest.material;
+      } else if (!doc2D) {
+        name = `${NO_2D_GROUP_PREFIX}${part.part.id}`;
+      } else {
+        name = `${EXTRACTION_PENDING_PREFIX}${part.part.id}`;
+      }
       if (!groups[name]) groups[name] = { materialName: name, parts: [] };
       groups[name].parts.push(part);
     });
     return Object.values(groups);
+  };
+
+  const toDisplayMaterialName = (groupKey) => {
+    if (groupKey.startsWith(NO_2D_GROUP_PREFIX)) return NO_2D_DOCUMENT_LABEL;
+    if (groupKey.startsWith(EXTRACTION_PENDING_PREFIX)) return EXTRACTION_PENDING_LABEL;
+    return groupKey;
   };
 
   const tableData = useMemo(() => {
@@ -891,15 +991,38 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         group.parts.forEach((part, i) => {
           const latest = getLatestExtractedData(part.extracted_data);
           const doc2D = getLatest2DDocument(part.documents);
-          const key = `${order.id}-${group.materialName}-${part.part.id}`;
-          const matchInfo = getMaterialMatchInfo(group.materialName, rawMaterialsList);
+          const hasNo2DDocument = !doc2D;
+          const extractedFrom2D = hasExtractedMaterialFrom2D(latest);
+          // Flows 1–2: manual planning (full master list). Flow 3: extracted material + fuzzy match.
+          const needsManualPlanning = hasNo2DDocument || !extractedFrom2D;
+          const showExtractedMaterialUI = extractedFrom2D;
+          const groupKey = group.materialName;
+          const displayRmName = toDisplayMaterialName(groupKey);
+          const key = `${order.id}-${groupKey}-${part.part.id}`;
+          const plannedRm = latest?.planned_raw_material_id
+            ? rawMaterialsList.find((rm) => Number(rm.id) === Number(latest.planned_raw_material_id))
+            : null;
+          const matchInfo = needsManualPlanning
+            ? {
+                materialExists: true,
+                recommendations: [],
+                exactMatch: false,
+                resolvedMaterialId: latest?.planned_raw_material_id || null,
+                resolvedMaterialName: plannedRm?.material_name || null,
+              }
+            : getMaterialMatchInfo(displayRmName, rawMaterialsList);
           rows.push({
             key,
             orderId: order.id,
             orderName: order.sale_order_number,
-            rmName: group.materialName,
+            rmName: displayRmName,
+            rmGroupKey: groupKey,
+            hasNo2DDocument,
+            needsManualPlanning,
+            showExtractedMaterialUI,
+            hasExtractionPending: !!doc2D && !extractedFrom2D,
             rmId: matchInfo.resolvedMaterialId || part.part.raw_material_id,
-            materialExists: matchInfo.materialExists,
+            materialExists: needsManualPlanning ? true : matchInfo.materialExists,
             resolvedMaterialId: matchInfo.resolvedMaterialId,
             resolvedMaterialName: matchInfo.resolvedMaterialName,
             materialRecommendations: matchInfo.recommendations,
@@ -957,7 +1080,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
     const planningUpdates = {};
     tableData.forEach((row) => {
-      if (!row.rmName || !row.dimension || row.plannedFormType) return;
+      if (!row.rmName || !row.dimension || row.plannedFormType || row.needsManualPlanning) return;
       const formType = detectFormTypeFromDimensions(row.dimension);
       const dimensions = parseDimensions(row.dimension, formType);
       planningUpdates[row.key] = {
@@ -993,15 +1116,21 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     fetchExistingPlannedRM(tableData, extractedDataIds);
   }, [extractedDataIdsKey, refreshTrigger, tableData]);
 
+  const partNameOptions = useMemo(() => {
+    const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
+    return [...new Set(base.map(r => r.partName).filter(Boolean))].sort();
+  }, [tableData, selectedOrder]);
+
   const partNumberOptions = useMemo(() => {
     const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
-    return [...new Set(base.map(r => r.partNumber))];
+    return [...new Set(base.map(r => r.partNumber).filter(Boolean))];
   }, [tableData, selectedOrder]);
 
   // Derived column filter options
   const colFilterOptions = useMemo(() => ({
     orders: [...new Set(tableData.map(r => r.orderName).filter(Boolean))].sort(),
     rms: [...new Set(tableData.map(r => r.rmName).filter(Boolean))].sort(),
+    partNames: [...new Set(tableData.map(r => r.partName).filter(Boolean))].sort(),
     partNumbers: [...new Set(tableData.map(r => r.partNumber).filter(Boolean))].sort(),
     formTypes: [...new Set(tableData.map(r => planningData[r.key]?.formType).filter(Boolean))].sort(),
     sources: ['General Stock', 'Procured', 'Not Assigned'],
@@ -1011,6 +1140,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     const rows = tableData.filter(r => {
       if (selectedOrder.length > 0 && !selectedOrder.includes(r.orderName)) return false;
       if (selectedRM.length > 0 && !selectedRM.includes(r.rmName)) return false;
+      if (selectedPartName.length > 0 && !selectedPartName.includes(r.partName)) return false;
       if (selectedPartNumber.length > 0 && !selectedPartNumber.includes(r.partNumber)) return false;
       if (selectedStockSource.length > 0) {
         const src = linkedStockMap[r.partId]?.sourceType;
@@ -1018,9 +1148,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         if (selectedStockSource.includes('order') && src !== 'order') return false;
         if (selectedStockSource.includes('not_assigned') && linkedStockMap[r.partId]) return false;
       }
+      if (selectedDocStatus === 'no_2d' && !r.hasNo2DDocument) return false;
       // Column header filters
       if (colOrder.length > 0 && !colOrder.includes(r.orderName)) return false;
       if (colRM.length > 0 && !colRM.includes(r.rmName)) return false;
+      if (colPartName.length > 0 && !colPartName.includes(r.partName)) return false;
       if (colPartNumber.length > 0 && !colPartNumber.includes(r.partNumber)) return false;
       if (colFormType.length > 0 && !colFormType.includes(planningData[r.key]?.formType)) return false;
       if (colSource.length > 0) {
@@ -1034,20 +1166,20 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
     const rmCount = {};
     rows.forEach(r => {
       orderCount[r.orderName] = (orderCount[r.orderName] || 0) + 1;
-      const k = `${r.orderName}__${r.rmName}`;
+      const k = `${r.orderName}__${r.rmGroupKey || r.rmName}`;
       rmCount[k] = (rmCount[k] || 0) + 1;
     });
     const orderSeen = {};
     const rmSeen = {};
     return rows.map(r => {
-      const k = `${r.orderName}__${r.rmName}`;
+      const k = `${r.orderName}__${r.rmGroupKey || r.rmName}`;
       const oSpan = orderSeen[r.orderName] ? 0 : orderCount[r.orderName];
       const rSpan = rmSeen[k] ? 0 : rmCount[k];
       orderSeen[r.orderName] = true;
       rmSeen[k] = true;
       return { ...r, orderRowSpan: oSpan, rmRowSpan: rSpan };
     });
-  }, [tableData, selectedOrder, selectedRM, selectedPartNumber, selectedStockSource, linkedStockMap, colOrder, colRM, colPartNumber, colFormType, colSource, planningData]); // eslint-disable-line
+  }, [tableData, selectedOrder, selectedRM, selectedPartName, selectedPartNumber, selectedStockSource, selectedDocStatus, linkedStockMap, colOrder, colRM, colPartName, colPartNumber, colFormType, colSource, planningData]); // eslint-disable-line
 
   const border = '1px solid #000';
   const isMobile = window.innerWidth <= 768;
@@ -1062,8 +1194,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: isMobile ? 10 : 14, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: isMobile ? 14 : 16, whiteSpace: 'nowrap' }}>Plan & Procure Raw Materials</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartNumber([]); }}>
+          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartName([]); setSelectedPartNumber([]); }}>
             {orderOptions.map(o => <Option key={o} value={o}>{o}</Option>)}
+          </Select>
+          <Select mode="multiple" value={selectedPartName} placeholder="Part Name" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartName(val || [])}>
+            {partNameOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
           </Select>
           <Select mode="multiple" value={selectedPartNumber} placeholder="Part Number" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartNumber(val || [])}>
             {partNumberOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
@@ -1076,11 +1211,16 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
             <Option value="order">Procured</Option>
             <Option value="not_assigned">Not Assigned</Option>
           </Select>
-          {(selectedOrder.length > 0 || selectedRM.length > 0 || selectedPartNumber.length > 0 || selectedStockSource.length > 0) && (
-            <Button size="small" danger onClick={() => { setSelectedOrder([]); setSelectedPartNumber([]); setSelectedRM([]); setSelectedStockSource([]); }}>
-              Clear
-            </Button>
-          )}
+          <Select
+            value={selectedDocStatus === 'all' ? undefined : selectedDocStatus}
+            placeholder="Document"
+            allowClear
+            style={{ minWidth: isMobile ? 130 : 160 }}
+            onChange={(val) => setSelectedDocStatus(val || 'all')}
+          >
+            <Option value="all">All</Option>
+            <Option value="no_2d">No 2D Document</Option>
+          </Select>
           <PlanProcureRMDownload tableData={filteredRows} planningData={planningData} savedRows={savedRows} />
         </div>
       </div>
@@ -1101,7 +1241,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
               </tr>
               <tr>
                 <th style={thStyle}><FilterHeader label="Part Number" options={colFilterOptions.partNumbers} value={colPartNumber} onChange={setColPartNumber} /></th>
-                <th style={thStyle}>Part Name</th>
+                <th style={thStyle}><FilterHeader label="Part Name" options={colFilterOptions.partNames} value={colPartName} onChange={setColPartName} /></th>
                 <th style={thStyle}>Qty</th>
                 <th style={thStyle}>Preview Document</th>
                 <th style={thStyle}>Material Name</th>
@@ -1132,6 +1272,9 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                   </td>
                   <td style={tdStyle}>{row.dimension}</td>
                   <td style={tdStyle}>
+                    {row.needsManualPlanning ? (
+                      <span style={{ color: '#999', fontSize: isMobile ? 9 : 10 }}>—</span>
+                    ) : (
                     <Select
                       size="small"
                       value={planningData[row.key]?.formType || undefined}
@@ -1144,10 +1287,62 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                       <Option value="Square">Square</Option>
                       <Option value="Pipe">Pipe</Option>
                     </Select>
+                    )}
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left', minWidth: isMobile ? '150px' : '220px', verticalAlign: 'top' }}>
+                    {row.needsManualPlanning ? (
+                      <>
+                        <div style={{
+                          marginBottom: 8,
+                          padding: '4px 8px',
+                          backgroundColor: '#fffbe6',
+                          border: '1px solid #ffe58f',
+                          borderRadius: '2px',
+                          fontSize: isMobile ? 9 : 10,
+                          fontWeight: 600,
+                          color: '#ad8b00',
+                        }}>
+                          {row.hasNo2DDocument
+                            ? 'No 2D document — select material, form type, and dimensions'
+                            : '2D document uploaded — material not extracted. Select material, form type, and dimensions manually.'}
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          <Select
+                            size="small"
+                            placeholder="Select raw material from master list"
+                            style={{ width: '100%', fontSize: isMobile ? 9 : 10 }}
+                            value={getSelectedMaterialId(row)}
+                            onChange={(val) => handleMaterialSelection(row.key, Number(val))}
+                            options={getMaterialSelectOptions(row)}
+                            optionFilterProp="label"
+                            showSearch
+                            disabled={isPartStockLocked(row.partId)}
+                          />
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          <Select
+                            size="small"
+                            value={planningData[row.key]?.formType || undefined}
+                            placeholder="Select form type"
+                            style={{ width: '100%', fontSize: isMobile ? 9 : 10 }}
+                            onChange={(val) => handleFormTypeChange(row, val)}
+                            disabled={isPartStockLocked(row.partId)}
+                          >
+                            <Option value="Round">Round</Option>
+                            <Option value="Square">Square</Option>
+                            <Option value="Pipe">Pipe</Option>
+                          </Select>
+                        </div>
+                        {isPartStockLocked(row.partId) && (
+                          <div style={{ fontSize: isMobile ? 8 : 9, color: '#999', marginBottom: 8 }}>
+                            Planning locked — unlink stock or delete procure to change material, form type, or dimensions
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
                     {/* Material Availability Status */}
-                    {row.rmName !== '2D Document Not Uploaded' && (
+                    {row.showExtractedMaterialUI && (
                       <>
                         <div style={{ 
                           marginBottom: 8, 
@@ -1173,7 +1368,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           <div style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: isMobile ? 8 : 9, color: '#666', marginBottom: 4 }}>
                               Extracted: <strong>{row.rmName}</strong>
-                              {getSelectedMaterialLabel(row, true) && (
+                              {savedRows[row.key] && getSelectedMaterialLabel(row, true) && (
                                 <span>
                                   {' → Planned: '}
                                   <strong>{getSelectedMaterialLabel(row, true)}</strong>
@@ -1201,6 +1396,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                             )}
                           </div>
                         )}
+                      </>
+                    )}
                       </>
                     )}
                     
@@ -1235,7 +1432,11 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           type={savedRows[row.key] ? "default" : "primary"}
                           loading={loadingSave[row.key]}
                           onClick={() => savePlannedRM(row)}
-                          disabled={!row.materialExists || isPartStockLocked(row.partId)}
+                          disabled={
+                            isPartStockLocked(row.partId) ||
+                            (!row.needsManualPlanning && !row.materialExists) ||
+                            (row.needsManualPlanning && !getSelectedMaterialId(row))
+                          }
                           icon={savedRows[row.key] ? <CheckOutlined /> : <SaveOutlined />}
                           style={{ 
                             fontSize: isMobile ? 9 : 10, 
@@ -1259,7 +1460,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                       isMobile={isMobile}
                       planningData={planningData}
                       isSaved={savedRows[row.key]}
-                      materialExists={row.materialExists}
+                      materialExists={row.needsManualPlanning ? true : row.materialExists}
                       linkedStock={linkedStockMap[row.partId] || null}
                       isProcured={procuredMap[row.partId] || false}
                       updateLinkedStock={updateLinkedStockStatus}

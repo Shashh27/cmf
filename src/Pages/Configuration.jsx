@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card, Input } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-design/icons";
 import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
 import VendorsTable from "../Configuration Components/VendorsTable";
+import MachineMHRs from "../Configuration Components/MachineMHRs";
+import { api } from '../api/client.js';
 
 const Configuration = () => {
   const [workcenters, setworkcenters] = useState([]);
@@ -40,9 +40,7 @@ const Configuration = () => {
 
   const fetchworkcenters = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/workcenters/`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      const response = await api.get(`/workcenters/`);
       setworkcenters(response.data);
     } catch (error) {
       console.error("Error fetching work centers:", error);
@@ -56,9 +54,7 @@ const Configuration = () => {
     try {
       const machinePromises = workcenters.map(async (workcenter) => {
         try {
-          const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`, {
-            params: userId != null ? { user_id: userId } : undefined,
-          });
+          const response = await api.get(`/machines/workcenter/${workcenter.id}`);
           return { workcenterId: workcenter.id, machines: response.data };
         } catch (error) {
           console.error(`Error fetching machines for work center ${workcenter.id}:`, error);
@@ -90,9 +86,7 @@ const Configuration = () => {
 
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/workcenters/${id}`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      await api.delete(`/workcenters/${id}`);
       message.success("Work center deleted successfully");
       fetchworkcenters();
     } catch (error) {
@@ -325,6 +319,11 @@ const Configuration = () => {
       key: 'vendors',
       label: 'Vendors',
       children: <VendorsTable userId={userId} />,
+    },
+    {
+      key: 'machine_mhrs',
+      label: 'Machine MHRs',
+      children: <MachineMHRs userId={userId} />,
     },
   ];
 

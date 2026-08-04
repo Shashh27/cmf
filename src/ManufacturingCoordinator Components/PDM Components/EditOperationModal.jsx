@@ -4,19 +4,31 @@ import {
   Spin, Empty, Tag, Row, Col, TimePicker, Select, Tooltip, Flex,
   Badge, DatePicker, App
 } from 'antd';
+import { api } from '../../api/client.js';
 import {
   UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined,
   ExclamationCircleOutlined, ToolOutlined, PlusOutlined, SyncOutlined,
   DownloadOutlined, EyeOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import axios from "axios";
 import { API_BASE_URL } from '../../Config/auth';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
 import OperationToolsSelector from './OperationToolsSelector';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
+
+async function downloadBlobWithAuth(path, filename) {
+  const response = await api.get(path, { responseType: 'blob' });
+  const blobUrl = URL.createObjectURL(response.data);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.setAttribute('download', filename || 'download');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}
 
 // Reusable From/To date pair for Out-Source operations
 const OutSourceDates = ({ form, fromDateWatch, namePrefix }) => {
@@ -70,6 +82,8 @@ const EditOperationModal = ({
   const [loadingTools, setLoadingTools]         = useState(false);
   const [allTools, setAllTools]                 = useState([]);
   const [preview, setPreview]                   = useState(null); // { url, title, type }
+  const [previewBlobUrl, setPreviewBlobUrl]     = useState(null);
+  const [previewLoading, setPreviewLoading]     = useState(false);
   const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
   const [partTypes, setPartTypes]               = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
@@ -123,7 +137,7 @@ const EditOperationModal = ({
     setLoadingDocs(true);
     try {
       // Do not filter by user_id: admin, project coordinator, and manufacturing coordinator all see the same operation documents
-      const r = await axios.get(`${API_BASE_URL}/operation-documents/operation/${operation.id}`);
+      const r = await api.get(`/operation-documents/operation/${operation.id}`);
       setDocuments(r.data);
     } catch (e) {
       console.error(e);
@@ -136,7 +150,7 @@ const EditOperationModal = ({
     if (!operation) return;
     setLoadingTools(true);
     try {
-      const r = await axios.get(`${API_BASE_URL}/tools/operation/${operation.id}`);
+      const r = await api.get(`/tools/operation/${operation.id}`);
       setExistingTools(r.data);
     } catch (e) {
       console.error(e);
@@ -212,7 +226,7 @@ const EditOperationModal = ({
     if (uid != null) fd.append('user_id', String(uid));
     setLoadingDocs(true);
     try {
-      await axios.post(`${API_BASE_URL}/operation-documents/upload/`, fd);
+      await api.post(`/operation-documents/upload/`, fd);
       message.success(`${selectedFileList[0].name} uploaded successfully`);
       resetUpload();
       fetchDocuments();
@@ -227,7 +241,7 @@ const EditOperationModal = ({
 
   const handleDeleteDocument = async (docId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/operation-documents/${docId}`);
+      await api.delete(`/operation-documents/${docId}`);
       message.success('Document deleted successfully');
       fetchDocuments();
     } catch (e) {
@@ -242,7 +256,7 @@ const EditOperationModal = ({
 
   const handlePreview = (doc) => {
     const ext = doc.document_name.split('.').pop().toLowerCase();
-    const url = `${API_BASE_URL}/operation-documents/${doc.id}/preview`;
+    const url = `/operation-documents/${doc.id}/preview`;
     let type = 'other';
     if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
     else if (ext === 'pdf') type = 'pdf';
@@ -254,16 +268,58 @@ const EditOperationModal = ({
     setParentId(null); // Switch off "Update Version" mode if it was on
   };
 
-  const handleDownloadFile = (doc) => {
-    const url = `${API_BASE_URL}/operation-documents/${doc.id}/download`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.style.display = 'none';
-    a.setAttribute('download', doc.document_name);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    message.success(`Downloading ${doc.document_name}`);
+  const closePreview = () => {
+    setPreview(null);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
+  };
+
+  // Media elements cannot send a Bearer header, so load previews as authenticated blobs.
+  useEffect(() => {
+    if (!preview) return undefined;
+    if (!['image', 'pdf', 'text', 'video'].includes(preview.type)) {
+      setPreviewBlobUrl(null);
+      setPreviewLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewBlobUrl((previousUrl) => {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      return null;
+    });
+
+    (async () => {
+      try {
+        const response = await api.get(preview.url, { responseType: 'blob' });
+        if (!cancelled) setPreviewBlobUrl(URL.createObjectURL(response.data));
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          message.error('Failed to load document preview');
+          setPreviewBlobUrl(null);
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preview]);
+
+  const handleDownloadFile = async (doc) => {
+    try {
+      await downloadBlobWithAuth(`/operation-documents/${doc.id}/download`, doc.document_name);
+      message.success(`Downloading ${doc.document_name}`);
+    } catch (error) {
+      console.error(error);
+      message.error('Download failed');
+    }
   };
 
   const handleAddTools = async ({ tool_ids }) => {
@@ -273,8 +329,7 @@ const EditOperationModal = ({
     for (const toolId of tool_ids) {
       if (existingTools.some(t => t.tool_id === toolId)) continue;
       try {
-        await axios.post(
-          `${API_BASE_URL}/tools/`,
+        await api.post(`/tools/`,
           {
             tool_id: toolId,
             part_id: operation.part_id,
@@ -297,7 +352,7 @@ const EditOperationModal = ({
 
   const handleRemoveTool = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/tools/${id}`);
+      await api.delete(`/tools/${id}`);
       message.success('Tool removed');
       fetchExistingTools();
       if (onUpdate) onUpdate();
@@ -329,10 +384,10 @@ const EditOperationModal = ({
         work_instructions: out ? null : (rest.work_instructions ?? null),
         notes:             out ? null : (rest.notes ?? null),
       };
-      const url    = isCreateMode ? `${API_BASE_URL}/operations/` : `${API_BASE_URL}/operations/${operation.id}`;
+      const url    = isCreateMode ? `/operations/` : `/operations/${operation.id}`;
       const body   = isCreateMode ? { ...payload, part_id: partId } : payload;
       const method = isCreateMode ? 'post' : 'put';
-      const r = await axios({
+      const r = await api({
         url,
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -751,23 +806,27 @@ const EditOperationModal = ({
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={filteredTabs} />
       </div>
       {preview && (
-        <Modal title={preview.title} open onCancel={() => setPreview(null)}
+        <Modal title={preview.title} open onCancel={closePreview}
           footer={[
             <Button key="dl" icon={<DownloadOutlined />} onClick={() => handleDownloadFile({ id: preview.id, document_name: preview.name })}>Download</Button>,
-            <Button key="cl" type="primary" onClick={() => setPreview(null)}>Close</Button>
+            <Button key="cl" type="primary" onClick={closePreview}>Close</Button>
           ]}
           width="95%" style={{ maxWidth: 1000, top: 20 }} styles={{ body: { height: '75vh', padding: 0 } }}
         >
-          {preview.type === 'image' ? (
+          {previewLoading ? (
+            <div className="flex items-center justify-center h-full"><Spin size="large" /></div>
+          ) : ['image', 'pdf', 'text', 'video'].includes(preview.type) && !previewBlobUrl ? (
+            <div className="flex items-center justify-center h-full"><Empty description="Preview unavailable" /></div>
+          ) : preview.type === 'image' ? (
             <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-              <img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              <img src={previewBlobUrl} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
             </div>
           ) : preview.type === 'pdf' ? (
-            <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
+            <iframe src={`${previewBlobUrl}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
           ) : preview.type === 'text' ? (
             <div className="h-full bg-gray-50 p-4 overflow-auto">
               <iframe 
-                src={preview.url} 
+                src={previewBlobUrl} 
                 title={preview.title} 
                 width="100%" 
                 height="100%" 
@@ -786,7 +845,7 @@ const EditOperationModal = ({
                 controls
                 autoPlay
                 style={{ maxWidth: '100%', maxHeight: '100%' }}
-                src={preview.url}
+                src={previewBlobUrl}
               >
                 Your browser does not support the video tag.
               </video>

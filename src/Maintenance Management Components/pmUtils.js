@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
 
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
@@ -197,9 +198,13 @@ export function frequencySummary(item) {
 }
 
 export async function pmFetch(path, options = {}) {
-  const res = await fetch(`${PM_API}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const headers = isFormData
+    ? { ...options.headers }
+    : { 'Content-Type': 'application/json', ...options.headers };
+  const res = await authFetch(`${PM_API}${path}`, {
     ...options,
+    headers,
   });
   if (!res.ok) {
     let detail = 'Request failed';

@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, Select, Button, message } from 'antd';
 import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 
 const { Option } = Select;
 
@@ -15,23 +16,54 @@ export const roleLabels = {
 
 const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] }) => {
   const [form] = Form.useForm();
+  const [existingPassword, setExistingPassword] = useState('');
+  const [loadingPassword, setLoadingPassword] = useState(false);
+
+  const fetchExistingPassword = async (userId) => {
+    try {
+      setLoadingPassword(true);
+      const response = await authFetch(`${API_BASE_URL}/access-users/${userId}/password`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.password_type === 'encrypted') {
+          setExistingPassword(data.password);
+        } else {
+          setExistingPassword('');
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching password:', error);
+    } finally {
+      setLoadingPassword(false);
+    }
+  };
 
   useEffect(() => {
     if (open) {
       if (editingUser) {
+        fetchExistingPassword(editingUser.id);
         form.setFieldsValue({
           username: editingUser.username || editingUser.user_name,
           gmail: editingUser.gmail,
           role: editingUser.role,
           center: editingUser.center,
           group: editingUser.group,
-          password: editingUser.password || '',
+          password: '',  // Will be set after fetch
         });
       } else {
         form.resetFields();
+        setExistingPassword('');
       }
     }
   }, [open, editingUser, form]);
+
+  useEffect(() => {
+    if (existingPassword && editingUser) {
+      form.setFieldsValue({
+        password: existingPassword,
+      });
+    }
+  }, [existingPassword, editingUser, form]);
 
   const handleFormSubmit = async (values) => {
     const { username, password, ...rest } = values;
@@ -46,13 +78,13 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
     try {
       let response;
       if (editingUser) {
-        response = await fetch(`${API_BASE_URL}/access-users/${editingUser.id}/`, {
+        response = await authFetch(`${API_BASE_URL}/access-users/${editingUser.id}/`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
       } else {
-        response = await fetch(`${API_BASE_URL}/access-users/`, {
+        response = await authFetch(`${API_BASE_URL}/access-users/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -181,7 +213,7 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
           name="password"
           label="Password"
           rules={[
-            { required: true, message: 'Please enter password' },
+            { required: !editingUser, message: 'Please enter password' },
             {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
@@ -193,7 +225,10 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
             }
           ]}
         >
-          <Input.Password placeholder="Enter password" />
+          <Input.Password 
+            placeholder={editingUser ? "Current password loaded" : "Enter password"} 
+            disabled={loadingPassword && editingUser}
+          />
         </Form.Item>
 
         <Form.Item>

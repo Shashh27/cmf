@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, App, Tabs } from "antd";
-import { 
+import {
   ExperimentOutlined, 
   PlusOutlined, 
   EditOutlined, 
   DeleteOutlined,
   DatabaseOutlined
 } from "@ant-design/icons";
+import { api } from '../api/client.js';
 import { RawMaterialsInventoryPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 import { StockDetailsPdfDownload } from "../DownloadReports/StockDetailsPdfDownload";
 
@@ -63,10 +62,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     fetchingRawMaterials.current = true;
     setLoading(true);
     try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const response = await api.get(`/rawmaterials/`);
       const materials = response.data || [];
 
       // Backend already returns materials with stock status
@@ -90,7 +86,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
   const fetchStockForMaterial = async (materialId) => {
     setStockLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+      const response = await api.get(`/rawmaterials/stock/`, {
         params: { material_id: materialId }
       });
       setSelectedMaterialStock(response.data || []);
@@ -126,7 +122,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
       cancelText: 'No, Cancel',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/stock/${stockId}`);
+          await api.delete(`/rawmaterials/stock/${stockId}`);
           message.success('Stock deleted successfully!');
           fetchStockForMaterial(selectedMaterialForStock?.id);
         } catch (error) {
@@ -162,7 +158,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     setSavingRawMaterial(true);
     try {
       const isEdit = !!editingRawMaterial?.id;
-      const url = isEdit ? `${API_BASE_URL}/rawmaterials/${editingRawMaterial.id}` : `${API_BASE_URL}/rawmaterials/`;
+      const url = isEdit ? `/rawmaterials/${editingRawMaterial.id}` : `/rawmaterials/`;
       const method = isEdit ? "put" : "post";
 
       const payload = {
@@ -175,10 +171,9 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
         quantity: values.quantity === "" ? 0 : Number(values.quantity) || 0,
         stock_dimensions: values.stock_dimensions,
         cost_per_kg: values.cost === "" ? null : Number(values.cost) || null,
-        user_id: getCurrentUserId(),
       };
 
-      await axios({
+      await api({
         url,
         method,
         headers: { "Content-Type": "application/json" },
@@ -209,9 +204,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`, {
-            params: { user_id: getCurrentUserId() ?? undefined },
-          });
+          await api.delete(`/rawmaterials/${material.id}`);
           await fetchRawMaterials();
           message.success("Raw material deleted successfully");
         } catch (error) {
@@ -440,6 +433,8 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                 rules={[{ required: true, message: 'Please enter density' }]}
               >
                 <InputNumber 
+                  controls={false}
+                  keyboard={false}
                   style={{ width: '100%' }} 
                   min={0} 
                   precision={3} 
@@ -456,6 +451,8 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                 label={<span className="font-semibold text-gray-700">Cost (₹/kg)</span>}
               >
                 <InputNumber 
+                  controls={false}
+                  keyboard={false}
                   style={{ width: '100%' }} 
                   min={0} 
                   precision={2} 
@@ -739,11 +736,10 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
         quantity: Number(values.quantity),
         source_type: "general",
         cost: materialCost || null,
-        user_id: getCurrentUserId(),
         ...getDimensions(values)
       };
       
-      await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, payload);
+      await api.post(`/rawmaterials/stock/`, payload);
       message.success("Stock added successfully!");
       form.resetFields();
       onSuccess?.();
@@ -780,9 +776,11 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
     if (formType === "Round") {
       return (
         <>
-          <Col xs={12} sm={8}>
+          <Col xs={12} sm={12}>
             <Form.Item name="diameter" label="Diameter (mm)" rules={[{ required: true }]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -819,9 +817,11 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
               />
             </Form.Item>
           </Col>
-          <Col xs={12} sm={8}>
+          <Col xs={12} sm={12}>
             <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -865,8 +865,51 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
       return (
         <>
           <Col xs={12} sm={8}>
+            <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
+              <InputNumber 
+                controls={false}
+                keyboard={false}
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
             <Form.Item name="breadth" label="Breadth (mm)" rules={[{ required: true }]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -906,45 +949,8 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
           <Col xs={12} sm={8}>
             <Form.Item name="height" label="Height (mm)" rules={[{ required: true }]}>
               <InputNumber 
-                style={{ width: '100%' }} 
-                min={0} 
-                step={0.01}
-                precision={2} 
-                placeholder="mm"
-                onBeforeInput={(e) => {
-                  const char = e.data;
-                  if (char && !/[0-9.]/.test(char)) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyPress={(e) => {
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
-                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
-                      e.which !== 36 && e.which !== 35) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyDown={(e) => {
-                  const value = e.target.value;
-                  if (e.key === '.' && value && value.includes('.')) {
-                    e.preventDefault();
-                    return false;
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-              />
-            </Form.Item>
-          </Col>
-          <Col xs={12} sm={8}>
-            <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
-              <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -988,8 +994,17 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
       return (
         <>
           <Col xs={12} sm={8}>
-            <Form.Item name="inner_diameter" label="Inner ⌀ (mm)" rules={[{ required: true, message: 'Required' }]}>
+            <Form.Item name="outer_diameter" label="Outer ⌀ (mm)" rules={[{ required: true, message: 'Required' }, ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('inner_diameter') < value) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(new Error('Outer diameter must be > inner diameter'));
+              },
+            })]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -1027,15 +1042,10 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
-            <Form.Item name="outer_diameter" label="Outer ⌀ (mm)" rules={[{ required: true, message: 'Required' }, ({ getFieldValue }) => ({
-              validator(_, value) {
-                if (!value || getFieldValue('inner_diameter') < value) {
-                  return Promise.resolve();
-                }
-                return Promise.reject(new Error('Outer diameter must be > inner diameter'));
-              },
-            })]}>
+            <Form.Item name="inner_diameter" label="Inner ⌀ (mm)" rules={[{ required: true, message: 'Required' }]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -1075,6 +1085,8 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
           <Col xs={12} sm={8}>
             <Form.Item name="length" label="Length (mm)" rules={[{ required: true, message: 'Required' }]}>
               <InputNumber 
+                controls={false}
+                keyboard={false}
                 style={{ width: '100%' }} 
                 min={0} 
                 step={0.01}
@@ -1118,8 +1130,8 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
 
   return (
     <Form form={form} layout="vertical" onFinish={handleSubmit}>
-      <Row gutter={[16, 0]}>
-        <Col xs={24} sm={8}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12}>
           <Form.Item 
             name="process_type" 
             label="Process Type" 
@@ -1132,7 +1144,7 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
             </Select>
           </Form.Item>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={12}>
           <Form.Item
             name="form_type"
             label="Form Type"
@@ -1146,10 +1158,16 @@ export const StockForm = ({ materialId, materialCost, onSuccess }) => {
             </Select>
           </Form.Item>
         </Col>
+      </Row>
+      <Row gutter={[16, 16]}>
         {renderDimensionFields()}
+      </Row>
+      <Row gutter={[16, 16]}>
         <Col xs={24} sm={12}>
           <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
             <InputNumber
+              controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               min={1}
               step={1}

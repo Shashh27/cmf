@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Table, Select, Typography, Button, Modal, message, Input, Space, Tooltip, Card, Tag,
 } from 'antd';
+import { authFetch } from '../api/client.js';
 import {
   ReloadOutlined, CheckOutlined, CloseOutlined, EyeOutlined, SafetyCertificateOutlined,
   CalendarOutlined, ClockCircleOutlined, ThunderboltOutlined,
@@ -129,7 +130,7 @@ const PokaYokeSupervisorReview = ({ machines = [], fetchMachines, machinesLoadin
 
   useEffect(() => {
     loadPending();
-    fetch(`${API_BASE_URL}/access-users/`)
+    authFetch(`${API_BASE_URL}/access-users/`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         const map = {};

@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, InputNumber, Modal, Select, Spin } from 'antd';
-import { TOOLS_API_BASE_URL } from '../../Config/qualityconfig';
 import { DEFAULT_MEASURED_INSTRUMENT } from './inspectorConstants';
-
-const INSTRUMENTS_API = `${TOOLS_API_BASE_URL}/tools-list/?category=${encodeURIComponent('Instruments')}`;
+import { buildInstrumentSelectOptions, fetchInstrumentSubCategories } from './instrumentOptions';
 
 const STANDARD_DIM_TYPES = [
   { value: 'Length', label: 'Length' },
@@ -47,18 +45,7 @@ const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaul
     const loadInstruments = async () => {
       setLoadingInstruments(true);
       try {
-        const res = await fetch(INSTRUMENTS_API);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const seen = new Set();
-        const subs = [];
-        (Array.isArray(data) ? data : []).forEach((item) => {
-          const sub = (item?.sub_category || '').trim();
-          if (!sub || seen.has(sub)) return;
-          seen.add(sub);
-          subs.push(sub);
-        });
-        subs.sort((a, b) => a.localeCompare(b));
+        const subs = await fetchInstrumentSubCategories();
         if (!cancelled) setInstrumentOptions(subs);
       } catch (err) {
         console.warn('Failed to load instruments for stamp modal', err);
@@ -74,22 +61,10 @@ const StampCharacteristicModal = ({ open, onCancel, onOk, confirmLoading, defaul
     };
   }, [open]);
 
-  const instrumentSelectOptions = useMemo(() => {
-    const seen = new Set();
-    const merged = [];
-    const push = (v) => {
-      const t = (v || '').trim();
-      if (!t || seen.has(t)) return;
-      seen.add(t);
-      merged.push({ value: t, label: t });
-    };
-    push(DEFAULT_MEASURED_INSTRUMENT);
-    const def = (defaultInstrument || '').trim();
-    if (def) push(def);
-    instrumentOptions.forEach(push);
-    return merged;
-  }, [instrumentOptions, defaultInstrument]);
-
+  const instrumentSelectOptions = useMemo(
+    () => buildInstrumentSelectOptions(instrumentOptions, [defaultInstrument]),
+    [instrumentOptions, defaultInstrument],
+  );
   useEffect(() => {
     if (open) {
       const inst = (defaultInstrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT;

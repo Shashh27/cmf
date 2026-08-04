@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Button, Modal, Select, App, Spin, Tag, Typography, Space } from "antd";
-import { LinkOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, DisconnectOutlined, ShoppingCartOutlined } from "@ant-design/icons";
 import {
   filterUnitsForPlanned,
   getEligibleGeneralStocks,
   stockMeetsPlannedCrossSection,
 } from "./stockPlanningUtils";
+import { LinkOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, DisconnectOutlined, ShoppingCartOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 
@@ -77,7 +76,21 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   const plannedFormType = planningData?.[row.key]?.formType;
 
   const eligibleRecommendations = useMemo(
-    () => (recommendations || []).filter((rec) => rec.status !== 'unavailable'),
+    () => (recommendations || [])
+      .filter((rec) => rec.status !== 'unavailable')
+      .slice()
+      .sort((a, b) => {
+        // Best Match % first
+        const aScore = a.match_score ?? 0;
+        const bScore = b.match_score ?? 0;
+        if (aScore !== bScore) return bScore - aScore;
+        const aCross = a.cross_section_excess_mm ?? Number.POSITIVE_INFINITY;
+        const bCross = b.cross_section_excess_mm ?? Number.POSITIVE_INFINITY;
+        if (aCross !== bCross) return aCross - bCross;
+        const aLen = a.length_excess_mm ?? 0;
+        const bLen = b.length_excess_mm ?? 0;
+        return aLen - bLen;
+      }),
     [recommendations],
   );
 
@@ -102,14 +115,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   // Check if material is linked to order stock (procured)
   const isLinkedToOrderStock = linkedStock?.sourceType === 'order';
 
-  // Get user ID from localStorage
-  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const userId = storedUser?.id;
-
   const fetchGeneralStock = async () => {
     try {
       setLoadingStock(true);
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+      const response = await api.get(`/rawmaterials/stock/`, {
         params: {
           material_name: rowData.resolvedMaterialName || rowData.rmName,
           material_id: rowData.resolvedMaterialId || rowData.rmId,
@@ -127,7 +136,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   const fetchStockUnits = async (stockId) => {
     try {
       setLoadingUnits(prev => ({ ...prev, [stockId]: true }));
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/${stockId}/units`);
+      const response = await api.get(`/rawmaterials/stock/${stockId}/units`);
       setStockUnits(prev => ({ ...prev, [stockId]: response.data || [] }));
     } catch (error) {
     } finally {
@@ -150,7 +159,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       onOk: async () => {
         try {
           setLoadingLink(true);
-          await axios.put(`${API_BASE_URL}/parts/${rowData.partId}`, {
+          await api.put(`/parts/${rowData.partId}`, {
             raw_material_stock_id: null,
             raw_material_unit_id: null,
             raw_material_id: null,
@@ -215,12 +224,11 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       onOk: async () => {
         try {
           setLoadingLink(true);
-          await axios.post(`${API_BASE_URL}/rawmaterials/assign-material/`, null, {
+          await api.post(`/rawmaterials/assign-material/`, null, {
             params: {
               unit_id: targetUnitId,
               part_id: rowData.partId,
-              required_length: plannedLength,
-              user_id: userId
+              required_length: plannedLength
             }
           });
           message.success('Stock linked successfully');
@@ -250,6 +258,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   };
 
   const getFormType = () => {
+    if (plannedFormType) return plannedFormType;
     const dimensions = planningData?.[row.key]?.dimensions || {};
     if (dimensions.diameter && dimensions.inner_diameter && dimensions.outer_diameter) {
       return 'Hollow';
@@ -259,6 +268,22 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       return 'Round';
     }
     return 'Unknown';
+  };
+
+  const getPlannedDimensionsSummary = () => {
+    const formType = plannedFormType || getFormType();
+    const dims = plannedDims || {};
+    if (formType === 'Round' && dims.diameter != null && dims.length != null) {
+      return `${dims.diameter} DIA x ${dims.length} LENGTH`;
+    }
+    if (formType === 'Square' && dims.breadth != null && dims.height != null && dims.length != null) {
+      return `${dims.length} x ${dims.breadth} x ${dims.height}`;
+    }
+    if (formType === 'Pipe' && dims.outer_diameter != null && dims.inner_diameter != null && dims.length != null) {
+      return `${dims.outer_diameter} OD x ${dims.inner_diameter} ID x ${dims.length} LENGTH`;
+    }
+    if (plannedLength != null) return `${plannedLength} mm length`;
+    return 'Not planned';
   };
 
   const getDimensionsToShow = () => {
@@ -288,12 +313,11 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       
       // Call the auto-extract-process endpoint to create order material
       // Send form_type and dimensions directly to avoid re-parsing issues
-      await axios.post(`${API_BASE_URL}/rawmaterials/auto-extract-process`, {
+      await api.post(`/rawmaterials/auto-extract-process`, {
         part_id: rowData.partId,
         material_name: rowData.resolvedMaterialName || rowData.rmName,
         required_length: dimensions.length || plannedLength,
         process_type: selectedProcessType,
-        user_id: userId,
         form_type: formType,
         dimensions: dimensions
       });
@@ -388,7 +412,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       {!linkedStock && eligibleRecommendations.length > 0 && (
         <div style={{ marginBottom: 8, padding: '4px 8px', backgroundColor: '#f0f8ff', borderRadius: '2px', border: '1px solid #b3d9ff' }}>
           <Text style={{ color: '#1890ff', fontSize: isMobile ? 9 : 10, fontWeight: 600, display: 'block', marginBottom: 2 }}>
-            Recommended Stocks (nearest fit):
+            Recommended Stocks (best match % first):
           </Text>
           {eligibleRecommendations.slice(0, 3).map((rec, idx) => (
             <div key={idx} style={{ fontSize: isMobile ? 8 : 9, color: '#666' }}>
@@ -464,14 +488,17 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         <div style={{ marginBottom: 16 }}>
           <Text strong>Extracted Dimension:</Text> <Text>{rowData.dimension}</Text>
         </div>
+        <div style={{ marginBottom: 8 }}>
+          <Text strong>Form Type:</Text> <Tag color="blue">{plannedFormType || getFormType()}</Tag>
+        </div>
         <div style={{ marginBottom: 16 }}>
-          <Text strong>Planned Length (Required):</Text> <Text>{plannedLength ? `${plannedLength} mm` : 'Not planned'}</Text>
+          <Text strong>Planned Dimensions:</Text> <Text>{getPlannedDimensionsSummary()}</Text>
         </div>
         
         {/* Recommended Stocks Section - show if not already assigned and recommendations exist with available units */}
         {!linkedStock && eligibleRecommendations.length > 0 && (
           <div style={{ marginBottom: 24, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
-            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (nearest fit by length, ≥ planned size):</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: 12 }}>Recommended Stocks (best match % first, length ≤ 3× planned):</Text>
             <div style={{ marginTop: 8, maxHeight: '300px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, border: '1px solid #b3d9ff' }}>
                 <thead style={{ backgroundColor: '#e6f7ff' }}>
@@ -508,6 +535,9 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
         {/* Available General Stock Section */}
         <div>
           <Text strong>Available General Stock with Units:</Text>
+          <Text style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>
+            (nearest fit first — all usable stocks, including longer bars)
+          </Text>
           {loadingStock ? (
             <Spin style={{ marginLeft: 16 }} />
           ) : generalStock.length === 0 ? (
@@ -681,10 +711,10 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
               {(getDimensionsToShow().showInnerDiameter || getDimensionsToShow().showOuterDiameter) && (
                 <tr>
                   <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }} colSpan={2}>Additional Dimensions</td>
-                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Inner Diameter</td>}
-                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }} colSpan={getDimensionsToShow().showOuterDiameter ? 1 : 2}>{planningData?.[row.key]?.dimensions?.inner_diameter} mm</td>}
                   {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Outer Diameter</td>}
-                  {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.outer_diameter} mm</td>}
+                  {getDimensionsToShow().showOuterDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }} colSpan={getDimensionsToShow().showInnerDiameter ? 1 : 2}>{planningData?.[row.key]?.dimensions?.outer_diameter} mm</td>}
+                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px', backgroundColor: '#fafafa', fontWeight: 'bold' }}>Inner Diameter</td>}
+                  {getDimensionsToShow().showInnerDiameter && <td style={{ border: '1px solid #d9d9d9', padding: '8px' }}>{planningData?.[row.key]?.dimensions?.inner_diameter} mm</td>}
                 </tr>
               )}
             </tbody>

@@ -1,14 +1,16 @@
 import { useState, useCallback, useEffect, useRef, useMemo, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Button, Modal, Tag, Descriptions } from 'antd'
 import * as THREE from 'three'
 import FactoryScene from './FactoryScene'
 import MachineGrid from '../../shopfloordashboard/MachineGrid'
-import { applyOverviewCamera, clampOrbitCamera, computeCameraPreset } from '../../shopfloordashboard/shopFloorCamera'
+import { applyOverviewCamera, clampOrbitCamera, computeCameraPreset, getMachineFocusPose } from '../../shopfloordashboard/shopFloorCamera'
 import '../../shopfloordashboard/shopFloor.css'
 import { API_BASE_URL } from '../../Config/auth'
+import { getApiWsUrl } from '../../auth/apiUrl'
+import { useAuth } from '../../auth/AuthContext.jsx'
 
 /** Always visible in header — show 0 when no machines in that state */
 const HEADER_STATUS_PILLS = ['PRODUCTION', 'IDLE', 'OFF']
@@ -58,20 +60,23 @@ const CAM_MIN_DIST = 5
 const CAM_MAX_DIST = 110
 
 function getMonitoringWsUrl() {
-  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
+  return getApiWsUrl('monitoring/live/ws')
 }
 
-function SceneCameraRig({ preset, machines, zones, controlsRef, layoutKey, frameRef }) {
+function SceneCameraRig({ machines, zones, controlsRef, layoutKey, frameRef, selectedMachine }) {
   const { camera, size } = useThree()
   const framedKeyRef = useRef('')
+  const animRef = useRef(null)
+  const lastFocusedIdRef = useRef(null)
 
   const frameScene = useCallback(() => {
     if (!machines.length) return
     camera.aspect = size.width / Math.max(size.height, 1)
     applyOverviewCamera(camera, controlsRef.current, machines, zones)
     framedKeyRef.current = layoutKey
+    animRef.current = null
+    lastFocusedIdRef.current = null
+    if (controlsRef.current) controlsRef.current.enabled = true
   }, [camera, controlsRef, layoutKey, machines, size.height, size.width, zones])
 
   useLayoutEffect(() => {
@@ -82,6 +87,63 @@ function SceneCameraRig({ preset, machines, zones, controlsRef, layoutKey, frame
   useEffect(() => {
     frameRef.current = frameScene
   }, [frameRef, frameScene])
+
+  useEffect(() => {
+    if (!selectedMachine) {
+      lastFocusedIdRef.current = null
+      if (controlsRef.current) controlsRef.current.enabled = true
+      return
+    }
+    if (lastFocusedIdRef.current === selectedMachine.id) return
+    lastFocusedIdRef.current = selectedMachine.id
+
+    const controls = controlsRef.current
+    const { position, target, fov } = getMachineFocusPose(selectedMachine, camera.position)
+    if (controls) controls.enabled = false
+
+    animRef.current = {
+      fromPos: camera.position.clone(),
+      fromTarget: controls?.target.clone() ?? target.clone(),
+      toPos: position,
+      toTarget: target,
+      fromFov: camera.fov,
+      toFov: fov,
+      t: 0,
+    }
+  }, [selectedMachine, camera, controlsRef])
+
+  useFrame((_, delta) => {
+    const anim = animRef.current
+    if (!anim) return
+
+    anim.t = Math.min(1, anim.t + delta / 0.7)
+    const ease = 1 - (1 - anim.t) ** 3
+
+    camera.position.lerpVectors(anim.fromPos, anim.toPos, ease)
+    camera.fov = THREE.MathUtils.lerp(anim.fromFov, anim.toFov, ease)
+    camera.updateProjectionMatrix()
+
+    const controls = controlsRef.current
+    if (controls) {
+      controls.target.lerpVectors(anim.fromTarget, anim.toTarget, ease)
+      controls.update()
+    } else {
+      camera.lookAt(new THREE.Vector3().lerpVectors(anim.fromTarget, anim.toTarget, ease))
+    }
+
+    if (anim.t >= 1) {
+      camera.position.copy(anim.toPos)
+      camera.fov = anim.toFov
+      camera.updateProjectionMatrix()
+      if (controls) {
+        controls.target.copy(anim.toTarget)
+        clampOrbitCamera(controls)
+        controls.enabled = true
+        controls.update()
+      }
+      animRef.current = null
+    }
+  })
 
   return null
 }
@@ -360,6 +422,7 @@ function buildLayout(apiMachines, filterWorkCenter = 'ALL', workCenterColorMap =
 
 export default function ShopFloor() {
   const navigate = useNavigate()
+  const { logoutToLogin } = useAuth()
   const [selected, setSelected] = useState(null)
   const [showLegend, setShowLegend] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
@@ -500,7 +563,7 @@ export default function ShopFloor() {
               status={st}
               count={getHeaderStatusCount(st, stats.counts)}
               isActive={statusFilter === st}
-              onClick={() => setStatusFilter(prev => (prev === st ? 'ALL' : st))}
+              onClick={() => setStatusFilter(st)}
             />
           ))}
         </div>
@@ -541,12 +604,12 @@ export default function ShopFloor() {
             statusFilter={statusFilter}
           />
           <SceneCameraRig
-            preset={cameraPreset}
             machines={visibleMachines}
             zones={workCenterZones}
             controlsRef={controlsRef}
             layoutKey={cameraLayoutKey}
             frameRef={frameSceneRef}
+            selectedMachine={selectedMachine}
           />
           <BoundedOrbitControls controlsRef={controlsRef} initialTarget={cameraPreset.target} />
         </Canvas>
@@ -605,7 +668,10 @@ export default function ShopFloor() {
         <Modal
           title="Confirm Logout"
           open={showLogoutConfirm}
-          onOk={() => navigate('/login')}
+          onOk={async () => {
+            setShowLogoutConfirm(false)
+            await logoutToLogin(navigate)
+          }}
           onCancel={() => setShowLogoutConfirm(false)}
           okText="Logout"
           cancelText="Cancel"

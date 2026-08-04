@@ -1,13 +1,25 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { PlusOutlined, PartitionOutlined, ToolOutlined, EditOutlined, DeleteOutlined, DeleteRowOutlined, CaretDownOutlined, CaretRightOutlined, SearchOutlined, DownloadOutlined, AppstoreOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography, Dropdown } from "antd";
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import "./pdm-theme.css";
+import { api } from '../api/client.js';
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
+import MovePartModal from "./MovePartModal";
+import {
+  DraggablePartRow,
+  DroppableParentRow,
+  parseDragId,
+  productDropId,
+  assemblyDropId,
+  getLocationLabel,
+  findAssemblyInTree,
+  bomCollisionDetection,
+  dragOverlayOffset,
+} from "./bomMoveDnd";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 import ProductToolsViewer from "./ProductToolsViewer";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
@@ -32,11 +44,25 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [activeItemType, setActiveItemType] = useState(null);
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
+  const [showMovePartModal, setShowMovePartModal] = useState(false);
+  const [partToMove, setPartToMove] = useState(null);
+  const [moveCurrentLabel, setMoveCurrentLabel] = useState('');
+  const [moveUpcomingLabel, setMoveUpcomingLabel] = useState('');
+  const [moveTargetAssemblyId, setMoveTargetAssemblyId] = useState(null);
+  const [activeDragPart, setActiveDragPart] = useState(null);
+  const [activeDropLabel, setActiveDropLabel] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [isDeleting, setIsDeleting] = useState(false);
   const hasFetchedData = useRef(false);
+  const hasAutoSelectedInitial = useRef(false);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
 
   const getExpandKey = (type, id) => `${type}-${id}`;
 
@@ -191,13 +217,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }
   }, []);
 
-  // If opened with an initial product id (e.g., from OMS), auto-select it AND auto-expand complete BOM tree
+  // If opened with an initial product id (e.g., from OMS), auto-select it once only
   useEffect(() => {
+    if (hasAutoSelectedInitial.current) return;
     const pid = initialProductId != null ? Number(initialProductId) : null;
     if (!pid || loading) return;
     const product = hierarchicalData[pid]?.product || products.find(p => Number(p.id) === pid);
     if (!product) return;
+    hasAutoSelectedInitial.current = true;
     setActiveItemId(pid);
+    setActiveItemType('product');
     if (onItemSelected) {
       onItemSelected({ ...product, itemType: 'product', productId: pid });
     }
@@ -235,7 +264,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
     try {
       // Use lightweight endpoint - no operations/documents/tools (much faster)
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
+      const response = await api.get(`/products/${productId}/hierarchical-lightweight`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
         const bomExport = flattenBOMForExportLightweight(data);
@@ -338,10 +367,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const downloadTemplate = async (templateType) => {
     try {
       const endpoint = templateType === 'parts'
-        ? `${API_BASE_URL}/parts/template/download`
-        : `${API_BASE_URL}/operations/template/download`;
+        ? `/parts/template/download`
+        : `/operations/template/download`;
 
-      const response = await axios.get(endpoint, {
+      const response = await api.get(endpoint, {
         responseType: 'blob',
       });
 
@@ -396,6 +425,145 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       assembly = findAssembly(hierarchicalData[part.product_id].assemblies || []);
     }
     openModal('part', product, assembly, true, part);
+  };
+
+  const openMoveConfirm = (part, targetAssemblyId, product, assemblies) => {
+    const currentLabel = getLocationLabel({
+      assemblyId: part.assembly_id || null,
+      product,
+      assemblies,
+    });
+    const upcomingLabel = getLocationLabel({
+      assemblyId: targetAssemblyId,
+      product,
+      assemblies,
+    });
+    setPartToMove(part);
+    setMoveCurrentLabel(currentLabel);
+    setMoveUpcomingLabel(upcomingLabel);
+    setMoveTargetAssemblyId(targetAssemblyId);
+    setShowMovePartModal(true);
+  };
+
+  const clearMoveState = () => {
+    setShowMovePartModal(false);
+    setPartToMove(null);
+    setMoveCurrentLabel('');
+    setMoveUpcomingLabel('');
+    setMoveTargetAssemblyId(null);
+  };
+
+  const findPartById = (partId) => {
+    for (const productId of Object.keys(hierarchicalData)) {
+      const data = hierarchicalData[productId];
+      const direct = (data.parts || []).find(p => p.id === partId);
+      if (direct) return direct;
+      const walk = (assemblies) => {
+        for (const asm of assemblies || []) {
+          const found = (asm.parts || []).find(p => p.id === partId);
+          if (found) return found;
+          const nested = walk(asm.child_assemblies);
+          if (nested) return nested;
+        }
+        return null;
+      };
+      const nested = walk(data.assemblies || []);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  const handleBomDragStart = (event) => {
+    const parsed = parseDragId(String(event.active.id));
+    if (parsed?.kind === 'part') {
+      setActiveDragPart(findPartById(parsed.id));
+    }
+    setActiveDropLabel('');
+  };
+
+  const handleBomDragOver = (event) => {
+    const label = event.over?.data?.current?.dropLabel;
+    setActiveDropLabel(label || '');
+  };
+
+  const handleBomDragEnd = (event) => {
+    setActiveDragPart(null);
+    setActiveDropLabel('');
+    const { active, over } = event;
+    if (!over) return;
+
+    const from = parseDragId(String(active.id));
+    const to = parseDragId(String(over.id));
+    if (!from || from.kind !== 'part' || !to) return;
+    if (to.kind !== 'product' && to.kind !== 'assembly') return;
+
+    const part = findPartById(from.id);
+    if (!part || part.recycle_bin) return;
+
+    const productId = part.product_id;
+    const product =
+      hierarchicalData[productId]?.product ||
+      products.find(p => p.id === productId);
+    const assemblies = hierarchicalData[productId]?.assemblies || [];
+
+    let targetAssemblyId = null;
+    if (to.kind === 'assembly') {
+      const targetAsm = findAssemblyInTree(assemblies, to.id);
+      if (!targetAsm || targetAsm.recycle_bin) {
+        message.error('Cannot drop on a recycle-bin assembly.');
+        return;
+      }
+      if (targetAsm.product_id && targetAsm.product_id !== productId) {
+        message.error('Cannot move a part to a different product.');
+        return;
+      }
+      targetAssemblyId = to.id;
+    } else if (to.kind === 'product') {
+      if (to.id !== productId) {
+        message.error('Cannot move a part to a different product.');
+        return;
+      }
+      targetAssemblyId = null;
+    }
+
+    const currentAssemblyId = part.assembly_id || null;
+    if (currentAssemblyId === targetAssemblyId) {
+      message.info('Part is already under that parent.');
+      return;
+    }
+
+    openMoveConfirm(part, targetAssemblyId, product, assemblies);
+  };
+
+  const handleBomDragCancel = () => {
+    setActiveDragPart(null);
+    setActiveDropLabel('');
+  };
+
+  const handlePartMoved = async (movedPart) => {
+    const productId = movedPart?.product_id || partToMove?.product_id;
+    clearMoveState();
+    if (!productId) return;
+    const refreshed = await fetchProductHierarchy(productId, true);
+    const expandKeys = { [getExpandKey('product', productId)]: true };
+
+    if (movedPart?.assembly_id && refreshed?.assemblies) {
+      const collectAncestors = (assemblies, targetId, path = []) => {
+        for (const asm of assemblies || []) {
+          const next = [...path, asm.id];
+          if (asm.id === targetId) return next;
+          const found = collectAncestors(asm.child_assemblies, targetId, next);
+          if (found) return found;
+        }
+        return null;
+      };
+      const pathIds = collectAncestors(refreshed.assemblies, movedPart.assembly_id) || [movedPart.assembly_id];
+      pathIds.forEach((id) => {
+        expandKeys[getExpandKey('assembly', id)] = true;
+      });
+    }
+
+    setExpandedItems(prev => ({ ...prev, ...expandKeys }));
   };
 
   const openPartActionModal = (part, type) => {
@@ -459,13 +627,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         try {
           if (type === 'part') {
             // Use soft delete for parts (move to recycle bin)
-            await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/soft-delete`);
+            await api.post(`/recycle-bin/parts/${item.id}/soft-delete`);
           } else if (type === 'assembly') {
             // Use soft delete for assemblies (move to recycle bin)
-            await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/soft-delete`);
+            await api.post(`/recycle-bin/assemblies/${item.id}/soft-delete`);
           } else {
             // Use permanent delete for products
-            await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+            await api.delete(`${endpoints[type]}`);
           }
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
@@ -508,7 +676,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       okButtonProps: { id: `delete-all-parts-${product.id}` },
       onOk: async () => {
         try {
-          const response = await axios.post(`${API_BASE_URL}/recycle-bin/products/${product.id}/soft-delete-parts`);
+          const response = await api.post(`/recycle-bin/products/${product.id}/soft-delete-parts`);
           
           if (response.data?.deleted_count) {
             message.success(`${response.data.deleted_count} part(s) moved to recycle bin for product "${product.product_name}".`);
@@ -768,7 +936,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const menuItems = getMenuItems();
 
     return (
-      <div className="pdm-action-buttons flex items-center gap-0" style={{ width: 180, minWidth: 180, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+      <div className="pdm-action-buttons flex items-center gap-0" style={{ width: 180, minWidth: 180, flexShrink: 0 }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
         {/* Col 1: type tag — fixed 80px, truncates if needed */}
         <div style={{ width: 80, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           {isInRecycleBin ? (
@@ -842,8 +1010,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const hasUnacknowledgedDocs = part.has_unacknowledged_documents === true;
 
     return (
-      <div
+      <DraggablePartRow
         key={`part-${part.id}`}
+        partId={part.id}
+        disabled={isInRecycleBin}
         className={`pdm-bom-item pdm-bom-item-${(part.type_name || 'part').toLowerCase().replace(/[^a-z]/g, '')} ${
           isInRecycleBin
             ? 'opacity-60'
@@ -859,33 +1029,29 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon(part.type_name || 'part')}</span>
           <div className="flex flex-col min-w-0 flex-1">
-            <Tooltip title={`${part.part_name}${part.raw_material_name ? ' · ' + part.raw_material_name : ''}`} placement="topLeft">
-              <Text className={`text-sm font-semibold truncate ${
-                isInRecycleBin
-                  ? 'text-gray-400'
-                  : hasUnacknowledgedDocs
-                  ? 'text-amber-900'
-                  : isSelected
-                  ? 'text-[#2E8B57]'
-                  : 'text-[#2F2F2F]'
-              }`} style={{ fontSize: 13 }}>
-                {part.part_name}
-              </Text>
-            </Tooltip>
-            <Tooltip title={`${part.part_number}${part.raw_material_name ? ' (' + part.raw_material_name + ')' : ''}`} placement="bottomLeft">
-              <Text className={`text-xs truncate ${
-                isInRecycleBin
-                  ? 'text-gray-400'
-                  : hasUnacknowledgedDocs
-                  ? 'text-amber-700'
-                  : 'text-[#5D4037]'
-              }`} style={{ fontSize: 11 }}>
-                {part.part_number}
-                {part.raw_material_name && (
-                  <span className="ml-1 text-[10px] text-[#2E8B57]" style={{ fontSize: 10 }}>({part.raw_material_name})</span>
-                )}
-              </Text>
-            </Tooltip>
+            <Text className={`text-sm font-semibold truncate ${
+              isInRecycleBin
+                ? 'text-gray-400'
+                : hasUnacknowledgedDocs
+                ? 'text-amber-900'
+                : isSelected
+                ? 'text-[#1677ff]'
+                : 'text-[#2F2F2F]'
+            }`} style={{ fontSize: 13 }} title={part.part_name}>
+              {part.part_name}
+            </Text>
+            <Text className={`text-xs truncate ${
+              isInRecycleBin
+                ? 'text-gray-400'
+                : hasUnacknowledgedDocs
+                ? 'text-amber-700'
+                : 'text-[rgba(0,0,0,0.45)]'
+            }`} style={{ fontSize: 11 }}>
+              {part.part_number}
+              {part.raw_material_name && (
+                <span className="ml-1 text-[10px] text-[#1677ff]" style={{ fontSize: 10 }}>({part.raw_material_name})</span>
+              )}
+            </Text>
           </div>
           <ActionButtons 
             item={part} 
@@ -894,7 +1060,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             tagColor={getTypeColor(part.type_name || 'part')} 
           />
         </div>
-      </div>
+      </DraggablePartRow>
     );
   };
 
@@ -918,7 +1084,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
-        <div
+        <DroppableParentRow
+          dropId={assemblyDropId(assembly.id)}
+          disabled={!!assembly.recycle_bin}
+          dropLabel={assembly.assembly_name}
           className={`pdm-bom-item pdm-bom-item-${level > 1 ? 'subassembly' : 'assembly'} ${
             isSelected ? 'pdm-bom-item-selected' : ''
           }`}
@@ -930,23 +1099,20 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               {hasChildren ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                   onClick={(e) => { e.stopPropagation(); toggleExpand(getExpandKey('assembly', assembly.id)); }}
-                  className="w-5 h-5 flex items-center justify-center p-0 text-[#5D4037] hover:bg-[#F5F5DC]" />
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center p-0 text-[rgba(0,0,0,0.45)] hover:bg-[#f5f5f5]" />
               ) : <div className="w-5" />}
             </div>
             <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon('assembly', level)}</span>
             <div className="flex flex-col min-w-0 flex-1">
-              <Tooltip title={assembly.assembly_name} placement="topLeft">
-                <Text className={`text-sm font-semibold truncate ${
-                  isSelected ? 'text-[#2E8B57]' : 'text-[#2F2F2F]'
-                }`} style={{ fontSize: 13 }}>
-                  {assembly.assembly_name}
-                </Text>
-              </Tooltip>
-              <Tooltip title={assembly.assembly_number} placement="bottomLeft">
-                <Text className="text-xs text-[#5D4037] truncate" style={{ fontSize: 11 }}>
-                  {assembly.assembly_number}
-                </Text>
-              </Tooltip>
+              <Text className={`text-sm font-semibold truncate ${
+                isSelected ? 'text-[#1677ff]' : 'text-[#2F2F2F]'
+              }`} style={{ fontSize: 13 }}>
+                {assembly.assembly_name}
+              </Text>
+              <Text className="text-xs text-[rgba(0,0,0,0.45)] truncate" style={{ fontSize: 11 }}>
+                {assembly.assembly_number}
+              </Text>
             </div>
             <ActionButtons 
               item={assembly} 
@@ -955,7 +1121,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               tagColor={getTypeColor('assembly')}
             />
           </div>
-        </div>
+        </DroppableParentRow>
         {isExpanded && hasChildren && (
           <div>
             {combinedChildren.map(child =>
@@ -994,7 +1160,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
     return (
       <div key={product.id} className="select-none">
-        <div
+        <DroppableParentRow
+          dropId={productDropId(product.id)}
+          dropLabel={product.product_name}
           className={`pdm-bom-item pdm-bom-item-product ${
             isSelected ? 'pdm-bom-item-selected' : ''
           }`}
@@ -1005,22 +1173,19 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               {showArrow ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                   onClick={(e) => { e.stopPropagation(); handleExpandProduct(product); }}
-                  className="w-5 h-5 flex items-center justify-center p-0 text-[#5D4037] hover:bg-[#F5F5DC]" />
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center p-0 text-[rgba(0,0,0,0.45)] hover:bg-[#f5f5f5]" />
               ) : <div className="w-5" />}
             </div>
             <span className="w-5 flex justify-center items-center text-sm flex-shrink-0">{getTypeIcon('product')}</span>
             <div className="flex flex-col min-w-0 flex-1">
-              <Tooltip title={product.product_name} placement="topLeft">
-                <Text className={`text-sm font-semibold truncate ${
-                  isSelected ? 'text-[#2E8B57]' : 'text-[#2F2F2F]'
-                }`} style={{ fontSize: 13 }}>{product.product_name}</Text>
-              </Tooltip>
+              <Text className={`text-sm font-semibold truncate ${
+                isSelected ? 'text-[#1677ff]' : 'text-[#2F2F2F]'
+              }`} style={{ fontSize: 13 }}>{product.product_name}</Text>
               {product.product_number && (
-                <Tooltip title={product.product_number} placement="bottomLeft">
-                  <Text className="text-xs text-[#5D4037] truncate" style={{ fontSize: 11 }}>
-                    {product.product_number}
-                  </Text>
-                </Tooltip>
+                <Text className="text-xs text-[rgba(0,0,0,0.45)] truncate" style={{ fontSize: 11 }}>
+                  {product.product_number}
+                </Text>
               )}
             </div>
             <ActionButtons 
@@ -1030,9 +1195,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               tagColor={getTypeColor('product')}
             />
           </div>
-        </div>
+        </DroppableParentRow>
         {isExpanded && hasChildren && (
-          <div className="ml-2 border-l border-[#D6D3C4] pl-1">
+          <div className="ml-2 border-l border-[#d9d9d9] pl-1">
             {combinedChildren.map(child =>
               child.__childType === 'part'
                 ? renderPartInTree(child, 1, product.id)
@@ -1375,13 +1540,15 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   return (
     <>
-      <div className="pdm-container flex flex-col h-full bg-[#F5F5DC]">
-        <div className="pdm-section-header flex-wrap gap-2" style={{ margin: 0, padding: '4px 8px' }}>
+      <div className="pdm-container flex flex-col h-full bg-white" style={{ minWidth: 0, width: "100%" }}>
+        <div className="pdm-section-header" style={{ margin: 0, padding: "8px 10px" }}>
           <div className="pdm-section-header-title">
-            <AppstoreOutlined style={{ color: '#2E8B57', fontSize: 16 }} />
-            <span className="text-sm font-semibold" style={{ fontSize: 14 }}>Bill of Materials</span>
+            <AppstoreOutlined style={{ color: "#1677ff", fontSize: 16 }} />
+            <span className="text-sm font-semibold truncate" style={{ fontSize: 14 }}>
+              Bill of Materials
+            </span>
           </div>
-            <div className="flex items-center gap-1 sm:gap-2 shrink-0 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap justify-end" style={{ flex: "1 1 auto", minWidth: 0 }}>
               <Tooltip title="Download Parts Template">
                 <Button
                   type="default"
@@ -1390,7 +1557,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   onClick={() => downloadTemplate('parts')}
                   className="pdm-action-button"
                 >
-                  <span className="hidden lg:inline">Parts Template</span>
+                  <span className="hidden xl:inline">Parts Template</span>
                 </Button>
               </Tooltip>
               {filteredProducts.length === 1 && (
@@ -1408,7 +1575,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                     onClick={() => handleViewAllTools(filteredProducts[0])}
                     className="pdm-action-button"
                   >
-                    <span className="hidden md:inline">View Tools</span>
+                    <span className="hidden xl:inline">View Tools</span>
                   </Button>
                 </>
               )}
@@ -1419,7 +1586,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   icon={<PlusOutlined />}
                   onClick={handleCreateProduct}
                   className="pdm-action-button"
-                  style={{ backgroundColor: '#2E8B57', borderColor: '#2E8B57', color: '#FFFFFF' }}
                 >
                   <span className="hidden sm:inline">New Product</span>
                   <span className="sm:hidden">New</span>
@@ -1429,18 +1595,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           </div>
         
         {/* Search Bar & Filters */}
-        <div className="px-3 pb-3 pt-2 flex items-center gap-2 w-full flex-wrap">
-          <div className="flex-1 min-w-0">
-            <div className="pdm-search-bar">
-              <SearchOutlined style={{ color: '#5D4037' }} />
-              <input
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
+        <div className="px-2 sm:px-3 pb-2 pt-1 flex items-center gap-2 w-full" style={{ minWidth: 0 }}>
+          <div className="pdm-search-bar" style={{ flex: "1 1 0%", minWidth: 0 }}>
+            <SearchOutlined style={{ color: 'rgba(0,0,0,0.45)', flexShrink: 0, fontSize: 12 }} />
+            <input
+              placeholder="Search parts, assemblies..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-          <div className="w-32 sm:w-40 md:w-44 lg:w-52 shrink-0">
+          <div className="shrink-0" style={{ maxWidth: "42%" }}>
             <BOMFilters 
               stats={getBOMStats()} 
               activeFilter={activeFilter} 
@@ -1453,16 +1617,45 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 min-h-0">
-          {searchTerm.trim() ? (
-            renderSearchResults()
-          ) : filteredProducts.length > 0 ? (
-            filteredProducts.map(product => renderProductTree(product))
-          ) : (
-            <div className="pdm-empty-state">
-              <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 min-h-0" style={{ minWidth: 0 }}>
+          {activeDragPart && (
+            <div className="pdm-bom-dragging-hint mb-2">
+              {activeDropLabel ? (
+                <>
+                  Moving <strong>{activeDragPart.part_name}</strong> → drop under <strong>{activeDropLabel}</strong>
+                </>
+              ) : (
+                <>
+                  Dragging <strong>{activeDragPart.part_name}</strong> — hover a Product / Assembly row to drop
+                </>
+              )}
             </div>
           )}
+          <DndContext
+            sensors={dndSensors}
+            collisionDetection={bomCollisionDetection}
+            onDragStart={handleBomDragStart}
+            onDragOver={handleBomDragOver}
+            onDragEnd={handleBomDragEnd}
+            onDragCancel={handleBomDragCancel}
+          >
+            {searchTerm.trim() ? (
+              renderSearchResults()
+            ) : filteredProducts.length > 0 ? (
+              filteredProducts.map(product => renderProductTree(product))
+            ) : (
+              <div className="pdm-empty-state">
+                <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            )}
+            <DragOverlay dropAnimation={null} modifiers={[dragOverlayOffset]}>
+              {activeDragPart ? (
+                <div className="pdm-bom-drag-chip">
+                  {activeDragPart.part_name}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         </div>
       </div>
       
@@ -1483,6 +1676,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         actionType={partActionType}
         selectedPart={selectedPart}
         onActionCreated={handleActionCreated}
+      />
+
+      <MovePartModal
+        open={showMovePartModal}
+        part={partToMove}
+        currentLabel={moveCurrentLabel}
+        upcomingLabel={moveUpcomingLabel}
+        targetAssemblyId={moveTargetAssemblyId}
+        onCancel={clearMoveState}
+        onMoved={handlePartMoved}
       />
       
       <ProductToolsViewer

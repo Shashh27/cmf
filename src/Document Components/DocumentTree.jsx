@@ -2,6 +2,7 @@ import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'rea
 import { Tree, Spin, message, Button, Modal, Input, Upload, Card, Select } from 'antd';
 import { FolderOutlined,  FileOutlined, CaretDownOutlined, CaretRightOutlined,ShoppingOutlined, AppstoreOutlined, PlusOutlined, FileAddOutlined, DeleteOutlined, UploadOutlined,ShoppingCartOutlined,DesktopOutlined} from '@ant-design/icons';
 import config from '../Config/config';
+import { authFetch } from '../api/client.js';
 
 const { Option } = Select;
 const DOC_TYPE_OPTIONS = ['General', 'Other'];
@@ -105,12 +106,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const role = getUserRole();
-      const userId = getUserId();
-      const url = role === 'manufacturing_coordinator' && userId
-        ? `${config.API_BASE_URL}/orders/?manufacturing_coordinator_id=${userId}`
-        : `${config.API_BASE_URL}/orders/`;
-      const response = await fetch(url);
+      const response = await authFetch(`${config.API_BASE_URL}/orders/`);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }
@@ -126,14 +122,14 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
 
   const fetchGeneralFolders = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/general-documents/folders/tree`);
+      const response = await authFetch(`${config.API_BASE_URL}/general-documents/folders/tree`);
       if (!response.ok) {
         throw new Error('Failed to fetch general folders');
       }
       const data = await response.json();
       setGeneralFolders(data);
     } catch (error) {
-      message.error('Failed to fetch general folders: ' + error.message);
+      console.error('Failed to fetch general folders:', error);
     }
   };
 
@@ -141,8 +137,8 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     try {
       const baseUrl = `${config.API_BASE_URL}`;
       const [foldersResponse, docsResponse] = await Promise.all([
-        fetch(`${baseUrl}/common-documents/folders/tree`),
-        fetch(`${baseUrl}/common-documents/all/documents`)
+        authFetch(`${baseUrl}/common-documents/folders/tree`),
+        authFetch(`${baseUrl}/common-documents/all/documents`)
       ]);
 
       if (!foldersResponse.ok) {
@@ -159,20 +155,19 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       setCommonRootDocumentCount(Array.isArray(docsData) ? docsData.length : 0);
     } catch (error) {
       console.error('Error fetching common folders or documents:', error);
-      message.error('Failed to fetch common folders: ' + error.message);
     }
   };
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
+      const response = await authFetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
       if (!response.ok) {
         throw new Error('Failed to fetch machines');
       }
       const data = await response.json();
       setMachines(data || []);
     } catch (error) {
-      message.error('Failed to fetch machines: ' + error.message);
+      console.error('Failed to fetch machines:', error);
     }
   };
 
@@ -212,7 +207,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     }
 
     const baseUrl = `${config.API_BASE_URL}`;
-    const response = await fetch(`${baseUrl}/machine-documents/machines/${resolvedMachineId}/folders`);
+    const response = await authFetch(`${baseUrl}/machine-documents/machines/${resolvedMachineId}/folders`);
     if (!response.ok) {
       throw new Error('Failed to fetch machine folders');
     }
@@ -750,20 +745,14 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      const response = await fetch(`${config.API_BASE_URL}/general-documents/folders`, {
+const response = await authFetch(`${config.API_BASE_URL}/general-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           folder_name: newFolderName.trim(),
-          parent_id: parentFolderId,
-          user_id: userId
+          parent_id: parentFolderId
         })
       });
 
@@ -793,20 +782,14 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      const response = await fetch(`${config.API_BASE_URL}/common-documents/folders`, {
+const response = await authFetch(`${config.API_BASE_URL}/common-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           folder_name: commonNewFolderName.trim(),
-          parent_id: commonParentFolderId,
-          user_id: userId
+          parent_id: commonParentFolderId
         })
       });
 
@@ -839,7 +822,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (!folderToDelete) return;
 
     try {
-      const response = await fetch(`${config.API_BASE_URL}/general-documents/folders/${folderToDelete.id}`, {
+      const response = await authFetch(`${config.API_BASE_URL}/general-documents/folders/${folderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -866,7 +849,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (!commonFolderToDelete) return;
 
     try {
-      const response = await fetch(`${config.API_BASE_URL}/common-documents/folders/${commonFolderToDelete.id}`, {
+      const response = await authFetch(`${config.API_BASE_URL}/common-documents/folders/${commonFolderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -917,20 +900,12 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (resolvedDocType) {
       formData.append('document_type', resolvedDocType);
     }
-
-    const userId = getUserId();
-    if (!userId) {
-      message.error('User not found. Please login.');
-      return;
-    }
-    formData.append('user_id', userId.toString());
-
-    const uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
+const uploadUrl = `${config.API_BASE_URL}/general-documents/upload`;
     
     try {
       setLoading(true);
       
-      const response = await fetch(uploadUrl, {
+      const response = await authFetch(uploadUrl, {
         method: 'POST',
         body: formData,
       });
@@ -983,21 +958,13 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (commonUploadFolderId !== null && commonUploadFolderId !== undefined) {
       formData.append('folder_id', commonUploadFolderId.toString());
     }
-    {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      formData.append('user_id', userId.toString());
-    }
 
     try {
       setLoading(true);
       const baseUrl = `${config.API_BASE_URL}`;
       const uploadUrl = `${baseUrl}/common-documents/upload`;
 
-      const response = await fetch(uploadUrl, {
+      const response = await authFetch(uploadUrl, {
         method: 'POST',
         body: formData
       });
@@ -1039,14 +1006,9 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      const targetMachineId = machineParentMachineId;
+const targetMachineId = machineParentMachineId;
       const baseUrl = `${config.API_BASE_URL}`;
-      const response = await fetch(`${baseUrl}/machine-documents/folders`, {
+      const response = await authFetch(`${baseUrl}/machine-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1054,8 +1016,7 @@ const buildMachineFoldersTree = (folders, machine) => {
         body: JSON.stringify({
           folder_name: machineNewFolderName.trim(),
           machine_id: machineParentMachineId,
-          parent_id: machineParentFolderId,
-          user_id: userId
+          parent_id: machineParentFolderId
         })
       });
 
@@ -1108,7 +1069,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
     try {
       const baseUrl = `${config.API_BASE_URL}`;
-      const response = await fetch(`${baseUrl}/machine-documents/folders/${machineFolderToDelete.id}`, {
+      const response = await authFetch(`${baseUrl}/machine-documents/folders/${machineFolderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -1168,7 +1129,8 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     const formData = new FormData();
-    formData.append('file', file, file.name);
+    // Backend expects repeated field name "files" (List[UploadFile])
+    formData.append('files', file, file.name);
     
     // Append folder_id or machine_id (one will be null, the other will have a value)
     if (machineUploadFolderId) {
@@ -1177,21 +1139,13 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (machineUploadMachineId) {
       formData.append('machine_id', machineUploadMachineId.toString());
     }
-    {
-      const userId = getUserId();
-      if (!userId) {
-        message.error('User not found. Please login.');
-        return;
-      }
-      formData.append('user_id', userId.toString());
-    }
 
     try {
       setLoading(true);
       const baseUrl = `${config.API_BASE_URL}`;
       const uploadUrl = `${baseUrl}/machine-documents/upload`;
 
-      const response = await fetch(uploadUrl, {
+      const response = await authFetch(uploadUrl, {
         method: 'POST',
         body: formData
       });
@@ -1429,7 +1383,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
   const fetchOrderHierarchy = async (orderId) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const response = await authFetch(`${config.API_BASE_URL}/orders/${orderId}/hierarchical`);
       if (!response.ok) {
         throw new Error('Failed to fetch order hierarchy');
       }
@@ -1443,7 +1397,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
   const fetchOperationsByPart = async (partId) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/operations/part/${partId}`);
+      const response = await authFetch(`${config.API_BASE_URL}/operations/part/${partId}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch operations: ${response.status} ${response.statusText}`);

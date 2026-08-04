@@ -3,6 +3,7 @@ import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../Config/config';
 import dayjs from 'dayjs';
+import { authFetch } from '../api/client.js';
 
 const MachineNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -18,9 +19,10 @@ const MachineNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      
       const url = `${base}?${params.toString()}`;
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch notifications');
       }
@@ -40,7 +42,7 @@ const MachineNotifications = ({ dateRange, onCount }) => {
 
   const handleAcknowledge = async (id) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/machine-notifications/${id}/ack`, {
+      const response = await authFetch(`${config.API_BASE_URL}/machine-notifications/${id}/ack`, {
         method: 'PUT',
       });
       if (!response.ok) {

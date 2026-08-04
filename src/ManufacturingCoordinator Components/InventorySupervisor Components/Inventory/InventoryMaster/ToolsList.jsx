@@ -3,6 +3,7 @@ import { Table, Button, Space, message, Input, Select, Card, Row, Col, Upload } 
 import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
 import {API_BASE_URL} from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
+import { authFetch } from '../../../../api/client.js';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -77,7 +78,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     }
     
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -95,7 +96,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       if (needsMigration) {
         console.log('Detected tools with null total_quantity, running migration...');
         try {
-          const migrateResponse = await fetch(`${API_BASE_URL}/tools-list/migrate-total-quantity`, {
+          const migrateResponse = await authFetch(`${API_BASE_URL}/tools-list/migrate-total-quantity`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -153,7 +154,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     formData.append('file', file);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
+      const response = await authFetch(`${API_BASE_URL}/tools-list/upload-excel`, {
         method: 'POST',
         body: formData,
       });

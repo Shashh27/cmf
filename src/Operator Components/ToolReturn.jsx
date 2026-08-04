@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Tag, Input, Button } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { authFetch } from '../api/client.js';
 
 const ToolReturn = () => {
   const [returns, setReturns] = useState([]);
@@ -43,7 +44,7 @@ const ToolReturn = () => {
       if (currentOpId != null) {
         url = `${API_BASE_URL}/inventory-return-requests/by-operator/${currentOpId}`;
       }
-      const response = await fetch(url);
+      const response = await authFetch(url);
 
       if (response.ok) {
         let returnsData = await response.json();

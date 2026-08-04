@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import {
   ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined, UserOutlined, CalendarOutlined,
   SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
+import { api } from '../api/client.js';
 import OrderModal from "./OMS Components/OrderModal";
 import DocumentModal from "./OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -33,18 +32,6 @@ const OMS = () => {
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
-  const getCurrentProjectCoordinatorId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const user = JSON.parse(stored);
-      if (user?.id == null) return null;
-      return user.id;
-    } catch {
-      return null;
-    }
-  };
-
   useEffect(() => {
     if (hasFetchedData.current) return;
 
@@ -68,7 +55,7 @@ const OMS = () => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      const response = await api.get(`/customers/`);
       setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
@@ -78,10 +65,7 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const coordinatorId = getCurrentProjectCoordinatorId();
-      const response = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: coordinatorId != null ? { project_coordinator_id: coordinatorId } : undefined,
-      });
+      const response = await api.get(`/orders/`);
       const data = response.data;
       setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -167,7 +151,7 @@ const OMS = () => {
       centered: true,
       onOk: async () => {
         try {
-          const response = await axios.delete(`${API_BASE_URL}/orders/${order.id}`);
+          const response = await api.delete(`/orders/${order.id}`);
           const result = response.data || {};
           fetchOrders();
           if (result.product_also_deleted) {

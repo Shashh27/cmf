@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   Modal, Button, message, Tabs, Spin, Pagination,
 } from 'antd';
+import { authFetch } from '../api/client.js';
 import {
   CheckCircleOutlined, CloseOutlined, CheckCircleFilled,
   CloseCircleFilled,
@@ -259,7 +260,7 @@ const PokaYokeChecklist = ({
     if (!machineId) { setAssignments([]); return; }
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE_URL}/pm/operator/assignments?machine_id=${machineId}`,
         { headers: { accept: 'application/json' } }
       );
@@ -462,7 +463,7 @@ const PokaYokeChecklist = ({
         })
         .filter(Boolean);
 
-      const res = await fetch(`${API_BASE_URL}/pm/operator/submissions`, {
+      const res = await authFetch(`${API_BASE_URL}/pm/operator/submissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import dayjs from 'dayjs';
-import axios from 'axios';
 import config from '../../Config/config';
+import { api } from '../../api/client.js';
 
 const useGanttStore = create((set, get) => ({
   dateRange: [dayjs().startOf('day'), dayjs().endOf('day')],
@@ -22,19 +22,6 @@ const useGanttStore = create((set, get) => ({
     try {
       const queryParams = new URLSearchParams();
 
-      // Add project_coordinator_id from local storage
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          if (user?.id) {
-            queryParams.append('project_coordinator_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage:', e);
-        }
-      }
-      
       // Use provided date range or current store date range
       // For refresh button (forceRefresh=true), use today's date
       if (forceRefresh) {
@@ -54,9 +41,9 @@ const useGanttStore = create((set, get) => ({
         queryParams.append('end_date', endDate.format('YYYY-MM-DD HH:mm:ss'));
       }
 
-      const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+      const url = `/production-analytics/combined-schedule-production${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
 
-      const response = await axios.get(url);
+      const response = await api.get(url);
 
       // Ensure we have arrays even if the API returns null/undefined
       const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};
@@ -179,22 +166,9 @@ const useGanttStore = create((set, get) => ({
     try {
       const queryParams = new URLSearchParams();
 
-      // Add project_coordinator_id from local storage
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          if (user?.id) {
-            queryParams.append('project_coordinator_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage:', e);
-        }
-      }
+      const url = `/production-analytics/combined-schedule-production${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
 
-      const url = `${config.API_BASE_URL}/production-analytics/combined-schedule-production/${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-
-      const response = await axios.get(url);
+      const response = await api.get(url);
 
       // Ensure we have arrays even if the API returns null/undefined
       const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};

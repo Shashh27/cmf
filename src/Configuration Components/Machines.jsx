@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, message, Popconfirm, Space, Card, Tooltip, Input } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import MachineModal from "../Configuration Components/MachineModal";
+import { api } from '../api/client.js';
 
 const Machines = ({ workcenter, onBack, userId, searchText }) => {
   const [machines, setMachines] = useState([]);
@@ -23,9 +22,7 @@ const Machines = ({ workcenter, onBack, userId, searchText }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      const response = await api.get(`/machines/workcenter/${workcenter.id}`);
       setMachines(response.data);
     } catch (error) {
       console.error("Error fetching machines:", error);
@@ -60,9 +57,7 @@ const Machines = ({ workcenter, onBack, userId, searchText }) => {
 
   const handleDeleteMachine = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/machines/${id}`, {
-        params: userId != null ? { user_id: userId } : undefined,
-      });
+      await api.delete(`/machines/${id}`);
       message.success("Machine deleted successfully");
       fetchMachines();
     } catch (error) {

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import axios from "axios";
 
 import { API_BASE_URL } from "../Config/auth";
 
 import { Modal, Form, Input, Select, Button, App, Badge } from "antd";
 import "./pdm-theme.css";
+import { api } from '../api/client.js';
 
 
 
@@ -445,7 +445,7 @@ const CreateProductModal = ({
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/part-types/`);
+      const response = await api.get(`/part-types/`);
 
       setPartTypes(response.data);
 
@@ -467,7 +467,7 @@ const CreateProductModal = ({
 
     try {
 
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      const response = await api.get(`/rawmaterials/vendors`);
 
       setVendors(response.data);
 
@@ -596,7 +596,7 @@ const CreateProductModal = ({
 
 
 
-      const response = await axios({
+      const response = await api({
 
         url,
 
@@ -696,17 +696,7 @@ const CreateProductModal = ({
         {`
 
           .pdm-modal-primary-btn, .pdm-modal-primary-btn:hover, .pdm-modal-primary-btn:focus, .pdm-modal-primary-btn:active {
-
-            background-color: #2E8B57 !important;
-
-            color: #FFFFFF !important;
-
-            opacity: 1 !important;
-
-            border-color: #2E8B57 !important;
-
             box-shadow: none !important;
-
           }
 
           .ant-modal-body {
@@ -759,7 +749,7 @@ const CreateProductModal = ({
 
             count={`Creating under: ${selectedProduct?.product_name || 'Selected Product'}`} 
 
-            style={{ backgroundColor: '#FDF5E6', color: '#2F2F2F', padding: '0 8px', fontSize: 'clamp(10px, 2.5vw, 12px)', border: '1px solid #D6D3C4' }} 
+            style={{ backgroundColor: '#fafafa', color: '#2F2F2F', padding: '0 8px', fontSize: 'clamp(10px, 2.5vw, 12px)', border: '1px solid #d9d9d9' }} 
 
           />
 
@@ -807,11 +797,11 @@ const CreateProductModal = ({
 
                 style={{ 
 
-                  backgroundColor: '#FDF5E6', 
+                  backgroundColor: '#fafafa', 
 
-                  color: '#5D4037', 
+                  color: 'rgba(0,0,0,0.45)', 
 
-                  borderColor: '#D6D3C4' 
+                  borderColor: '#d9d9d9' 
 
                 }} 
 
@@ -859,11 +849,11 @@ const CreateProductModal = ({
 
                 style={{
 
-                  backgroundColor: '#FDF5E6',
+                  backgroundColor: '#fafafa',
 
-                  color: '#5D4037',
+                  color: 'rgba(0,0,0,0.45)',
 
-                  borderColor: '#D6D3C4'
+                  borderColor: '#d9d9d9'
 
                 }}
 
@@ -1134,7 +1124,7 @@ const CreateProductModal = ({
 
         <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
 
-          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto" style={{ borderColor: '#D6D3C4', color: '#2F2F2F' }}>
+          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto" style={{ borderColor: '#d9d9d9', color: '#2F2F2F' }}>
 
             Cancel
 

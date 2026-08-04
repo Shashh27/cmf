@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { DeleteOutlined, UndoOutlined, SearchOutlined, CaretDownOutlined, CaretRightOutlined, MenuOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Table, Button, App, message, Modal, Typography, Tag, Empty, Spin, Input, Space, Layout, Tree, Drawer } from "antd";
+import { api } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { Sider, Content } = Layout;
@@ -142,33 +141,12 @@ const Recyclebin = ({ orderId }) => {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const user = getCurrentUser();
-      let url = `${API_BASE_URL}/recycle-bin/parts`;
-      
-      if (user && user.id) {
-        const params = new URLSearchParams();
-        const role = (user.role || user.user_role || "").toLowerCase();
-        
-        if (role.includes("admin")) {
-          params.append("admin_id", user.id);
-        } else if (role.includes("manufacturing_coordinator") || role.includes("mc")) {
-          params.append("manufacturing_coordinator_id", user.id);
-        } else if (role.includes("project_coordinator") || role.includes("pc")) {
-          params.append("project_coordinator_id", user.id);
-        } else {
-          params.append("user_id", user.id);
-        }
-        
-        if (orderId) {
-          params.append("order_id", orderId);
-        }
-        
-        if (params.toString()) {
-          url += `?${params.toString()}`;
-        }
+      let url = `/recycle-bin/parts`;
+      if (orderId) {
+        url += `?order_id=${orderId}`;
       }
       
-      const response = await axios.get(url);
+      const response = await api.get(url);
       const allParts = response.data.parts || [];
       const allAssemblies = response.data.assemblies || [];
       const orderInfo = response.data.order_info;
@@ -287,10 +265,10 @@ const Recyclebin = ({ orderId }) => {
       onOk: async () => {
         try {
           if (type === 'part') {
-            await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/restore`);
+            await api.post(`/recycle-bin/parts/${item.id}/restore`);
             antMessage.success(`Part "${item.part_name}" restored successfully`);
           } else {
-            await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
+            await api.post(`/recycle-bin/assemblies/${item.id}/restore`);
             antMessage.success(`Assembly "${item.assembly_name}" and all its parts restored successfully`);
           }
           setCheckedKeys([]);
@@ -341,10 +319,10 @@ const Recyclebin = ({ orderId }) => {
       onOk: async () => {
         try {
           if (type === 'part') {
-            await axios.delete(`${API_BASE_URL}/recycle-bin/parts/${item.id}/permanent-delete`);
+            await api.delete(`/recycle-bin/parts/${item.id}/permanent-delete`);
             antMessage.success(`Part "${item.part_name}" permanently deleted`);
           } else {
-            await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
+            await api.delete(`/recycle-bin/assemblies/${item.id}/permanent-delete`);
             antMessage.success(`Assembly "${item.assembly_name}" permanently deleted`);
           }
           setCheckedKeys([]);
@@ -392,7 +370,7 @@ const Recyclebin = ({ orderId }) => {
 
           for (const item of topAssemblies) {
             try {
-              await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
+              await api.post(`/recycle-bin/assemblies/${item.id}/restore`);
               successCount++;
             } catch (error) {
               errorCount++;
@@ -402,7 +380,7 @@ const Recyclebin = ({ orderId }) => {
 
           for (const item of standaloneParts) {
             try {
-              await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/restore`);
+              await api.post(`/recycle-bin/parts/${item.id}/restore`);
               successCount++;
             } catch (error) {
               errorCount++;
@@ -464,7 +442,7 @@ const Recyclebin = ({ orderId }) => {
 
           for (const item of topAssemblies) {
             try {
-              await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
+              await api.delete(`/recycle-bin/assemblies/${item.id}/permanent-delete`);
               successCount++;
             } catch (error) {
               errorCount++;
@@ -474,7 +452,7 @@ const Recyclebin = ({ orderId }) => {
 
           for (const item of standaloneParts) {
             try {
-              await axios.delete(`${API_BASE_URL}/recycle-bin/parts/${item.id}/permanent-delete`);
+              await api.delete(`/recycle-bin/parts/${item.id}/permanent-delete`);
               successCount++;
             } catch (error) {
               errorCount++;

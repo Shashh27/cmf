@@ -3,8 +3,7 @@ import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, Del
 import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Form, Input } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import DocumentsPanel from "./DocumentsPanel";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { api } from '../api/client.js';
 
 const { Text } = Typography;
 
@@ -73,33 +72,19 @@ const ProductDetails = ({ selectedItem }) => {
           .join("|");
 
         const buildRows = (extractedList) => {
-          const grouped = new Map();
+          const rows = [];
           (extractedList || []).forEach((ex) => {
             const doc = docById.get(ex.document_id);
             if (!doc) return;
-            const rootId = doc.parent_id || doc.id || ex.document_id;
-            const versionNum = parseV(doc.document_version);
-            const entry = grouped.get(rootId) || { rootId, variants: [] };
-            entry.variants.push({ ex, doc, versionNum });
-            grouped.set(rootId, entry);
+            rows.push({
+              ...ex,
+              document_id: ex.document_id,
+              document_name: doc?.document_name || "N/A",
+              document_version: doc?.document_version || "1.0",
+            });
           });
-          return Array.from(grouped.values()).map(({ rootId, variants }) => {
-            // FIFO by document id (oldest first)
-            const sorted = [...variants].sort((a, b) => (a.doc?.id || 0) - (b.doc?.id || 0));
-            const chosen = sorted[0];
-            return {
-              ...chosen.ex,
-              _rootId: rootId,
-              _variants: sorted.map((v) => ({
-                document_id: v.ex.document_id,
-                document_name: v.doc?.document_name || "N/A",
-                document_version: v.doc?.document_version || "1.0",
-                ex: v.ex,
-              })),
-              document_name: chosen.doc?.document_name || "N/A",
-              document_version: chosen.doc?.document_version || "1.0",
-            };
-          });
+          // Sort by document id (oldest first)
+          return rows.sort((a, b) => (a.document_id || 0) - (b.document_id || 0));
         };
 
         const partId = selectedItem.id;
@@ -120,7 +105,7 @@ const ProductDetails = ({ selectedItem }) => {
         const controller = new AbortController();
         (async () => {
           try {
-            const res = await axios.get(`${API_BASE_URL}/documents/part/${partId}/extracted-data`, { signal: controller.signal });
+            const res = await api.get(`/documents/part/${partId}/extracted-data`, { signal: controller.signal });
             setExtractedMaterials(buildRows(res.data || []));
           } catch {
             setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
@@ -240,8 +225,7 @@ const ProductDetails = ({ selectedItem }) => {
       onOk: async () => {
         try {
           const uid = getCurrentUserId();
-          await axios.put(
-            `${API_BASE_URL}/parts/${item.id}`,
+          await api.put(`/parts/${item.id}`,
             { raw_material_id: null, user_id: uid },
             { headers: { "Content-Type": "application/json" } }
           );
@@ -294,8 +278,7 @@ const ProductDetails = ({ selectedItem }) => {
         user_id: uid
       };
       
-      await axios.put(
-        `${API_BASE_URL}/documents/extracted-data/${editingRecord.id}`,
+      await api.put(`/documents/extracted-data/${editingRecord.id}`,
         payload,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -384,12 +367,12 @@ const ProductDetails = ({ selectedItem }) => {
   };
 
   return (
-    <div className="flex flex-col bg-[#F5F5DC] h-full overflow-hidden pdm-container">
+    <div className="flex flex-col bg-[#f5f5f5] h-full overflow-hidden pdm-container">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[#D6D3C4] bg-white shrink-0">
+      <div className="px-3 py-2 border-b border-[#d9d9d9] bg-white shrink-0">
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="font-semibold text-[#2F2F2F] truncate" style={{ fontSize: 14 }}>{itemName || 'Unknown Item'}</span>
-          <span className="font-mono text-xs text-[#5D4037] truncate" style={{ fontSize: 12 }}>({itemNumber || 'N/A'})</span>
+          <span className="font-mono text-xs text-[rgba(0,0,0,0.45)] truncate" style={{ fontSize: 12 }}>({itemNumber || 'N/A'})</span>
           {itemType === 'part' && item?.size && (
             <Tag color="cyan" className="text-xs m-0" style={{ fontSize: 11 }}>{item.size}</Tag>
           )}
@@ -406,14 +389,14 @@ const ProductDetails = ({ selectedItem }) => {
         <div style={{ flex: 0.5, minHeight: 0, display: 'flex', gap: '8px', padding: '4px', flexDirection: 'row' }} className="flex-col lg:flex-row">
           {/* 3D/2D Viewer */}
           <div style={{ flex: 0.6, minWidth: 0, display: 'flex', flexDirection: 'column' }} className="w-full lg:w-auto">
-            <div className="bg-white border border-[#D6D3C4] p-1 h-full">
+            <div className="bg-white border border-[#d9d9d9] p-1 h-full">
               <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     type={viewerMode === '3d' ? 'primary' : 'default'}
                     size="small"
                     onClick={() => setViewerMode('3d')}
-                    style={{ backgroundColor: viewerMode === '3d' ? '#2E8B57' : undefined, borderColor: viewerMode === '3d' ? '#2E8B57' : undefined }}
+                    style={{ backgroundColor: viewerMode === '3d' ? '#1677ff' : undefined, borderColor: viewerMode === '3d' ? '#1677ff' : undefined }}
                   >
                     3D View
                   </Button>
@@ -421,7 +404,7 @@ const ProductDetails = ({ selectedItem }) => {
                     type={viewerMode === '2d' ? 'primary' : 'default'}
                     size="small"
                     onClick={() => setViewerMode('2d')}
-                    style={{ backgroundColor: viewerMode === '2d' ? '#2E8B57' : undefined, borderColor: viewerMode === '2d' ? '#2E8B57' : undefined }}
+                    style={{ backgroundColor: viewerMode === '2d' ? '#1677ff' : undefined, borderColor: viewerMode === '2d' ? '#1677ff' : undefined }}
                   >
                     2D Drawings
                   </Button>
@@ -475,7 +458,7 @@ const ProductDetails = ({ selectedItem }) => {
                       <span className="font-mono mt-0.5" style={{ fontSize: 11 }}>{itemNumber || "N/A"}</span>
                     </div>
                   ) : (
-                    <ModelViewer3D documentId={selectedThreeDDocumentId} height="100%" showControls showEdgeButton={true} restrictZoom={true} />
+                    <ModelViewer3D documentId={selectedThreeDDocumentId} height="100%" showEdgeButton={true} restrictZoom={true} />
                   )
                 ) : (
                   twoDDocuments.length === 0 || !selectedTwoDDocumentId ? (
@@ -502,8 +485,8 @@ const ProductDetails = ({ selectedItem }) => {
             <div style={{ flex: 0.4, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' }} className="w-full lg:w-auto">
               {/* Raw Materials */}
               <div style={{ flex: 0.5, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <div className="bg-white border border-[#D6D3C4] p-2 h-full">
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-[#5D4037] mb-2" style={{ fontSize: 13 }}>
+                <div className="bg-white border border-[#d9d9d9] p-2 h-full">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-[rgba(0,0,0,0.45)] mb-2" style={{ fontSize: 13 }}>
                     <FileTextOutlined />
                     <span>Raw Material ({rawMaterials.length})</span>
                   </div>
@@ -511,11 +494,11 @@ const ProductDetails = ({ selectedItem }) => {
                     {rawMaterials.length > 0 ? (
                       <div className="flex flex-col gap-2">
                         {rawMaterials.map((material) => (
-                          <div key={material.id} className="bg-[#F5F5DC] border border-[#D6D3C4] rounded p-2">
+                          <div key={material.id} className="bg-[#f5f5f5] border border-[#d9d9d9] rounded p-2">
                             <div className="flex flex-col gap-2">
-                              <div className="border-b border-[#D6D3C4] pb-2">
+                              <div className="border-b border-[#d9d9d9] pb-2">
                                 <div className="flex items-center gap-2">
-                                  <Text className="text-xs font-medium text-[#5D4037]" style={{ fontSize: 12 }}>Material:</Text>
+                                  <Text className="text-xs font-medium text-[rgba(0,0,0,0.45)]" style={{ fontSize: 12 }}>Material:</Text>
                                   <Tooltip title={material.material_name}>
                                     <Tag color="blue" style={{ margin: 0, fontSize: 11, fontWeight: 500 }}>
                                       {material.material_name}
@@ -526,7 +509,7 @@ const ProductDetails = ({ selectedItem }) => {
                               {material.stock_dimensions && (
                                 <div className="pt-1">
                                   <div className="flex items-center gap-2">
-                                    <Text className="text-xs font-medium text-[#5D4037]" style={{ fontSize: 12 }}>Stock Dimensions:</Text>
+                                    <Text className="text-xs font-medium text-[rgba(0,0,0,0.45)]" style={{ fontSize: 12 }}>Stock Dimensions:</Text>
                                     <Tooltip title={material.stock_dimensions}>
                                       <Tag color="cyan" style={{ margin: 0, fontSize: 11, fontWeight: 500 }}>
                                         {material.stock_dimensions}
@@ -540,8 +523,8 @@ const ProductDetails = ({ selectedItem }) => {
                         ))}
                       </div>
                     ) : (
-                      <div className="py-4 text-center border border-dashed border-[#D6D3C4] rounded-md bg-[#F5F5DC] h-full flex items-center justify-center">
-                        <Text className="text-sm font-medium text-[#5D4037]">No raw materials assigned</Text>
+                      <div className="py-4 text-center border border-dashed border-[#d9d9d9] rounded-md bg-[#f5f5f5] h-full flex items-center justify-center">
+                        <Text className="text-sm font-medium text-[rgba(0,0,0,0.45)]">No raw materials assigned</Text>
                       </div>
                     )}
                   </div>
@@ -550,9 +533,9 @@ const ProductDetails = ({ selectedItem }) => {
 
               {/* Extracted from 2D */}
               <div style={{ flex: 0.5, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <div className="bg-white border border-[#D6D3C4] p-2 h-full">
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-[#5D4037] mb-2" style={{ fontSize: 13 }}>
-                    <FileTextOutlined className="text-[#2E8B57]" />
+                <div className="bg-white border border-[#d9d9d9] p-2 h-full">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-[rgba(0,0,0,0.45)] mb-2" style={{ fontSize: 13 }}>
+                    <FileTextOutlined className="text-[#1677ff]" />
                     <span>Extracted from 2D ({extractedMaterials.length})</span>
                   </div>
                   <div style={{ height: 'calc(100% - 24px)', overflow: 'auto' }}>
@@ -567,6 +550,13 @@ const ProductDetails = ({ selectedItem }) => {
                             width: 100,
                             ellipsis: { showTitle: false },
                             render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Version',
+                            dataIndex: 'document_version',
+                            key: 'document_version',
+                            width: 60,
+                            render: (text) => cellWithTooltip(text, '1.0')
                           },
                           {
                             title: 'Material',
@@ -613,15 +603,15 @@ const ProductDetails = ({ selectedItem }) => {
                             ),
                           },
                         ]}
-                        rowKey="_rootId"
+                        rowKey="id"
                         size="small"
                         pagination={false}
                         scroll={{ x: 'max-content', y: 'calc(100% - 20px)' }}
                         bordered
                       />
                     ) : (
-                      <div className="py-4 text-center border border-dashed border-[#D6D3C4] rounded-md bg-[#F5F5DC] h-full flex items-center justify-center">
-                        <Text className="text-sm font-medium text-[#5D4037]">No material data extracted</Text>
+                      <div className="py-4 text-center border border-dashed border-[#d9d9d9] rounded-md bg-[#f5f5f5] h-full flex items-center justify-center">
+                        <Text className="text-sm font-medium text-[rgba(0,0,0,0.45)]">No material data extracted</Text>
                       </div>
                     )}
                   </div>
@@ -633,8 +623,8 @@ const ProductDetails = ({ selectedItem }) => {
 
         {/* Bottom Section - Process Plan & Part Documents */}
         <div style={{ flex: 0.5, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '4px' }}>
-          <div className="bg-white border border-[#D6D3C4] p-2 h-full">
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-[#5D4037] mb-2" style={{ fontSize: 13 }}>
+          <div className="bg-white border border-[#d9d9d9] p-2 h-full">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-[rgba(0,0,0,0.45)] mb-2" style={{ fontSize: 13 }}>
               <FileTextOutlined />
               <span>Process Plan & Part Documents</span>
             </div>
@@ -664,7 +654,7 @@ const ProductDetails = ({ selectedItem }) => {
         destroyOnClose
       >
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <div className="flex items-center justify-between p-3 border-b border-[#D6D3C4] bg-white flex-wrap gap-2">
+          <div className="flex items-center justify-between p-3 border-b border-[#d9d9d9] bg-white flex-wrap gap-2">
             <div className="flex items-center gap-2 flex-wrap">
               {viewerMode === '3d' && threeDDocuments.length > 0 && (
                 <Select
@@ -704,7 +694,7 @@ const ProductDetails = ({ selectedItem }) => {
                 type={viewerMode === '3d' ? 'primary' : 'default'}
                 size="small"
                 onClick={() => setViewerMode('3d')}
-                style={{ backgroundColor: viewerMode === '3d' ? '#2E8B57' : undefined, borderColor: viewerMode === '3d' ? '#2E8B57' : undefined }}
+                style={{ backgroundColor: viewerMode === '3d' ? '#1677ff' : undefined, borderColor: viewerMode === '3d' ? '#1677ff' : undefined }}
               >
                 3D View
               </Button>
@@ -712,7 +702,7 @@ const ProductDetails = ({ selectedItem }) => {
                 type={viewerMode === '2d' ? 'primary' : 'default'}
                 size="small"
                 onClick={() => setViewerMode('2d')}
-                style={{ backgroundColor: viewerMode === '2d' ? '#2E8B57' : undefined, borderColor: viewerMode === '2d' ? '#2E8B57' : undefined }}
+                style={{ backgroundColor: viewerMode === '2d' ? '#1677ff' : undefined, borderColor: viewerMode === '2d' ? '#1677ff' : undefined }}
               >
                 2D Drawings
               </Button>

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { BellOutlined, CheckOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined, FileTextFilled, ToolFilled, AppstoreFilled, ShoppingFilled, CalendarOutlined, SearchOutlined, FolderFilled, SettingFilled, BuildFilled } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Card, Badge, Button, App, message, Typography, Tag, Empty, Spin, Space, Drawer, Tooltip, Row, Col, Statistic, DatePicker, Select, Input } from "antd";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 dayjs.extend(relativeTime);
 
@@ -14,6 +14,7 @@ const { Option } = Select;
 const { Search } = Input;
 const PCNotifications = () => {
   const { message: antMessage } = App.useApp();
+  const { user: authUser } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -24,16 +25,7 @@ const PCNotifications = () => {
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
 
-  const getCurrentUser = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const user = JSON.parse(stored);
-      return user;
-    } catch {
-      return null;
-    }
-  };
+  const getCurrentUser = () => authUser;
 
   const fetchNotifications = async (unreadOnly = false) => {
     setLoading(true);
@@ -50,8 +42,8 @@ const PCNotifications = () => {
         params.append("unread_only", "true");
       }
 
-      const response = await axios.get(
-        `${API_BASE_URL}/pc-notifications/${user.id}?${params.toString()}`
+      const response = await api.get(
+        `/pc-notifications/${user.id}?${params.toString()}`
       );
       setNotifications(response.data || []);
     } catch (error) {
@@ -67,8 +59,8 @@ const PCNotifications = () => {
       const user = getCurrentUser();
       if (!user || !user.id) return;
 
-      const response = await axios.get(
-        `${API_BASE_URL}/pc-notifications/${user.id}/unread-count`
+      const response = await api.get(
+        `/pc-notifications/${user.id}/unread-count`
       );
       setUnreadCount(response.data.unread_count || 0);
     } catch (error) {
@@ -78,7 +70,7 @@ const PCNotifications = () => {
 
   const markAsRead = async (notificationId) => {
     try {
-      await axios.put(`${API_BASE_URL}/pc-notifications/${notificationId}/read`);
+      await api.put(`/pc-notifications/${notificationId}/read`);
       // Update local state
       setNotifications(prev =>
         prev.map(notif =>
@@ -98,7 +90,7 @@ const PCNotifications = () => {
       const user = getCurrentUser();
       if (!user || !user.id) return;
 
-      await axios.put(`${API_BASE_URL}/pc-notifications/${user.id}/read-all`);
+      await api.put(`/pc-notifications/${user.id}/read-all`);
       setNotifications(prev =>
         prev.map(notif => ({ ...notif, is_read: true, read_at: new Date() }))
       );

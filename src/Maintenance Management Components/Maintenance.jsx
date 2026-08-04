@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Tabs, Table, Spin, message, Select, Button, Typography, Space, Input, Tooltip } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
+import { authFetch } from '../api/client.js';
 
 const { Text } = Typography;
 
@@ -76,10 +77,10 @@ const Maintenance = () => {
     setLoading(true);
     try {
       const [oeeRes, brRes, compRes, helpRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
-        fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
-        fetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
-        fetch(`${API_BASE_URL}/maintenance/help-support`, { headers: { accept: 'application/json' } }),
+        authFetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
+        authFetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
+        authFetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
+        authFetch(`${API_BASE_URL}/maintenance/help-support`, { headers: { accept: 'application/json' } }),
       ]);
       const [oeeData, brData, compData, helpData] = await Promise.all([
         oeeRes.ok ? oeeRes.json() : [],

@@ -7,6 +7,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { API_BASE_URL } from '../Config/auth.js';
 import UserModal, { roleLabels } from './Access Control Components/UserModal';
+import { authFetch } from '../api/client.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -48,7 +49,7 @@ const AccessControl = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/access-users/`);
+      const response = await authFetch(`${API_BASE_URL}/access-users/`);
       if (response.ok) {
         let data = await response.json();
         data = Array.isArray(data) ? data.slice().sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
@@ -85,7 +86,7 @@ const AccessControl = () => {
       title: 'Are you sure you want to delete this user?',
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}/access-users/${id}/`, {
+          const response = await authFetch(`${API_BASE_URL}/access-users/${id}/`, {
             method: 'DELETE',
           });
           if (response.ok) {
@@ -192,23 +193,9 @@ const AccessControl = () => {
       title: 'Password',
       dataIndex: 'password',
       key: 'password',
-      render: (text, record) => {
-        const password = text || '';
-        const isVisible = visiblePasswords[record.id];
-        const displayText = isVisible
-          ? (password || 'Not set')
-          : (password ? '••••••••' : 'Not set');
-        return (
-          <Space>
-            <span>{displayText}</span>
-            <Button
-              type="text"
-              icon={isVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-              onClick={() => togglePasswordVisibility(record.id)}
-            />
-          </Space>
-        );
-      },
+      render: () => (
+        <span style={{ color: '#94a3b8' }}>Set via edit (never shown)</span>
+      ),
     },
     {
       title: 'Actions',

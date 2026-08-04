@@ -14,6 +14,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 import {
   Badge,
   Button,
@@ -31,8 +32,6 @@ import {
   Tooltip,
 } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import { normalizeVersion } from "./operationUtils";
 
@@ -59,6 +58,8 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const [previewDocument, setPreviewDocument] = useState(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [is3DModalOpen, setIs3DModalOpen] = useState(false);
   const [selected3DDocument, setSelected3DDocument] = useState(null);
   const [selectedThreeDDocumentId, setSelectedThreeDDocumentId] = useState(null);
@@ -122,8 +123,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
     setLoading(true);
     try {
-      const res = await axios.get(
-        `${API_BASE_URL}/documents/assembly/${selectedItem.id}`
+      const res = await api.get(`/documents/assembly/${selectedItem.id}`
       );
       setDocuments(res.data || []);
     } catch (e) {
@@ -192,14 +192,63 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     setIsPreviewModalOpen(true);
   };
 
-  const handleDownload = (documentId) => {
-    const url = `${API_BASE_URL}/documents/${documentId}/download`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Fetch the preview through the authenticated api client and expose it as a
+  // blob URL so <img>/<iframe> can render it (those tags cannot send the JWT).
+  useEffect(() => {
+    let revokedUrl = null;
+    if (isPreviewModalOpen && previewDocument?.id) {
+      const displayName =
+        getDocumentDisplayName(previewDocument) || previewDocument.document_name;
+      const type = getPreviewType(displayName);
+      if (type === "image" || type === "pdf") {
+        setPreviewLoading(true);
+        setPreviewBlobUrl(null);
+        api
+          .get(`/documents/${previewDocument.id}/preview`, { responseType: "blob" })
+          .then((res) => {
+            const blobUrl = window.URL.createObjectURL(res.data);
+            revokedUrl = blobUrl;
+            setPreviewBlobUrl(blobUrl);
+          })
+          .catch((e) => {
+            console.error("Error loading document preview", e);
+            setPreviewBlobUrl(null);
+          })
+          .finally(() => setPreviewLoading(false));
+      }
+    }
+    return () => {
+      if (revokedUrl) window.URL.revokeObjectURL(revokedUrl);
+      setPreviewBlobUrl(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPreviewModalOpen, previewDocument?.id]);
+
+  // Download via the authenticated api client so the JWT is sent, then save the
+  // returned blob. A raw <a href> to the API would be sent without the token
+  // and get a 401.
+  const downloadBlobWithAuth = async (documentId, fileName) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+      const blobUrl = window.URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", fileName || `document_${documentId}`);
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    } catch (e) {
+      console.error("Error downloading document", e);
+      message.error("Failed to download document");
+    }
+  };
+
+  const handleDownload = (documentId, fileName) => {
+    downloadBlobWithAuth(documentId, fileName);
   };
 
   const is3DFile = (doc) => {
@@ -290,7 +339,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const handleDelete = async (documentId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/documents/${documentId}`);
+      await api.delete(`/documents/${documentId}`);
       message.success("Document deleted");
       // Optimistic UI update so it disappears immediately
       setDocuments((prev) => prev.filter((d) => d.id !== documentId));
@@ -303,7 +352,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const handleAcknowledgeDocument = async (docId, currentStatus) => {
     try {
-      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+      await api.put(`/documents/${docId}/acknowledge`, null, {
         params: { is_acknowledged: !currentStatus }
       });
       message.success('Document acknowledged successfully');
@@ -413,7 +462,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         if (uploadParentId) formData.append("parent_id", String(uploadParentId));
       }
 
-      const resp = await axios.post(`${API_BASE_URL}/documents/bulk`, formData);
+      const resp = await api.post(`/documents/bulk`, formData);
       const created = Array.isArray(resp.data) ? resp.data : [];
       message.success(`${created.length} document(s) uploaded successfully`);
 
@@ -596,7 +645,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               size="small"
               type="text"
               icon={<DownloadOutlined />}
-              onClick={() => handleDownload(currentDoc.id)}
+              onClick={() => handleDownload(currentDoc.id, getDocumentDisplayName(currentDoc) || currentDoc.document_name)}
               className="hover:text-green-500 hover:bg-green-50"
             />
             <Button
@@ -924,23 +973,39 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         destroyOnHidden
         styles={{ body: { height: "75vh", padding: 0, minHeight: 200 } }}
         footer={[
-          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { if (previewDocument?.id) { const a = document.createElement("a"); a.href = `${API_BASE_URL}/documents/${previewDocument.id}/download`; a.setAttribute("download", previewDocument.document_name); document.body.appendChild(a); a.click(); a.remove(); } setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Download</Button>,
+          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { if (previewDocument?.id) { downloadBlobWithAuth(previewDocument.id, previewDocument.document_name); } setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Download</Button>,
           <Button key="cl" type="primary" onClick={() => { setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Close</Button>
         ]}
       >
         {previewDocument && (() => {
-          const previewUrl = `${API_BASE_URL}/documents/${previewDocument.id}/preview`;
           const displayName = getDocumentDisplayName(previewDocument) || previewDocument.document_name;
           const type = getPreviewType(displayName);
+          if (previewLoading) {
+            return (
+              <div className="flex items-center justify-center h-full bg-gray-50">
+                <SyncOutlined spin className="text-3xl text-gray-400" />
+                <span className="ml-3 text-gray-500">Loading preview…</span>
+              </div>
+            );
+          }
+          if ((type === "image" || type === "pdf") && !previewBlobUrl) {
+            return (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+                <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+                <p className="text-gray-700 font-medium mb-2">Preview unavailable.</p>
+                <p className="text-gray-500">Please download the file to view it.</p>
+              </div>
+            );
+          }
           if (type === "image") {
             return (
               <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-                <img src={previewUrl} alt={displayName} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                <img src={previewBlobUrl} alt={displayName} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
               </div>
             );
           }
           if (type === "pdf") {
-            return <iframe src={`${previewUrl}#toolbar=0`} title={displayName} width="100%" height="100%" style={{ border: "none" }} />;
+            return <iframe src={`${previewBlobUrl}#toolbar=0`} title={displayName} width="100%" height="100%" style={{ border: "none" }} />;
           }
           return (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
@@ -974,12 +1039,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
           <Button key="dl" icon={<DownloadOutlined />} onClick={() => { 
             const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
             if (selectedDoc?.id) { 
-              const a = document.createElement("a"); 
-              a.href = `${API_BASE_URL}/documents/${selectedDoc.id}/download`; 
-              a.setAttribute("download", selectedDoc.document_name); 
-              document.body.appendChild(a); 
-              a.click(); 
-              a.remove(); 
+              downloadBlobWithAuth(selectedDoc.id, selectedDoc.document_name); 
             } 
           }}>Download</Button>,
           <Button key="cl" type="primary" onClick={() => { 

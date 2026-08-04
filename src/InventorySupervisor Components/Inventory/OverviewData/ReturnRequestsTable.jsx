@@ -4,6 +4,7 @@ import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
 import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
 import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
+import { authFetch } from '../../../api/client.js';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
@@ -46,7 +47,7 @@ const ReturnRequestsTable = () => {
   const fetchReturnRequests = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
+      const response = await authFetch(`${API_BASE_URL}/inventory-return-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -88,7 +89,7 @@ const ReturnRequestsTable = () => {
         console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=pending&table_id=${record.id}`, {
+          const response = await authFetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -150,7 +151,7 @@ const ReturnRequestsTable = () => {
         console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=collected&table_id=${record.id}`, {
+          const response = await authFetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           

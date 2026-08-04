@@ -7,6 +7,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import { API_BASE_URL } from '../Config/auth.js';
 import dayjs from 'dayjs';
 import cmtisLogo from '../assets/cmtis.png';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -94,7 +95,7 @@ const ProductionLogsHistory = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await authFetch(`${API_BASE_URL}/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -124,7 +125,7 @@ const ProductionLogsHistory = () => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);

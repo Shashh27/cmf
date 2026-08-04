@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber, App } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { api } from '../../api/client.js';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -172,7 +171,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const fetchUsersForRoles = async () => {
     if (users.length > 0) return;
     try {
-      const response = await axios.get(`${API_BASE_URL}/access-users/`);
+      const response = await api.get(`/access-users/`);
       const list = Array.isArray(response.data) ? response.data : [];
       setUsers(list);
 
@@ -235,7 +234,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           if (!projectValue && editingOrder.product_id) {
             // Try to get product name from the product
             try {
-              const productResponse = await axios.get(`${API_BASE_URL}/products/${editingOrder.product_id}`);
+              const productResponse = await api.get(`/products/${editingOrder.product_id}`);
               projectValue = productResponse.data.product_name || `Project ${editingOrder.product_id}`;
             } catch (error) {
               console.error("Error fetching product:", error);
@@ -322,7 +321,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         try {
           const userId = getCurrentUserId();
           if (userId) {
-            const productResponse = await axios.post(`${API_BASE_URL}/products/`, {
+            const productResponse = await api.post(`/products/`, {
               product_name: values.project_name.trim(),
               product_version: "1.0",
               user_id: parseInt(userId, 10),
@@ -337,7 +336,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         try {
           const userId = getCurrentUserId();
           if (userId) {
-            await axios.put(`${API_BASE_URL}/products/${productId}`, {
+            await api.put(`/products/${productId}`, {
               product_name: values.project_name.trim(),
               product_version: "1.0",
               user_id: parseInt(userId, 10),
@@ -350,8 +349,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       }
 
       const url = editingOrder 
-        ? `${API_BASE_URL}/orders/${editingOrder.id}`
-        : `${API_BASE_URL}/orders/`;
+        ? `/orders/${editingOrder.id}`
+        : `/orders/`;
       
       const method = editingOrder ? 'PUT' : 'POST';
       
@@ -397,7 +396,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         return;
       }
 
-      const response = await axios({
+      const response = await api({
         url,
         method,
         headers: {
@@ -416,10 +415,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         
         onOrderCreated(result);
         handleClose();
-        // Show success message after both product and order are created successfully
-        if (!editingOrder && values.project_name?.trim()) {
-          message.success(`Project "${values.project_name.trim()}" created successfully`);
-        }
       } else {
         const errorData = response.data || {};
         message.error(errorData.detail || "Failed to save order");
@@ -501,8 +496,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         uploadFormData.append("user_id", String(currentUserId));
 
         try {
-          await axios.post(
-            `${API_BASE_URL}/order-documents/upload/${orderId}`,
+          await api.post(`/order-documents/upload/${orderId}`,
             uploadFormData
           );
         } catch (error) {

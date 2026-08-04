@@ -3,6 +3,7 @@ import { Table, Space, Tag, Alert,Spin,Empty,Input,Button,Row,Col,DatePicker,Sel
 import { SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
 import { disableFutureDates, normalizeDateRange } from '../../../../InventorySupervisor Components/Inventory/OverviewData/inventoryDateUtils.js';
+import { authFetch } from '../../../../api/client.js';
 const { RangePicker } = DatePicker;
 const TransactionHistory = () => {
 const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
@@ -20,7 +21,7 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
   const fetchAllTransactions = async () => {
     try {
       console.log('Fetching all transactions...');
-      const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
+      const response = await authFetch(`${API_BASE_URL}/transaction-history/all`);
       console.log('Response status:', response.status);
       
       if (!response.ok) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Tree, Spin, message } from 'antd';
 import { FolderOutlined, FileOutlined,DesktopOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from "../../Config/auth";
+import { authFetch } from '../../api/client.js';
 
 const OperatorDocumentTree = ({ onNodeSelect }) => {
   const [loading, setLoading] = useState(false);
@@ -70,11 +71,11 @@ const OperatorDocumentTree = ({ onNodeSelect }) => {
 
       const requests = [];
       if (machineId != null) {
-        requests.push(fetch(`${baseUrl}machine-documents/machines/${machineId}/folders`));
+        requests.push(authFetch(`${baseUrl}machine-documents/machines/${machineId}/folders`));
       } else {
         requests.push(Promise.resolve(null));
       }
-      requests.push(fetch(`${baseUrl}common-documents/folders/tree`));
+      requests.push(authFetch(`${baseUrl}common-documents/folders/tree`));
 
       const [machineFoldersRes, commonFoldersRes] = await Promise.all(requests);
 

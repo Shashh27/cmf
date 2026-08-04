@@ -2,7 +2,7 @@ import React from "react";
 
 
 
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 
 
 
@@ -99,6 +99,7 @@ import AccessControl from "./Pages/AccessControl";
 
 
 import ProtectedRoute from "./components/ProtectedRoute";
+import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 
 
 
@@ -127,14 +128,39 @@ import QMSInspector from "./Quality Management Components/QMSInspector";
 
 
 
+/** Floating chatbot only after login — hidden on /login and when not authenticated. */
+/** Only shown for Admin and Manufacturing Coordinator roles. */
+function isChatbotAllowedRole(user) {
+  const role = String(user?.role || user?.user_role || '')
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .trim();
+  if (!role) return false;
+  if (role === 'admin') return true;
+  if (role === 'mc' || role.includes('manufacturing coordinator')) return true;
+  return false;
+}
+
+function AuthenticatedChatPanel() {
+  const location = useLocation();
+  const { isAuthenticated, user, bootstrapping } = useAuth();
+  if (bootstrapping || !isAuthenticated || location.pathname === '/login') {
+    return null;
+  }
+  if (!isChatbotAllowedRole(user)) {
+    return null;
+  }
+  return <ChatPanel />;
+}
+
+
+
 function App() {
 
 
 
   return (
-
-
-
+    <AuthProvider>
     <Router>
 
 
@@ -526,10 +552,11 @@ function App() {
 
       </Layout>
 
-      {/* Chat Panel - floating widget */}
-      <ChatPanel />
+      {/* Chat Panel - only after login */}
+      <AuthenticatedChatPanel />
 
     </Router>
+    </AuthProvider>
 
 
 

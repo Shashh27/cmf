@@ -9,6 +9,7 @@ import MCResponseRework from './MCResponseRework';
 import { API_BASE_URL } from '../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -187,7 +188,7 @@ const parseDueSchedulesResponse = (data) => {
 };
 
 const fetchDueSchedules = async (machineId) => {
-  const res = await fetch(`${API_BASE_URL}/pm/schedules/machine/${machineId}/due`, {
+  const res = await authFetch(`${API_BASE_URL}/pm/schedules/machine/${machineId}/due`, {
     headers: { accept: 'application/json' },
   });
   if (!res.ok) throw new Error('Failed to fetch due schedules');
@@ -274,7 +275,7 @@ const Dashboard = () => {
   const fetchLatestReply = async (mId) => {
     if (!mId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`);
+      const res = await authFetch(`${API_BASE_URL}/maintenance/help-support`);
       if (res.ok) {
         const data = await res.json();
         const machineReplies = data
@@ -294,7 +295,7 @@ const Dashboard = () => {
   const fetchOrderDetails = async (saleOrderId) => {
     if (!saleOrderId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/orders/${saleOrderId}`);
+      const res = await authFetch(`${API_BASE_URL}/orders/${saleOrderId}`);
       if (res.ok) {
         const order = await res.json();
         setProductName(order.product_name);
@@ -395,7 +396,7 @@ const Dashboard = () => {
 
     const fetchLiveMachineStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/monitoring/live`, {
+        const res = await authFetch(`${API_BASE_URL}/monitoring/live`, {
           headers: { accept: 'application/json' },
         });
         if (!res.ok || cancelled) return;
@@ -533,7 +534,7 @@ const Dashboard = () => {
         })
         .filter(Boolean);
 
-      const res = await fetch(`${API_BASE_URL}/pm/operator/submissions`, {
+      const res = await authFetch(`${API_BASE_URL}/pm/operator/submissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({

@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Empty, Spin, Input, Select, Button } from "antd";
 import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined, DollarOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from "../../api/client.js";
 import ProductSummaryDownload from "../../DownloadReports/ProductSummaryDownload";
 import AdditionalCostsSection from "./AdditionalCostsSection";
 
@@ -166,8 +165,8 @@ const ProductSummary = ({ productId, orderId, userId }) => {
     // Use lightweight summary-data endpoint - only operations data for hours calculation.
     // Pass order_id (when available) so the backend also returns that order's
     // additional project costs (Tooling/Fixture/Inspection etc.) in one call.
-    axios
-      .get(`${API_BASE_URL}/products/${productId}/summary-data`, {
+    api
+      .get(`/products/${productId}/summary-data`, {
         params: orderId ? { order_id: orderId } : {},
         signal: controller.signal,
       })

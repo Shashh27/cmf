@@ -3,6 +3,7 @@ import { Table, Tag, Spin, message, Button, Select, Space } from 'antd';
 import { CheckOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import config from '../Config/config';
 import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 
 const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
@@ -23,7 +24,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await authFetch(`${API_BASE_URL}/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -58,7 +59,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);
@@ -70,7 +71,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const fetchPokayokeChecklistNotifications = async () => {    setPokayokeChecklistLoading(true);
     try {
       const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions`;
-      const response = await fetch(apiUrl);
+      const response = await authFetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
         // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
@@ -182,7 +183,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
         }
       }
 
-      const response = await fetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
+      const response = await authFetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

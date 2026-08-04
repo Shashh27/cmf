@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Upload, Button, Table, Tag, message } from "antd";
 import { InboxOutlined, FileTextOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from '../../api/client.js';
 
 const { Dragger } = Upload;
 
@@ -64,8 +63,7 @@ const OperationImportModal = ({ open, onCancel, existingOperations = [], onUseOp
     const formData = new FormData();
     formData.append("file", fileToUse);
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/operations/parse-mpp`,
+      const response = await api.post(`/operations/parse-mpp`,
         formData
       );
       const data = response.data;

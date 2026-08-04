@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Table, Spin, Tag, Typography, Button, Space, Tooltip, Empty } from "antd";
 import { ToolOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import ToolsDownload from "../../DownloadReports/ToolsDownload";
+import { api } from '../../api/client.js';
 
 const { Text, Title } = Typography;
 
@@ -22,7 +21,7 @@ const ProductToolsViewer = ({ visible, onClose, product }) => {
     setLoading(true);
     try {
       // Use lightweight tools-data endpoint - only tools linked to operations
-      const response = await axios.get(`${API_BASE_URL}/products/${product.id}/tools-data`);
+      const response = await api.get(`/products/${product.id}/tools-data`);
       if (response.status >= 200 && response.status < 300) {
         setTools(response.data.tools || []);
       }

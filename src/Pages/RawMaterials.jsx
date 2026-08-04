@@ -6,9 +6,8 @@ import { Tabs, App as AntApp } from "antd";
 
 import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, HistoryOutlined, DatabaseOutlined } from "@ant-design/icons";
 
-import axios from "axios";
 
-import { API_BASE_URL } from "../Config/auth";
+import { api } from '../api/client.js';
 
 
 // Import split components
@@ -60,7 +59,7 @@ const RawMaterialsContent = () => {
 
   const fetchSharedRawMaterials = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
+      const response = await api.get(`/rawmaterials/`);
       const data = response.data;
       setSharedRawMaterials(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -117,7 +116,7 @@ const RawMaterialsContent = () => {
 
       label: <span className="flex items-center gap-2 px-2"><DatabaseOutlined /> Raw Material Inventory</span>,
 
-      children: <RawMaterialInventoryTab />
+      children: <RawMaterialInventoryTab rawMaterials={sharedRawMaterials} />
 
     },
 

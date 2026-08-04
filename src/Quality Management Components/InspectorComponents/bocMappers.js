@@ -10,14 +10,14 @@ export function mapDimensionTypeToDimType(dimensionType) {
   return s || '—';
 }
 
-function fmtTolPlus(val) {
+export function fmtTolPlus(val) {
   if (val == null || val === '') return '-';
   const t = String(val).trim();
   if (t === '0' || t === '0.0') return '-';
   return t.startsWith('+') || t.startsWith('-') ? t : `+${t}`;
 }
 
-function fmtTolMinus(val) {
+export function fmtTolMinus(val) {
   if (val == null || val === '') return '-';
   const t = String(val).trim();
   if (t === '0' || t === '0.0') return '-';

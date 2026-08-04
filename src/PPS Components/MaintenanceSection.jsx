@@ -4,23 +4,24 @@ import Lottie from "lottie-react";
 import warningAnimation from "../assets/warning.json";
 import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
+import { authFetch } from '../api/client.js';
 
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
 
-import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
-import config from "../Config/config.js";
 import {
   Card, Row, Col, message, Spin, Button, Modal, Form, Radio, Space, Alert,
   Checkbox, Calendar, Tag, Table, Select, List, Upload, DatePicker,
   Tooltip, Popconfirm, Input
 } from "antd";
+import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import {
   CheckCircleOutlined, InfoCircleOutlined, ReloadOutlined,
   ExclamationCircleOutlined, UploadOutlined, EyeOutlined, SearchOutlined,
   LeftOutlined, DownloadOutlined, DeleteOutlined, CalendarOutlined,
   ClockCircleOutlined, SettingOutlined,
 } from "@ant-design/icons";
+import config from "../Config/config.js";
 import ShiftDayAssignmentsPanel from "./ShiftDayAssignmentsPanel";
 import "./ShiftPlanning.css";
 
@@ -178,7 +179,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const handleOpenPreviewModal = async (record) => {
     setSelectedLog(record); setPreviewModalVisible(true); setPreviewLoading(true);
     try {
-      const res = await fetch(`${config.API_BASE_URL}/machine-documents/machines/${record.machine_id}/documents`);
+      const res = await authFetch(`${config.API_BASE_URL}/machine-documents/machines/${record.machine_id}/documents`);
       if (res.ok) setMachineDocuments(await res.json());
       else message.error("Failed to fetch documents for this machine.");
     } catch { message.error("Error fetching machine documents."); }
@@ -201,7 +202,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     formData.append("document_type", "maintenance");
     try {
       setUploading(true);
-      const res = await fetch(`${config.API_BASE_URL}/machine-documents/upload`, { method: "POST", body: formData });
+      const res = await authFetch(`${config.API_BASE_URL}/machine-documents/upload`, { method: "POST", body: formData });
       if (res.ok) { message.success("Uploaded successfully"); handleCloseUploadModal(); fetchDowntimeLogs(); }
       else { const e = await res.json(); message.error(e.detail || "File upload failed"); }
     } catch { message.error("Error uploading file"); }
@@ -215,7 +216,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
       okText: "Yes, Delete", okType: "danger", cancelText: "No",
       onOk: async () => {
         try {
-          const res = await fetch(`${config.API_BASE_URL}/machine-documents/documents/${documentId}`, { method: "DELETE" });
+          const res = await authFetch(`${config.API_BASE_URL}/machine-documents/documents/${documentId}`, { method: "DELETE" });
           if (res.ok) { message.success("Document deleted successfully"); if (selectedLog) handleOpenPreviewModal(selectedLog); }
           else message.error("Failed to delete document");
         } catch { message.error("Error deleting document"); }

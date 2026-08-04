@@ -3,6 +3,8 @@ import { Layout, Typography, Button, Avatar, Space, Badge, Popover, Grid, Empty,
 import { UserOutlined, BellOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../../Config/config';
+import { useAuth } from '../../auth/AuthContext.jsx';
+import { authFetch } from '../../api/client.js';
 
 const { Header } = Layout;
 const { Title, Text } = Typography;
@@ -12,6 +14,7 @@ const Navbar = ({ collapsed }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const screens = useBreakpoint();
+  const { user, logoutToLogin } = useAuth();
   
   const getRoleInfo = () => {
     const path = location.pathname;
@@ -24,8 +27,7 @@ const Navbar = ({ collapsed }) => {
     else if (path.startsWith('/inventory_supervisor')) role = 'Inventory Supervisor';
     let name = role;
     try {
-      const stored = localStorage.getItem('user');
-      const u = stored ? JSON.parse(stored) : null;
+      const u = user || null;
       if (u?.user_name) {
         name = u.user_name;
       } else if (u?.username) {
@@ -84,7 +86,7 @@ const Navbar = ({ collapsed }) => {
       //   `${config.API_BASE_URL}/machine-calibration-notifications/`,
       // ];
       const [orders, machines, tools, components, calibrations] = await Promise.all(
-        endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
+        endpoints.map((url) => authFetch(url).then((r) => (r.ok ? r.json() : [])))
       );
       const items = [
         ...unify('orders', orders),
@@ -149,9 +151,8 @@ const Navbar = ({ collapsed }) => {
     return '';
   };
 
-  const handleLogout = () => {
-    localStorage.clear();
-    navigate('/login');
+  const handleLogout = async () => {
+    await logoutToLogin(navigate);
   };
 
   const userMenu = (

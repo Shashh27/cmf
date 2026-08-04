@@ -3,6 +3,8 @@ import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../Config/config';
 import dayjs from 'dayjs';
+import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
+import { authFetch } from '../api/client.js';
 
 const OrderNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -35,41 +37,31 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
       
-      // Add role-based filtering based on user's role
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          const userRole = (user.role || user.user_role || '').toLowerCase();
-          // Pass the appropriate role ID based on the user's role
-          if (userRole.includes('manufacturing') || userRole === 'mc') {
-            if (user.id) params.set('mc_id', user.id);
-          } else if (userRole.includes('project') || userRole === 'pc') {
-            if (user.id) params.set('pc_id', user.id);
-          } else if (userRole.includes('admin')) {
-            if (user.id) params.set('admin_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage', e);
-        }
-      }
       
       const url = `${base}?${params.toString()}`;
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch notifications');
       }
       const data = await response.json();
 
-      // Filter out notifications created by the current user
-      const currentUser = getCurrentUser();
-      const filteredData = currentUser.username
-        ? data.filter(n => n.created_by?.toLowerCase() !== currentUser.username.toLowerCase())
-        : data;
+      const currentUser = getStoredUser();
+      const filteredData = filterOwnCreatedNotifications(data, currentUser);
 
       setNotifications(filteredData);
-      if (onCount) onCount(Array.isArray(filteredData) ? filteredData.filter(n => !n.is_ack).length : 0);
+      if (onCount) {
+        const userRole = String(currentUser?.role || currentUser?.user_role || '').toLowerCase();
+        const pending = Array.isArray(filteredData)
+          ? filteredData.filter((n) => {
+              if (userRole.includes('manufacturing')) return !n.mc_is_ack;
+              if (userRole.includes('project')) return !n.pc_is_ack;
+              if (userRole.includes('admin')) return !n.admin_is_ack;
+              return !n.is_ack;
+            }).length
+          : 0;
+        onCount(pending);
+      }
     } catch (error) {
       message.error(error.message);
     } finally {
@@ -99,7 +91,7 @@ const OrderNotifications = ({ dateRange, onCount }) => {
         normalizedRole = 'admin';
       }
 
-      const response = await fetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
+      const response = await authFetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

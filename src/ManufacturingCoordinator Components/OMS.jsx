@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Select } from "antd";
-import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
+import {
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined } from "@ant-design/icons";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Select } from "antd";
+import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined } from "@ant-design/icons";
+import { api } from '../api/client.js';
 import OrderModal from "./OMS Components/OrderModal";
 import DocumentModal from "./OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -34,18 +34,6 @@ const OMS = () => {
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
-  const getCurrentUserId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const user = JSON.parse(stored);
-      if (user?.id == null) return null;
-      return user.id;
-    } catch {
-      return null;
-    }
-  };
-
   useEffect(() => {
     if (hasFetchedData.current) return;
     
@@ -69,11 +57,7 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const uid = getCurrentUserId();
-      // For manufacturing coordinator view, filter by manufacturing_coordinator_id instead of admin_id
-      const response = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-      });
+      const response = await api.get(`/orders/`);
       const data = response.data;
       setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -149,7 +133,7 @@ const OMS = () => {
       centered: true,
       onOk: async () => {
         try {
-          const response = await axios.delete(`${API_BASE_URL}/orders/${order.id}`);
+          const response = await api.delete(`/orders/${order.id}`);
           const result = response.data || {};
           fetchOrders();
           if (result.product_also_deleted) {

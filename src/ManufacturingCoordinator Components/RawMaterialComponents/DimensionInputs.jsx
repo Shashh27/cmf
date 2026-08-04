@@ -56,6 +56,20 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm) <span className="text-red-500">*</span></label>
+          <InputNumber
+            style={{ width: '100%' }}
+            placeholder="Length"
+            keyboard={false}
+            min={0}
+            precision={0}
+            controls={false}
+            onKeyDown={handleInputKeyDown}
+            value={dimensions.length}
+            onChange={(value) => onChange('length', value)}
+          />
+        </div>
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm) <span className="text-red-500">*</span></label>
           <InputNumber
             style={{ width: '100%' }}
@@ -83,20 +97,6 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onChange={(value) => onChange('height', value)}
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm) <span className="text-red-500">*</span></label>
-          <InputNumber
-            style={{ width: '100%' }}
-            placeholder="Length"
-            keyboard={false}
-            min={0}
-            precision={0}
-            controls={false}
-            onKeyDown={handleInputKeyDown}
-            value={dimensions.length}
-            onChange={(value) => onChange('length', value)}
-          />
-        </div>
       </div>
     );
   }
@@ -104,20 +104,6 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
   if (formType === 'Pipe') {
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm) <span className="text-red-500">*</span></label>
-          <InputNumber
-            style={{ width: '100%' }}
-            placeholder="Inner Diameter"
-            keyboard={false}
-            min={0}
-            precision={0}
-            controls={false}
-            onKeyDown={handleInputKeyDown}
-            value={dimensions.inner_diameter}
-            onChange={(value) => onChange('inner_diameter', value)}
-          />
-        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm) <span className="text-red-500">*</span></label>
           <InputNumber
@@ -130,6 +116,20 @@ const DimensionInputs = ({ formType, dimensions, onChange }) => {
             onKeyDown={handleInputKeyDown}
             value={dimensions.outer_diameter}
             onChange={(value) => onChange('outer_diameter', value)}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm) <span className="text-red-500">*</span></label>
+          <InputNumber
+            style={{ width: '100%' }}
+            placeholder="Inner Diameter"
+            keyboard={false}
+            min={0}
+            precision={0}
+            controls={false}
+            onKeyDown={handleInputKeyDown}
+            value={dimensions.inner_diameter}
+            onChange={(value) => onChange('inner_diameter', value)}
           />
         </div>
         <div>
