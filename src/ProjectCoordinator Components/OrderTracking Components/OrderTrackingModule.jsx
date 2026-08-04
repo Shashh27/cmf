@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../../Config/auth';
 import { Card, Table, Spin, message, Row, Col, Statistic, Typography, Tag, Select, Empty, Space } from 'antd';
 import { ShoppingCartOutlined, SyncOutlined,CheckCircleOutlined,ClockCircleOutlined,DatabaseOutlined,ToolOutlined} from '@ant-design/icons';
+import { api } from '../../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -148,7 +147,7 @@ const OrderTrackingModule = () => {
           : { admin_id: userId })
         : undefined;
 
-      const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
+      const res = await api.get(`/orders/`, { params });
       const data = Array.isArray(res.data) ? res.data : [];
       setOrders(data);
       if (data.length > 0 && !selectedOrderId) {
@@ -161,7 +160,7 @@ const OrderTrackingModule = () => {
   const fetchOrderDetails = async (orderId) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const res = await api.get(`/orders/${orderId}/hierarchical`);
       setOrderDetails(res.data);
     } catch { message.error('Failed to fetch order details'); }
     finally { setLoading(false); }
@@ -169,7 +168,7 @@ const OrderTrackingModule = () => {
 
   const fetchOrderTrackingData = async (orderId) => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/order-tracking/${orderId}`);
+      const res = await api.get(`/order-tracking/${orderId}`);
       setOrderTrackingData(res.data);
       
       // Extract production logs from tracking data and update state

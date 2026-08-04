@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, Tag, message, Popconfirm, Tooltip, Space, Card, Modal, Form, Input } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { api } from '../api/client.js';
 
 const VendorsTable = ({ userId }) => {
   const [vendors, setVendors] = useState([]);
@@ -36,7 +35,7 @@ const VendorsTable = ({ userId }) => {
   const fetchVendors = async () => {
     try {
       // Remove user_id restriction - show all vendors for everyone
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      const response = await api.get(`/rawmaterials/vendors`);
       setVendors(response.data);
     } catch (error) {
       console.error("Error fetching vendors:", error);
@@ -54,7 +53,7 @@ const VendorsTable = ({ userId }) => {
 
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/rawmaterials/vendors/${id}`);
+      await api.delete(`/rawmaterials/vendors/${id}`);
       message.success("Vendor deleted successfully");
       fetchVendors();
     } catch (error) {
@@ -123,10 +122,10 @@ const VendorsTable = ({ userId }) => {
 
       if (editingVendor) {
         // Update existing vendor
-        await axios.put(`${API_BASE_URL}/rawmaterials/vendors/${editingVendor.id}`, values);
+        await api.put(`/rawmaterials/vendors/${editingVendor.id}`, values);
       } else {
         // Create new vendor
-        await axios.post(`${API_BASE_URL}/rawmaterials/vendors`, values);
+        await api.post(`/rawmaterials/vendors`, values);
       }
 
       handleModalSave();

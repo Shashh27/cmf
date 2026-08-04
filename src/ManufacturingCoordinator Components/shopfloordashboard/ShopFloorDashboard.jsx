@@ -1,20 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Spin, Alert, Typography, Button, Space, Row, Col, Segmented, Card } from 'antd';
 import { motion } from 'framer-motion';
-import axios from 'axios';
-import { API_BASE_URL } from '../../Config/auth';
+import { getApiWsUrl } from '../../auth/apiUrl';
 import { TableOutlined, CalendarOutlined, AppstoreOutlined, LineChartOutlined } from '@ant-design/icons';
 
 import { MachineGrid } from './MachineComponents';
 import { SchedulingAnalytics } from './SchedulingAnalytics';
+import { api, getIsBootstrapping, restoreSessionFromStorage } from '../../api/client.js';
+import { useAuth } from '../../auth/AuthContext';
 
 const { Title, Text } = Typography;
 
-const getMonitoringWsUrl = () => {
-  const url = new URL(`${API_BASE_URL}/monitoring/live/ws`);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  return url.toString();
-};
+const getMonitoringWsUrl = () => getApiWsUrl('monitoring/live/ws');
 
 const normalizeMachineStatus = (value) => {
   const raw = String(value ?? '').trim().toUpperCase();
@@ -61,6 +58,7 @@ const mapLiveMachinesFor2D = (liveMachines) => {
 
 // Main ShopFloorDashboard Component
 const ShopFloorDashboard = ({ onBack }) => {
+  const { bootstrapping } = useAuth();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [liveMachines, setLiveMachines] = useState([]);
@@ -84,15 +82,7 @@ const ShopFloorDashboard = ({ onBack }) => {
     if (!background) setLoading(true);
     setError(null);
     try {
-      const manufacturingcoordinatorId = getCurrentmanufacturingcoordinatorId();
-      if (!manufacturingcoordinatorId) {
-        setError('No manufacturingcoordinator ID found. Please log in again.');
-        return;
-      }
-
-      const response = await axios.get(`${API_BASE_URL}/orders/shop-floor/hierarchical`, {
-        params: { manufacturing_coordinator_id: manufacturingcoordinatorId }
-      });
+      const response = await api.get(`/orders/shop-floor/hierarchical`);
       setData(response.data);
     } catch (err) {
       console.error('Failed to fetch shop floor data:', err);
@@ -123,8 +113,10 @@ const ShopFloorDashboard = ({ onBack }) => {
   };
 
   useEffect(() => {
-    fetchShopFloorData({ background: true });
-  }, []);
+    if (!bootstrapping) {
+      fetchShopFloorData({ background: true });
+    }
+  }, [bootstrapping]);
 
   useEffect(() => {
     let socket;

@@ -23,6 +23,7 @@ import {
   LineChart,
   Line,
 } from 'recharts';
+import { authFetch } from '../../../api/client.js';
 import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { Text } = Typography;
@@ -91,10 +92,10 @@ const InventoryAnalytics = () => {
 
   const fetchAnalyticsData = async (year) => {
     try {
-      const requestsResponse = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      const requestsResponse = await authFetch(`${API_BASE_URL}/inventory-requests/`);
       const requestsData = await requestsResponse.json();
 
-      const returnsResponse = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
+      const returnsResponse = await authFetch(`${API_BASE_URL}/inventory-return-requests/`);
       const returnsData = await returnsResponse.json();
 
       const approvedRequests = requestsData.filter((req) => {

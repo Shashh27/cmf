@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip, Spin } from "antd";
 import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -56,7 +56,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const fetchDocuments = async (orderId) => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/order-documents/order/${orderId}`);
+      const response = await api.get(`/order-documents/order/${orderId}`);
       setDocuments(response.data);
     } catch (error) {
       console.error("Error fetching documents:", error);
@@ -106,8 +106,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     uploadFormData.append("user_id", String(currentUserId));
 
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/order-documents/upload/${selectedOrderId}`,
+      const response = await api.post(`/order-documents/upload/${selectedOrderId}`,
         uploadFormData
       );
 
@@ -135,7 +134,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleDownload = async (documentId, documentName) => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/order-documents/${documentId}/download`, {
+      const response = await api.get(`/order-documents/${documentId}/download`, {
         responseType: "blob",
       });
       const blob = response.data;
@@ -168,7 +167,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     // Fetch PDF as blob for better iframe compatibility
     const fetchPdfBlob = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/order-documents/${documentId}/preview`, {
+        const response = await api.get(`/order-documents/${documentId}/preview`, {
           responseType: 'blob'
         });
         const blob = new Blob([response.data], { type: 'application/pdf' });
@@ -187,7 +186,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleDelete = async (documentId) => {
     try {
-      await axios.delete(`${API_BASE_URL}/order-documents/${documentId}`);
+      await api.delete(`/order-documents/${documentId}`);
       message.success("Document deleted successfully");
       if (selectedOrderId) {
         fetchDocuments(selectedOrderId);

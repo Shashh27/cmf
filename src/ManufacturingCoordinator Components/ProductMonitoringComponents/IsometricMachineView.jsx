@@ -4,6 +4,7 @@ import { SettingOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import machineSvg from '/assets/shopfloor/mch.svg';
 import { API_BASE_URL } from '../../Config/auth';
+import { getApiWsUrl } from '../../auth/apiUrl';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const CONFIG = {
@@ -242,11 +243,7 @@ const positionMachines = (data) => {
   return positioned;
 };
 
-const getMonitoringWsUrl = () => {
-  const httpUrl = new URL(`${API_BASE_URL}/monitoring/live/ws`);
-  httpUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-  return httpUrl.toString();
-};
+const getMonitoringWsUrl = () => getApiWsUrl('monitoring/live/ws');
 
 // ─── Compute line labels ──────────────────────────────────────────────────────
 // Mirrors Vue's lineLabels computed exactly: one label per line, centered above the line's U span.

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { Layout, Drawer, Button, Tabs } from "antd";
-import { MenuOutlined, BellOutlined } from "@ant-design/icons";
+import React, { useState, useEffect, useMemo } from "react";
+import { Layout, Drawer, Button, Tabs, Tooltip } from "antd";
+import { MenuOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
 import ProductDetails from "../PDM Components/ProductDetails";
@@ -15,6 +15,17 @@ import "../PDM Components/pdm-theme.css";
 
 const { Sider, Content } = Layout;
 
+const BOM_SIDER_COLLAPSED = 48;
+
+function getBomWidth(viewportWidth) {
+  // Leave room for app sidebar + details panel; grow with screen size
+  if (viewportWidth >= 1600) return Math.min(520, Math.round(viewportWidth * 0.28));
+  if (viewportWidth >= 1400) return Math.min(460, Math.round(viewportWidth * 0.3));
+  if (viewportWidth >= 1200) return Math.min(420, Math.round(viewportWidth * 0.32));
+  if (viewportWidth >= 992) return Math.min(360, Math.round(viewportWidth * 0.34));
+  return Math.min(320, Math.round(viewportWidth * 0.42));
+}
+
 const PDM = () => {
   const navigate = useNavigate();
   const { productId: routeProductId } = useParams();
@@ -26,216 +37,316 @@ const PDM = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
   const [productHierarchies, setProductHierarchies] = useState({});
   const [activeTopTab, setActiveTopTab] = useState("pdm");
   const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
+  const [bomCollapsed, setBomCollapsed] = useState(false);
 
-  // Get user from localStorage for additional costs tracking
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userId = user?.id;
 
-  // Detect screen size
-  React.useEffect(() => {
+  const isMobile = viewportWidth < 768;
+  const useBomDrawer = viewportWidth < 992; // tablet + mobile: BOM in drawer
+  const bomWidth = useMemo(() => getBomWidth(viewportWidth), [viewportWidth]);
+
+  useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) setMobileDrawerOpen(false);
+      const w = window.innerWidth;
+      setViewportWidth(w);
+      if (w >= 992) setMobileDrawerOpen(false);
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  React.useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = 'auto'; };
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "auto";
+    };
   }, []);
 
   const handleItemSelected = (item) => {
     setSelectedItem(item);
     setPartDocuments([]);
-    if (isMobile) setMobileDrawerOpen(false); // Close drawer on mobile after selection
+    if (useBomDrawer) setMobileDrawerOpen(false);
   };
   const handleHierarchyLoaded = (productId, hierarchy) => {
-    setProductHierarchies(prev => ({ ...prev, [productId]: hierarchy }));
+    setProductHierarchies((prev) => ({ ...prev, [productId]: hierarchy }));
   };
   const handlePartsCreated = () => {
-    // Trigger BOM refresh when parts are created for assemblies
-    setBomRefreshTrigger(prev => prev + 1);
+    setBomRefreshTrigger((prev) => prev + 1);
   };
   const isProductSelected = selectedItem?.itemType === "product";
+
+  const bomPanel = (
+    <BillOfMaterials
+      onItemSelected={handleItemSelected}
+      onHierarchyLoaded={handleHierarchyLoaded}
+      disableProductCreate={fromOms}
+      initialProductId={fromOms ? initialProductId : null}
+      bomRefreshTrigger={bomRefreshTrigger}
+    />
+  );
 
   return (
     <>
       <style>{`
-        @media (max-width: 768px) {
+        .pdm-shell {
+          height: 100%;
+          width: 100%;
+          min-width: 0;
+          min-height: 0;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        }
+        .pdm-main-layout {
+          flex: 1;
+          min-height: 0;
+          min-width: 0;
+          width: 100%;
+          overflow: hidden;
+          display: flex !important;
+        }
+        .pdm-bom-sider.ant-layout-sider {
+          flex: 0 0 auto !important;
+          max-width: none !important;
+          min-width: 0 !important;
+        }
+        .pdm-bom-sider .ant-layout-sider-children {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .pdm-detail-content {
+          flex: 1 1 auto !important;
+          min-width: 0 !important;
+          width: auto !important;
+        }
+        .pdm-mobile-toggle {
+          position: fixed;
+          top: 12px;
+          left: 12px;
+          z-index: 1001;
+          background: #fff;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        @media (min-width: 768px) and (max-width: 991px) {
           .pdm-mobile-toggle {
-            position: fixed;
-            top: 80px;
-            left: 16px;
-            z-index: 1001;
-            background: #FFFFFF;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            top: 16px;
+            left: 96px;
           }
         }
+        .pdm-top-bar {
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .pdm-top-bar .ant-tabs {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .pdm-top-bar .ant-tabs-nav {
+          margin-bottom: 0 !important;
+        }
       `}</style>
-      
-      <div className="pdm-container" style={{ height: '100vh', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+      <div className="pdm-container pdm-shell">
         {fromOms && (
-          <div className="pdm-section-header" style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div
+            className="pdm-section-header pdm-top-bar"
+            style={{
+              padding: "8px 12px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+          >
             <Tabs
               activeKey={activeTopTab}
               onChange={setActiveTopTab}
+              size={viewportWidth < 1100 ? "small" : "middle"}
               items={[
                 { key: "pdm", label: "PDM" },
                 { key: "pps", label: "PPS" },
-                { key: "quality", label: "Quality Management" },
-                { key: "recycle-bin", label: "Recycle Bin" },
+                { key: "quality", label: viewportWidth < 1100 ? "Quality" : "Quality Management" },
+                { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
               ]}
             />
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
               <AdminDocumentNotifications orderId={initialOrderId} />
               <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
-                Back to Orders
+                {viewportWidth < 900 ? "Back" : "Back to Orders"}
               </Button>
             </div>
           </div>
         )}
 
-      {(!fromOms || activeTopTab === "pdm") ? (
-      <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex', margin: 0, padding: 0 }}>
-        {/* Mobile: Hamburger button */}
-        {isMobile && (
-          <Button
-            type="text"
-            icon={<MenuOutlined />}
-            onClick={() => setMobileDrawerOpen(true)}
-            className="pdm-mobile-toggle"
-          />
-        )}
+        {!fromOms || activeTopTab === "pdm" ? (
+          <Layout className="pdm-main-layout">
+            {useBomDrawer && (
+              <Button
+                type="default"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileDrawerOpen(true)}
+                className="pdm-mobile-toggle"
+              >
+                BOM
+              </Button>
+            )}
 
-        {/* Desktop: Fixed Sidebar - scrolls independently */}
-        {!isMobile && (
-          <Sider
-            width="30%"
-            theme="light"
-            style={{
-              borderRight: "1px solid #D6D3C4",
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              minWidth: 280,
-              maxWidth: 480,
-              height: '100%',
-              backgroundColor: '#F5F5DC',
-              margin: 0,
-              padding: 0
-            }}
-          >
-            <div className="flex flex-col h-full overflow-hidden">
-              <BillOfMaterials 
-                onItemSelected={handleItemSelected} 
-                onHierarchyLoaded={handleHierarchyLoaded}
-                disableProductCreate={fromOms}
-                initialProductId={fromOms ? initialProductId : null}
-                bomRefreshTrigger={bomRefreshTrigger}
-              />
-            </div>
-          </Sider>
-        )}
-
-        {/* Mobile: Drawer for BOM */}
-        {isMobile && (
-          <Drawer
-            placement="left"
-            onClose={() => setMobileDrawerOpen(false)}
-            open={mobileDrawerOpen}
-            style={{ width: '85%' }}
-            styles={{ body: { padding: 0 } }}
-          >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
-              onHierarchyLoaded={handleHierarchyLoaded}
-              disableProductCreate={fromOms}
-              initialProductId={fromOms ? initialProductId : null}
-              bomRefreshTrigger={bomRefreshTrigger}
-            />
-          </Drawer>
-        )}
-        
-        {/* Right: Product summary for product; otherwise details + documents */}
-        <Content
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            backgroundColor: "#F5F5DC",
-            height: "100%",
-            margin: 0
-          }}
-        >
-          {isProductSelected ? (
-            <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-              <ProductSummary 
-                productId={selectedItem?.id} 
-                orderId={initialOrderId}
-                userId={userId}
-              />
-            </div>
-          ) : (
-            <>
-              {/* Top panel: ProductDetails now includes DocumentsPanel */}
-              {selectedItem?.itemType === 'part' && (
-                <div 
-                  style={{ 
-                    flex: 1, 
-                    minHeight: 0, 
-                    overflow: "hidden",
-                    height: "100%"
+            {!useBomDrawer && (
+              <Sider
+                className="pdm-bom-sider"
+                width={bomWidth}
+                collapsedWidth={BOM_SIDER_COLLAPSED}
+                collapsed={bomCollapsed}
+                collapsible
+                trigger={null}
+                theme="light"
+                style={{
+                  borderRight: "1px solid #f0f0f0",
+                  overflow: "hidden",
+                  height: "100%",
+                  backgroundColor: "#ffffff",
+                  transition: "all 0.2s",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: bomCollapsed ? "center" : "space-between",
+                    padding: bomCollapsed ? "8px 0" : "6px 10px",
+                    borderBottom: "1px solid #f0f0f0",
+                    flexShrink: 0,
+                    background: "#fafafa",
+                    gap: 8,
                   }}
                 >
-                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
-                    <DocumentsPanel
-                      selectedItem={selectedItem}
-                      onDocumentsLoaded={setPartDocuments}
+                  {!bomCollapsed && (
+                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)", whiteSpace: "nowrap" }}>
+                      BOM panel
+                    </span>
+                  )}
+                  <Tooltip
+                    title={bomCollapsed ? "Expand Bill of Materials" : "Minimise Bill of Materials"}
+                    placement="right"
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={bomCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                      onClick={() => setBomCollapsed((c) => !c)}
+                      aria-label={bomCollapsed ? "Expand BOM" : "Collapse BOM"}
                     />
-                  </ProductDetails>
+                  </Tooltip>
                 </div>
-              )}
-              {selectedItem?.itemType === 'assembly' && (
-                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                  <AssemblyDocumentsPanel selectedItem={selectedItem} onPartsCreated={handlePartsCreated} />
+                {/* Keep BOM mounted when collapsed so selection / expand state is preserved */}
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    display: bomCollapsed ? "none" : "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {bomPanel}
                 </div>
-              )}
-              {selectedItem?.itemType !== "part" && selectedItem?.itemType !== "assembly" && (
-                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                  <DocumentsPanel
-                    selectedItem={selectedItem}
-                    onDocumentsLoaded={setPartDocuments}
+              </Sider>
+            )}
+
+            <Drawer
+              title="Bill of Materials"
+              placement="left"
+              onClose={() => setMobileDrawerOpen(false)}
+              open={useBomDrawer && mobileDrawerOpen}
+              size={Math.min(420, Math.round(viewportWidth * 0.92))}
+              styles={{ body: { padding: 0, height: "100%", overflow: "hidden" } }}
+              destroyOnClose={false}
+            >
+              {bomPanel}
+            </Drawer>
+
+            <Content
+              className="pdm-detail-content"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                backgroundColor: "#ffffff",
+                height: "100%",
+                margin: 0,
+                padding: useBomDrawer ? "48px 8px 8px" : 0,
+                minWidth: 0,
+              }}
+            >
+              {isProductSelected ? (
+                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                  <ProductSummary
+                    productId={selectedItem?.id}
+                    orderId={initialOrderId}
+                    userId={userId}
                   />
                 </div>
+              ) : (
+                <>
+                  {selectedItem?.itemType === "part" && (
+                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                      <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                        <DocumentsPanel
+                          selectedItem={selectedItem}
+                          onDocumentsLoaded={setPartDocuments}
+                        />
+                      </ProductDetails>
+                    </div>
+                  )}
+                  {selectedItem?.itemType === "assembly" && (
+                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                      <AssemblyDocumentsPanel
+                        selectedItem={selectedItem}
+                        onPartsCreated={handlePartsCreated}
+                      />
+                    </div>
+                  )}
+                  {selectedItem?.itemType !== "part" &&
+                    selectedItem?.itemType !== "assembly" && (
+                      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                        <DocumentsPanel
+                          selectedItem={selectedItem}
+                          onDocumentsLoaded={setPartDocuments}
+                        />
+                      </div>
+                    )}
+                </>
               )}
-            </>
-          )}
-        </Content>
-      </Layout>
-      ) : activeTopTab === "pps" ? (
-        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#F5F5DC" }}>
-          <ProcessPlanning initialOrderId={initialOrderId} />
-        </div>
-      ) : activeTopTab === "quality" ? (
-        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#F5F5DC" }}>
-          <QualityManagement 
-            initialProductId={fromOms ? initialProductId : null} 
-            initialOrderId={initialOrderId}
-            fromOms={fromOms} 
-          />
-        </div>
-      ) : activeTopTab === "recycle-bin" ? (
-        <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%", background: "#F5F5DC" }}>
-          <Recyclebin orderId={initialOrderId} />
-        </div>
-      ) : null}
+            </Content>
+          </Layout>
+        ) : activeTopTab === "pps" ? (
+          <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+            <ProcessPlanning initialOrderId={initialOrderId} />
+          </div>
+        ) : activeTopTab === "quality" ? (
+          <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+            <QualityManagement
+              initialProductId={fromOms ? initialProductId : null}
+              initialOrderId={initialOrderId}
+              fromOms={fromOms}
+            />
+          </div>
+        ) : activeTopTab === "recycle-bin" ? (
+          <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+            <Recyclebin orderId={initialOrderId} />
+          </div>
+        ) : null}
       </div>
     </>
   );

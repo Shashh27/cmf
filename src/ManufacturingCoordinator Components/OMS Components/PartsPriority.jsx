@@ -3,6 +3,7 @@ import {
   Table, Card, Typography, message, Spin, InputNumber,
   Button, Space, Tag, Empty, Modal, Input, Select, Tooltip, Collapse, Tabs, Badge,
 } from "antd";
+import { api } from '../../api/client.js';
 import {
   ExclamationCircleOutlined, SwapOutlined,
   OrderedListOutlined, ArrowUpOutlined, ArrowDownOutlined,
@@ -11,9 +12,7 @@ import {
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import axios from "axios";
 import Lottie from "lottie-react";
-import { API_BASE_URL } from "@/Config/auth";
 import { SCHEDULING_API_BASE_URL } from "@/Config/schedulingconfig";
 import { filterLiveInHouseParts } from "./partPriorityUtils";
 import { PartWisePriorityPdfDownload } from "@/DownloadReports/PartsPriorityPdfDownload";
@@ -182,10 +181,7 @@ const PartsPriority = () => {
   const fetchPartPriorities = async () => {
     setPartLoading(true);
     try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/all`, {
-        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
-      });
+      const response = await api.get(`/orders/part-priorities/all`);
       setPartData(filterLiveInHouseParts(response.data));
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -234,10 +230,9 @@ const PartsPriority = () => {
   const handleUpdatePriority = async (id, newPriority) => {
     if (!newPriority || newPriority < 1) return;
     try {
-      const uid = getCurrentUserId();
-      await axios.put(
-        `${API_BASE_URL}/orders/part-priorities/update-global`,
-        { id, priority: newPriority, admin_id: uid },
+      await api.put(
+        `/orders/part-priorities/update-global`,
+        { id, priority: newPriority },
         { headers: { "Content-Type": "application/json" } }
       );
       messageApi.success("Priority updated successfully");
@@ -273,7 +268,7 @@ const PartsPriority = () => {
     }
     setSwapModal(s => ({ ...s, phase: "simulating" }));
     try {
-      const res = await axios.post(
+      const res = await api.post(
         `${SCHEDULING_API_BASE_URL}/scheduling/part-priorities/simulate-swap`,
         { id1: sourcePart.id, id2: targetPartId },
         { headers: { "Content-Type": "application/json" } }
@@ -365,7 +360,7 @@ const PartsPriority = () => {
     }
     setSwapModal(s => ({ ...s, phase: "committing" }));
     try {
-      const res = await axios.put(
+      const res = await api.put(
         `${SCHEDULING_API_BASE_URL}/scheduling/part-priorities/swap`,
         { id1, id2, priority_changed_by_id },
         { headers: { "Content-Type": "application/json" } }
@@ -462,7 +457,7 @@ const PartsPriority = () => {
     // immediately run simulation since we already know both parts
     setTimeout(async () => {
       try {
-        const res = await axios.post(
+        const res = await api.post(
           `${SCHEDULING_API_BASE_URL}/scheduling/part-priorities/simulate-swap`,
           { id1: sourcePart.id, id2: targetPart.id },
           { headers: { "Content-Type": "application/json" } }
@@ -484,7 +479,7 @@ const PartsPriority = () => {
     openSwapModal(sourcePart, targetPart.id, { activeIndex: index, overIndex: swapWithIndex });
     setTimeout(async () => {
       try {
-        const res = await axios.post(
+        const res = await api.post(
           `${SCHEDULING_API_BASE_URL}/scheduling/part-priorities/simulate-swap`,
           { id1: sourcePart.id, id2: targetPart.id },
           { headers: { "Content-Type": "application/json" } }

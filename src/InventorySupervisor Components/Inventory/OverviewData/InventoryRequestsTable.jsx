@@ -4,6 +4,7 @@ import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth.js';
 import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
 import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
+import { authFetch } from '../../../api/client.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -47,7 +48,7 @@ const InventoryRequestsTable = () => {
   const fetchInventoryRequests = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      const response = await authFetch(`${API_BASE_URL}/inventory-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -81,7 +82,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=approved`, {
+          const response = await authFetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -136,7 +137,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=rejected`, {
+          const response = await authFetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=rejected`, {
             method: 'PUT'
           });
           

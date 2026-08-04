@@ -11,11 +11,12 @@ import {
   UploadOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
-import config from '../../Config/config.js';
 import {
   getInventoryOverviewTableProps,
   ModernTableStyles,
 } from '../../InventorySupervisor Components/Inventory/OverviewData/inventoryOverviewTable.jsx';
+import { authFetch } from '../../api/client.js';
+import config from '../../Config/config.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -132,7 +133,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'part-ipid') {
         // For IPID, fetch operations and their documents
-        const operationsResponse = await fetch(`${config.API_BASE_URL}/operations/part/${selectedNode.partId}`);
+        const operationsResponse = await authFetch(`${config.API_BASE_URL}/operations/part/${selectedNode.partId}`);
         if (!operationsResponse.ok) {
           throw new Error('Failed to fetch operations');
         }
@@ -141,7 +142,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         // Fetch documents for each operation
         const allDocuments = [];
         for (const operation of operations) {
-          const docsResponse = await fetch(`${config.API_BASE_URL}/operation-documents/operation/${operation.id}`);
+          const docsResponse = await authFetch(`${config.API_BASE_URL}/operation-documents/operation/${operation.id}`);
           if (docsResponse.ok) {
             const docs = await docsResponse.json();
             // Filter only IPID documents and add operation information
@@ -182,7 +183,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         return;
       }
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch documents');
       }
@@ -220,7 +221,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       setSelectedVersions({});
       setDocuments(normalizedData);
     } catch (error) {
-      message.error('Failed to fetch documents: ' + error.message);
+      console.error('Failed to fetch documents:', error);
     } finally {
       setLoading(false);
     }
@@ -532,7 +533,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         body = { document_name: newDocumentName.trim() };
       }
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -577,7 +578,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
 
     if (downloadUrl) {
       // Force download by fetching the file and creating a blob
-      fetch(downloadUrl)
+      authFetch(downloadUrl)
         .then(response => response.blob())
         .then(blob => {
           const url = window.URL.createObjectURL(blob);
@@ -612,7 +613,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     try {
       // For general folders, we need to fetch all versions from the backend
       if (document.doc_source_type === 'general-folder') {
-        const response = await fetch(`${config.API_BASE_URL}/general-documents/folders/${document.general_folder_id}/documents`);
+        const response = await authFetch(`${config.API_BASE_URL}/general-documents/folders/${document.general_folder_id}/documents`);
         if (response.ok) {
           const allDocs = await response.json();
           const familyDocs = allDocs.filter(doc => 
@@ -687,11 +688,15 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
+        formData.delete('file');
+        formData.append('files', file, file.name);
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
         formData.append('user_id', userId.toString());
@@ -733,7 +738,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         throw new Error('Upload URL not determined');
       }
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: 'POST',
         body: formData,
       });
@@ -798,44 +803,34 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       
       if (selectedNode.type === 'general-folder') {
         url = `${config.API_BASE_URL}/general-documents/upload`;
+        // general-documents expects singular "file"
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('folder_id', selectedNode.folderId.toString());
-        formData.append('file_name', addFileList[0].originFileObj.name);
+        formData.append('file_name', first.name);
         formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'common-folder') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading common documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'common-root') {
         url = `${config.API_BASE_URL}/common-documents/upload`;
+        const first = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', first, first.name);
         formData.append('user_id', userId.toString());
-        console.log('Uploading common documents to root:', {
-          url,
-          folderId: null,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'machine-folder') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents:', {
-          url,
-          folderId: selectedNode.folderId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'machine') {
         url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('user_id', userId.toString());
-        console.log('Uploading machine documents directly to machine:', {
-          url,
-          machineId: selectedNode.machineId,
-          fileCount: addFileList.length
-        });
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         // For part-category, still use single file upload as it expects 'document_name'
@@ -871,7 +866,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('user_id', userId.toString());
       }
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: 'POST',
         body: formData,
       });
@@ -937,7 +932,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             url = `${config.API_BASE_URL}/order-documents/${document.id}`;
           }
 
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'DELETE'
           });
 

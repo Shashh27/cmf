@@ -6,6 +6,7 @@ import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './
 import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
 import InventoryDownloadButton from './InventoryDownloadButton.jsx';
 import { buildTransactionHistoryReportConfig } from './inventoryReportDownload.js';
+import { authFetch } from '../../../api/client.js';
 
 const { RangePicker } = DatePicker;
 
@@ -41,7 +42,7 @@ const TransactionHistory = () => {
     setAllTransactionsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
+      const response = await authFetch(`${API_BASE_URL}/transaction-history/all`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

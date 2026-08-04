@@ -3,6 +3,7 @@ import { Card, DatePicker, Typography, Space, Spin } from 'antd';
 import * as echarts from 'echarts';
 import moment from 'moment';
 import { API_BASE_URL } from '../../Config/auth';
+import { authFetch } from '../../api/client.js';
 
 const { Title } = Typography;
 
@@ -19,7 +20,7 @@ function ProductionStatus({ machineId }) {
         if (machineId) {
             try {
                 setLoading(true);
-                const response = await fetch(
+                const response = await authFetch(
                     `${API_BASE_URL}/energy-monitoring/get_production_data?date=${date.format('YYYY-MM-DD')}&machine_id=${machineId}`
                 );
                 const data = await response.json();

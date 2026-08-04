@@ -4,7 +4,7 @@ import {
   Select, Empty, Spin, Tabs, Table, Tooltip,
   Button, Modal, Input
 } from 'antd';
-import { Line } from '@ant-design/plots';
+import { api } from '../api/client.js';
 
 import {
   Activity, BarChart2,
@@ -12,9 +12,8 @@ import {
   Award, Clock,
   CheckCircle, Target, AlertTriangle
 } from 'lucide-react';
+import { Line } from '@ant-design/plots';
 import dayjs from 'dayjs';
-import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
 
 const { Option } = Select;
 const { Search: SearchInput } = Input;
@@ -252,8 +251,7 @@ const OEEDashboard = () => {
       params.append('date', selectedDate);
       params.append('shift', oeeData.selectedShift || 'all');
 
-      const response = await axios.get(
-        `${API_BASE_URL}/production-analytics/overall-oee-analytics/?${params.toString()}`
+      const response = await api.get(`/production-analytics/overall-oee-analytics/?${params.toString()}`
       );
       const data = response.data;
 
@@ -301,8 +299,7 @@ const OEEDashboard = () => {
       const params = new URLSearchParams();
       params.append('date', selectedDate);
       params.append('shift', oeeData.selectedShift !== null && oeeData.selectedShift !== 'all' ? oeeData.selectedShift : 'all');
-      const response = await axios.get(
-        `${API_BASE_URL}/production-analytics/machine-oee-analysis/${machineId}?${params.toString()}`
+      const response = await api.get(`/production-analytics/machine-oee-analysis/${machineId}?${params.toString()}`
       );
       if (response.data && response.data.oee_trends) {
         const chartData = response.data.oee_trends.flatMap(trend => [

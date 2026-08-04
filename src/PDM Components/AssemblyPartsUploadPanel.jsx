@@ -17,6 +17,7 @@ import {
   Popconfirm,
   Progress,
 } from "antd";
+import { api } from '../api/client.js';
 import {
   UploadOutlined,
   FileWordOutlined,
@@ -29,8 +30,6 @@ import {
   InboxOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 
 const { Text, Title } = Typography;
 const { Dragger } = Upload;
@@ -128,7 +127,7 @@ const AssemblyPartsUploadPanel = ({
 
   const fetchPartTypes = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/part-types/`);
+      const res = await api.get(`/part-types/`);
       setInternalPartTypes(res.data || []);
     } catch (e) {
       console.error("Error fetching part types:", e);
@@ -170,7 +169,7 @@ const AssemblyPartsUploadPanel = ({
     form.append("file", file);
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/parts/parse-doc`, form, {
+      const res = await api.post(`/parts/parse-doc`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -312,7 +311,7 @@ const AssemblyPartsUploadPanel = ({
     };
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/parts/bulk`, bulkPayload);
+      const res = await api.post(`/parts/bulk`, bulkPayload);
       const { created = [], duplicates = [], errors = [] } = res.data;
 
       // Build lookup maps by part_number for quick status update
@@ -380,9 +379,9 @@ const AssemblyPartsUploadPanel = ({
     try {
       let response;
       if (selectedItem.itemType === "product") {
-        response = await axios.post(`${API_BASE_URL}/recycle-bin/products/${selectedItem.id}/soft-delete-parts`);
+        response = await api.post(`/recycle-bin/products/${selectedItem.id}/soft-delete-parts`);
       } else {
-        response = await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${selectedItem.id}/soft-delete-parts`);
+        response = await api.post(`/recycle-bin/assemblies/${selectedItem.id}/soft-delete-parts`);
       }
       
       const { deleted_count, part_ids } = response.data;

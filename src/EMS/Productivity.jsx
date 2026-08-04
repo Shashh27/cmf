@@ -5,22 +5,28 @@ import ReactECharts from 'echarts-for-react';
 import moment from 'moment';
 import { API_BASE_URL } from '../Config/auth';
 import Report from './Reportnew';
+import { authFetch } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const { Title, Text } = Typography;
-const { RangePicker } = DatePicker;
 
 const Productivity = ({ onBack }) => {
+  const { isAuthenticated, bootstrapping } = useAuth();
   const [selectedDateRange, setSelectedDateRange] = useState(null);
+  const [fromDate, setFromDate] = useState(null);
+  const [toDate, setToDate] = useState(null);
   const [isLive, setIsLive] = useState(true);
   const [machineData, setMachineData] = useState([]);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const prevDataRef = useRef([]);
   const [showReport, setShowReport] = useState(false);
+  const [toPickerOpen, setToPickerOpen] = useState(false);
 
   // Fetch live shiftwise energy data
   const fetchLiveShiftwiseData = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/energy-monitoring/shiftwise-energy/live`);
+      const response = await authFetch(`${API_BASE_URL}/energy-monitoring/shiftwise-energy/live`);
+      if (!response.ok) return;
       const data = await response.json();
       
       if (Array.isArray(data)) {
@@ -46,13 +52,21 @@ const Productivity = ({ onBack }) => {
   // Fetch historical shiftwise energy data
   const fetchHistoricalShiftwiseData = async (fromDate, toDate) => {
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/energy-monitoring/shiftwise-energy/history?start_date=${fromDate}&end_date=${toDate}`
       );
-      const data = await response.json();
-      
-      if (Array.isArray(data)) {
-        const processedData = data.map(machine => ({
+      if (!response.ok) {
+        setMachineData([]);
+        prevDataRef.current = [];
+        setIsDataLoading(false);
+        return;
+      }
+      const payload = await response.json();
+      // API returns { data: [...], timestamp } — not a bare array
+      const rows = Array.isArray(payload) ? payload : (payload?.data || []);
+
+      if (rows.length > 0) {
+        const processedData = rows.map(machine => ({
           id: machine.machine_id,
           machine_name: machine.machine_name,
           energy: parseFloat(machine.total_energy || 0),
@@ -78,40 +92,67 @@ const Productivity = ({ onBack }) => {
 
   // Load data when component mounts
   useEffect(() => {
-    if (isLive) {
-      fetchLiveShiftwiseData();
-      const interval = setInterval(fetchLiveShiftwiseData, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [isLive]);
+    if (bootstrapping || !isAuthenticated || !isLive) return undefined;
+    fetchLiveShiftwiseData();
+    const interval = setInterval(fetchLiveShiftwiseData, 5000);
+    return () => clearInterval(interval);
+  }, [isLive, isAuthenticated, bootstrapping]);
 
-  const handleDateRangeChange = async (dates) => {
+  const loadHistoryForRange = async (from, to) => {
     try {
       setIsDataLoading(true);
-      setSelectedDateRange(dates);
-      setIsLive(!dates);
-      
-      if (!dates || dates.length === 0) {
-        setIsLive(true);
-        return;
-      }
-      
-      const [fromDate, toDate] = dates;
-      const formattedFromDate = fromDate.format('YYYY-MM-DD');
-      const formattedToDate = toDate.format('YYYY-MM-DD');
-      
-      await fetchHistoricalShiftwiseData(formattedFromDate, formattedToDate);
+      setSelectedDateRange([from, to]);
+      setIsLive(false);
+      await fetchHistoricalShiftwiseData(
+        from.format('YYYY-MM-DD'),
+        to.format('YYYY-MM-DD')
+      );
     } catch (error) {
-      console.error('Error in handleDateRangeChange:', error);
+      console.error('Error loading historical range:', error);
       setMachineData([]);
       prevDataRef.current = [];
       setIsDataLoading(false);
     }
   };
 
+  const handleFromDateChange = (date) => {
+    setFromDate(date);
+    // If to is before new from, clear to
+    if (date && toDate && toDate.isBefore(date, 'day')) {
+      setToDate(null);
+      setSelectedDateRange(null);
+      setIsLive(true);
+      setToPickerOpen(true);
+    } else if (date && toDate && !toDate.isBefore(date, 'day')) {
+      loadHistoryForRange(date, toDate);
+    } else if (!date) {
+      setToDate(null);
+      setSelectedDateRange(null);
+      setIsLive(true);
+      setToPickerOpen(false);
+    } else {
+      // From selected — open To picker next
+      setToPickerOpen(true);
+    }
+  };
+
+  const handleToDateChange = (date) => {
+    setToDate(date);
+    setToPickerOpen(false);
+    if (fromDate && date && !date.isBefore(fromDate, 'day')) {
+      loadHistoryForRange(fromDate, date);
+    } else if (!date) {
+      setSelectedDateRange(null);
+      setIsLive(true);
+    }
+  };
+
   const handleGoLive = () => {
     setIsDataLoading(true);
     setSelectedDateRange(null);
+    setFromDate(null);
+    setToDate(null);
+    setToPickerOpen(false);
     setIsLive(true);
     setMachineData([]);
     prevDataRef.current = [];
@@ -264,16 +305,38 @@ const Productivity = ({ onBack }) => {
           {isLive ? 'Live Energy Monitoring' : `Historical Energy Data - ${getDateRangeDisplay()}`}
         </Title>
         <Space size="middle">
-          <RangePicker 
-            value={selectedDateRange}
-            onChange={handleDateRangeChange}
-            style={{ width: '300px' }}
-            placeholder={['From Date', 'To Date']}
+          <DatePicker
+            value={fromDate}
+            onChange={handleFromDateChange}
+            placeholder="From Date"
             format="YYYY-MM-DD"
-            disabledDate={(current) => {
-              return current && current > moment().endOf('day');
+            allowClear
+            style={{ width: 140 }}
+            disabledDate={(current) => current && current > moment().endOf('day')}
+          />
+          <DatePicker
+            value={toDate}
+            onChange={handleToDateChange}
+            placeholder="To Date"
+            format="YYYY-MM-DD"
+            allowClear
+            style={{ width: 140 }}
+            disabled={!fromDate}
+            open={toPickerOpen}
+            onOpenChange={(open) => {
+              if (!fromDate) {
+                setToPickerOpen(false);
+                return;
+              }
+              setToPickerOpen(open);
             }}
-            allowClear={true}
+            disabledDate={(current) => {
+              if (!current) return false;
+              if (current > moment().endOf('day')) return true;
+              // Only allow To Date on/after selected From Date
+              if (fromDate && current.isBefore(fromDate, 'day')) return true;
+              return false;
+            }}
           />
         
           <Button

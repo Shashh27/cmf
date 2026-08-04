@@ -119,3 +119,20 @@ body {
 
 /* Previously had per-table header padding overrides; now all headers use same padding
    via .ant-table-thead .table-header-styled to keep height consistent. */
+
+/* Hide native number input spinners app-wide */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Hide Ant Design InputNumber stepper controls app-wide */
+.ant-input-number-handler-wrap {
+  display: none !important;
+}

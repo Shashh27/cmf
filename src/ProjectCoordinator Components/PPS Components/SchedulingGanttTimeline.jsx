@@ -2,10 +2,6 @@ import React, {
   forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timeline } from 'vis-timeline';
-import { DataSet } from 'vis-data';
-import 'vis-timeline/styles/vis-timeline-graph2d.css';
-import { message } from 'antd';
 import {
   buildShiftHiddenDates,
   buildTimelineGroups,
@@ -21,11 +17,15 @@ import {
   getTimeRange,
   filterScheduledOperations,
 } from './schedulingTimelineUtils.js';
+import { Timeline } from 'vis-timeline';
 import {
   getItemBatchSize,
   getSyncDebounceMs,
   getWindowAnimation,
 } from './schedulingTimelineMotion.js';
+import { DataSet } from 'vis-data';
+import 'vis-timeline/styles/vis-timeline-graph2d.css';
+import { message } from 'antd';
 
 const ROW_HEIGHT = 34;
 const INTERACTION_COOLDOWN_MS = 280;

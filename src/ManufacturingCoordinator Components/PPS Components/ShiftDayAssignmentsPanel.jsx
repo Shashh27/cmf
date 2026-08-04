@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import dayjs from "dayjs";
 import { SCHEDULING_API_BASE_URL } from "../../Config/schedulingconfig.js";
-import { isMachineAvailableForAssignmentOnDate } from "./breakdownDateUtils.js";
 import {
   Card, Button, Modal, Form, Select, Spin, Popconfirm, Tag, Space, Tooltip, message,
 } from "antd";
+import { isMachineAvailableForAssignmentOnDate } from "./breakdownDateUtils.js";
 import {
   DeleteOutlined, EditOutlined, PlusOutlined, UserOutlined, ToolOutlined,
   SwapOutlined, TeamOutlined, ArrowRightOutlined, CalendarOutlined, UserSwitchOutlined,

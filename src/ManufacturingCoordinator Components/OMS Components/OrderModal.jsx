@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import { message } from "antd";
 import dayjs from "dayjs";
+import { api } from '../../api/client.js';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -137,7 +136,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
   const fetchUsersForRoles = async () => {
     if (users.length > 0) return;
     try {
-      const response = await axios.get(`${API_BASE_URL}/access-users/`);
+      const response = await api.get(`/access-users/`);
       const list = Array.isArray(response.data) ? response.data : [];
       setUsers(list);
       const pcs = list.filter(
@@ -175,8 +174,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
     }
     setCreateProductLoading(true);
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/products/`,
+      const response = await api.post(`/products/`,
         {
           product_name: values.product_name?.trim() || "",
           product_version: values.product_version?.trim() || "1.0",
@@ -271,8 +269,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
 
     try {
       const url = editingOrder 
-        ? `${API_BASE_URL}/orders/${editingOrder.id}`
-        : `${API_BASE_URL}/orders/`;
+        ? `/orders/${editingOrder.id}`
+        : `/orders/`;
       
       const method = editingOrder ? 'PUT' : 'POST';
       
@@ -327,7 +325,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
         return;
       }
 
-      const response = await axios({
+      const response = await api({
         url,
         method,
         headers: {
@@ -433,8 +431,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
     if (!uploadFormData.getAll("files")?.length) return;
 
     try {
-      await axios.post(
-        `${API_BASE_URL}/order-documents/upload-bulk/${orderId}`,
+      await api.post(`/order-documents/upload-bulk/${orderId}`,
         uploadFormData
       );
     } catch (error) {

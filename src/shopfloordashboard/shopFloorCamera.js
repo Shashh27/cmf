@@ -85,6 +85,13 @@ function allPointsVisible(camera, points, margin = VIEW_MARGIN) {
   return true
 }
 
+export function clampInsideHall(position) {
+  position.x = THREE.MathUtils.clamp(position.x, -HALL_HALF_W, HALL_HALF_W)
+  position.y = THREE.MathUtils.clamp(position.y, HALL_MIN_H, HALL_MAX_H)
+  position.z = THREE.MathUtils.clamp(position.z, -HALL_HALF_D, HALL_HALF_D)
+  return position
+}
+
 /**
  * Fixed front overview — camera at open front (+Z), centered on machines,
  * elevated, looking straight into the hall. Fits all machines in one frame.
@@ -167,11 +174,59 @@ export function computeCameraPreset(machines = [], zones = [], aspect = 1) {
   }
 }
 
-export function clampInsideHall(position) {
-  position.x = THREE.MathUtils.clamp(position.x, -HALL_HALF_W, HALL_HALF_W)
-  position.y = THREE.MathUtils.clamp(position.y, HALL_MIN_H, HALL_MAX_H)
-  position.z = THREE.MathUtils.clamp(position.z, -HALL_HALF_D, HALL_HALF_D)
-  return position
+/**
+ * Close-up pose when a single machine is selected.
+ * Approaches from the current camera side (or front +Z), lower and nearer
+ * so the machine fills the view instead of a high bird's-eye hop.
+ */
+export function getMachineFocusPose(machine, fromCameraPos = null) {
+  const px = machine.position?.x ?? 0
+  const pz = machine.position?.z ?? 0
+  const target = new THREE.Vector3(px, 1.55, pz)
+
+  const dir = new THREE.Vector3(0, 0, 1)
+  if (fromCameraPos) {
+    dir.set(fromCameraPos.x - px, 0, fromCameraPos.z - pz)
+    if (dir.lengthSq() < 0.25) dir.set(0, 0, 1)
+    dir.normalize()
+  }
+
+  // ~6.5 units out, chest-height look — close enough to "walk up" to the machine
+  const position = clampInsideHall(
+    new THREE.Vector3(px + dir.x * 6.5, 4.6, pz + dir.z * 6.5),
+  )
+
+  // Keep a usable orbit distance after clamp (minDistance is 5)
+  const toCam = position.clone().sub(target)
+  const dist = toCam.length()
+  if (dist < 5.5) {
+    toCam.normalize().multiplyScalar(5.5)
+    position.copy(target).add(toCam)
+    clampInsideHall(position)
+  }
+
+  const distance = position.distanceTo(target)
+  return { position, target, fov: 42, distance }
+}
+
+export function applyMachineFocusCamera(camera, controls, machine) {
+  const aspect = camera.aspect > 0 ? camera.aspect : window.innerWidth / Math.max(window.innerHeight, 1)
+  camera.aspect = aspect
+  const { position, target, fov, distance } = getMachineFocusPose(machine, camera.position)
+
+  camera.fov = fov
+  camera.position.copy(position)
+  camera.lookAt(target)
+  camera.near = Math.max(0.1, distance * 0.002)
+  camera.far = Math.max(400, distance * 12)
+  camera.updateProjectionMatrix()
+
+  if (controls) {
+    controls.target.copy(target)
+    controls.update()
+  }
+
+  return { position, target, distance, fov }
 }
 
 export function applyOverviewCamera(camera, controls, machines, zones) {

@@ -3,10 +3,10 @@ import { Modal, Button, Popconfirm, Table, Tag } from 'antd';
 import {
   DeleteOutlined, CalendarOutlined, ClockCircleOutlined, DashboardOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import {
   PM_T, btnSharp, formatDate, formatDateTime, itemTypeShort, STATUS_COLORS,
 } from './pmUtils';
+import dayjs from 'dayjs';
 
 function getIntervalLabel(ci) {
   if (!ci) return '—';

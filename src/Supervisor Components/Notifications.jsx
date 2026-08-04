@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
 import { parseMasterBocBboxToPdfRect } from '../Quality Management Components/InspectorComponents/bocMappers';
 import PokayokeOperationNotification from './PokayokeOperationNotification';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -150,7 +151,7 @@ const Notifications = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await authFetch(`${API_BASE_URL}/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -180,7 +181,7 @@ const Notifications = () => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);

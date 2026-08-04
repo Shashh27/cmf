@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, Empty, Spin, Table, Tag, Typography } from "antd";
 import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from "../../api/client.js";
 
 const { Text } = Typography;
 
@@ -85,8 +84,8 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     const controller = new AbortController();
     setLoading(true);
 
-    axios
-      .get(`${API_BASE_URL}/products/${productId}/hierarchical`, { signal: controller.signal })
+    api
+      .get(`/products/${productId}/hierarchical`, { signal: controller.signal })
       .then((res) => { if (isMounted) setHierarchy(res.data); })
       .catch((e) => {
         if (e?.name !== "CanceledError" && e?.name !== "AbortError") {

@@ -82,13 +82,21 @@ export const sortStocksByNearestFit = (stocks, plannedDims, plannedFormType) => 
     .map((stock) => ({
       stock,
       nearestFit: getNearestFitDistance(stock, plannedDims, plannedFormType),
+      stockLength: stock.length || 0,
     }))
     .filter(({ nearestFit }) => Number.isFinite(nearestFit))
-    .sort((a, b) => a.nearestFit - b.nearestFit)
+    .sort((a, b) => {
+      // Nearest cross-section first (e.g. 40 before 50 before 85 for planned 35)
+      if (a.nearestFit !== b.nearestFit) return a.nearestFit - b.nearestFit;
+      // Then shorter stock length (less waste when cutting planned length)
+      if (a.stockLength !== b.stockLength) return a.stockLength - b.stockLength;
+      return (a.stock.id || 0) - (b.stock.id || 0);
+    })
     .map(({ stock }) => stock);
 };
 
 export const getEligibleGeneralStocks = (stocks, stockUnits, plannedDims, plannedFormType, plannedLength, linkedUnitId = null) => {
+  // Sort nearest → farthest, then keep only stocks with usable units
   return sortStocksByNearestFit(stocks, plannedDims, plannedFormType).filter((stock) => {
     const units = filterUnitsForPlanned(stockUnits[stock.id], plannedLength, linkedUnitId);
     return units.length > 0;

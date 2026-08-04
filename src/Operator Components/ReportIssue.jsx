@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Tabs, Button, Select, Input, DatePicker, message, Space, Typography } from 'antd';
 import { WarningOutlined, ToolOutlined, LockOutlined, CustomerServiceOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 const { TabPane } = Tabs;
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -78,7 +79,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
           setHelpPartId(parsedJob.part_id);
           setHelpOperationId(parsedJob.operation_id);
           // Fetch operations for the part
-          fetch(`${API_BASE_URL}/operations/part/${parsedJob.part_id}`, { headers: { accept: 'application/json' } })
+          authFetch(`${API_BASE_URL}/operations/part/${parsedJob.part_id}`, { headers: { accept: 'application/json' } })
             .then(async (r) => {
               if (r.ok) {
                 const data = await r.json();
@@ -95,7 +96,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
         setSelectedJob(null);
       }
       
-      fetch(`${API_BASE_URL}/orders/`).then(async (r) => {
+      authFetch(`${API_BASE_URL}/orders/`).then(async (r) => {
         if (r.ok) {
           const data = await r.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -117,7 +118,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setParts([]);
       return;
     }
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -153,7 +154,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setOperationId(null);
       return;
     }
-    fetch(`${API_BASE_URL}/operations/part/${partId}`, { headers: { accept: 'application/json' } })
+    authFetch(`${API_BASE_URL}/operations/part/${partId}`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -181,7 +182,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setHelpParts([]);
       return;
     }
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -217,7 +218,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setHelpOperationId(null);
       return;
     }
-    fetch(`${API_BASE_URL}/operations/part/${helpPartId}`, { headers: { accept: 'application/json' } })
+    authFetch(`${API_BASE_URL}/operations/part/${helpPartId}`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -294,7 +295,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       reported_at: formatLocalNaive(new Date()),
     };
     try {
-      const res = await fetch(`${API_BASE_URL}/maintenance/oee-issues`, {
+      const res = await authFetch(`${API_BASE_URL}/maintenance/oee-issues`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -334,7 +335,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       reported_at: formatLocalNaive(new Date()),
     };
     try {
-      const res = await fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, {
+      const res = await authFetch(`${API_BASE_URL}/maintenance/machine-breakdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -366,7 +367,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       reported_at: formatLocalNaive(new Date()),
     };
     try {
-      const res = await fetch(`${API_BASE_URL}/maintenance/component-issues`, {
+      const res = await authFetch(`${API_BASE_URL}/maintenance/component-issues`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -398,7 +399,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       reported_at: formatLocalNaive(new Date()),
     };
     try {
-      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`, {
+      const res = await authFetch(`${API_BASE_URL}/maintenance/help-support`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

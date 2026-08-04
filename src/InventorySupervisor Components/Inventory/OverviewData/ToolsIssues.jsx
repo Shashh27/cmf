@@ -3,6 +3,7 @@ import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DateP
 import { API_BASE_URL } from '../../../Config/auth.js';
 import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
 import { disableFutureDates, normalizeDateRange } from './inventoryDateUtils.js';
+import { authFetch } from '../../../api/client.js';
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -48,7 +49,7 @@ const ToolsIssues = () => {
       if (status !== 'all') {
         url = `${API_BASE_URL}/tool-issues/by-status/${status}`;
       }
-      const resp = await fetch(url);
+      const resp = await authFetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       
@@ -139,7 +140,7 @@ const ToolsIssues = () => {
       };
 
       const url = `${API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
-      const resp = await fetch(url, { 
+      const resp = await authFetch(url, { 
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

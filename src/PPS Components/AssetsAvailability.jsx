@@ -10,8 +10,7 @@ dayjs.extend(isSameOrBefore);
 
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { Card, Row, Col, Tabs, Table, Tag, message, Spin, Button, Modal, Form, Select, DatePicker, Input, Space, Switch } from "antd";
-import { CheckCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined 
-} from "@ant-design/icons";
+import { CheckCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined } from "@ant-design/icons";
 import MaintenanceSection from "./MaintenanceSection";
 import MachineAssignment from "./Machineassignment";
 

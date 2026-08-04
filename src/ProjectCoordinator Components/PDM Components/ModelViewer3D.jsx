@@ -5,8 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Spin, Empty, Typography } from "antd";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { api } from '../../api/client.js';
 
 const { Text } = Typography;
 
@@ -127,8 +126,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             arrayBuffer = modelCache.get(documentId);
           } else {
             try {
-              const response = await axios.get(
-                `${API_BASE_URL}/documents/${documentId}/3d`,
+              const response = await api.get(`/documents/${documentId}/3d`,
                 { responseType: "arraybuffer" }
               );
               arrayBuffer = response.data;

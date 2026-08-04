@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Modal, Form, Input, Button, Typography, message } from "antd";
+import { api } from '../api/client.js';
 
 const { Title } = Typography;
 
@@ -37,12 +36,12 @@ const CustomerModal = ({ isOpen, onClose, userId, onCustomerCreated, editingCust
       };
 
       const url = editingCustomer 
-        ? `${API_BASE_URL}/customers/${editingCustomer.id}/`
-        : `${API_BASE_URL}/customers/`;
+        ? `/customers/${editingCustomer.id}/`
+        : `/customers/`;
       
       const method = editingCustomer ? 'put' : 'post';
       
-      const response = await axios({
+      const response = await api({
         url,
         method,
         headers: {

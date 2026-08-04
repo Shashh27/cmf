@@ -1,322 +1,397 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
 import {
   Modal,
   Table,
   InputNumber,
-  Input,
-  Checkbox,
   Button,
   message,
-  Popconfirm,
   Space,
   Divider,
   Alert,
+  Tag,
+  Select,
+  Input,
+  Popconfirm,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, CalculatorOutlined } from "@ant-design/icons";
+import { api } from '../api/client.js';
+import { CalculatorOutlined, SaveOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import MachineMhrExport from "../DownloadReports/MachineMhrExport.jsx";
 
-const emptyRow = (sequence_number = 0) => ({
-  id: null,
-  code: "",
-  label: "",
-  unit: "",
-  value: null,
-  is_applicable: true,
-  sequence_number,
-});
+const handleInputKeyDown = (e) => {
+  // Allow: Backspace, Delete, Tab, Escape, Enter, Arrow keys
+  if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) {
+    return;
+  }
+  // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+  if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) {
+    return;
+  }
+  // Allow: Decimal point for float values
+  if (e.key === '.') {
+    return;
+  }
+  // Block: non-digit characters
+  if (e.key && !/^\d$/.test(e.key)) {
+    e.preventDefault();
+  }
+};
 
-const PAIRED_CODES = [["power_kw", "power_rate"]];
-
-const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated }) => {
-  const [rows, setRows] = useState([]);
+const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => {
+  const [values, setValues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [calculating, setCalculating] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [breakdown, setBreakdown] = useState(null);
-  const [mhr, setMhr] = useState(null);
+  const [finalMhr, setFinalMhr] = useState(null);
+  const [recommendedMhr, setRecommendedMhr] = useState(null);
+  const [mhrCalculatedAt, setMhrCalculatedAt] = useState(null);
+  const [availableParticulars, setAvailableParticulars] = useState([]);
+  const [selectedParticular, setSelectedParticular] = useState(null);
+  const [editedValues, setEditedValues] = useState({});
 
   useEffect(() => {
     if (isOpen && machine) {
-      fetchParameters();
+      fetchMhrData();
+      fetchAvailableParticulars();
     }
   }, [isOpen, machine]);
 
-  const fetchParameters = async () => {
+  const fetchMhrData = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/machines/${machine.id}/mhr`);
-      setRows(res.data.parameters.length ? res.data.parameters : [emptyRow()]);
-      setMhr(res.data.mhr);
-      setBreakdown(null);
-      setIsDirty(false);
+      const res = await api.get(`/machines/${machine.id}/mhr`);
+      setValues(res.data.values || []);
+      setFinalMhr(res.data.final_mhr);
+      setRecommendedMhr(res.data.recommended_mhr);
+      setMhrCalculatedAt(res.data.mhr_calculated_at);
+      setEditedValues({}); // Reset edited values on fresh load
     } catch (error) {
-      console.error("Error fetching MHR parameters:", error);
-      message.error("Failed to load MHR parameters");
+      console.error("Error fetching MHR data:", error);
+      message.error("Failed to load MHR data");
     } finally {
       setLoading(false);
     }
   };
 
-  const updateRow = (index, field, value) => {
-    setRows((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
-      return next;
-    });
-    setIsDirty(true);
-  };
-
-  const addRow = () => {
-    setRows((prev) => [...prev, emptyRow(prev.length)]);
-    setIsDirty(true);
-  };
-
-  const deleteRow = (index) => {
-    setRows((prev) => prev.filter((_, i) => i !== index));
-    setIsDirty(true);
-  };
-
-  // Client-side pre-check so the user gets instant feedback instead of
-  // waiting on a round trip just to find out a code is duplicated.
-  const validateRows = () => {
-    const codes = new Set();
-    for (const row of rows) {
-      const code = (row.code || "").trim().toLowerCase();
-      const label = (row.label || "").trim();
-      if (!code || !label) {
-        message.error("Every parameter needs both a code and a label");
-        return false;
-      }
-      if (codes.has(code)) {
-        message.error(`Duplicate parameter code '${code}' — codes must be unique`);
-        return false;
-      }
-      codes.add(code);
-      if (row.value != null && row.value < 0) {
-        message.error(`'${label}' cannot have a negative value`);
-        return false;
-      }
+  const fetchAvailableParticulars = async () => {
+    try {
+      const res = await api.get(`/machines/${machine.id}/mhr/available-particulars`);
+      setAvailableParticulars(res.data || []);
+    } catch (error) {
+      console.error("Error fetching available particulars:", error);
     }
-    for (const [a, b] of PAIRED_CODES) {
-      const rowA = rows.find((r) => (r.code || "").trim().toLowerCase() === a);
-      const rowB = rows.find((r) => (r.code || "").trim().toLowerCase() === b);
-      const aOn = !!rowA?.is_applicable;
-      const bOn = !!rowB?.is_applicable;
-      if (aOn !== bOn) {
-        message.error(`'${a}' and '${b}' must both be applicable together, or both off`);
-        return false;
-      }
-    }
-    return true;
   };
 
-  const saveParameters = async () => {
-    if (!validateRows()) return false;
+  const handleInputChange = (valueId, newValue) => {
+    const valueRecord = values.find(v => v.id === valueId);
+    if (!valueRecord) return;
+    setEditedValues(prev => ({
+      ...prev,
+      [valueRecord.particular_id]: newValue
+    }));
+  };
+
+  const saveAllChanges = async () => {
+    if (Object.keys(editedValues).length === 0) {
+      message.info("No changes to save");
+      return;
+    }
+
     setSaving(true);
     try {
-      const payload = {
-        parameters: rows.map((r, i) => ({ ...r, sequence_number: i })),
-      };
-      const res = await axios.put(
-        `${API_BASE_URL}/machines/${machine.id}/mhr/parameters`,
-        payload
+      const updates = Object.entries(editedValues).map(([particularId, value]) => ({
+        particular_id: parseInt(particularId),
+        value: value
+      }));
+
+      const res = await api.put(`/machines/${machine.id}/mhr/values`,
+        updates
       );
-      setRows(res.data);
-      setIsDirty(false);
-      message.success("Parameters saved");
-      return true;
+      await fetchMhrData();
+      message.success("All values updated and MHR recalculated");
+      // Use the updated MHR from the API response
+      const updatedMhr = res.data?.final_mhr || finalMhr;
+      onCalculated && onCalculated(updatedMhr);
     } catch (error) {
-      console.error("Error saving MHR parameters:", error);
-      message.error(error?.response?.data?.detail || "Failed to save parameters");
-      return false;
+      console.error("Error updating values:", error);
+      message.error(error?.response?.data?.detail || "Failed to update values");
     } finally {
       setSaving(false);
     }
   };
 
-  // Calculate always saves first if there are unsaved edits, so the
-  // breakdown shown is never calculated from stale data.
-  const calculateMhr = async () => {
-    if (isDirty) {
-      const saved = await saveParameters();
-      if (!saved) return;
-    }
-    setCalculating(true);
+  const toggleApplicable = async (valueId, isApplicable) => {
+    const valueRecord = values.find(v => v.id === valueId);
+    if (!valueRecord) return;
+
+    setSaving(true);
     try {
-      const res = await axios.post(`${API_BASE_URL}/machines/${machine.id}/mhr/calculate`);
-      setMhr(res.data.mhr);
-      setBreakdown(res.data.breakdown);
-      message.success("MHR calculated");
-      onCalculated && onCalculated(res.data.mhr);
+      await api.post(`/machines/${machine.id}/mhr/particulars/${valueRecord.particular_id}/toggle`,
+        null,
+        { params: { is_applicable: isApplicable } }
+      );
+      await fetchMhrData();
+      message.success("Particular toggled");
     } catch (error) {
-      console.error("Error calculating MHR:", error);
-      message.error(error?.response?.data?.detail || "Failed to calculate MHR");
+      console.error("Error toggling particular:", error);
+      message.error(error?.response?.data?.detail || "Failed to toggle particular");
     } finally {
-      setCalculating(false);
+      setSaving(false);
     }
   };
 
-  const handleClose = () => {
-    if (isDirty) {
-      Modal.confirm({
-        title: "Discard unsaved changes?",
-        content: "You have unsaved parameter edits. Closing now will discard them.",
-        okText: "Discard",
-        okButtonProps: { danger: true },
-        cancelText: "Keep editing",
-        onOk: onClose,
-      });
+  const addParticular = async () => {
+    if (!selectedParticular) {
+      message.error("Please select a particular to add");
       return;
     }
-    onClose();
+
+    setSaving(true);
+    try {
+      await api.post(`/machines/${machine.id}/mhr/particulars/${selectedParticular}`
+      );
+      await fetchMhrData();
+      await fetchAvailableParticulars();
+      setSelectedParticular(null);
+      message.success("Particular added");
+    } catch (error) {
+      console.error("Error adding particular:", error);
+      message.error(error?.response?.data?.detail || "Failed to add particular");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeParticular = async (particularId) => {
+    setSaving(true);
+    try {
+      await api.delete(`/machines/${machine.id}/mhr/particulars/${particularId}`
+      );
+      await fetchMhrData();
+      await fetchAvailableParticulars();
+      message.success("Particular removed");
+    } catch (error) {
+      console.error("Error removing particular:", error);
+      message.error(error?.response?.data?.detail || "Failed to remove particular");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateRecommendedMhr = async (newValue) => {
+    setSaving(true);
+    try {
+      await api.put(`/machines/${machine.id}/mhr/recommended-mhr`,
+        null,
+        { params: { recommended_mhr: newValue } }
+      );
+      setRecommendedMhr(newValue);
+      message.success("Recommended MHR updated");
+    } catch (error) {
+      console.error("Error updating recommended MHR:", error);
+      message.error(error?.response?.data?.detail || "Failed to update recommended MHR");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns = [
     {
-      title: "Applicable",
-      key: "is_applicable",
-      width: 90,
-      align: "center",
-      render: (_, record, index) => (
-        <Checkbox
-          checked={record.is_applicable}
-          onChange={(e) => updateRow(index, "is_applicable", e.target.checked)}
-        />
-      ),
-    },
-    {
-      title: "Parameter",
-      key: "label",
-      render: (_, record, index) => (
-        <Input
-          value={record.label}
-          placeholder="e.g. Investment cost"
-          status={!record.label?.trim() ? "error" : ""}
-          onChange={(e) => updateRow(index, "label", e.target.value)}
-        />
-      ),
-    },
-    {
       title: "Code",
       key: "code",
-      width: 160,
-      render: (_, record, index) => (
-        <Input
-          value={record.code}
-          placeholder="investment_cost"
-          status={!record.code?.trim() ? "error" : ""}
-          onChange={(e) => updateRow(index, "code", e.target.value)}
-        />
+      render: (_, record) => (
+        <Tag color="blue" style={{ fontSize: 11 }}>{record.particular?.code || "-"}</Tag>
+      ),
+    },
+    {
+      title: "Name",
+      key: "name",
+      ellipsis: true,
+      render: (_, record) => (
+        <span style={{ fontSize: 12 }}>{record.particular?.name || "-"}</span>
+      ),
+    },
+    {
+      title: "Type",
+      key: "type",
+      render: (_, record) => (
+        <Tag color={record.particular?.is_input ? "green" : "orange"} style={{ fontSize: 11 }}>
+          {record.particular?.is_input ? "In" : "Fm"}
+        </Tag>
       ),
     },
     {
       title: "Value",
       key: "value",
-      width: 140,
-      render: (_, record, index) => (
-        <InputNumber
-          style={{ width: "100%" }}
-          min={0}
-          value={record.value}
-          onChange={(val) => updateRow(index, "value", val)}
-        />
-      ),
+      render: (_, record) => {
+        if (!record.particular?.is_input) {
+          return <span style={{ fontSize: 12, color: "#999" }}>{record.computed_value?.toFixed(2) || "-"}</span>;
+        }
+        const displayValue = editedValues[record.particular_id] !== undefined 
+          ? editedValues[record.particular_id] 
+          : record.input_value;
+        const hasChanges = editedValues[record.particular_id] !== undefined;
+        return (
+          <InputNumber
+            style={{ width: "100%", border: hasChanges ? '2px solid #1890ff' : undefined, fontSize: 13 }}
+            value={displayValue}
+            onChange={(val) => handleInputChange(record.id, val)}
+            disabled={saving}
+            size="small"
+            controls={false}
+            keyboard={false}
+            onKeyDown={handleInputKeyDown}
+            placeholder="Enter value"
+          />
+        );
+      },
     },
     {
       title: "Unit",
       key: "unit",
-      width: 100,
-      render: (_, record, index) => (
-        <Input
-          value={record.unit}
-          placeholder="Rs / KW / Hrs"
-          onChange={(e) => updateRow(index, "unit", e.target.value)}
-        />
+      render: (_, record) => (
+        <span style={{ fontSize: 11 }}>{record.particular?.unit || "-"}</span>
       ),
     },
     {
-      title: "",
-      key: "actions",
-      width: 50,
-      align: "center",
-      render: (_, record, index) => (
-        <Popconfirm title="Remove this parameter?" onConfirm={() => deleteRow(index)}>
-          <Button type="text" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+      title: "Formula",
+      key: "formula",
+      ellipsis: true,
+      render: (_, record) => (
+        <span style={{ fontSize: 11, color: "#666" }}>
+          {record.particular?.formula || "-"}
+        </span>
       ),
     },
   ];
 
   return (
     <Modal
-      title={`MHR Parameters — ${machine?.type || ""} ${machine?.model || ""}`}
+      title={`MHR Configuration — ${machine?.type || ""} ${machine?.model || ""}`}
       open={isOpen}
-      onCancel={handleClose}
-      width="90%"
-      style={{ maxWidth: 900 }}
+      onCancel={onClose}
+      width="98vw"
+      style={{ maxWidth: 1600, top: 10 }}
       footer={null}
-      destroyOnHidden
+      destroyOnClose
       centered
+      bodyStyle={{ padding: '8px', height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}
     >
-      {isDirty && (
-        <Alert
-          type="warning"
-          showIcon
-          message="You have unsaved changes"
-          style={{ marginBottom: 12 }}
-        />
-      )}
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* Controls Row - Side by Side */}
+        <div style={{ marginBottom: 6, display: 'flex', gap: 12, flexWrap: 'wrap', flexShrink: 0, alignItems: 'center' }}>
+          {/* Calculated MHR */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+            <label style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>Calculated MHR:</label>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#1890ff' }}>₹{finalMhr || 0}/hr</span>
+          </div>
 
-      <Table
-        columns={columns}
-        dataSource={rows}
-        rowKey={(r, i) => r.id ?? `new-${i}`}
-        pagination={false}
-        loading={loading}
-        size="small"
-        bordered
-      />
+          {/* Recommended MHR Override */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+            <label style={{ fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap' }}>Recommended MHR:</label>
+            <Space.Compact>
+              <InputNumber
+                style={{ width: 80 }}
+                value={recommendedMhr}
+                onChange={(val) => setRecommendedMhr(val)}
+                placeholder="Override"
+                disabled={saving}
+                size="small"
+                controls={false}
+                onKeyDown={(e) => {
+                  // Allow only numbers, backspace, delete, and navigation keys
+                  if (
+                    !/^[0-9]$/.test(e.key) &&
+                    !['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) &&
+                    !e.ctrlKey && !e.metaKey
+                  ) {
+                    e.preventDefault();
+                  }
+                }}
+              />
+              <Button
+                type="primary"
+                size="small"
+                icon={<SaveOutlined />}
+                onClick={() => updateRecommendedMhr(recommendedMhr)}
+                loading={saving}
+              >
+                {recommendedMhr ? "Update" : "Save"}
+              </Button>
+            </Space.Compact>
+          </div>
 
-      <div style={{ marginTop: 12 }}>
-        <Button icon={<PlusOutlined />} onClick={addRow}>
-          Add parameter
-        </Button>
-      </div>
+          {/* Add Particular */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+            <label style={{ fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap' }}>Add Particular:</label>
+            <Select
+              style={{ flex: 1, minWidth: 120 }}
+              placeholder="Select particular"
+              value={selectedParticular}
+              onChange={setSelectedParticular}
+              disabled={saving || availableParticulars.length === 0}
+              size="small"
+              options={availableParticulars.map(p => ({
+                label: `${p.code} - ${p.name} (${p.is_input ? 'Input' : 'Formula'})`,
+                value: p.id
+              }))}
+            />
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={addParticular}
+              disabled={!selectedParticular || saving}
+            >
+              Add
+            </Button>
+            {availableParticulars.length === 0 && (
+              <span style={{ fontSize: 10, color: '#999' }}>
+                All assigned
+              </span>
+            )}
+          </div>
 
-      <Divider />
-
-      <Space style={{ width: "100%", justifyContent: "space-between" }}>
-        <Space>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button type="primary" loading={saving} onClick={saveParameters}>
-            Save parameters
+          {/* Save All Changes Button */}
+          <Button
+            type="primary"
+            size="small"
+            icon={<SaveOutlined />}
+            onClick={saveAllChanges}
+            disabled={Object.keys(editedValues).length === 0 || saving}
+            loading={saving}
+          >
+            Save All Changes ({Object.keys(editedValues).length})
           </Button>
-        </Space>
-        <Button
-          type="primary"
-          ghost
-          icon={<CalculatorOutlined />}
-          loading={calculating || saving}
-          onClick={calculateMhr}
-        >
-          Calculate MHR
-        </Button>
-      </Space>
 
-      {breakdown && (
-        <div style={{ marginTop: 16, background: "#fafafa", padding: 12, borderRadius: 6 }}>
-          <p style={{ margin: 0, fontWeight: 600 }}>MHR = ₹{mhr} /hr</p>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8c8c8c" }}>
-            Power charges: ₹{breakdown.power_charges} · Utilization hrs:{" "}
-            {breakdown.utilization_hours} · Machine utilization cost: ₹
-            {breakdown.machine_utilization_cost} · Machine hour rate: ₹
-            {breakdown.machine_hour_rate}
-            {breakdown.wage_rate != null ? ` · Wage rate: ₹${breakdown.wage_rate}` : ""}
-          </p>
+          {/* Export Button */}
+          <MachineMhrExport
+            values={values}
+            machine={machine}
+            finalMhr={finalMhr}
+            recommendedMhr={recommendedMhr}
+          />
         </div>
-      )}
+
+        <Divider style={{ margin: '4px 0', flexShrink: 0 }} />
+
+        {/* MHR Values Table */}
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <Table
+            columns={columns}
+            dataSource={values}
+            rowKey="id"
+            pagination={false}
+            loading={loading}
+            size="small"
+            bordered
+            scroll={{ x: 'max-content' }}
+            style={{ fontSize: 12 }}
+          />
+        </div>
+
+        <div style={{ marginTop: 6, textAlign: 'right', flexShrink: 0 }}>
+          <Button size="small" onClick={onClose}>Close</Button>
+        </div>
+      </div>
     </Modal>
   );
 };

@@ -1,18 +1,25 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth.js";
-import { Modal, Form, Input, DatePicker, Button, message, InputNumber, Select } from "antd";
+import { Modal, Form, Input, DatePicker, Button, message, InputNumber, Select, Alert, Space } from "antd";
 import dayjs from "dayjs";
+import MachineMhrPanel from "./Machinemhrpanel.jsx";
+import { api } from '../api/client.js';
 
 const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [frequencyUnit, setFrequencyUnit] = useState(null);
+  const [calculatedMhr, setCalculatedMhr] = useState(null);
+  const [recommendedMhr, setRecommendedMhr] = useState(null);
+  const [mhrCalculatedAt, setMhrCalculatedAt] = useState(null);
+  const [mhrPanelOpen, setMhrPanelOpen] = useState(false);
 
   useEffect(() => {
     if (machine) {
       const freqUnit = machine.calibration_frequency ? machine.calibration_frequency.split(' ')[1] : null;
       setFrequencyUnit(freqUnit);
+      setCalculatedMhr(machine.mhr);
+      setRecommendedMhr(machine.recommended_mhr);
+      setMhrCalculatedAt(machine.mhr_calculated_at);
       form.setFieldsValue({
         work_center_id: machine.work_center_id || workcenterId,
         type: machine.type || "",
@@ -22,7 +29,6 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
         cnc_controller: machine.cnc_controller || "",
         cnc_controller_service: machine.cnc_controller_service || "",
         remarks: machine.remarks || "",
-        mhr: machine.mhr ?? null,
         calibration_date: machine.calibration_date ? dayjs(machine.calibration_date) : null,
         calibration_frequency_value: machine.calibration_frequency ? parseInt(machine.calibration_frequency.split(' ')[0]) : null,
         calibration_frequency_unit: freqUnit,
@@ -31,6 +37,9 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
     } else {
       form.resetFields();
       setFrequencyUnit(null);
+      setCalculatedMhr(null);
+      setRecommendedMhr(null);
+      setMhrCalculatedAt(null);
       form.setFieldsValue({ work_center_id: workcenterId });
     }
   }, [machine, workcenterId, isOpen, form]);
@@ -48,7 +57,6 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
       cnc_controller: values.cnc_controller || null,
       cnc_controller_service: values.cnc_controller_service || null,
       remarks: values.remarks || null,
-      mhr: values.mhr != null && values.mhr !== '' ? parseInt(values.mhr) : null,
       calibration_date: values.calibration_date ? values.calibration_date.toISOString() : null,
       calibration_frequency: values.calibration_frequency_value && values.calibration_frequency_unit
         ? `${values.calibration_frequency_value} ${values.calibration_frequency_unit}`
@@ -63,11 +71,11 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
 
     try {
       const url = machine 
-        ? `${API_BASE_URL}/machines/${machine.id}`
-        : `${API_BASE_URL}/machines/`;
+        ? `/machines/${machine.id}`
+        : `/machines/`;
       const method = machine ? "put" : "post";
 
-      await axios({
+      await api({
         url,
         method,
         headers: {
@@ -183,22 +191,22 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
             <Input placeholder="Enter service provider" />
           </Form.Item>
 
-          <Form.Item
-            name="mhr"
-            label="MHR (Machine Hourly Rate)"
-            rules={[{ type: 'integer', message: 'Only whole numbers allowed' }]}
-          >
-            <InputNumber
-              placeholder="Enter MHR"
-              style={{ width: '100%' }}
-              min={0}
-              precision={0}
-              step={1}
-              controls={false}
-              addonBefore="₹"
-              onKeyPress={(e) => { if (!/[0-9]/.test(e.key)) e.preventDefault(); }}
-            />
-          </Form.Item>
+          {machine && (
+            <Form.Item label="MHR (Machine Hourly Rate)">
+              <Space>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  Calculated MHR: ₹{calculatedMhr || 'Not calculated'}/hr
+                </span>
+                <Button
+                  type="primary"
+                  size="small"
+                  onClick={() => setMhrPanelOpen(true)}
+                >
+                  Edit MHR Particulars
+                </Button>
+              </Space>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="calibration_date"
@@ -318,6 +326,18 @@ const MachineModal = ({ machine, workcenterId, userId, isOpen, onClose, onSave }
           </Button>
         </div>
       </Form>
+
+      {/* MHR Panel Modal */}
+      <MachineMhrPanel
+        machine={machine}
+        isOpen={mhrPanelOpen}
+        onClose={() => setMhrPanelOpen(false)}
+        onCalculated={(mhr) => {
+          setCalculatedMhr(mhr);
+          // Don't call onSave() here - let user manually close panel
+        }}
+        userId={userId}
+      />
     </Modal>
   );
 };

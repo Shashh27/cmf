@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { Input, InputNumber, Button, Popconfirm, message, Tag } from "antd";
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, DollarOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { api } from '../api/client.js';
 
 // ─── Shared styles (kept consistent with ProductSummary tables) ────────────
 
@@ -85,7 +84,7 @@ const AdditionalCostsSection = ({ orderId, costs = [], onCostsChange, userId }) 
 
     setAdding(true);
     try {
-      const res = await axios.post(`${API_BASE_URL}/orders/${orderId}/additional-costs/`, {
+      const res = await api.post(`/orders/${orderId}/additional-costs/`, {
         cost_name: name,
         cost_value: newValue,
         user_id: userId ?? null,
@@ -121,7 +120,7 @@ const AdditionalCostsSection = ({ orderId, costs = [], onCostsChange, userId }) 
 
     setSavingId(id);
     try {
-      const res = await axios.put(`${API_BASE_URL}/orders/${orderId}/additional-costs/${id}`, {
+      const res = await api.put(`/orders/${orderId}/additional-costs/${id}`, {
         cost_name: name,
         cost_value: editValue,
         user_id: userId ?? null,
@@ -139,7 +138,7 @@ const AdditionalCostsSection = ({ orderId, costs = [], onCostsChange, userId }) 
   // ── Delete ───────────────────────────────────────────────────────────────
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/orders/${orderId}/additional-costs/${id}`);
+      await api.delete(`/orders/${orderId}/additional-costs/${id}`);
       onCostsChange(costs.filter((c) => c.id !== id));
       message.success("Cost removed");
     } catch (e) {

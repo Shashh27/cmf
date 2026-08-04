@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { BellOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, FileTextOutlined, ClockCircleOutlined, SearchOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
 import { Badge, Button, Modal, Input, Empty, Spin, Tag, Typography, Tooltip, message, Table, Space, Select, Card } from "antd";
+import { api } from '../api/client.js';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -13,6 +12,8 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [ackRemarks, setAckRemarks] = useState("");
   const [rejectRemarks, setRejectRemarks] = useState("");
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -39,7 +40,7 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
     try {
       const params = { pending_only: false };
       if (orderId) params.order_id = orderId;
-      const response = await axios.get(`${API_BASE_URL}/admin-document-notifications`, { params });
+      const response = await api.get(`/admin-document-notifications`, { params });
       setNotifications(response.data || []);
       setFilteredNotifications(response.data || []);
     } catch (error) {
@@ -94,11 +95,63 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
     setPreviewDoc(document);
   };
 
+  // Fetch the preview through the authenticated api client and expose it as a
+  // blob URL so <img>/<iframe> can render it (those tags cannot send the JWT).
+  useEffect(() => {
+    let revokedUrl = null;
+    if (previewDoc?.id) {
+      const type = getPreviewType(previewDoc);
+      if (type === "image" || type === "pdf") {
+        setPreviewLoading(true);
+        setPreviewBlobUrl(null);
+        api
+          .get(`/documents/${previewDoc.id}/preview`, { responseType: "blob" })
+          .then((res) => {
+            const blobUrl = window.URL.createObjectURL(res.data);
+            revokedUrl = blobUrl;
+            setPreviewBlobUrl(blobUrl);
+          })
+          .catch((e) => {
+            console.error("Error loading document preview", e);
+            setPreviewBlobUrl(null);
+          })
+          .finally(() => setPreviewLoading(false));
+      }
+    }
+    return () => {
+      if (revokedUrl) window.URL.revokeObjectURL(revokedUrl);
+      setPreviewBlobUrl(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewDoc?.id]);
+
+  // Download via the authenticated api client so the JWT is sent, then save the
+  // returned blob (a raw <a href> to the API would 401 without the token).
+  const downloadBlobWithAuth = async (documentId, fileName) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+      const blobUrl = window.URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", fileName || `document_${documentId}`);
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    } catch (e) {
+      console.error("Error downloading document", e);
+      message.error("Failed to download document");
+    }
+  };
+
   const handleAcknowledge = async () => {
     if (!selectedNotification) return;
 
     try {
-      await axios.put(`${API_BASE_URL}/admin-document-notifications/${selectedNotification.id}/acknowledge`, {
+      await api.put(`/admin-document-notifications/${selectedNotification.id}/acknowledge`, {
         remarks: ackRemarks
       });
       message.success("Document acknowledged successfully");
@@ -116,7 +169,7 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
     if (!selectedNotification) return;
 
     try {
-      await axios.put(`${API_BASE_URL}/admin-document-notifications/${selectedNotification.id}/reject`, {
+      await api.put(`/admin-document-notifications/${selectedNotification.id}/reject`, {
         remarks: rejectRemarks
       });
       message.success("Document rejected successfully");
@@ -362,15 +415,31 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
       >
         {previewDoc && (
           <div style={{ textAlign: 'center' }}>
-            {getPreviewType(previewDoc) === 'pdf' ? (
+            {previewLoading ? (
+              <div style={{ padding: '60px' }}>
+                <Spin />
+                <p style={{ marginTop: 16, color: '#8c8c8c' }}>Loading preview…</p>
+              </div>
+            ) : (getPreviewType(previewDoc) === 'pdf' || getPreviewType(previewDoc) === 'image') && !previewBlobUrl ? (
+              <div style={{ padding: '40px' }}>
+                <FileTextOutlined style={{ fontSize: '48px', color: '#8c8c8c' }} />
+                <p>Preview unavailable</p>
+                <Button
+                  type="primary"
+                  onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
+                >
+                  Download
+                </Button>
+              </div>
+            ) : getPreviewType(previewDoc) === 'pdf' ? (
               <iframe
-                src={`${API_BASE_URL}/documents/${previewDoc.id}/preview`}
+                src={previewBlobUrl}
                 style={{ width: '100%', height: '700px', border: 'none' }}
                 title="PDF Preview"
               />
             ) : getPreviewType(previewDoc) === 'image' ? (
               <img
-                src={`${API_BASE_URL}/documents/${previewDoc.id}/preview`}
+                src={previewBlobUrl}
                 alt={previewDoc.document_name}
                 style={{ maxWidth: '100%', maxHeight: '700px' }}
               />
@@ -380,14 +449,7 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
                 <p>Preview not available for this file type</p>
                 <Button
                   type="primary"
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = `${API_BASE_URL}/documents/${previewDoc.id}/download`;
-                    a.setAttribute('download', previewDoc.document_name);
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                  }}
+                  onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
                 >
                   Download
                 </Button>

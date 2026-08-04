@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Tabs, Button, Typography, Card, Row, Col, Statistic, Spin, Select, DatePicker, Switch } from 'antd';
+import { Tabs, Button, Typography, Card, Row, Col, Statistic, Spin, Select, DatePicker, Switch, Empty, Alert } from 'antd';
 import { ArrowLeftOutlined, LineChartOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { API_BASE_URL } from '../Config/auth';
 import dayjs from 'dayjs';
+import { authFetch } from '../api/client.js';
 
 const { Title } = Typography;
 
@@ -12,21 +13,19 @@ const PARAMETER_OPTIONS = [
   { value: 'phase_b_voltage', label: 'Phase B Voltage (V)' },
   { value: 'phase_c_voltage', label: 'Phase C Voltage (V)' },
   { value: 'avg_phase_voltage', label: 'Average Phase Voltage (V)' },
-  { value: 'line_ab_voltage', label: 'Line AB Voltage (V)' },
-  { value: 'line_bc_voltage', label: 'Line BC Voltage (V)' },
-  { value: 'line_ca_voltage', label: 'Line CA Voltage (V)' },
-  { value: 'avg_line_voltage', label: 'Average Line Voltage (V)' },
   { value: 'phase_a_current', label: 'Phase A Current (A)' },
   { value: 'phase_b_current', label: 'Phase B Current (A)' },
   { value: 'phase_c_current', label: 'Phase C Current (A)' },
   { value: 'avg_three_phase_current', label: 'Average Three Phase Current (A)' },
-  { value: 'power_factor', label: 'Power Factor' },
   { value: 'frequency', label: 'Frequency (Hz)' },
   { value: 'total_instantaneous_power', label: 'Total Instantaneous Power (kW)' },
   { value: 'active_energy_delivered', label: 'Active Energy Delivered (kWh)' }
 ];
 
-const ParameterCard = ({ title, value, unit, color }) => (
+const ParameterCard = ({ title, value, unit, color }) => {
+  const numeric = Number(value);
+  const display = Number.isFinite(numeric) ? numeric.toFixed(2) : '--';
+  return (
   <Card 
     size="small" 
     style={{ 
@@ -55,11 +54,12 @@ const ParameterCard = ({ title, value, unit, color }) => (
         color: color,
         fontWeight: 'bold'
       }}>
-        {value.toFixed(2)}{unit}
+        {display}{unit}
       </span>
     </div>
   </Card>
-);
+  );
+};
 
 const MemoizedChart = React.memo(({ options }) => {
   return (
@@ -131,13 +131,36 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
   const [parameterHistoryData, setParameterHistoryData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const pollingRef = useRef(null);
+  const lastLiveTimestampRef = useRef(null);
+
+  const formatLiveTimestamp = (isoTimestamp) => {
+    if (!isoTimestamp) return null;
+    const date = new Date(isoTimestamp);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+  };
 
   useEffect(() => {
+    lastLiveTimestampRef.current = null;
+    setParameterHistoryData([]);
+    setMachineParameters(null);
+    setIsLoading(true);
+
     const fetchParameters = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
+        const response = await authFetch(`${API_BASE_URL}/energy-monitoring/live_recent?machine_id=${machineId}`);
+        if (!response.ok) {
+          setMachineParameters(null);
+          setIsLoading(false);
+          return;
+        }
         const data = await response.json();
-        setMachineParameters(data);
+        setMachineParameters(data?.offline ? null : data);
         setIsLoading(false);
       } catch (error) {
         console.error('Error fetching parameters:', error);
@@ -159,17 +182,19 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
     const fetchParameterHistory = async () => {
       if (!isLive && startTime && endTime) {
         try {
-          const response = await fetch(
+          const response = await authFetch(
             `${API_BASE_URL}/energy-monitoring/get_machine_history/${machineId}?start_time=${startTime.format('YYYY-MM-DD HH:mm:ss')}&end_time=${endTime.format('YYYY-MM-DD HH:mm:ss')}`
           );
           const data = await response.json();
-          const paramData = data.map(item => ({
-            timestamp: item.timestamp,
-            value: item[selectedParameter] || 0
-          }));
+          const paramData = (Array.isArray(data) ? data : []).map(item => ({
+            timestamp: formatLiveTimestamp(item.timestamp) || item.timestamp,
+            rawTimestamp: item.timestamp,
+            value: item[selectedParameter] ?? null
+          })).filter(d => d.value !== null && d.value !== undefined && !Number.isNaN(Number(d.value)));
           setParameterHistoryData(paramData);
         } catch (error) {
           console.error('Error fetching parameter history:', error);
+          setParameterHistoryData([]);
         }
       }
     };
@@ -177,32 +202,41 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
     fetchParameterHistory();
   }, [machineId, selectedParameter, isLive, startTime, endTime]);
 
+  // Live chart: only append real points from ems.machine_ems_live using DB timestamp
   useEffect(() => {
-    if (isLive && machineParameters) {
-      const newDataPoint = {
-        timestamp: new Date().toLocaleTimeString(),
-        value: machineParameters[selectedParameter] || 0
-      };
-      setParameterHistoryData(prev => {
-        const newData = [...prev, newDataPoint];
-        return newData.length > 50 ? newData.slice(-50) : newData;
-      });
-    }
+    if (!isLive || !machineParameters?.timestamp) return;
+
+    const rawTimestamp = machineParameters.timestamp;
+    if (lastLiveTimestampRef.current === rawTimestamp) return;
+
+    const value = machineParameters[selectedParameter];
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return;
+
+    const label = formatLiveTimestamp(rawTimestamp);
+    if (!label) return;
+
+    lastLiveTimestampRef.current = rawTimestamp;
+    setParameterHistoryData((prev) => {
+      const next = [...prev, { timestamp: label, rawTimestamp, value: Number(value) }];
+      return next.length > 50 ? next.slice(-50) : next;
+    });
   }, [machineParameters, selectedParameter, isLive]);
 
   const handleParameterChange = useCallback((value) => {
     setSelectedParameter(value);
     if (isLive) {
+      lastLiveTimestampRef.current = null;
       setParameterHistoryData([]);
     }
   }, [isLive]);
 
   const handleLiveToggle = useCallback((checked) => {
     setIsLive(checked);
+    lastLiveTimestampRef.current = null;
+    setParameterHistoryData([]);
     if (checked) {
       setStartTime(null);
       setEndTime(null);
-      setParameterHistoryData([]);
     }
   }, []);
 
@@ -382,6 +416,23 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
       };
     }
 
+    if (isLive && (!parameterHistoryData || parameterHistoryData.length === 0)) {
+      return {
+        ...baseOptions,
+        graphic: [{
+          type: 'text',
+          left: 'center',
+          top: 'middle',
+          style: {
+            text: 'No live data for the selected machine',
+            fontSize: 16,
+            fontWeight: 'bold',
+            fill: '#999'
+          }
+        }]
+      };
+    }
+
     return baseOptions;
   }, [selectedParameter, parameterHistoryData, isLive]);
 
@@ -393,6 +444,8 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
     setActiveTab(key);
   };
 
+  const hasLiveData = Boolean(machineParameters && !machineParameters.offline && machineParameters.timestamp);
+
   const items = [
     {
       key: '1',
@@ -403,6 +456,21 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
       ),
       children: (
         <div style={{ padding: '8px' }}>
+          {!hasLiveData ? (
+            <div style={{ marginBottom: 12 }}>
+              <Alert
+                type="warning"
+                showIcon
+                message="No live data for the selected machine"
+                description={`${machineName || `Machine ${machineId}`} has no row in ems.machine_ems_live. Turn Live off and pick a date range to view historical data, if available.`}
+                style={{ marginBottom: 12 }}
+              />
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="No live data for the selected machine"
+              />
+            </div>
+          ) : (
           <Row gutter={[8, 8]}>
             <Col span={8}>
               <Card 
@@ -423,28 +491,16 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
               >
                 <Row gutter={[2, 2]}>
                   <Col span={12}>
-                    <ParameterCard title="Phase A V" value={machineParameters?.phase_a_voltage || 0} unit="V" color="#722ed1" />
+                    <ParameterCard title="Phase A V" value={machineParameters?.phase_a_voltage} unit="V" color="#722ed1" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Phase B V" value={machineParameters?.phase_b_voltage || 0} unit="V" color="#722ed1" />
+                    <ParameterCard title="Phase B V" value={machineParameters?.phase_b_voltage} unit="V" color="#722ed1" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Phase C V" value={machineParameters?.phase_c_voltage || 0} unit="V" color="#722ed1" />
+                    <ParameterCard title="Phase C V" value={machineParameters?.phase_c_voltage} unit="V" color="#722ed1" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Avg Phase V" value={machineParameters?.avg_phase_voltage || 0} unit="V" color="#722ed1" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line AB V" value={machineParameters?.line_ab_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line BC V" value={machineParameters?.line_bc_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Line CA V" value={machineParameters?.line_ca_voltage || 0} unit="V" color="#eb2f96" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Avg Line V" value={machineParameters?.avg_line_voltage || 0} unit="V" color="#eb2f96" />
+                    <ParameterCard title="Avg Phase V" value={machineParameters?.avg_phase_voltage} unit="V" color="#722ed1" />
                   </Col>
                 </Row>
               </Card>
@@ -469,16 +525,16 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
               >
                 <Row gutter={[2, 2]}>
                   <Col span={12}>
-                    <ParameterCard title="Phase A A" value={machineParameters?.phase_a_current || 0} unit="A" color="#fa8c16" />
+                    <ParameterCard title="Phase A A" value={machineParameters?.phase_a_current} unit="A" color="#fa8c16" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Phase B A" value={machineParameters?.phase_b_current || 0} unit="A" color="#fa8c16" />
+                    <ParameterCard title="Phase B A" value={machineParameters?.phase_b_current} unit="A" color="#fa8c16" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Phase C A" value={machineParameters?.phase_c_current || 0} unit="A" color="#fa8c16" />
+                    <ParameterCard title="Phase C A" value={machineParameters?.phase_c_current} unit="A" color="#fa8c16" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Avg 3P A" value={machineParameters?.avg_three_phase_current || 0} unit="A" color="#fa8c16" />
+                    <ParameterCard title="Avg 3P A" value={machineParameters?.avg_three_phase_current} unit="A" color="#fa8c16" />
                   </Col>
                 </Row>
               </Card>
@@ -503,21 +559,19 @@ const MachineOverlay = ({ machineId, machineName, onBack }) => {
               >
                 <Row gutter={[2, 2]}>
                   <Col span={12}>
-                    <ParameterCard title="Power Factor" value={machineParameters?.power_factor || 0} unit="" color="#2f54eb" />
+                    <ParameterCard title="Frequency" value={machineParameters?.frequency} unit="Hz" color="#2f54eb" />
                   </Col>
                   <Col span={12}>
-                    <ParameterCard title="Frequency" value={machineParameters?.frequency || 0} unit="Hz" color="#2f54eb" />
+                    <ParameterCard title="Total Power" value={machineParameters?.total_instantaneous_power} unit="kW" color="#52c41a" />
                   </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Total Power" value={machineParameters?.total_instantaneous_power || 0} unit="kW" color="#52c41a" />
-                  </Col>
-                  <Col span={12}>
-                    <ParameterCard title="Energy Delivered" value={machineParameters?.active_energy_delivered || 0} unit="kWh" color="#52c41a" />
+                  <Col span={24}>
+                    <ParameterCard title="Energy Delivered" value={machineParameters?.active_energy_delivered} unit="kWh" color="#52c41a" />
                   </Col>
                 </Row>
               </Card>
             </Col>
           </Row>
+          )}
 
           <Card style={{ marginTop: '8px' }}>
             <TimelineControls

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin, Select } from "antd";
-import { 
+import {
   CaretDownOutlined, 
   CaretRightOutlined, 
   ArrowLeftOutlined, 
@@ -18,6 +17,8 @@ import {
   InfoCircleOutlined,
   CloseOutlined
 } from "@ant-design/icons";
+import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin, Select } from "antd";
+import { api } from '../../api/client.js';
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 
@@ -49,8 +50,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
         if (!isMounted) return;
         setLoading(true);
         try {
-            const response = await axios.get(
-                `${API_BASE_URL}/operation-documents/operation/${operationId}`,
+            const response = await api.get(`/operation-documents/operation/${operationId}`,
                 { signal }
             );
             if (isMounted) setDocs(response.data);
@@ -232,7 +232,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const fetchBOMData = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      const response = await api.get(`/products/${productId}/hierarchical`);
       const data = response.data;
       if (data.product) {
         setProduct(data.product);
@@ -341,7 +341,6 @@ const ProductBOMView = ({ onBackToOrders }) => {
         const response = await axios.get(url, {
           responseType: 'blob',
           headers: { 'Content-Type': 'application/octet-stream' },
-          withCredentials: true,
         });
         link.href = window.URL.createObjectURL(response.data);
       }

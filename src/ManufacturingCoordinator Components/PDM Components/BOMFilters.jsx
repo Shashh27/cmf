@@ -1,6 +1,6 @@
 import React from 'react';
 import { Select, Badge } from 'antd';
-import { 
+import {
   FilterOutlined,
   AppstoreOutlined, 
   CodeSandboxOutlined, 
@@ -33,7 +33,7 @@ const BOMFilters = ({ stats, activeFilter, onFilterChange }) => {
         size="small"
         placeholder="Filter parts"
         classNames={{ popup: { root: 'bom-filter-dropdown' } }}
-        style={{ minWidth: '160px' }}
+        style={{ minWidth: '130px', width: '100%' }}
         suffixIcon={<FilterOutlined className="text-indigo-500" />}
       >
         {options.map(opt => (

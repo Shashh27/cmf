@@ -5,6 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
 import dayjs from 'dayjs';
+import { authFetch } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const { Title, Text } = Typography;
 import OrderNotifications from './Notification Components/OrderNotifications';
@@ -15,10 +17,12 @@ import MachineCalibrationNotifications from './Notification Components/MachineCa
 import PokayokeOperationNotification from './Notification Components/PokayokeOperationNotification';
 import ProductionLogNotification from './Notification Components/ProductionLogNotification';
 import config from '../Config/config';
+import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 
 const Notification = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAuthenticated, bootstrapping } = useAuth();
   const [dateRange, setDateRange] = useState([null, null]);
   const [activeKey, setActiveKey] = useState('1');
   const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0, pokayoke: 0, productionLogs: 0 });
@@ -44,25 +48,8 @@ const Notification = () => {
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
       
-      // Add role-based filtering based on user's role
-      const storedUser = localStorage.getItem('user');
-      let userRole = '';
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          userRole = (user.role || user.user_role || '').toLowerCase();
-          if (userRole.includes('manufacturing') || userRole === 'mc') {
-            if (user.id) params.set('mc_id', user.id);
-          } else if (userRole.includes('project') || userRole === 'pc') {
-            if (user.id) params.set('pc_id', user.id);
-          } else if (userRole.includes('admin')) {
-            if (user.id) params.set('admin_id', user.id);
-          }
-        } catch (e) {
-          console.error('Error parsing user from localStorage', e);
-        }
-      }
-      
+      const user = getStoredUser();
+      const userRole = String(user?.role || user?.user_role || '').toLowerCase();
       const qs = params.toString();
       const endpoints = [
         `${config.API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
@@ -72,35 +59,41 @@ const Notification = () => {
         `${config.API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
       ];
       const [orders, machines, tools, components, calibrations] = await Promise.all(
-        endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
+        endpoints.map((url) => authFetch(url).then((r) => (r.ok ? r.json() : [])))
       );
       
-      // Count pending notifications based on role-specific acknowledgment status
-      const countPending = (notifications) => {
+      const visibleOrders = filterOwnCreatedNotifications(orders, user);
+
+      // Orders use role-specific ack flags; other notification types use is_ack only.
+      const countPendingOrders = (notifications) => {
         if (!Array.isArray(notifications)) return 0;
         return notifications.filter((n) => {
           if (userRole.includes('manufacturing')) return !n.mc_is_ack;
           if (userRole.includes('project')) return !n.pc_is_ack;
           if (userRole.includes('admin')) return !n.admin_is_ack;
-          return !n.is_ack; // fallback for other roles
+          return !n.is_ack;
         }).length;
       };
+      const countPendingSimple = (notifications) =>
+        Array.isArray(notifications) ? notifications.filter((n) => !n.is_ack).length : 0;
       
-      setCounts({
-        orders: countPending(orders),
-        machines: countPending(machines),
-        tools: countPending(tools),
-        components: countPending(components),
-        calibrations: countPending(calibrations),
-      });
+      setCounts((c) => ({
+        ...c,
+        orders: countPendingOrders(visibleOrders),
+        machines: countPendingSimple(machines),
+        tools: countPendingSimple(tools),
+        components: countPendingSimple(components),
+        calibrations: countPendingSimple(calibrations),
+      }));
     } catch (e) {
       // silent fail; badges will update when tabs are visited
     }
   }, [dateRange]);
 
   useEffect(() => {
+    if (bootstrapping || !isAuthenticated) return;
     fetchCounts();
-  }, [fetchCounts]);
+  }, [fetchCounts, isAuthenticated, bootstrapping]);
 
   const tabItems = [
     {

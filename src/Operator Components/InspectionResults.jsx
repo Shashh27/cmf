@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, ConfigProvider, Empty, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import {
   ClockCircleOutlined,
   CloudDownloadOutlined,
@@ -10,6 +9,7 @@ import {
   SendOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
+import { Button, Card, ConfigProvider, Empty, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';

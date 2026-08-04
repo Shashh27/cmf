@@ -3,8 +3,7 @@ import { Button, Tooltip, Spin, Dropdown, message } from "antd";
 import { FilePdfOutlined, FileExcelOutlined, DownloadOutlined } from "@ant-design/icons";
 import { PDFDownloadLink, Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer";
 import ExcelJS from "exceljs";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { api } from '../api/client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -688,7 +687,7 @@ const ProductBOMPdfDownload = ({
   const handlePrepareDownload = async () => {
     setLoading("prepare");
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/${product.id}/hierarchical`);
+      const response = await api.get(`/products/${product.id}/hierarchical`);
       setFullHierarchicalData(response.data);
       setDropdownOpen(true); // Open dropdown after data is loaded
     } catch (error) {

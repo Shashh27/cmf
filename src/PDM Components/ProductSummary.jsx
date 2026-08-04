@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Empty, Spin, Input, Select, Button } from "antd";
 import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined, DollarOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { api } from "../api/client.js";
 import ProductSummaryDownload from "../DownloadReports/ProductSummaryDownload";
 import "./pdm-theme.css";
 import AdditionalCostsSection from "./AdditionalCostsSection";
@@ -21,11 +20,11 @@ const FilterHeader = ({ label, options, value, onChange }) => {
     <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none' }}
       onClick={() => setOpen(o => !o)}>
       <span style={{ fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 9, color: active ? '#2E8B57' : '#aaa' }}>▼</span>
-      {active && <span style={{ background: '#2E8B57', color: '#fff', borderRadius: 8, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>{value.length}</span>}
+      <span style={{ fontSize: 9, color: active ? '#1677ff' : '#aaa' }}>▼</span>
+      {active && <span style={{ background: '#1677ff', color: '#fff', borderRadius: 8, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>{value.length}</span>}
       {open && (
-        <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: '#fff', border: '1px solid #D6D3C4', borderRadius: 0, boxShadow: '0 4px 12px rgba(0,0,0,.15)', zIndex: 9999, minWidth: 180, maxHeight: 260, overflowY: 'auto', padding: '6px 0' }}>
-          <div style={{ padding: '2px 10px', fontSize: 10, color: '#999', borderBottom: '1px solid #F5F5DC', marginBottom: 3 }}>Filter</div>
+        <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: '#fff', border: '1px solid #d9d9d9', borderRadius: 0, boxShadow: '0 4px 12px rgba(0,0,0,.15)', zIndex: 9999, minWidth: 180, maxHeight: 260, overflowY: 'auto', padding: '6px 0' }}>
+          <div style={{ padding: '2px 10px', fontSize: 10, color: '#999', borderBottom: '1px solid #f5f5f5', marginBottom: 3 }}>Filter</div>
           {options.map(opt => (
             <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input type="checkbox" checked={value.includes(opt)} onChange={() => onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt])} />
@@ -33,8 +32,8 @@ const FilterHeader = ({ label, options, value, onChange }) => {
             </label>
           ))}
           {value.length > 0 && (
-            <div style={{ borderTop: '1px solid #F5F5DC', marginTop: 3, padding: '3px 10px' }}>
-              <span onClick={() => onChange([])} style={{ fontSize: 10, color: '#2E8B57', cursor: 'pointer' }}>Clear</span>
+            <div style={{ borderTop: '1px solid #f5f5f5', marginTop: 3, padding: '3px 10px' }}>
+              <span onClick={() => onChange([])} style={{ fontSize: 10, color: '#1677ff', cursor: 'pointer' }}>Clear</span>
             </div>
           )}
         </div>
@@ -45,10 +44,10 @@ const FilterHeader = ({ label, options, value, onChange }) => {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const border = "1px solid #D6D3C4";
+const border = "1px solid #d9d9d9";
 const thStyle = {
   border, padding: "4px 8px", textAlign: "center",
-  fontWeight: 600, fontSize: 12, background: "#FDF5E6",
+  fontWeight: 600, fontSize: 12, background: "#fafafa",
   whiteSpace: "nowrap", fontFamily: "'Roboto', sans-serif",
 };
 const tdStyle = {
@@ -104,12 +103,12 @@ const formatHms = (seconds) => {
 
 const StatCard = ({ icon, label, value, iconColor }) => (
   <div
-    className="border border-[#D6D3C4] shadow-sm"
+    className="border border-[#d9d9d9] shadow-sm"
     style={{ padding: "6px 10px", display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", fontFamily: "'Roboto', sans-serif" }}
   >
     <div style={{ color: iconColor, fontSize: 16, lineHeight: 1 }}>{icon}</div>
     <div className="min-w-0">
-      <div style={{ fontSize: 11, color: "#5D4037", lineHeight: "1.2", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 11, color: "rgba(0,0,0,0.45)", lineHeight: "1.2", marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 13, fontWeight: 600, color: "#2F2F2F" }}>{value}</div>
     </div>
   </div>
@@ -118,14 +117,14 @@ const StatCard = ({ icon, label, value, iconColor }) => (
 // ─── Section Header ──────────────────────────────────────────────────────────
 
 const SectionHeader = ({ icon, title, count }) => (
-  <div className="flex items-center justify-between px-3 py-1.5 bg-[#FDF5E6] border-b border-[#D6D3C4" style={{ fontFamily: "'Roboto', sans-serif" }}>
+  <div className="flex items-center justify-between px-3 py-1.5 bg-[#fafafa] border-b border-[#d9d9d9" style={{ fontFamily: "'Roboto', sans-serif" }}>
     <div className="flex items-center gap-2">
-      <span style={{ fontSize: 14, color: "#2E8B57" }}>{icon}</span>
+      <span style={{ fontSize: 14, color: "#1677ff" }}>{icon}</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: "#2F2F2F" }}>{title}</span>
     </div>
     {count != null && (
       <span style={{
-        background: "#2E8B57", color: "#fff", padding: "2px 6px",
+        background: "#1677ff", color: "#fff", padding: "2px 6px",
         fontSize: 11, fontWeight: 600
       }}>
         {count} rows
@@ -165,8 +164,8 @@ const ProductSummary = ({ productId, orderId, userId }) => {
     // Use lightweight summary-data endpoint - only operations data for hours calculation.
     // Pass order_id (when available) so the backend also returns that order's
     // additional project costs (Tooling/Fixture/Inspection etc.) in one call.
-    axios
-      .get(`${API_BASE_URL}/products/${productId}/summary-data`, {
+    api
+      .get(`/products/${productId}/summary-data`, {
         params: orderId ? { order_id: orderId } : {},
         signal: controller.signal,
       })
@@ -436,13 +435,13 @@ const ProductSummary = ({ productId, orderId, userId }) => {
   return (
     <div
       className="w-full p-2 flex flex-col gap-2 pdm-container"
-      style={{ height: "100%", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box", backgroundColor: "#F5F5DC" }}
+      style={{ height: "100%", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box", backgroundColor: "#f5f5f5" }}
     >
 
       {/* Product title with search and filters */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 justify-between" style={{ fontFamily: "'Roboto', sans-serif" }}>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <AppstoreOutlined style={{ fontSize: 16, color: "#2E8B57" }} />
+          <AppstoreOutlined style={{ fontSize: 16, color: "#1677ff" }} />
           <span style={{ fontWeight: 600, color: "#2F2F2F", fontSize: 13 }} className="truncate max-w-[150px] sm:max-w-[200px]">
             {summary.productName || "Product Summary"}
           </span>
@@ -450,7 +449,7 @@ const ProductSummary = ({ productId, orderId, userId }) => {
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
           <Input
             placeholder="Search..."
-            prefix={<SearchOutlined style={{ color: "#5D4037" }} />}
+            prefix={<SearchOutlined style={{ color: "rgba(0,0,0,0.45)" }} />}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             allowClear
@@ -502,13 +501,13 @@ const ProductSummary = ({ productId, orderId, userId }) => {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         <StatCard icon={<ClockCircleOutlined />} iconColor="#F59E0B" label="Total Setup Time"       value={formatHms(summary.totalSetup)} />
         <StatCard icon={<ClockCircleOutlined />} iconColor="#16A34A" label="Total Cycle Time"       value={formatHms(summary.totalCycle)} />
-        <StatCard icon={<ClockCircleOutlined />} iconColor="#2E8B57" label="Total (Setup + Cycle)"  value={formatHms(summary.totalAll)}   />
-        <StatCard icon={<ToolOutlined />}         iconColor="#8B4513" label="Total Machining Cost"  value={fmtCost(summary.totalCost)}     />
+        <StatCard icon={<ClockCircleOutlined />} iconColor="#1677ff" label="Total (Setup + Cycle)"  value={formatHms(summary.totalAll)}   />
+        <StatCard icon={<ToolOutlined />}         iconColor="#8c8c8c" label="Total Machining Cost"  value={fmtCost(summary.totalCost)}     />
         <StatCard icon={<DollarOutlined />}       iconColor="#DC2626" label="Grand Total" value={fmtCost(grandTotal)} />
       </div>
 
       {/* ── Table: Part Operations ──────────────────────────────────── */}
-      <div className="bg-white border border-[#D6D3C4] shadow-sm flex flex-col" style={{ flex: 1, minHeight: 0, maxHeight: showAdditionalCosts ? "calc(100% - 200px)" : "calc(100% - 60px)" }}>
+      <div className="bg-white border border-[#d9d9d9] shadow-sm flex flex-col" style={{ flex: 1, minHeight: 0, maxHeight: showAdditionalCosts ? "calc(100% - 200px)" : "calc(100% - 60px)" }}>
         <SectionHeader
           icon={<PartitionOutlined />}
           title="Part Operations (ALL)"
@@ -611,7 +610,7 @@ const ProductSummary = ({ productId, orderId, userId }) => {
                   </tr>
                 ))}
                 {/* Summary row */}
-                <tr style={{ background: "#FDF5E6", fontWeight: 700 }}>
+                <tr style={{ background: "#fafafa", fontWeight: 700 }}>
                   <td colSpan={2} style={{ ...tdStyle, textAlign: "right", fontWeight: 700 }}>TOTAL</td>
                   <td style={{ ...tdStyleRight, fontWeight: 700 }}>{summary.totalQtyAll}</td>
                   <td colSpan={6} style={{ ...tdStyle }}></td>

@@ -1,19 +1,18 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Tabs, Input } from "antd";
-import { ExclamationCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
-import { 
+import {
   OrderedListOutlined, 
   ArrowUpOutlined, 
   ArrowDownOutlined,
   SaveOutlined,
   HolderOutlined
 } from "@ant-design/icons";
+import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Tabs, Input } from "antd";
+import { ExclamationCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { api } from '../../api/client.js';
 import { PartWisePriorityPdfDownload, OrderWisePriorityPdfDownload } from "../DownloadReports/PartsPriorityPdfDownload";
 
 const Row = (props) => {
@@ -76,10 +75,7 @@ const PartsPriority = () => {
   const fetchPartPriorities = async () => {
     setPartLoading(true);
     try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/all`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const response = await api.get(`/orders/part-priorities/all`);
       const result = response.data;
       const filtered = result.filter(
         (item) =>
@@ -98,10 +94,7 @@ const PartsPriority = () => {
   const fetchOrderWisePriorities = async () => {
     setOrderLoading(true);
     try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/order-wise`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
+      const response = await api.get(`/orders/part-priorities/order-wise`);
       const result = response.data;
       setOrderData(result);
     } catch (error) {
@@ -208,13 +201,11 @@ const PartsPriority = () => {
     if (!newPriority || newPriority < 1) return;
     
     try {
-      const uid = getCurrentUserId();
-      await axios.put(
-        `${API_BASE_URL}/orders/part-priorities/update-global`,
+      await api.put(
+        `/orders/part-priorities/update-global`,
         {
           id: id,
-          priority: newPriority,
-          admin_id: uid,
+          priority: newPriority
         },
         {
           headers: {
@@ -491,12 +482,10 @@ const PartsPriority = () => {
 
   const handleOrderWiseReorder = async (newOrderIds) => {
     try {
-      const uid = getCurrentUserId();
-      await axios.put(
-        `${API_BASE_URL}/orders/part-priorities/order-wise/reorder`,
+      await api.put(
+        `/orders/part-priorities/order-wise/reorder`,
         {
-          order_ids: newOrderIds,
-          admin_id: uid,
+          order_ids: newOrderIds
         },
         {
           headers: {

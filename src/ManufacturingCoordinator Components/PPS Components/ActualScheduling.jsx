@@ -1,18 +1,18 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Layout, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
-import { motion, AnimatePresence } from 'framer-motion';
-import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
-import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
 import {
   CONTROL_BAR_MOTION,
   LEGEND_CHIP_MOTION,
   LEGEND_MOTION,
   getWindowAnimation,
 } from './schedulingTimelineMotion.js';
+import { motion, AnimatePresence } from 'framer-motion';
+import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
+import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import { api } from '../../api/client.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
-import { API_BASE_URL } from '../../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig.js';
 import useLenis from '../../hooks/useLenis.js';
 
@@ -172,8 +172,8 @@ const ActualScheduling = () => {
   useEffect(() => {
     const fetchMachines = async () => {
       try {
-        const mRes = await fetch(`${API_BASE_URL}/machines/`);
-        const machines = mRes.ok ? await mRes.json() : [];
+        const mRes = await api.get('/machines/');
+        const machines = mRes.data || [];
         const formatted = (machines || []).map(m => {
           const modelName = m.make && m.model
             ? `(${m.make}) ${m.model}`
@@ -185,15 +185,9 @@ const ActualScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const mcId = getCurrentManufacturingCoordinatorId();
-        const url = mcId
-          ? `${API_BASE_URL}/orders/?manufacturing_coordinator_id=${mcId}`
-          : `${API_BASE_URL}/orders/`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(Array.isArray(data) ? data : []);
-        }
+        const res = await api.get('/orders/');
+        const data = res.data;
+        setOrders(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }
     };
     fetchMachines();
@@ -240,9 +234,9 @@ const ActualScheduling = () => {
     }
 
     if (so) {
-      fetch(`${API_BASE_URL}/orders/sale-order/${so}/parts`)
-        .then(r => r.ok ? r.json() : [])
-        .then(d => {
+      api.get(`/orders/sale-order/${so}/parts`)
+        .then((r) => r.data)
+        .then((d) => {
           const list = Array.isArray(d) ? d : (d.parts || []);
           setParts(list);
         })

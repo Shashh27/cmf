@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, Button, message, Tabs, Table, Popconfirm, Tag } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
+import { authFetch } from '../../../api/client.js';
 
 const { Option } = Select;
 const { TabPane } = Tabs;
@@ -40,7 +41,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
 
   const fetchSubCategories = async () => {
     try {
-      const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (treeResponse.ok) {
         const tree = await treeResponse.json();
         const catNode = tree.find(c => c.category === target?.category);
@@ -62,7 +63,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
       let subCategoryId = null;
 
       if (target?.category || target?.sub_category) {
-        const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+        const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
         if (treeResponse.ok) {
           const tree = await treeResponse.json();
 
@@ -85,7 +86,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
       }
 
       // Fetch all custom columns
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`);
       if (!response.ok) {
         setExistingColumns([]);
         return;
@@ -117,7 +118,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
 
   const handleDelete = async (columnId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns/${columnId}`, {
+      const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns/${columnId}`, {
         method: 'DELETE',
       });
 
@@ -150,7 +151,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
         // Add to specific sub-category
         payload.sub_category_id = target.sub_category_id;
 
-        const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`, {
+        const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -172,7 +173,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
           if (catNode) {
             payload.category_id = catNode.id;
 
-            const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`, {
+            const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
@@ -195,7 +196,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
               if (subNode) {
                 payload.sub_category_id = subNode.id;
 
-                const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`, {
+                const response = await authFetch(`${API_BASE_URL}/tools-list/custom-columns`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(payload),
@@ -230,7 +231,7 @@ const CustomColumnModal = ({ visible, onCancel, onSuccess, mode, target }) => {
 
   const fetchCategoryId = async () => {
     try {
-      const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      const treeResponse = await authFetch(`${API_BASE_URL}/tools-list/categories/tree`);
       if (treeResponse.ok) {
         const tree = await treeResponse.json();
         return tree.find(c => c.category === target?.category);

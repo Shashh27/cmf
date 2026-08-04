@@ -1,4 +1,4 @@
-import axios from "axios";
+import { api } from '../../api/client.js';
 
 // Shared utility: normalise a version string as the user types
 export const normalizeVersion = (raw) => {
@@ -40,7 +40,7 @@ export const fetchInto = async (url, setter, setLoading, guard) => {
   if (setLoading) setLoading(true);
   try {
     // Do not pass user_id: config (workcenters, machines, part-types, tools) and product data are shared for all roles
-    const res = await axios.get(url);
+    const res = await api.get(url);
     setter(res.data);
   } catch (e) {
     console.error(`Fetch error [${url}]:`, e);

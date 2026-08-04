@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../../Config/auth';
 import { Card, Table, Spin, message, Row, Col, Statistic, Typography, Tag, Select, Empty, Space } from 'antd';
 import {
   ShoppingCartOutlined,
@@ -14,6 +12,7 @@ import {
   sortLogsByStage,
   getOpQtyTotals,
 } from '../../utils/productionLogDisplay';
+import { api } from '../../api/client.js';
 import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 
 const { Title, Text } = Typography;
@@ -31,7 +30,7 @@ const getStatusTag = (status) => {
 };
 
 /* ─── MAIN COMPONENT ─────────────────────────────────────────────────────── */
-const OrderTracking = () => {
+const OrderTracking = ({ productId }) => {
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedPartId, setSelectedPartId] = useState(null);
@@ -156,21 +155,19 @@ const OrderTracking = () => {
   const fetchOrders = async () => {
     setInitialLoading(true);
     try {
-      const userId = getCurrentAdminId();
-      const userRole = getUserRole();
-      const normalizedRole = (userRole || '').toLowerCase().replace(/_/g, ' ').trim();
-
-      // Use manufacturing_coordinator_id for MC users, admin_id for admin users
-      const isManufacturingCoordinator = normalizedRole.includes('manufacturing coordinator') || normalizedRole === 'mc';
-      const params = userId != null
-        ? (isManufacturingCoordinator ? { manufacturing_coordinator_id: userId } : { admin_id: userId })
-        : undefined;
-
-      const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
+      const res = await api.get(`/orders/`);
       const data = Array.isArray(res.data) ? res.data : [];
-      setOrders(data);
-      if (data.length > 0 && !selectedOrderId) {
-        setSelectedOrderId(data[0].id);
+      
+      // Filter orders by productId if provided
+      const filteredOrders = productId 
+        ? data.filter(order => order.product_id?.toString() === productId?.toString())
+        : data;
+      
+      setOrders(filteredOrders);
+      
+      // Auto-select the order matching the current product, or the first order
+      if (filteredOrders.length > 0 && !selectedOrderId) {
+        setSelectedOrderId(filteredOrders[0].id);
       }
     } catch { message.error('Failed to fetch orders'); setOrders([]); }
     finally { setInitialLoading(false); }
@@ -179,7 +176,7 @@ const OrderTracking = () => {
   const fetchOrderDetails = async (orderId) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const res = await api.get(`/orders/${orderId}/hierarchical`);
       setOrderDetails(res.data);
     } catch { message.error('Failed to fetch order details'); }
     finally { setLoading(false); }
@@ -187,7 +184,7 @@ const OrderTracking = () => {
 
   const fetchOrderTrackingData = async (orderId) => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/order-tracking/${orderId}`);
+      const res = await api.get(`/order-tracking/${orderId}`);
       setOrderTrackingData(res.data);
 
       // Extract production logs from tracking data and update state

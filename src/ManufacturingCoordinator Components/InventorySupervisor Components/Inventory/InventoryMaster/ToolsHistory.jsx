@@ -6,6 +6,7 @@ import moment from 'moment';
 import { pdf } from '@react-pdf/renderer';
 import { API_BASE_URL } from '../../../Config/auth.js';
 import { disableFutureDates, normalizeDateRange } from '../../../../InventorySupervisor Components/Inventory/OverviewData/inventoryDateUtils.js';
+import { authFetch } from '../../../../api/client.js';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -39,7 +40,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   const fetchToolHistory = async (toolData) => {
     setHistoryLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
+      const response = await authFetch(`${API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

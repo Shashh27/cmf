@@ -7,6 +7,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { API_BASE_URL } from '../Config/auth.js';
 import UserModal, { roleLabels } from '../Access Control Components/UserModal';
+import { authFetch } from '../api/client.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -19,6 +20,8 @@ const AccessControl = () => {
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [editingUser, setEditingUser] = useState(null);
   const [users, setUsers] = useState([]);
+  const [decryptedPasswords, setDecryptedPasswords] = useState({});
+  const [loadingPasswords, setLoadingPasswords] = useState({});
   const lockRef = React.useRef(null);
 
   useEffect(() => {
@@ -48,7 +51,7 @@ const AccessControl = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/access-users/`);
+      const response = await authFetch(`${API_BASE_URL}/access-users/`);
       if (response.ok) {
         let data = await response.json();
         data = Array.isArray(data) ? data.slice().sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
@@ -85,7 +88,7 @@ const AccessControl = () => {
       title: 'Are you sure you want to delete this user?',
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}/access-users/${id}/`, {
+          const response = await authFetch(`${API_BASE_URL}/access-users/${id}/`, {
             method: 'DELETE',
           });
           if (response.ok) {
@@ -104,6 +107,34 @@ const AccessControl = () => {
   const handleEdit = (record) => {
     setEditingUser(record);
     setIsModalVisible(true);
+  };
+
+  const fetchDecryptedPassword = async (userId) => {
+    try {
+      setLoadingPasswords(prev => ({ ...prev, [userId]: true }));
+      const response = await authFetch(`${API_BASE_URL}/access-users/${userId}/password`);
+      if (response.ok) {
+        const data = await response.json();
+        setDecryptedPasswords(prev => ({ ...prev, [userId]: data }));
+      } else {
+        message.error('Failed to fetch password');
+      }
+    } catch (error) {
+      console.error('Error fetching password:', error);
+      message.error('Error fetching password');
+    } finally {
+      setLoadingPasswords(prev => ({ ...prev, [userId]: false }));
+    }
+  };
+
+  const handlePasswordVisibility = async (userId) => {
+    if (!visiblePasswords[userId]) {
+      // Fetch password if not already loaded
+      if (!decryptedPasswords[userId]) {
+        await fetchDecryptedPassword(userId);
+      }
+    }
+    setVisiblePasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
   };
 
   const filteredUsers = users.filter(user =>
@@ -192,21 +223,61 @@ const AccessControl = () => {
       title: 'Password',
       dataIndex: 'password',
       key: 'password',
-      render: (text, record) => {
-        const password = text || '';
+      render: (_, record) => {
+        const passwordData = decryptedPasswords[record.id];
+        const isLoading = loadingPasswords[record.id];
         const isVisible = visiblePasswords[record.id];
-        const displayText = isVisible
-          ? (password || 'Not set')
-          : (password ? '••••••••' : 'Not set');
+        
+        if (isLoading) {
+          return <span style={{ color: '#94a3b8' }}>Loading...</span>;
+        }
+        
+        if (!passwordData) {
+          return (
+            <Button 
+              type="text" 
+              icon={<EyeOutlined />} 
+              onClick={() => handlePasswordVisibility(record.id)}
+              size="small"
+            >
+              Show
+            </Button>
+          );
+        }
+        
+        if (passwordData.password_type === 'hashed') {
+          return (
+            <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+              {passwordData.password}
+            </span>
+          );
+        }
+        
+        if (isVisible) {
+          return (
+            <Space size="small">
+              <span style={{ fontFamily: 'monospace', color: '#1890ff' }}>
+                {passwordData.password}
+              </span>
+              <Button 
+                type="text" 
+                icon={<EyeInvisibleOutlined />} 
+                onClick={() => handlePasswordVisibility(record.id)}
+                size="small"
+              />
+            </Space>
+          );
+        }
+        
         return (
-          <Space>
-            <span>{displayText}</span>
-            <Button
-              type="text"
-              icon={isVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-              onClick={() => togglePasswordVisibility(record.id)}
-            />
-          </Space>
+          <Button 
+            type="text" 
+            icon={<EyeOutlined />} 
+            onClick={() => handlePasswordVisibility(record.id)}
+            size="small"
+          >
+            Show
+          </Button>
         );
       },
     },

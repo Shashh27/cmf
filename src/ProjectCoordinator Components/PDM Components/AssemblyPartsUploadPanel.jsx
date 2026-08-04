@@ -1,9 +1,7 @@
 import React, { useState, useRef } from "react";
 import {Button,Modal,Upload,Table,Input,InputNumber,Select,Tag,Typography,Space,Alert,Spin,Tooltip,message,Popconfirm,Progress,} from "antd";
-import {UploadOutlined,FileWordOutlined,EditOutlined,DeleteOutlined,CheckCircleOutlined,ExclamationCircleOutlined,LoadingOutlined,
-  PlusOutlined,InboxOutlined,ThunderboltOutlined,} from "@ant-design/icons";
-import axios from "axios";
-import { API_BASE_URL } from "../../Config/auth";
+import { UploadOutlined,FileWordOutlined,EditOutlined,DeleteOutlined,CheckCircleOutlined,ExclamationCircleOutlined,LoadingOutlined, PlusOutlined,InboxOutlined,ThunderboltOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
 
 const { Text, Title } = Typography;
 const { Dragger } = Upload;
@@ -115,7 +113,7 @@ const AssemblyPartsUploadPanel = ({
     form.append("file", file);
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/parts/parse-doc`, form, {
+      const res = await api.post(`/parts/parse-doc`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -229,7 +227,7 @@ const AssemblyPartsUploadPanel = ({
     };
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/parts/bulk`, bulkPayload);
+      const res = await api.post(`/parts/bulk`, bulkPayload);
       const { created = [], duplicates = [], errors = [] } = res.data;
 
       // Build lookup maps by part_number for quick status update

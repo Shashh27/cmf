@@ -5,6 +5,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import { API_BASE_URL } from '../Config/auth.js';
 import NotificationPokaYoke from './NotificationPokaYoke';
 import OTNotification from './OTNotification';
+import { authFetch } from '../api/client.js';
 
 const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
@@ -28,7 +29,7 @@ const Notifications = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await authFetch(`${API_BASE_URL}/orders/`);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -58,7 +59,7 @@ const Notifications = () => {
     const saleOrder = order?.sale_order_number;
     if (!saleOrder) return;
 
-    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         const list = Array.isArray(d) ? d : (d.parts || []);

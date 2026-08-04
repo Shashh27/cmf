@@ -5,8 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Spin, Empty, Typography } from "antd";
-import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { api } from '../api/client.js';
 
 const { Text } = Typography;
 
@@ -127,8 +126,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             arrayBuffer = modelCache.get(documentId);
           } else {
             try {
-              const response = await axios.get(
-                `${API_BASE_URL}/documents/${documentId}/3d`,
+              const response = await api.get(`/documents/${documentId}/3d`,
                 { responseType: "arraybuffer" }
               );
               arrayBuffer = response.data;
@@ -441,15 +439,17 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       style={{ minHeight: height, maxWidth: '100%' }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", maxWidth: '100%' }} />
-      <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
-        <button onClick={() => setCameraView('front', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Front</button>
-        <button onClick={() => setCameraView('back', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Back</button>
-        <button onClick={() => setCameraView('left', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Left</button>
-        <button onClick={() => setCameraView('right', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Right</button>
-        <button onClick={() => setCameraView('top', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Top</button>
-        <button onClick={() => setCameraView('bottom', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Bottom</button>
-        <button onClick={() => setCameraView('isometric', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Iso</button>
-      </div>
+      {showControls && (
+        <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
+          <button onClick={() => setCameraView('front', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Front</button>
+          <button onClick={() => setCameraView('back', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Back</button>
+          <button onClick={() => setCameraView('left', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Left</button>
+          <button onClick={() => setCameraView('right', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Right</button>
+          <button onClick={() => setCameraView('top', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Top</button>
+          <button onClick={() => setCameraView('bottom', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Bottom</button>
+          <button onClick={() => setCameraView('isometric', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Iso</button>
+        </div>
+      )}
       {showEdgeButton && (
         <div className="absolute top-2 right-2">
           <button

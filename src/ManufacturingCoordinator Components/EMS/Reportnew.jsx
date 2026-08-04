@@ -1,661 +1,619 @@
-import React, { useRef } from 'react';
-import { Typography, Button, Table, Space, Row, Col } from 'antd';
-import { ArrowLeftOutlined, PrinterOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useMemo, useRef, useState } from 'react';
+import { Typography, Button, Table, Space, Row, Col, Card, Empty, message } from 'antd';
+import { PrinterOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { useLocation } from 'react-router-dom';
 import moment from 'moment';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import cmtiImage from '../../assets/cmtis.png';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 
 const { Title, Text } = Typography;
 
-const Report = ({ date: propDate, machineData: propMachineData, returnPath: propReturnPath, fromDate: propFromDate, toDate: propToDate }) => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { date, machineData, returnPath, fromDate, toDate } = location.state || {
-    date: propDate,
-    machineData: propMachineData || [],
-    returnPath: propReturnPath || '/admin/energy-monitoring',
-    fromDate: propFromDate,
-    toDate: propToDate
-  };
-  const reportRef = useRef(null);
-  const chartRef = useRef(null);
-  
-  // Calculate totals from the new data format
-  const totalEnergy = machineData.reduce((sum, machine) => sum + (machine.energy || 0), 0);
-  const totalFirstShift = machineData.reduce((sum, machine) => sum + (machine.first_shift || 0), 0);
-  const totalSecondShift = machineData.reduce((sum, machine) => sum + (machine.second_shift || 0), 0);
-  const totalCost = machineData.reduce((sum, machine) => sum + (machine.cost || 0), 0);
+const fmtKwh = (v) => Number(v || 0).toFixed(2);
+const fmtInr = (v) => `₹${Number(v || 0).toFixed(2)}`;
 
-  // Table columns configuration
+const Report = ({
+  date: propDate,
+  machineData: propMachineData,
+  returnPath: propReturnPath,
+  fromDate: propFromDate,
+  toDate: propToDate,
+}) => {
+  const location = useLocation();
+  const state = location.state || {};
+
+  const machineData = state.machineData ?? propMachineData ?? [];
+  const fromDate = state.fromDate ?? propFromDate;
+  const toDate = state.toDate ?? propToDate;
+  const date = state.date ?? propDate;
+
+  const chartCaptureRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
+
+  const rows = useMemo(
+    () =>
+      [...(machineData || [])]
+        .map((m, idx) => ({
+          key: m.id ?? m.machine_id ?? idx,
+          machine_name: m.machine_name || `Machine ${m.id ?? idx + 1}`,
+          first_shift: Number(m.first_shift || 0),
+          second_shift: Number(m.second_shift || 0),
+          third_shift: Number(m.third_shift || 0),
+          energy: Number(m.energy || m.total_energy || 0),
+          cost: Number(m.cost || 0),
+        }))
+        .sort((a, b) => b.energy - a.energy),
+    [machineData]
+  );
+
+  const showThirdShift = rows.some((r) => r.third_shift > 0);
+
+  const totals = useMemo(() => {
+    const first = rows.reduce((s, r) => s + r.first_shift, 0);
+    const second = rows.reduce((s, r) => s + r.second_shift, 0);
+    const third = rows.reduce((s, r) => s + r.third_shift, 0);
+    const energy = rows.reduce((s, r) => s + r.energy, 0);
+    const cost = rows.reduce((s, r) => s + r.cost, 0);
+    return { first, second, third, energy, cost };
+  }, [rows]);
+
+  const periodLabel = useMemo(() => {
+    if (fromDate && toDate && fromDate !== toDate) {
+      return `${moment(fromDate).format('DD MMM YYYY')} – ${moment(toDate).format('DD MMM YYYY')}`;
+    }
+    const d = fromDate || toDate || date;
+    return d ? moment(d).format('DD MMM YYYY') : moment().format('DD MMM YYYY');
+  }, [fromDate, toDate, date]);
+
+  const generatedAt = moment().format('DD MMM YYYY, hh:mm A');
+
   const columns = [
     {
-      title: 'MACHINES',
+      title: '#',
+      key: 'idx',
+      width: 48,
+      align: 'center',
+      render: (_, __, index) => index + 1,
+    },
+    {
+      title: 'Machine',
       dataIndex: 'machine_name',
       key: 'machine_name',
-      width: '25%',
+      ellipsis: true,
     },
     {
-      title: 'FIRST SHIFT (kWh)',
+      title: 'Shift 1 (kWh)',
       dataIndex: 'first_shift',
       key: 'first_shift',
-      render: (value) => parseFloat(value || 0).toFixed(3),
       align: 'right',
-      width: '15%',
+      render: (v) => fmtKwh(v),
     },
     {
-      title: 'SECOND SHIFT (kWh)',
+      title: 'Shift 2 (kWh)',
       dataIndex: 'second_shift',
       key: 'second_shift',
-      render: (value) => parseFloat(value || 0).toFixed(3),
       align: 'right',
-      width: '15%',
+      render: (v) => fmtKwh(v),
     },
+    ...(showThirdShift
+      ? [
+          {
+            title: 'Shift 3 (kWh)',
+            dataIndex: 'third_shift',
+            key: 'third_shift',
+            align: 'right',
+            render: (v) => fmtKwh(v),
+          },
+        ]
+      : []),
     {
-      title: 'ALL SHIFTS (kWh)',
+      title: 'Total (kWh)',
       dataIndex: 'energy',
       key: 'energy',
-      render: (value) => parseFloat(value || 0).toFixed(3),
       align: 'right',
-      width: '15%',
+      render: (v) => <Text strong>{fmtKwh(v)}</Text>,
     },
     {
-      title: 'TOTAL COST (₹)',
+      title: '% of Total',
+      key: 'pct',
+      align: 'right',
+      width: 100,
+      render: (_, row) =>
+        totals.energy > 0 ? `${((row.energy / totals.energy) * 100).toFixed(1)}%` : '0%',
+    },
+    {
+      title: 'Cost (₹)',
       dataIndex: 'cost',
       key: 'cost',
-      render: (value) => `₹${parseFloat(value || 0).toFixed(2)}`,
       align: 'right',
-      width: '15%',
-    }
+      render: (v) => fmtInr(v),
+    },
   ];
 
-  // Prepare data for stacked bar chart - limit to top 10 machines for better readability
-  const getChartOptions = () => {
-    const sortedData = [...machineData].sort((a, b) => (b.energy || 0) - (a.energy || 0));
-    const topMachines = sortedData.slice(0, Math.min(10, sortedData.length));
-    
+  const chartOptions = useMemo(() => {
+    const chartRows = rows.slice(0, 15);
+    const series = [
+      {
+        name: 'Shift 1',
+        data: chartRows.map((r) => r.first_shift),
+        color: '#1677ff',
+      },
+      {
+        name: 'Shift 2',
+        data: chartRows.map((r) => r.second_shift),
+        color: '#13c2c2',
+      },
+    ];
+    if (showThirdShift) {
+      series.push({
+        name: 'Shift 3',
+        data: chartRows.map((r) => r.third_shift),
+        color: '#faad14',
+      });
+    }
+
     return {
       chart: {
-        type: 'column',
-        height: 500,
-        style: {
-          fontFamily: 'Arial, sans-serif'
-        }
+        type: 'bar',
+        height: Math.max(280, Math.min(chartRows.length * 28 + 90, 520)),
+        backgroundColor: '#ffffff',
+        spacing: [8, 12, 8, 8],
+        style: { fontFamily: 'Segoe UI, Arial, sans-serif' },
       },
       title: {
-        text: 'Energy Consumption by Machine and Shift',
-        style: {
-          fontSize: '18px',
-          fontWeight: 'bold',
-          color: '#333'
-        }
+        text: rows.length > 15 ? 'Top 15 Machines by Energy' : 'Energy by Machine & Shift',
+        align: 'left',
+        margin: 8,
+        style: { fontSize: '13px', fontWeight: '600', color: '#1f1f1f' },
       },
       subtitle: {
-        text: `Date: ${date ? moment(date).format('MMMM D, YYYY') : moment().format('MMMM D, YYYY')}`,
-        style: {
-          fontSize: '14px',
-          color: '#666'
-        }
+        text: periodLabel,
+        align: 'left',
+        style: { fontSize: '11px', color: '#8c8c8c' },
       },
       xAxis: {
-        categories: topMachines.map(machine => machine.machine_name),
-        title: {
-          text: 'Machines',
-          style: {
-            fontWeight: 'bold',
-            color: '#333'
-          }
-        },
-        labels: {
-          rotation: -45,
-          style: {
-            fontSize: '12px',
-            color: '#333'
-          }
-        }
+        categories: chartRows.map((r) => r.machine_name),
+        title: { text: null },
+        labels: { style: { fontSize: '11px', color: '#595959' } },
+        lineColor: '#f0f0f0',
+        tickLength: 0,
       },
       yAxis: {
         min: 0,
-        title: {
-          text: 'Energy (kWh)',
-          style: {
-            fontWeight: 'bold',
-            color: '#333'
-          }
-        },
+        title: { text: 'kWh', style: { color: '#8c8c8c' } },
+        gridLineColor: '#f5f5f5',
         stackLabels: {
           enabled: true,
-          style: {
-            fontWeight: 'bold',
-            color: '#333',
-            textOutline: 'none'
+          style: { fontWeight: '600', color: '#595959', textOutline: 'none', fontSize: '10px' },
+          formatter() {
+            return this.total > 0 ? this.total.toFixed(1) : '';
           },
-          formatter: function() {
-            return this.total.toFixed(2);
-          }
         },
-        gridLineColor: '#e6e6e6'
       },
       legend: {
         align: 'right',
         verticalAlign: 'top',
-        backgroundColor: '#fff',
-        borderColor: '#ccc',
-        borderWidth: 1,
-        borderRadius: 5,
-        layout: 'vertical',
-        x: -10,
-        y: 70,
-        shadow: false
-      },
-      tooltip: {
-        headerFormat: '<b>{point.x}</b><br/>',
-        pointFormat: '{series.name}: {point.y:.2f} kWh<br/>Total: {point.stackTotal:.2f} kWh',
-        style: {
-          fontSize: '12px'
-        }
-      },
-      plotOptions: {
-        column: {
-          stacking: 'normal',
-          dataLabels: {
-            enabled: true,
-            formatter: function() {
-              if (this.y > 0.05) {
-                return this.y.toFixed(2);
-              }
-            },
-            style: {
-              fontSize: '10px',
-              fontWeight: 'bold',
-              color: '#fff',
-              textOutline: '1px contrast'
-            }
-          },
-          borderWidth: 0
-        }
-      },
-      credits: {
-        enabled: false
-      },
-      exporting: {
-        enabled: false
-      },
-      series: [
-        {
-          name: 'First Shift',
-          data: topMachines.map(machine => parseFloat(machine.first_shift || 0)),
-          color: '#34D399' // green
-        },
-        {
-          name: 'Second Shift',
-          data: topMachines.map(machine => parseFloat(machine.second_shift || 0)),
-          color: '#FBBF24' // yellow
-        },
-      ]
-    };
-  };
-
-  // Add this function for landscape-optimized chart options
-  const getLandscapeChartOptions = () => {
-    // Remove the slice limit to show all machines
-    const displayedMachines = machineData;
-    
-    return {
-      chart: {
-        type: 'column',
-        height: 500,
-        width: 1000,
-        style: {
-          fontFamily: 'Arial, sans-serif'
-        },
-        spacing: [20, 20, 20, 20]
-      },
-      title: {
-        text: 'Energy Consumption by Machine and Shift',
-        style: {
-          fontSize: '18px',
-          fontWeight: 'bold',
-          color: '#333'
-        }
-      },
-      subtitle: {
-        text: `Date: ${date ? moment(date).format('MMMM D, YYYY') : moment().format('MMMM D, YYYY')}`,
-        style: {
-          fontSize: '14px',
-          color: '#666'
-        }
-      },
-      xAxis: {
-        categories: displayedMachines.map(machine => machine.machine_name),
-        title: {
-          text: 'Machines',
-          style: {
-            fontWeight: 'bold',
-            color: '#333'
-          }
-        },
-        labels: {
-          rotation: -45,
-          style: {
-            fontSize: '10px', // Reduced font size for better fit
-            color: '#333'
-          },
-          y: 35,
-          x: -5
-        },
-        tickLength: 0
-      },
-      yAxis: {
-        min: 0,
-        title: {
-          text: 'Energy (kWh)',
-          style: {
-            fontWeight: 'bold',
-            color: '#333'
-          }
-        },
-        stackLabels: {
-          enabled: true,
-          style: {
-            fontWeight: 'bold',
-            color: '#333',
-            textOutline: 'none'
-          },
-          formatter: function() {
-            return (this.total || 0).toFixed(2);
-          }
-        },
-        gridLineColor: '#e6e6e6',
-        labels: {
-          formatter: function() {
-            return this.value.toFixed(2);
-          }
-        }
-      },
-      legend: {
-        align: 'center',
-        verticalAlign: 'bottom',
-        backgroundColor: '#fff',
-        borderColor: '#ccc',
-        borderWidth: 1,
-        borderRadius: 5,
         layout: 'horizontal',
-        shadow: false,
-        itemStyle: {
-          fontWeight: 'bold'
-        }
+        itemStyle: { fontWeight: '500', fontSize: '12px' },
       },
       tooltip: {
         shared: true,
-        formatter: function() {
-          let tooltipText = `<b>${this.x}</b><br/>`;
-          
-          this.points.forEach(point => {
-            tooltipText += `<span style="color:${point.color}">●</span> ${point.series.name}: ${point.y.toFixed(2)} kWh<br/>`;
-          });
-          
-          return tooltipText;
-        },
-        style: {
-          fontSize: '12px'
-        }
+        headerFormat: '<b>{point.key}</b><br/>',
+        pointFormat: '{series.name}: <b>{point.y:.2f} kWh</b><br/>',
       },
       plotOptions: {
-        column: {
+        series: {
           stacking: 'normal',
-          dataLabels: {
-            enabled: true,
-            formatter: function() {
-              if (this.y > 0.05) {
-                return this.y.toFixed(2);
-              }
-            },
-            style: {
-              fontSize: '9px',
-              fontWeight: 'bold',
-              color: '#fff',
-              textOutline: '1px contrast'
-            },
-            y: -5
-          },
           borderWidth: 0,
-          pointPadding: 0.1,
-          groupPadding: 0.2
-        }
-      },
-      credits: {
-        enabled: false
-      },
-      exporting: {
-        enabled: false
-      },
-      series: [
-        {
-          name: 'First Shift',
-          type: 'column',
-          data: displayedMachines.map(machine => parseFloat(machine.first_shift || 0)),
-          color: '#34D399', // green
-          stack: 'shifts'
+          dataLabels: { enabled: false },
         },
-        {
-          name: 'Second Shift',
-          type: 'column',
-          data: displayedMachines.map(machine => parseFloat(machine.second_shift || 0)),
-          color: '#FBBF24', // yellow
-          stack: 'shifts'
+        bar: {
+          borderRadius: 2,
+          pointPadding: 0.08,
+          groupPadding: 0.12,
         },
-        {
-          name: 'Total Energy',
-          type: 'column',
-          data: displayedMachines.map(machine => parseFloat(machine.energy || 0)),
-          color: '#3B82F6', // blue
-          stack: 'total',
-          pointPadding: 0.1,
-          pointPlacement: 0,
-          dataLabels: {
-            enabled: true,
-            format: '{point.y:.2f}',
-            style: {
-              fontWeight: 'bold',
-              color: '#fff',
-              textOutline: '1px contrast'
-            }
-          }
-        }
-      ]
+      },
+      credits: { enabled: false },
+      exporting: { enabled: false },
+      series,
     };
+  }, [rows, showThirdShift, periodLabel]);
+
+  const handleExportPdf = async () => {
+    if (!rows.length) {
+      message.warning('No machine data to export');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+      const usable = pageW - margin * 2;
+
+      pdf.setFillColor(22, 119, 255);
+      pdf.rect(margin, 8, usable, 10, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(12);
+      pdf.text('CMF ENERGY CONSUMPTION REPORT', pageW / 2, 14.5, { align: 'center' });
+
+      // Line 1: period left, generated right — never overlap
+      pdf.setTextColor(70, 70, 70);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.text('Period: ' + periodLabel, margin, 23);
+      pdf.text('Generated: ' + generatedAt, pageW - margin, 23, { align: 'right' });
+
+      // Line 2: KPIs only
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(8);
+      const kpiParts = [
+        'Machines: ' + rows.length,
+        'Total: ' + fmtKwh(totals.energy) + ' kWh',
+        'Shift 1: ' + fmtKwh(totals.first),
+        'Shift 2: ' + fmtKwh(totals.second),
+      ];
+      if (showThirdShift) kpiParts.push('Shift 3: ' + fmtKwh(totals.third));
+      kpiParts.push('Cost: ' + fmtInr(totals.cost));
+      pdf.text(kpiParts.join('   |   '), pageW / 2, 28.5, { align: 'center', maxWidth: usable });
+
+      pdf.setDrawColor(22, 119, 255);
+      pdf.setLineWidth(0.35);
+      pdf.line(margin, 31, pageW - margin, 31);
+
+      const headRow = showThirdShift
+        ? ['#', 'Machine', 'Shift 1 (kWh)', 'Shift 2 (kWh)', 'Shift 3 (kWh)', 'Total (kWh)', '%', 'Cost (INR)']
+        : ['#', 'Machine', 'Shift 1 (kWh)', 'Shift 2 (kWh)', 'Total (kWh)', '%', 'Cost (INR)'];
+
+      const body = rows.map((r, i) => {
+        const pct = totals.energy > 0 ? ((r.energy / totals.energy) * 100).toFixed(1) + '%' : '0%';
+        const row = [String(i + 1), r.machine_name, fmtKwh(r.first_shift), fmtKwh(r.second_shift)];
+        if (showThirdShift) row.push(fmtKwh(r.third_shift));
+        row.push(fmtKwh(r.energy), pct, fmtInr(r.cost));
+        return row;
+      });
+
+      const totalRow = showThirdShift
+        ? ['', 'TOTAL', fmtKwh(totals.first), fmtKwh(totals.second), fmtKwh(totals.third), fmtKwh(totals.energy), '100%', fmtInr(totals.cost)]
+        : ['', 'TOTAL', fmtKwh(totals.first), fmtKwh(totals.second), fmtKwh(totals.energy), '100%', fmtInr(totals.cost)];
+
+      // Measure each column from real header + data text width
+      const padMm = 4;
+      const measure = (text, bold) => {
+        pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+        pdf.setFontSize(8);
+        return pdf.getTextWidth(String(text == null ? '' : text)) + padMm;
+      };
+
+      const colCount = headRow.length;
+      const widths = Array.from({ length: colCount }, () => 0);
+      const sampleRows = [headRow].concat(body, [totalRow]);
+      sampleRows.forEach((row, rowIdx) => {
+        const bold = rowIdx === 0 || rowIdx === sampleRows.length - 1;
+        row.forEach((cell, colIdx) => {
+          widths[colIdx] = Math.max(widths[colIdx], measure(cell, bold));
+        });
+      });
+
+      const mins = showThirdShift
+        ? [10, 42, 28, 28, 28, 28, 14, 30]
+        : [10, 48, 28, 28, 28, 14, 30];
+      for (let i = 0; i < colCount; i += 1) {
+        widths[i] = Math.max(widths[i], mins[i]);
+      }
+
+      const machineIdx = 1;
+      let others = 0;
+      for (let i = 0; i < colCount; i += 1) {
+        if (i !== machineIdx) others += widths[i];
+      }
+      if (others + mins[machineIdx] > usable) {
+        const scale = (usable - mins[machineIdx]) / others;
+        for (let i = 0; i < colCount; i += 1) {
+          if (i !== machineIdx) widths[i] = Math.max(mins[i] * 0.85, widths[i] * scale);
+        }
+        others = 0;
+        for (let i = 0; i < colCount; i += 1) {
+          if (i !== machineIdx) others += widths[i];
+        }
+      }
+      widths[machineIdx] = Math.max(mins[machineIdx], usable - others);
+      const sum = widths.reduce((a, b) => a + b, 0);
+      if (sum > usable) widths[machineIdx] -= sum - usable;
+
+      const columnStyles = {};
+      widths.forEach((w, i) => {
+        columnStyles[i] = {
+          cellWidth: w,
+          halign: i === 0 ? 'center' : i === 1 ? 'left' : 'right',
+        };
+      });
+
+      autoTable(pdf, {
+        startY: 33,
+        head: [headRow],
+        body: body.concat([totalRow]),
+        theme: 'grid',
+        tableWidth: usable,
+        margin: { left: margin, right: margin, bottom: 12 },
+        styles: {
+          fontSize: 8,
+          cellPadding: { top: 2.4, bottom: 2.4, left: 2.2, right: 2.2 },
+          valign: 'middle',
+          overflow: 'linebreak',
+          lineColor: [200, 200, 200],
+          lineWidth: 0.2,
+          textColor: [30, 30, 30],
+        },
+        headStyles: {
+          fillColor: [22, 119, 255],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8,
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: { top: 2.8, bottom: 2.8, left: 2.2, right: 2.2 },
+        },
+        alternateRowStyles: { fillColor: [245, 248, 255] },
+        columnStyles: columnStyles,
+        didParseCell(data) {
+          if (data.section === 'body' && data.row.index === body.length) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [232, 232, 232];
+          }
+          if (data.section === 'head') data.cell.styles.halign = 'center';
+        },
+        didDrawPage(data) {
+          pdf.setFontSize(7);
+          pdf.setTextColor(140, 140, 140);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text('CMF Digitization · Energy Monitoring', margin, pageH - 6);
+          pdf.text('Page ' + data.pageNumber, pageW - margin, pageH - 6, { align: 'right' });
+        },
+      });
+
+      if (chartCaptureRef.current) {
+        const canvas = await html2canvas(chartCaptureRef.current, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+        });
+        const img = canvas.toDataURL('image/jpeg', 0.92);
+        const imgW = usable;
+        const imgH = (canvas.height * imgW) / canvas.width;
+        const maxH = pageH - 34;
+
+        pdf.addPage('a4', 'landscape');
+        pdf.setFillColor(22, 119, 255);
+        pdf.rect(margin, 8, usable, 10, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(12);
+        pdf.text('ENERGY BY MACHINE & SHIFT', pageW / 2, 14.5, { align: 'center' });
+        pdf.setTextColor(70, 70, 70);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8);
+        pdf.text('Period: ' + periodLabel, margin, 24);
+        pdf.text('Generated: ' + generatedAt, pageW - margin, 24, { align: 'right' });
+        pdf.setDrawColor(22, 119, 255);
+        pdf.setLineWidth(0.35);
+        pdf.line(margin, 26.5, pageW - margin, 26.5);
+        pdf.addImage(img, 'JPEG', margin, 28.5, imgW, Math.min(imgH, maxH));
+        pdf.setFontSize(7);
+        pdf.setTextColor(140, 140, 140);
+        pdf.text('CMF Digitization · Energy Monitoring', margin, pageH - 6);
+        pdf.text('Page 2', pageW - margin, pageH - 6, { align: 'right' });
+      }
+
+      const fileDate = String(fromDate || date || moment().format('YYYY-MM-DD')).replace(/[/\\:]/g, '-');
+      pdf.save('CMF-Energy-Report-' + fileDate + '.pdf');
+      message.success('PDF downloaded');
+    } catch (err) {
+      console.error(err);
+      message.error('Failed to generate PDF');
+    } finally {
+      setExporting(false);
+    }
   };
 
-  // Energy distribution summary data
-  const energyDistributionData = [
-    {
-      key: '1',
-      shift: 'First Shift',
-      energy: totalFirstShift.toFixed(2),
-      percentage: totalEnergy > 0 ? `${((totalFirstShift / totalEnergy) * 100).toFixed(1)}%` : '0%'
-    },
-    {
-      key: '2',
-      shift: 'Second Shift',
-      energy: totalSecondShift.toFixed(2),
-      percentage: totalEnergy > 0 ? `${((totalSecondShift / totalEnergy) * 100).toFixed(1)}%` : '0%'
-    },
-    {
-      key: '3',
-      shift: 'Total',
-      energy: totalEnergy.toFixed(2),
-      percentage: '100%'
-    }
+  const kpiCards = [
+    { label: 'Total Energy', value: fmtKwh(totals.energy) + ' kWh', color: '#1677ff' },
+    { label: 'Shift 1', value: fmtKwh(totals.first) + ' kWh', color: '#1677ff' },
+    { label: 'Shift 2', value: fmtKwh(totals.second) + ' kWh', color: '#13c2c2' },
+    { label: 'Total Cost', value: fmtInr(totals.cost), color: '#52c41a' },
   ];
 
-  // Function to generate a PDF with multiple A4 pages (portrait and landscape)
-  const handlePrint = async () => {
-    try {
-      // Set up loading indicator
-      const loadingElement = document.createElement('div');
-      loadingElement.style.position = 'fixed';
-      loadingElement.style.top = '0';
-      loadingElement.style.left = '0';
-      loadingElement.style.width = '100%';
-      loadingElement.style.height = '100%';
-      loadingElement.style.backgroundColor = 'rgba(0,0,0,0.5)';
-      loadingElement.style.display = 'flex';
-      loadingElement.style.justifyContent = 'center';
-      loadingElement.style.alignItems = 'center';
-      loadingElement.style.zIndex = '9999';
-      loadingElement.innerHTML = '<div style="background: white; padding: 20px; border-radius: 8px;"><h3>Generating PDF, please wait...</h3></div>';
-      document.body.appendChild(loadingElement);
-      
-      // Create a new PDF with first page in portrait orientation
-    const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      // Capture and add the first page (portrait)
-      const reportElement = document.getElementById('report-content');
-      const reportCanvas = await html2canvas(reportElement, { 
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff'
-      });
-      
-      const reportImgData = reportCanvas.toDataURL('image/jpeg', 1.0);
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const reportWidth = pageWidth - 20;
-      const reportHeight = (reportCanvas.height * reportWidth) / reportCanvas.width;
-      
-      pdf.addImage(reportImgData, 'JPEG', 10, 10, reportWidth, Math.min(reportHeight, 277));
-      
-      // Add a second page in landscape orientation
-      pdf.addPage([297, 210], 'landscape');
-      
-      // Capture and add the second page (landscape)
-      const chartElement = document.getElementById('chart-content');
-      const chartCanvas = await html2canvas(chartElement, { 
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff'
-      });
-      
-      const chartImgData = chartCanvas.toDataURL('image/jpeg', 1.0);
-      const landscapeWidth = 277; // 297 - 20 (margins)
-      const landscapeHeight = (chartCanvas.height * landscapeWidth) / chartCanvas.width;
-      
-      pdf.addImage(chartImgData, 'JPEG', 10, 10, landscapeWidth, Math.min(landscapeHeight, 190));
-      
-      // Save the PDF
-      pdf.save(`BEL-Energy-Report-${date || moment().format('YYYY-MM-DD')}.pdf`);
-      
-      // Remove loading element
-      document.body.removeChild(loadingElement);
-      
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('There was an error generating the PDF. Please try again.');
-      
-      // Remove loading element in case of error
-      const loadingElement = document.querySelector('div[style*="position: fixed"]');
-      if (loadingElement) {
-        document.body.removeChild(loadingElement);
-      }
-    }
-  };
-
-  // Format date for display
-  const formattedDate = date ? moment(date).format('MMMM D, YYYY') : moment().format('MMMM D, YYYY');
-
   return (
-    <div style={{ padding: '20px', maxWidth: '1800px', margin: '0 auto' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '24px',
-        backgroundColor: '#f0f2f5',
-        padding: '12px 16px',
-        borderRadius: '8px'
-      }}>
-        <Title level={4} style={{ margin: 0 }}>Energy Consumption Report</Title>
-        <Space>
-          <Button
-            type="primary"
-            icon={<PrinterOutlined />}
-            onClick={handlePrint}
-            style={{
-              backgroundColor: '#3b82f6',
-              borderColor: '#2563eb'
-            }}
-          >
-            Export PDF
-          </Button>
-        </Space>
-      </div>
-      
-      <Row gutter={[24, 24]} style={{ marginBottom: '20px' }}>
-        {/* First A4 page - Table */}
-        <Col xs={24}>
-          <div 
-            id="report-content" 
-            ref={reportRef}
-            style={{ 
-              backgroundColor: 'white', 
-              padding: '24px', 
-              borderRadius: '8px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              maxWidth: '210mm', // A4 width
-              width: '100%',
-              minHeight: '297mm', // A4 height
-              margin: '0 auto',
-              overflow: 'hidden'
-            }}
-          >
-        {/* Header Section with Logo and Date Info */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-          <div>
-            <img 
-              src={cmtiImage} 
-              alt="Bharat Electronics Limited" 
-              style={{ height: '50px' }}
-            />
-            
-            <div style={{ marginTop: '20px' }}>
-              <Text strong style={{ display: 'block', fontSize: '16px' }}>FAB-C workshop</Text>
-              <Text style={{ display: 'block', color: '#666' }}>BEL</Text>
-              <Text style={{ display: 'block', color: '#1890ff' }}>Bengaluru</Text>
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <Text strong style={{ fontSize: '16px' }}>
-              From Date: {fromDate} &nbsp;&nbsp;|&nbsp;&nbsp; To Date: {toDate}
-            </Text>
-                <Text style={{ display: 'block', color: '#666', marginTop: '8px' }}>
-                  Report Generated: {moment().format('MMMM D, YYYY, h:mm A')}
-            </Text>
-          </div>
-        </div>
-        
-            {/* Main Title */}
-            <div style={{ textAlign: 'center', margin: '20px 0', border: '1px solid #e8e8e8', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '4px' }}>
-              <Title level={3} style={{ margin: 0 }}>Energy Consumption Report</Title>
-              <Text style={{ display: 'block', color: '#666', marginTop: '8px' }}>
-                Data for {formattedDate}
+    <div style={{ padding: 16, background: '#f5f5f5', minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+          marginBottom: 16,
+          background: '#fff',
+          padding: '12px 16px',
+          borderRadius: 8,
+          border: '1px solid #f0f0f0',
+        }}
+      >
+        <div>
+          <Title level={4} style={{ margin: 0 }}>
+            Energy Consumption Report
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {periodLabel}
           </Text>
         </div>
-        
-        {/* Energy Table */}
-        <Table
-          columns={columns}
-          dataSource={machineData}
-          rowKey="id"
-          pagination={false}
-          size="small"
-          bordered
-          style={{ marginBottom: '20px' }}
-          summary={pageData => {
-            return (
-              <>
-                <Table.Summary.Row style={{ backgroundColor: '#f5f5f5' }}>
-                  <Table.Summary.Cell index={0}><Text strong>Total Usage:</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={1} align="right"><Text strong>{totalFirstShift.toFixed(2)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={2} align="right"><Text strong>{totalSecondShift.toFixed(2)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right"><Text strong>{totalEnergy.toFixed(2)} kWh</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right"><Text strong>₹{totalCost.toFixed(2)}</Text></Table.Summary.Cell>
-                </Table.Summary.Row>
-              </>
-            );
+        <Button
+          type="primary"
+          icon={<PrinterOutlined />}
+          loading={exporting}
+          onClick={handleExportPdf}
+          disabled={!rows.length}
+        >
+          Export PDF
+        </Button>
+      </div>
+
+      {!rows.length ? (
+        <Card>
+          <Empty description="No machine energy data for the selected period" />
+        </Card>
+      ) : (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 8,
+            border: '1px solid #f0f0f0',
+            overflow: 'hidden',
           }}
-        />
-        
-            {/* Page Number */}
-        <div style={{ 
-              textAlign: 'right', 
-              marginTop: '40px',
-              borderTop: '1px solid #e8e8e8',
-              paddingTop: '12px',
-              color: '#888'
-            }}>
-              <Text>BEL Energy Monitoring System • Page 1 of 2</Text>
-            </div>
-          </div>
-        </Col>
-        
-        {/* Second A4 page - Graph (Landscape) */}
-        <Col xs={24}>
-          <div 
-            id="chart-content" 
-            ref={chartRef}
-            style={{ 
-              backgroundColor: 'white', 
-              padding: '24px', 
-              borderRadius: '8px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              maxWidth: '297mm', // A4 landscape width
-              width: '100%',
-              minHeight: '210mm', // A4 landscape height
-              margin: '0 auto',
-              overflow: 'hidden'
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 16,
+              padding: '16px 20px',
+              borderBottom: '1px solid #f0f0f0',
+              background: 'linear-gradient(180deg, #fafafa 0%, #fff 100%)',
+              flexWrap: 'wrap',
             }}
           >
-            {/* Header Section with Logo and Date Info */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+            <Space align="center" size={12}>
+              <img src={cmtiImage} alt="CMTI" style={{ height: 44 }} />
               <div>
-                <img 
-                  src={cmtiImage} 
-                  alt="Bharat Electronics Limited" 
-                  style={{ height: '50px' }}
-                />
-                
-                <div style={{ marginTop: '20px' }}>
-                  <Text strong style={{ display: 'block', fontSize: '16px' }}>FAB-C workshop</Text>
-                  <Text style={{ display: 'block', color: '#666' }}>BEL</Text>
-                  <Text style={{ display: 'block', color: '#1890ff' }}>Bengaluru</Text>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <Text strong style={{ display: 'block', fontSize: '16px' }}>
-                  {formattedDate}
+                <Text strong style={{ display: 'block', fontSize: 16 }}>
+                  CMF Digitization
                 </Text>
-                <Text style={{ display: 'block', color: '#666', marginTop: '8px' }}>
-                  Report Generated: {moment().format('MMMM D, YYYY, h:mm A')}
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Energy Monitoring System · CMTI Bengaluru
                 </Text>
               </div>
-            </div>
-            
-            {/* Main Title */}
-            <div style={{ textAlign: 'center', margin: '20px 0', border: '1px solid #e8e8e8', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '4px' }}>
-              <Title level={3} style={{ margin: 0 }}>Energy Consumption Analysis</Title>
-              <Text style={{ display: 'block', color: '#666', marginTop: '8px' }}>
-                Visual representation for {formattedDate}
+            </Space>
+            <div style={{ textAlign: 'right' }}>
+              <Text strong style={{ display: 'block' }}>
+                Report Period
+              </Text>
+              <Text style={{ display: 'block' }}>{periodLabel}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Generated {generatedAt}
               </Text>
             </div>
-            
-            {/* Stacked Bar Chart for energy by shift - optimized for landscape */}
-            <div style={{ marginBottom: '30px', border: '1px solid #e8e8e8', padding: '16px', borderRadius: '8px' }}>
-              <HighchartsReact
-                highcharts={Highcharts}
-                options={getLandscapeChartOptions()}
-              />
+          </div>
+
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0f0' }}>
+            <Row gutter={[12, 12]}>
+              {kpiCards.map((kpi) => (
+                <Col xs={12} sm={12} md={6} key={kpi.label}>
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 8,
+                      border: '1px solid #f0f0f0',
+                      borderLeft: '3px solid ' + kpi.color,
+                      background: '#fafafa',
+                      height: '100%',
+                    }}
+                  >
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                      {kpi.label}
+                    </Text>
+                    <Text strong style={{ fontSize: 18, color: '#1f1f1f' }}>
+                      {kpi.value}
+                    </Text>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </div>
+
+          <div style={{ padding: '16px 20px' }}>
+            <Space style={{ marginBottom: 12 }}>
+              <ThunderboltOutlined style={{ color: '#1677ff' }} />
+              <Text strong>Machine-wise Energy Breakdown</Text>
+              <Text type="secondary">({rows.length} machines)</Text>
+            </Space>
+            <Table
+              columns={columns}
+              dataSource={rows}
+              pagination={false}
+              size="small"
+              bordered
+              scroll={{ x: true }}
+              summary={() => (
+                <Table.Summary.Row style={{ background: '#fafafa' }}>
+                  <Table.Summary.Cell index={0} />
+                  <Table.Summary.Cell index={1}>
+                    <Text strong>Total</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <Text strong>{fmtKwh(totals.first)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text strong>{fmtKwh(totals.second)}</Text>
+                  </Table.Summary.Cell>
+                  {showThirdShift && (
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong>{fmtKwh(totals.third)}</Text>
+                    </Table.Summary.Cell>
+                  )}
+                  <Table.Summary.Cell index={showThirdShift ? 5 : 4} align="right">
+                    <Text strong>{fmtKwh(totals.energy)} kWh</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={showThirdShift ? 6 : 5} align="right">
+                    <Text strong>100%</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={showThirdShift ? 7 : 6} align="right">
+                    <Text strong>{fmtInr(totals.cost)}</Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              )}
+            />
+          </div>
+
+          <div style={{ padding: '0 20px 20px' }}>
+            <div
+              ref={chartCaptureRef}
+              style={{
+                border: '1px solid #f0f0f0',
+                borderRadius: 6,
+                padding: 4,
+                background: '#fff',
+                lineHeight: 0,
+              }}
+            >
+              <HighchartsReact highcharts={Highcharts} options={chartOptions} />
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: '10px 20px',
+              borderTop: '1px solid #f0f0f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              color: '#8c8c8c',
+              fontSize: 12,
+            }}
+          >
+            <span>CMF Energy Monitoring System</span>
+            <span>Cost rate applied where provided · Values in kWh / INR</span>
+          </div>
         </div>
-        
-        {/* Page Number */}
-            <div style={{ 
-              textAlign: 'right', 
-              marginTop: '40px',
-              borderTop: '1px solid #e8e8e8',
-              paddingTop: '12px',
-              color: '#888'
-            }}>
-              <Text>BEL Energy Monitoring System • Page 2 of 2</Text>
-        </div>
-      </div>
-        </Col>
-      </Row>
+      )}
     </div>
   );
 };
 
-export default Report; 
+export default Report;
