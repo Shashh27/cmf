@@ -120,14 +120,14 @@ const CheckpointDetailModal = ({ item, allSubmissions, open, onClose, onDelete }
     {
       title: 'Operator',
       key: 'operator',
-      width: 56,
+      width: 100,
       className: 'pm-compact-th',
-      render: (_, r) => <span style={{ fontSize: 10 }}>{r.operator_id ?? '—'}</span>,
+      render: (_, r) => <span style={{ fontSize: 10 }}>{r.operator_name ?? r.operator_id ?? '—'}</span>,
     },
     {
       title: 'Response',
       dataIndex: 'response_value',
-      width: 52,
+      width: 60,
       className: 'pm-compact-th',
       render: (v) => <span style={{ fontSize: 10, fontWeight: 700, color: responseColor(v) }}>{v || '—'}</span>,
     },

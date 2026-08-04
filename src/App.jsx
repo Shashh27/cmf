@@ -439,11 +439,11 @@ function App() {
 
           <Route path="/supervisor/notifications" element={<SupervisorNotifications />} />
 
-          <Route path="/supervisor/pps/assets-availability" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/assets-availability" element={<SupervisorDashboard />} />
 
-          <Route path="/supervisor/product-monitoring/pokayoke-checklists" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/preventive-maintenance" element={<SupervisorDashboard />} />
 
-          <Route path="/supervisor/pokayoke-operation-checklists" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/pokayoke-checklists" element={<SupervisorDashboard />} />
 
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
 

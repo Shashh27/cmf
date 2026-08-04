@@ -11,13 +11,13 @@ const SupervisorDashboard = () => {
   const path = location.pathname;
 
   const renderContent = () => {
-    if (path.includes('/pps/assets-availability')) {
+    if (path.includes('/assets-availability')) {
       return <AssetsAvailability />;
     }
-    if (path.includes('/product-monitoring/pokayoke-checklists')) {
+    if (path.includes('/preventive-maintenance')) {
       return <PreventiveMaintenance />;
     }
-    if (path.includes('/pokayoke-operation-checklists')) {
+    if (path.includes('/pokayoke-checklists')) {
       return <PokaYokeOperationChecklist />;
     }
     if (path.includes('/production_logs')) {

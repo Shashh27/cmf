@@ -1,42 +1,53 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Row, Col, Select } from 'antd';
+import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Select } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
 import { SearchOutlined, ToolOutlined, CheckCircleOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 
-const KpiCard = ({ title, count, label, icon, color, bgColor }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  return (
-    <Card
-      style={{
-        borderRadius: '16px',
-        background: bgColor,
-        border: 'none',
-        minHeight: '120px',
-        padding: '20px',
-        cursor: 'pointer',
-        transition: 'all 0.3s ease',
-        transform: isHovered ? 'translateY(-5px)' : 'none',
-        boxShadow: isHovered ? '0 8px 16px rgba(0,0,0,0.1)' : 'none',
-      }}
-      styles={{ body: { padding: 0 } }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-          {icon}
-          <span style={{ fontSize: '16px', fontWeight: '600', color: color, marginLeft: '12px' }}>{title}</span>
+const KpiCard = ({ label, value, icon, color, iconColor, gradient, border }) => (
+  <div
+    style={{
+      width: 175,
+      minHeight: 88,
+      height: 88,
+      borderRadius: 10,
+      padding: '14px 16px',
+      background: gradient,
+      border: `1px solid ${border}`,
+      boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      flexShrink: 0,
+      boxSizing: 'border-box',
+      display: 'flex',
+      alignItems: 'center',
+    }}
+  >
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#64748b',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            marginBottom: 4,
+            minHeight: 28,
+            lineHeight: '14px',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {label}
         </div>
-        <div style={{ marginTop: 'auto' }}>
-          <div style={{ fontSize: '36px', fontWeight: 'bold', color: color, lineHeight: '1.2' }}>
-            {count}
-          </div>
-          <div style={{ fontSize: '14px', color: color, opacity: 0.8, fontWeight: '500' }}>{label}</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color, lineHeight: 1.1 }}>
+          {value}
         </div>
       </div>
-    </Card>
-  );
-};
+      <span style={{ fontSize: 22, color: iconColor, flexShrink: 0 }}>{icon}</span>
+    </div>
+  </div>
+);
 
 const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [requests, setRequests] = useState([]);
@@ -555,75 +566,91 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     },
   ];
 
+  const kpiCards = [
+    {
+      key: 'requested',
+      label: 'Total Tool Requested',
+      value: totalRequested,
+      color: '#2f54eb',
+      iconColor: '#597ef7',
+      gradient: 'linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%)',
+      border: '#d6e4ff',
+      icon: <ToolOutlined />,
+    },
+    {
+      key: 'collected',
+      label: 'Total Tool Collected',
+      value: totalReturned,
+      color: '#389e0d',
+      iconColor: '#52c41a',
+      gradient: 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)',
+      border: '#b7eb8f',
+      icon: <CheckCircleOutlined />,
+    },
+    {
+      key: 'toReturn',
+      label: 'Total Tool to be Returned',
+      value: totalToBeReturned,
+      color: '#d46b08',
+      iconColor: '#fa8c16',
+      gradient: 'linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%)',
+      border: '#ffd591',
+      icon: <ClockCircleOutlined />,
+    },
+    {
+      key: 'notCollected',
+      label: 'Yet to be Collected',
+      value: yetToBeCollected,
+      color: '#cf1322',
+      iconColor: '#f5222d',
+      gradient: 'linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%)',
+      border: '#ffa39e',
+      icon: <ClockCircleOutlined />,
+    },
+  ];
+
   return (
     <div style={{ background: '#f0f2f5', padding: '0px', borderRadius: '8px' }}>
       <Card style={{ borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
 
-        {/* KPI Cards */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-          <Col xs={24} sm={12} md={6}>
-            <KpiCard
-              title="Total Tool Requested"
-              count={totalRequested}
-              label="Tools"
-              icon={<ToolOutlined style={{ fontSize: '20px', color: '#1677FF' }} />}
-              color="#1677FF"
-              bgColor="#E6F4FF"
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <KpiCard
-              title="Total Tool Collected"
-              count={totalReturned}
-              label="Collected"
-              icon={<CheckCircleOutlined style={{ fontSize: '20px', color: '#52C41A' }} />}
-              color="#237804"
-              bgColor="#F6FFED"
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <KpiCard
-              title="Total Tool to be Returned"
-              count={totalToBeReturned}
-              label="To be returned"
-              icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#FA8C16' }} />}
-              color="#FA8C16"
-              bgColor="#FFF7E6"
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <KpiCard
-              title="Total Tools yet to be Collected"
-              count={yetToBeCollected}
-              label="Not collected"
-              icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#EB2F96' }} />}
-              color="#EB2F96"
-              bgColor="#FFF0F6"
-            />
-          </Col>
-        </Row>
+        {/* KPI Cards + Search / Refresh */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            marginBottom: 16,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {kpiCards.map((card) => (
+              <KpiCard key={card.key} {...card} />
+            ))}
+          </div>
 
-        {/* Search + Table */}
-        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-          <Input
-            placeholder="Search requested tools..."
-            allowClear
-            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-            size="middle"
-            style={{ width: 300 }}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              fetchRequests();
-              fetchReturnRequests();
-              fetchToolIssues();
-            }}
-          >
-            Refresh
-          </Button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
+            <Input
+              placeholder="Search requested tools..."
+              allowClear
+              prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+              size="middle"
+              style={{ width: 260 }}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                fetchRequests();
+                fetchReturnRequests();
+                fetchToolIssues();
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
         </div>
+
         <Table
           columns={columns}
           dataSource={requests}

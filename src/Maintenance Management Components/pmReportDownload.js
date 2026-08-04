@@ -209,7 +209,7 @@ export function buildChecklistsReportConfig(checklists, metaLines = []) {
       ],
       rows,
     }],
-    filename: `pm-checklists-${Date.now()}`,
+    filename: `pm-checklists-${formatDate(new Date())}`,
   };
 }
 
@@ -252,7 +252,7 @@ export function buildAssignmentsReportConfig(assignments, machines = [], metaLin
       ],
       rows,
     }],
-    filename: `pm-assignments-${Date.now()}`,
+    filename: `pm-assignments-${formatDate(new Date())}`,
   };
 }
 
@@ -304,6 +304,6 @@ export function buildSubmissionsReportConfig(grouped, checklistNameFor, metaLine
         rows: detailRows,
       },
     ],
-    filename: `pm-submission-history-${Date.now()}`,
+    filename: `pm-submission-history-${formatDate(new Date())}`,
   };
 }

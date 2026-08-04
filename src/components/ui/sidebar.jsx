@@ -11,31 +11,19 @@ import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCart
 } from "@ant-design/icons";
 
 import cmtisLogo from "../../assets/cmtis.png";
-
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
-
 import { API_BASE_URL } from '../../Config/auth';
-
 import { QUALITY_API_BASE_URL } from '../../Config/qualityconfig';
 
-
-
 const { Sider } = Layout;
-
-
 
 const Sidebar = ({ collapsed, onCollapse }) => {
 
   const location = useLocation();
-
   const selectedKey = location.pathname;
-
   const [isMobile, setIsMobile] = useState(false);
-
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-
   const [notificationCount, setNotificationCount] = useState(0);
-
 
 
   // Get the role prefix from the path
@@ -45,19 +33,12 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     const path = location.pathname;
 
     if (path.startsWith('/admin')) return '/admin';
-
     if (path.startsWith('/project_coordinator')) return '/project_coordinator';
-
     if (path.startsWith('/operator')) return '/operator';
-
     if (path.startsWith('/manufacturing_coordinator')) return '/manufacturing_coordinator';
-
     if (path.startsWith('/supervisor')) return '/supervisor';
-
     if (path.startsWith('/inventory_supervisor')) return '/inventory_supervisor';
-
     return ''; // Default fallback
-
   };
 
 
@@ -81,55 +62,32 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     const path = location.pathname;
 
     const keys = [];
-
     if (path.includes('/oms')) keys.push('oms');
-
     if (path.includes('/pps')) keys.push('pps');
-
     if (path.includes('/product-monitoring')) keys.push('product-monitoring');
-
     if (path.includes('/maintenance-management')) keys.push('maintenance-management');
-
     if (path.includes('/inventory-management')) keys.push('inventory-management');
-
     return keys;
-
   };
 
-
-
   const [openKeys, setOpenKeys] = useState(getOpenKeys());
-
-  
 
   // Detect mobile screen
 
   useEffect(() => {
 
     const handleResize = () => {
-
       const mobile = window.innerWidth < 768;
-
       setIsMobile(mobile);
-
       if (!mobile) {
-
         setMobileDrawerOpen(false);
-
       }
-
     };
 
-
-
     handleResize();
-
     window.addEventListener('resize', handleResize);
-
     return () => window.removeEventListener('resize', handleResize);
-
   }, []);
-
 
 
   // Fetch notification count for sidebar badge
@@ -137,60 +95,35 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   useEffect(() => {
 
     if (prefix === '/operator') {
-
       fetchOperatorNotificationCount();
-
     } else if (prefix === '/supervisor') {
-
       fetchSupervisorNotificationCount();
-
     } else if (prefix === '/project_coordinator') {
-
       fetchPCNotificationCount();
-
     } else if (prefix === '/admin') {
-
       fetchAdminNotificationCount();
-
     } else if (prefix === '/manufacturing_coordinator') {
-
       fetchMCNotificationCount();
-
     }
-
   }, [prefix]);
-
 
 
   const fetchOperatorNotificationCount = async () => {
 
     try {
-
       // Get operator ID from localStorage
-
       let operatorId = null;
-
       const storedUser = localStorage.getItem('user');
-
       if (storedUser) {
-
         try {
-
           const user = JSON.parse(storedUser);
-
           operatorId = user.id;
-
         } catch (e) {
-
           console.error("Error parsing user from local storage", e);
-
         }
-
       }
 
       if (!operatorId) operatorId = localStorage.getItem('operator_id');
-
-
 
       if (!operatorId) return;
 
@@ -1149,26 +1082,26 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       },
       {
 
-        key: `${prefix}/pps/assets-availability`,
+        key: `${prefix}/assets-availability`,
 
-        label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link>,
+        label: <Link to={`${prefix}/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link>,
 
         icon: <AppstoreOutlined />,
 
       },
       {
 
-        key: `${prefix}/product-monitoring/pokayoke-checklists`,
+        key: `${prefix}/preventive-maintenance`,
 
-        label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
+        label: <Link to={`${prefix}/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
 
         icon: <CarryOutOutlined  />,
 
       },
       {
-        key: `${prefix}/pokayoke-operation-checklists`,
+        key: `${prefix}/pokayoke-checklists`,
 
-        label: <Link to={`${prefix}/pokayoke-operation-checklists`} onClick={() => setMobileDrawerOpen(false)}>PokaYoke Checklist</Link>,
+        label: <Link to={`${prefix}/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>PokaYoke Checklist</Link>,
 
         icon: <SafetyCertificateOutlined />,
       },

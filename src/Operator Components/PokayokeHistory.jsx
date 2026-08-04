@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { message, Spin, DatePicker, Button } from 'antd';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { message, Spin, DatePicker, Button, Tooltip } from 'antd';
 import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
-  CheckCircleFilled, CloseCircleFilled,
+  CheckCircleFilled, CloseCircleFilled, ClearOutlined,
   CalendarOutlined, ClockCircleOutlined, ThunderboltOutlined,
   DownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
@@ -318,6 +318,54 @@ const PokayokeHistory = ({ machineId }) => {
   const [selYear,       setSelYear]       = useState(now.getFullYear());
   const [customStart,   setCustomStart]   = useState(toYMD(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [customEnd,     setCustomEnd]     = useState(toYMD(now));
+  const tableScrollRef = useRef(null);
+
+  const defaultCustomStart = toYMD(new Date(now.getFullYear(), now.getMonth(), 1));
+  const defaultCustomEnd = toYMD(now);
+
+  const hasActiveFilters = Boolean(
+    viewMode !== 'month' ||
+    selMonth !== now.getMonth() ||
+    selYear !== now.getFullYear() ||
+    (viewMode === 'day' && !selectedDayjs.isSame(dayjs(), 'day')) ||
+    (viewMode === 'custom' && (customStart !== defaultCustomStart || customEnd !== defaultCustomEnd))
+  );
+
+  const clearFilters = () => {
+    const n = new Date();
+    setViewMode('month');
+    setSelMonth(n.getMonth());
+    setSelYear(n.getFullYear());
+    setSelectedDayjs(dayjs());
+    setCustomStart(toYMD(new Date(n.getFullYear(), n.getMonth(), 1)));
+    setCustomEnd(toYMD(n));
+  };
+
+  const clearFiltersButton = hasActiveFilters ? (
+    <Tooltip title="Clear filters">
+      <Button
+        type="text"
+        size="small"
+        icon={<ClearOutlined />}
+        onClick={clearFilters}
+        aria-label="Clear filters"
+        style={{ color: '#ff4d4f', padding: '0 6px', height: 26, display: 'inline-flex', alignItems: 'center' }}
+      />
+    </Tooltip>
+  ) : null;
+
+  const scrollToMonth = (monthIdx) => {
+    const container = tableScrollRef.current;
+    if (!container) return;
+    const target = container.querySelector(`th[data-month-start="${monthIdx}"]`);
+    if (!target) return;
+    // Sticky: Sl (40) + Check Point (~220)
+    const stickyWidth = 260;
+    container.scrollTo({
+      left: Math.max(0, target.offsetLeft - stickyWidth),
+      behavior: 'smooth',
+    });
+  };
 
   /* ── Fetch ── */
   const loadHistory = useCallback(async () => {
@@ -354,17 +402,26 @@ const PokayokeHistory = ({ machineId }) => {
     return [];
   }, [viewMode, selectedDayjs, selMonth, selYear, customStart, customEnd]);
 
-  /* ── Group logs ── */
+  /* ── Group logs ──
+     NOTE: item ROWS are built from ALL history data (not filtered by the
+     currently selected date range) so that every check point the machine
+     has ever had a submission for stays visible, regardless of which
+     day/month/year/custom range is currently selected. The date-range
+     filter (colKeySet) is only used to decide whether a particular
+     submission gets attached to a visible day-cell — it no longer decides
+     whether the item's row exists at all. This is what fixes items being
+     dropped from the table when their last submission falls outside the
+     selected period (e.g. "Every 8 Months" / "Every 3 Years" items). */
   const grouped = useMemo(() => {
     const colKeySet = new Set(columns.map((c) => c.key));
     const map = {};
     for (const log of historyData) {
       const ymd = toYMD(new Date(log.completed_at));
-      if (!colKeySet.has(ymd)) continue;
       const cid   = String(log.checklist_id);
       const cName = log.checklist_name ?? `Checklist #${cid}`;
       if (!map[cid]) map[cid] = { id: cid, name: cName, items: {} };
       const logTs = new Date(log.completed_at).getTime();
+
       for (const item of (log.item_responses ?? [])) {
         if (item.response_value == null || String(item.response_value).trim() === '') continue;
 
@@ -385,6 +442,11 @@ const PokayokeHistory = ({ machineId }) => {
             submissions: {},
           };
         }
+
+        // Item row now always exists. Only attach the submission value if
+        // it falls inside the currently selected date range.
+        if (!colKeySet.has(ymd)) continue;
+
         const ex     = map[cid].items[ikey].submissions[ymd];
         const prevTs = ex ? new Date(ex._ts ?? 0).getTime() : 0;
         if (!ex || logTs > prevTs) {
@@ -634,15 +696,18 @@ const PokayokeHistory = ({ machineId }) => {
 
       {/* Day picker */}
       {viewMode === 'day' && (
-        <DatePicker
-          value={selectedDayjs}
-          onChange={(v) => v && setSelectedDayjs(v)}
-          format="DD-MM-YYYY"
-          allowClear={false}
-          suffixIcon={<CalendarOutlined style={{ color:'#1e3a5f', cursor:'pointer' }} />}
-          inputReadOnly
-          style={{ borderRadius:6, fontSize:12, width:148 }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <DatePicker
+            value={selectedDayjs}
+            onChange={(v) => v && setSelectedDayjs(v)}
+            format="DD-MM-YYYY"
+            allowClear={false}
+            suffixIcon={<CalendarOutlined style={{ color:'#1e3a5f', cursor:'pointer' }} />}
+            inputReadOnly
+            style={{ borderRadius:6, fontSize:12, width:148 }}
+          />
+          {clearFiltersButton}
+        </div>
       )}
 
       {/* Month nav */}
@@ -655,6 +720,7 @@ const PokayokeHistory = ({ machineId }) => {
           </span>
           <button onClick={() => { let m=selMonth+1,y=selYear; if(m>11){m=0;y++;} setSelMonth(m); setSelYear(y); }}
             style={{ border:'1px solid #d1d5db', borderRadius:4, background:'#fff', cursor:'pointer', padding:'2px 9px', fontSize:13 }}>›</button>
+          {clearFiltersButton}
         </div>
       )}
 
@@ -667,13 +733,34 @@ const PokayokeHistory = ({ machineId }) => {
             <span style={{ fontWeight:700, fontSize:12, color:'#1e3a5f', minWidth:40, textAlign:'center' }}>{selYear}</span>
             <button onClick={() => setSelYear((y) => y+1)}
               style={{ border:'1px solid #d1d5db', borderRadius:4, background:'#fff', cursor:'pointer', padding:'2px 9px', fontSize:13 }}>›</button>
+            {clearFiltersButton}
           </div>
-          {/* Inline month color legend for year view */}
+          {/* Inline month color legend for year view — click to scroll */}
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            {MONTH_COLORS.map((m) => (
-              <span key={m.label} style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, color:'#374151' }}>
-                <span style={{ width:10, height:10, borderRadius:2, background:m.bg, display:'inline-block' }} /> {m.label}
-              </span>
+            {MONTH_COLORS.map((m, idx) => (
+              <Tooltip key={m.label} title={`Go to ${m.label}`}>
+                <button
+                  type="button"
+                  onClick={() => scrollToMonth(idx)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    fontSize: 10,
+                    color: '#374151',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ width:10, height:10, borderRadius:2, background:m.bg, display:'inline-block' }} />
+                  {m.label}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -697,6 +784,7 @@ const PokayokeHistory = ({ machineId }) => {
             suffixIcon={<CalendarOutlined style={{ color:'#1e3a5f' }} />}
             style={{ borderRadius:6, fontSize:12, width:148 }}
           />
+          {clearFiltersButton}
         </div>
       )}
     </div>
@@ -730,15 +818,21 @@ const PokayokeHistory = ({ machineId }) => {
 
   /* ── Table ── */
   const table = (
-    <div style={{ overflowX:'auto' }}>
+    <div ref={tableScrollRef} style={{ overflow:'auto', maxHeight: 'calc(100vh - 400px)' }}>
       <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
-        <thead>
+        <thead style={{ position:'sticky', top:0, zIndex:2 }}>
           <tr>
             <th style={{ ...TH, width:40, minWidth:40, position:'sticky', left:0, zIndex:3 }}>Sl.</th>
             <th style={{ ...TH, minWidth:220, textAlign:'left', position:'sticky', left:40, zIndex:3 }}>Check Point</th>
             <th style={{ ...TH, minWidth:130 }}>Frequency</th>
             {columns.map((col) => (
-              <th key={col.key} style={colHeaderStyle(col)}>{col.day}</th>
+              <th
+                key={col.key}
+                style={colHeaderStyle(col)}
+                {...(col.isMonthStart ? { 'data-month-start': col.monthIdx } : {})}
+              >
+                {col.day}
+              </th>
             ))}
           </tr>
         </thead>
@@ -853,7 +947,9 @@ const PokayokeHistory = ({ machineId }) => {
         </div>
       </div>
       {topBar}
-      {table}
+      <div style={{ border: '2px solid #1e3a5f', borderTop: 'none', background: '#fff', overflow: 'auto' }}>
+        {table}
+      </div>
     </>
   );
 };
