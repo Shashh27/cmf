@@ -863,26 +863,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       {
 
-        key: `${prefix}/pps/machine-scheduling`,
-
-        label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link>,
-
-        icon: <AppstoreOutlined />,
-
-      },
-
-      {
-
-        key: `${prefix}/product-monitoring/planned-vs-actual`,
-
-        label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link>,
-
-        icon: <MonitorOutlined />,
-
-      },
-
-      {
-
         key: `${prefix}/recycle-bin`,
 
         label: <Link to={`${prefix}/recycle-bin`} onClick={() => setMobileDrawerOpen(false)}>Recycle Bin</Link>,
