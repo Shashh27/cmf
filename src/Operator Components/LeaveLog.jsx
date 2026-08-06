@@ -256,10 +256,14 @@ const LeaveLog = () => {
   ];
 
   return (
-    <div style={{ padding: '16px' }}>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
-          <Card title="Submit New Leave Request">
+          <Card
+            bordered={false}
+            title="Submit New Leave Request"
+            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}
+          >
             <Form form={form} layout="vertical" onFinish={handleSubmit}>
               <Row gutter={16}>
                 <Col xs={24} sm={12}>
@@ -325,7 +329,9 @@ const LeaveLog = () => {
 
         <Col xs={24} lg={14}>
           <Card
+            bordered={false}
             title="My Past Requests"
+            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}
             extra={(
               <Button
                 icon={<ReloadOutlined />}

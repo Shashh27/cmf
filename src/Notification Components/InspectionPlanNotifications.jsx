@@ -6,22 +6,11 @@ import { CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutl
 import dayjs from 'dayjs';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
+import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
+import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
+import { resolveBaseDrawingDocument } from '../Quality Management Components/InspectorComponents/drawingDocumentUtils';
 
 const { Text } = Typography;
-
-/** Helper: Matches new "Balloon document" uploads and legacy BALOON / typo baloon. */
-function isBalloonOperationDocument(d) {
-  if (!d) return false;
-  const t = String(d.document_type || '').trim().toLowerCase();
-  return t === 'baloon' || t === 'balloon' || t.includes('balloon');
-}
-
-/** Helper: PDF iframes in preview/review: hide toolbar and left thumbnail/outline pane. */
-function pdfEmbedSrcForReview(url) {
-  if (!url) return '';
-  const base = url.split('#')[0];
-  return `${base}#toolbar=0&navpanes=0&pagemode=none`;
-}
 
 const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
@@ -40,6 +29,8 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const [planDrawingUrl, setPlanDrawingUrl] = useState(null);
   const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
   const [planDrawingFileName, setPlanDrawingFileName] = useState(null);
+  const [ftpDrawingDocumentId, setFtpDrawingDocumentId] = useState(null);
+  const [ftpActiveBalloonId, setFtpActiveBalloonId] = useState(null);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -268,10 +259,7 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
 
   const ftpApproveMeasurementsDone = useMemo(() => {
     if (!ftpApproveRows?.length) return false;
-    return ftpApproveRows.every((r) => {
-      if (!Array.isArray(r.measurements) || r.measurements.length === 0) return false;
-      return r.measurements.every(m => parseNum(m) !== null);
-    });
+    return ftpApproveRows.every((r) => rowHasMeasured123(r));
   }, [ftpApproveRows]);
 
   const ftpApproveSummary = useMemo(() => {
@@ -283,18 +271,39 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     return { total, within, out, noTol, passRate };
   }, [ftpApproveDecoratedRows]);
 
+  const ftpInteractiveBalloons = useMemo(() => {
+    return (ftpApproveRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r._drawingBbox || r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
+  }, [ftpApproveRows]);
+
   const openFtpApproveModal = async (record) => {
-    let partPk = record.part_id;
+    let partPk = null;
     let opNameHint = '';
-    
-    // Resolve Part ID and Operation metadata if missing
+
     try {
-      const [pRes, opRes] = await Promise.all([
-        !partPk && record.part_number ? axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`) : Promise.resolve({ data: { id: partPk } }),
-        record.operation_id ? axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`) : Promise.resolve({ data: null })
-      ]);
-      partPk = pRes.data?.id;
-      opNameHint = opRes.data?.operation_name || '';
+      if (record.operation_id) {
+        const opRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`);
+        partPk = opRes.data?.part_id ?? null;
+        opNameHint = opRes.data?.operation_name || '';
+      }
+      if (!partPk && record.part_id) partPk = record.part_id;
+      if (!partPk && record.part_number) {
+        const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
+        partPk = pRes.data?.id;
+      }
     } catch (err) {
       console.warn('Metadata resolution failed:', err);
     }
@@ -307,13 +316,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     setFtpApproveContext({
       notificationId: record.id,
       opNo: record.op_no,
-      opName: opNameHint, 
+      opName: opNameHint,
       partNo: record.part_number,
       partId: partPk,
       orderId: record.order_id,
       operationId: record.operation_id,
       saleOrderNumber: record.sale_order_number || String(record.order_id),
-      isAck: record.is_ack
+      isAck: record.is_ack,
     });
     setFtpApproveModalOpen(true);
     setFtpApproveRows([]);
@@ -321,10 +330,11 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     setPlanDrawingUrl(null);
     setPlanDrawingFileName(null);
     setPlanDrawingIsPdf(true);
+    setFtpDrawingDocumentId(null);
+    setFtpActiveBalloonId(null);
 
     const ipid = buildFtpIpid(record.part_number, record.op_no);
     try {
-      // Ensure records exist
       try {
         await axios.post(`${QUALITY_API_BASE_URL}/quality/stage-inspection/ensure`, null, {
           params: {
@@ -341,8 +351,7 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
         console.warn('stage-inspection/ensure', ensureErr);
       }
 
-      // Fetch measurements and balloon documents
-      const [res, docsRes] = await Promise.all([
+      const [res, docsRes, partDocsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
           params: {
             part_id: partPk,
@@ -351,22 +360,39 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
             quantity_no: 1,
           },
         }),
-        axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`),
+        record.operation_id
+          ? axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`)
+          : Promise.resolve({ data: [] }),
+        axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`).catch(() => ({ data: [] })),
+        axios
+          .get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+            params: {
+              part_id: record.part_number,
+              sales_order_id: record.order_id,
+              op_no: record.op_no,
+            },
+          })
+          .catch(() => ({ data: [] })),
       ]);
 
-      setFtpApproveRows(Array.isArray(res.data) ? res.data : []);
+      const masters = Array.isArray(bocRes.data) ? bocRes.data : [];
+      const masterById = new Map(masters.map((m) => [Number(m.id), m]));
+      const stageRows = (Array.isArray(res.data) ? res.data : []).map((r) => {
+        const mid = parseMasterBocIdFromStageBbox(r.bbox);
+        const master = mid != null ? masterById.get(Number(mid)) : null;
+        return { ...r, _drawingBbox: master?.bbox || null };
+      });
+      setFtpApproveRows(stageRows);
 
-      // Handle ballooned drawing
-      const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
-      const baloonDoc = docs
-        .filter(isBalloonOperationDocument)
-        .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
+      const opDocs = Array.isArray(docsRes.data) ? docsRes.data : [];
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId } = resolveBaseDrawingDocument(opDocs, partDocs);
 
-      if (baloonDoc) {
-        const name = baloonDoc.document_name || '';
-        setPlanDrawingIsPdf(/\.pdf$/i.test(name));
+      if (url) {
+        setPlanDrawingIsPdf(isPdf);
         setPlanDrawingFileName(name || null);
-        setPlanDrawingUrl(`${QUALITY_API_BASE_URL}/operation-documents/${baloonDoc.id}/preview`);
+        setPlanDrawingUrl(url);
+        setFtpDrawingDocumentId(apiDocumentId);
       }
     } catch (err) {
       console.error(err);
@@ -428,13 +454,16 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
 
   const handleDownloadPlanDrawing = () => {
     if (!planDrawingUrl) return;
-    const id = planDrawingUrl.match(/operation-documents\/(\d+)\//)?.[1];
+    const id =
+      ftpDrawingDocumentId ??
+      planDrawingUrl.match(/(?:operation-documents|documents)\/(\d+)\//)?.[1];
     if (!id) return;
+    const endpoint = planDrawingUrl.includes('/documents/') ? 'documents' : 'operation-documents';
     const a = document.createElement('a');
-    a.href = `${QUALITY_API_BASE_URL}/operation-documents/${id}/download`;
+    a.href = `${QUALITY_API_BASE_URL}/${endpoint}/${id}/download`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.download = planDrawingFileName || `ftp_review_balloon.pdf`;
+    a.download = planDrawingFileName || `ftp_review_drawing.pdf`;
     a.click();
   };
 
@@ -770,12 +799,12 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
             )}
           </div>
 
-          {/* Right: Balloon Drawing Preview */}
+          {/* Right: Drawing View (base drawing + balloons like Measure Mode) */}
           <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Space>
                 <InfoCircleOutlined style={{ color: '#3b82f6' }} />
-                <Text strong style={{ color: '#111827', fontSize: 16 }}>Ballooned Drawing</Text>
+                <Text strong style={{ color: '#111827', fontSize: 16 }}>Drawing View</Text>
               </Space>
               {planDrawingUrl && (
                 <Button 
@@ -788,40 +817,24 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
                 </Button>
               )}
             </div>
-            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {planDrawingUrl ? (
-                planDrawingIsPdf ? (
-                  <iframe
-                    src={pdfEmbedSrcForReview(planDrawingUrl)}
-                    width="100%"
-                    height="100%"
-                    title="FTP Drawing"
-                    style={{
-                      height: 'min(72vh, 900px)',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
+            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', minHeight: 0 }}>
+              {ftpApproveLoading ? (
+                <Spin />
+              ) : planDrawingUrl || ftpDrawingDocumentId ? (
+                <div style={{ width: '100%', height: 'min(72vh, 900px)', border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', boxShadow: '0 2px 10px rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                  <InteractiveDrawing
+                    pdfId={planDrawingIsPdf ? ftpDrawingDocumentId : null}
+                    directImageSrc={!planDrawingIsPdf ? planDrawingUrl : null}
+                    pageNumber={1}
+                    balloons={ftpInteractiveBalloons}
+                    activeBalloonId={ftpActiveBalloonId}
+                    onBalloonClick={(b) => setFtpActiveBalloonId(b.id)}
+                    balloonColor="blue"
                   />
-                ) : (
-                  <img
-                    src={planDrawingUrl}
-                    alt="Ballooned drawing"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
-                  />
-                )
+                </div>
               ) : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Empty description="No balloon document found for this operation" />
+                  <Empty description="No drawing found for this operation" />
                 </div>
               )}
             </div>

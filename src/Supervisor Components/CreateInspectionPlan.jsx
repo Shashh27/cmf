@@ -161,8 +161,9 @@ const CreateInspectionPlan = () => {
   });
 
   return (
-    <div style={{ padding: '24px', background: '#f0f2f5', minHeight: 'calc(100vh - 120px)' }}>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
       <Card
+        bordered={false}
         title={
           <Space>
             <BuildOutlined style={{ color: '#1890ff' }} />
@@ -175,12 +176,12 @@ const CreateInspectionPlan = () => {
           <Input
             placeholder="Search projects by number, name or customer..."
             prefix={<SearchOutlined />}
-            style={{ width: 350 }}
+            style={{ width: 350, maxWidth: '100%' }}
             allowClear
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         }
-        style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
+        style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
           Active projects (scheduled status <Tag color="processing">active</Tag>). Open a project to build the

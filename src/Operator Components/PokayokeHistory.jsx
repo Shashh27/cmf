@@ -948,7 +948,7 @@ const PokayokeHistory = ({ machineId }) => {
         </div>
       </div>
       {topBar}
-      <div style={{ border: '2px solid #1e3a5f', borderTop: 'none', background: '#fff', overflow: 'auto' }}>
+      <div style={{ border: '2px solid #1e3a5f', background: '#fff', overflow: 'auto' }}>
         {table}
       </div>
     </>

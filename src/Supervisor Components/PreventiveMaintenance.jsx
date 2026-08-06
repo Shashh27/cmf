@@ -56,18 +56,24 @@ const PreventiveMaintenance = () => {
   ];
 
   return (
-    <Card
-      className="shadow-sm"
-      styles={{ body: { padding: '16px 20px 20px' } }}
-    >
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={tabItems}
-        size="middle"
-        style={{ marginBottom: 0, marginTop: 0 }}
-      />
-    </Card>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
+      <Card
+        bordered={false}
+        style={{
+          borderRadius: '8px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+        }}
+        styles={{ body: { padding: '16px 20px 20px' } }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          size="middle"
+          style={{ marginBottom: 0, marginTop: 0 }}
+        />
+      </Card>
+    </div>
   );
 };
 

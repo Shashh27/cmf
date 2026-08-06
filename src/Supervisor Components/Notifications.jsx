@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge, Input, Space, Modal, Tooltip, Alert, Empty, Select } from 'antd';
-import { BellOutlined, CheckOutlined, ReloadOutlined, ClearOutlined, CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge, Input, Space, Modal, Tooltip, Alert, Empty } from 'antd';
+import { BellOutlined, CheckOutlined, ReloadOutlined, CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
-import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import dayjs from 'dayjs';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
-import { parseMasterBocBboxToPdfRect } from '../Quality Management Components/InspectorComponents/bocMappers';
+import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
 import PokayokeOperationNotification from './PokayokeOperationNotification';
-import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -27,10 +26,19 @@ function isDrawingDocument(d) {
   const type = (d.document_type || '').toLowerCase();
   const name = (d.document_name || '').toLowerCase();
   const url = (d.document_url || '').toLowerCase();
+  if (
+    type.includes('video') ||
+    type.includes('3d') ||
+    /\.(mkv|mp4|avi|mov|step|stp|stl)$/i.test(url) ||
+    /\.(mkv|mp4|avi|mov|step|stp|stl)$/i.test(name)
+  ) {
+    return false;
+  }
   const isPdfFile = url.endsWith('.pdf') || type.includes('pdf');
   return (
     type.includes('2d') ||
     type.includes('drawing') ||
+    type.includes('ipid') ||
     name.includes('drawing') ||
     isPdfFile ||
     url.endsWith('.png') ||
@@ -56,20 +64,13 @@ function resolvePlanDrawing(operationDocs, partDocs) {
   const opDocs = Array.isArray(operationDocs) ? operationDocs : [];
   const partDocList = Array.isArray(partDocs) ? partDocs : [];
 
-  const balloonOp = opDocs
-    .filter(isBalloonOperationDocument)
-    .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
-  if (balloonOp) return toPlanDrawingInfo(balloonOp, 'operation-documents');
-
-  const nonBalloonOp = opDocs.filter((d) => !isBalloonOperationDocument(d));
-  const nonBalloonPart = partDocList.filter((d) => !isBalloonOperationDocument(d));
+  // Base drawing only (balloons overlay from BOC) — same as Measure Mode.
+  const filteredOp = opDocs.filter((d) => !isBalloonOperationDocument(d));
+  const filteredPart = partDocList.filter((d) => !isBalloonOperationDocument(d));
   const previewDrawing =
-    nonBalloonOp.find(isDrawingDocument) ||
-    nonBalloonPart.find(isDrawingDocument) ||
-    nonBalloonOp[0] ||
-    nonBalloonPart[0] ||
-    opDocs[0] ||
-    partDocList[0];
+    filteredOp.find(isDrawingDocument) ||
+    filteredPart.find(isDrawingDocument) ||
+    null;
 
   if (!previewDrawing) {
     return { url: null, isPdf: false, name: '', apiDocumentId: null, endpoint: null };
@@ -107,12 +108,6 @@ const Notifications = () => {
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
   const [query, setQuery] = useState('');
   const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
-  const [productionMachineFilter, setProductionMachineFilter] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [parts, setParts] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [selectedParts, setSelectedParts] = useState([]);
-  const [selectedOperations, setSelectedOperations] = useState([]);
 
   // FTP Modal States
   const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
@@ -122,6 +117,8 @@ const Notifications = () => {
   const [planDrawingUrl, setPlanDrawingUrl] = useState(null);
   const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
   const [planDrawingFileName, setPlanDrawingFileName] = useState(null);
+  const [ftpDrawingDocumentId, setFtpDrawingDocumentId] = useState(null);
+  const [ftpActiveBalloonId, setFtpActiveBalloonId] = useState(null);
 
   const [planViewOpen, setPlanViewOpen] = useState(false);
   const [planViewLoading, setPlanViewLoading] = useState(false);
@@ -147,48 +144,6 @@ const Notifications = () => {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [activeTab]);
-
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        const res = await authFetch(`${API_BASE_URL}/orders/`);
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(Array.isArray(data) ? data : []);
-        }
-      } catch (e) {
-        console.error('Error fetching orders:', e);
-      }
-    };
-    fetchOrders();
-  }, []);
-
-  const selectedSaleOrder = useMemo(() => {
-    if (!selectedProjectId) return null;
-    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
-  }, [selectedProjectId, orders]);
-
-  const handleProjectChange = (orderId) => {
-    setSelectedProjectId(orderId);
-    setSelectedParts([]);
-    setSelectedOperations([]);
-    setParts([]);
-    setPagination((prev) => ({ ...prev, current: 1 }));
-
-    if (!orderId) return;
-
-    const order = orders.find((o) => o.id === orderId);
-    const saleOrder = order?.sale_order_number;
-    if (!saleOrder) return;
-
-    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((d) => {
-        const list = Array.isArray(d) ? d : (d.parts || []);
-        setParts(list);
-      })
-      .catch(() => setParts([]));
-  };
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -234,21 +189,16 @@ const Notifications = () => {
         // Filter to show all logs related to supervisor:
         // - logs where supervisor hasn't responded yet (supervisor_id is null)
         // - logs where supervisor has responded (supervisor_id matches current supervisor)
-        // - logs reviewed via user_id (MC/supervisor as reviewer)
-        // and has operator submission (new produced and/or rework submit)
-        const supervisorLogs = (data || []).filter((log) => {
-          const noSupervisorAssigned =
-            log.supervisor_id === null || log.supervisor_id === undefined;
-          const matchesSupervisor =
-            String(log.supervisor_id) === String(supervisorId) ||
-            String(log.user_id) === String(supervisorId);
-          const hasSubmission = (log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0;
-          return (noSupervisorAssigned || matchesSupervisor) && hasSubmission;
-        });
+        // and produced_quantity > 0
+        const supervisorLogs = (data || []).filter(
+          log => ((log.supervisor_id === null || log.supervisor_id === undefined) ||
+                 String(log.supervisor_id) === String(supervisorId)) &&
+                 (log.produced_quantity || 0) > 0
+        );
         // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorLogs.sort((a, b) => {
-          const isAckA = a.supervisor_acknowledged_at || a.acknowledged_at || a.acknowledged;
-          const isAckB = b.supervisor_acknowledged_at || b.acknowledged_at || b.acknowledged;
+          const isAckA = a.supervisor_acknowledged_at || a.acknowledged;
+          const isAckB = b.supervisor_acknowledged_at || b.acknowledged;
           // Unacknowledged (false) comes before acknowledged (true)
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
@@ -277,34 +227,23 @@ const Notifications = () => {
       // Add to acknowledging set to disable button
       setAcknowledgingIds(prev => new Set(prev).add(logId));
 
-      // Get user ID from localStorage
+      // Get supervisor ID from localStorage
       const storedUser = localStorage.getItem('user');
-      let userId = null;
+      let supervisorId = null;
       if (storedUser) {
         try {
           const user = JSON.parse(storedUser);
-          userId = user.id ?? user.user_id ?? user.userId ?? null;
+          supervisorId = user.id;
         } catch (e) {
           console.error("Error parsing user from local storage", e);
         }
       }
-      if (!userId) userId = localStorage.getItem('supervisor_id') || localStorage.getItem('user_id');
+      if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
 
-      if (!userId) {
-        message.error('User not found in session. Please log in again.');
-        setAcknowledgingIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(logId);
-          return newSet;
-        });
-        return;
-      }
-
-      // Call the PUT endpoint for acknowledgment with user_id as query parameter
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${logId}/acknowledge?user_id=${userId}`, {
+      // Call the PUT endpoint for acknowledgment with supervisor_id as query parameter
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${logId}/acknowledge?supervisor_id=${supervisorId}`, {
         method: 'PUT',
         headers: {
-          accept: 'application/json',
           'Content-Type': 'application/json',
         },
       });
@@ -419,13 +358,21 @@ const Notifications = () => {
 
     const opNo = Number(record.op_no);
     try {
-      let partPk = record.part_id;
+      // Prefer OMS part id from the operation (handles duplicate part_number rows).
+      let partPk = null;
+      let opName = '';
+      if (record.operation_id) {
+        const opRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`);
+        partPk = opRes.data?.part_id ?? null;
+        opName = opRes.data?.operation_name || '';
+      }
+      if (!partPk && record.part_id) partPk = record.part_id;
       if (!partPk && record.part_number) {
         const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
         partPk = pRes.data?.id;
       }
 
-      const [opDocsRes, partDocsRes, bocRes, opRes] = await Promise.all([
+      const [opDocsRes, partDocsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`),
         partPk
           ? axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`)
@@ -437,10 +384,8 @@ const Notifications = () => {
             op_no: Number.isFinite(opNo) ? opNo : undefined,
           },
         }),
-        axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`),
       ]);
 
-      const opName = opRes.data?.operation_name || '';
       setPlanViewMeta((prev) => (prev ? { ...prev, opName } : prev));
 
       const opDocs = Array.isArray(opDocsRes.data) ? opDocsRes.data : [];
@@ -483,33 +428,38 @@ const Notifications = () => {
   const handleOpenQmsSoftware = async (record) => {
     const hideLoading = message.loading('Resolving project details...', 0);
     try {
-      // 1. Resolve Part ID if missing
-      let partPk = record.part_id;
+      // Prefer OMS part id from the operation (handles duplicate part_number rows).
+      let partPk = null;
+      let op = null;
+      if (record.operation_id) {
+        const opRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`);
+        op = opRes.data;
+        partPk = op?.part_id ?? null;
+      }
+      if (!partPk && record.part_id) partPk = record.part_id;
       if (!partPk && record.part_number) {
         const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
         partPk = pRes.data?.id;
       }
       if (!partPk) throw new Error('Could not resolve Part ID');
 
-      // 2. Resolve Operation + Drawing Details
-      const [opRes, docsRes] = await Promise.all([
-        axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`),
-        axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`)
-      ]);
-      const op = opRes.data;
+      const docsRes = await axios.get(
+        `${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`,
+      );
       const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
+      let partDocs = [];
+      try {
+        const pdRes = await axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`);
+        partDocs = Array.isArray(pdRes.data) ? pdRes.data : [];
+      } catch {
+        partDocs = [];
+      }
 
-      // 3. Find 2D Drawing
-      const isDrawing = (d) => {
-        const type = (d.document_type || "").toLowerCase();
-        const name = (d.document_name || "").toLowerCase();
-        return type.includes('2d') || type.includes('drawing') || name.includes('drawing') || name.endsWith('.pdf');
-      };
-      const drawing = docs.find(isDrawing) || docs[0];
-      const drawingUrl = drawing ? `${QUALITY_API_BASE_URL}/operation-documents/${drawing.id}/preview` : '';
-      const isPdf = drawing ? (drawing.document_name || '').toLowerCase().endsWith('.pdf') : false;
+      const drawing = resolvePlanDrawing(docs, partDocs);
+      const drawingUrl = drawing.url || '';
+      const isPdf = drawing.isPdf;
 
-      // 4. Resolve Project Name (via Part -> Product)
+      // Resolve Project Name (via Part -> Product)
       let projectName = 'PROJECT';
       try {
         const partDetails = await axios.get(`${QUALITY_API_BASE_URL}/parts/${partPk}`);
@@ -530,10 +480,10 @@ const Notifications = () => {
         operationNumber: String(record.op_no),
         drawingUrl,
         isPdf: String(isPdf),
-        fileName: drawing?.document_name || 'Drawing',
+        fileName: drawing?.name || 'Drawing',
         mode: 'PLAN'
       });
-      if (drawing?.id) qs.set('documentId', String(drawing.id));
+      if (drawing?.apiDocumentId) qs.set('documentId', String(drawing.apiDocumentId));
       if (record.operation_id) qs.set('operationId', String(record.operation_id));
 
       const path = window.location.pathname.startsWith('/supervisor') ? '/supervisor/qms-inspector' : '/admin/qms-inspector';
@@ -629,12 +579,10 @@ const Notifications = () => {
     return ftpApproveRows.every((r) => !rowHasMeasured123(r));
   }, [ftpApproveRows]);
 
+  // Match measure mode: at least one numeric reading per characteristic.
   const ftpApproveMeasurementsDone = useMemo(() => {
     if (!ftpApproveRows?.length) return false;
-    return ftpApproveRows.every((r) => {
-      if (!Array.isArray(r.measurements) || r.measurements.length === 0) return false;
-      return r.measurements.every(m => parseNum(m) !== null);
-    });
+    return ftpApproveRows.every((r) => rowHasMeasured123(r));
   }, [ftpApproveRows]);
 
   const ftpApproveSummary = useMemo(() => {
@@ -646,17 +594,41 @@ const Notifications = () => {
     return { total, within, out, noTol, passRate };
   }, [ftpApproveDecoratedRows]);
 
+  const ftpInteractiveBalloons = useMemo(() => {
+    return (ftpApproveRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r._drawingBbox || r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
+  }, [ftpApproveRows]);
+
   const openFtpApproveModal = async (record) => {
-    let partPk = record.part_id;
+    // Prefer operation.part_id (same PK measure mode uses). Never trust part-number alone —
+    // duplicate part_number rows can point at empty stage_inspection sets.
+    let partPk = null;
     let opNameHint = '';
-    
+
     try {
-      const [pRes, opRes] = await Promise.all([
-        !partPk && record.part_number ? axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`) : Promise.resolve({ data: { id: partPk } }),
-        record.operation_id ? axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`) : Promise.resolve({ data: null })
-      ]);
-      partPk = pRes.data?.id;
-      opNameHint = opRes.data?.operation_name || '';
+      if (record.operation_id) {
+        const opRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`);
+        partPk = opRes.data?.part_id ?? null;
+        opNameHint = opRes.data?.operation_name || '';
+      }
+      if (!partPk && record.part_id) partPk = record.part_id;
+      if (!partPk && record.part_number) {
+        const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
+        partPk = pRes.data?.id;
+      }
     } catch (err) {
       console.warn('Metadata resolution failed:', err);
     }
@@ -669,13 +641,13 @@ const Notifications = () => {
     setFtpApproveContext({
       notificationId: record.id,
       opNo: record.op_no,
-      opName: opNameHint, 
+      opName: opNameHint,
       partNo: record.part_number,
       partId: partPk,
       orderId: record.order_id,
       operationId: record.operation_id,
       saleOrderNumber: record.sale_order_number || String(record.order_id),
-      isAck: record.is_ack
+      isAck: record.is_ack,
     });
     setFtpApproveModalOpen(true);
     setFtpApproveRows([]);
@@ -683,6 +655,8 @@ const Notifications = () => {
     setPlanDrawingUrl(null);
     setPlanDrawingFileName(null);
     setPlanDrawingIsPdf(true);
+    setFtpDrawingDocumentId(null);
+    setFtpActiveBalloonId(null);
 
     const ipid = buildFtpIpid(record.part_number, record.op_no);
     try {
@@ -702,13 +676,7 @@ const Notifications = () => {
         console.warn('stage-inspection/ensure', ensureErr);
       }
 
-      const isBalloonOperationDocument = (d) => {
-        if (!d) return false;
-        const t = String(d.document_type || '').trim().toLowerCase();
-        return t === 'baloon' || t === 'balloon' || t.includes('balloon');
-      };
-
-      const [res, docsRes] = await Promise.all([
+      const [res, docsRes, partDocsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
           params: {
             part_id: partPk,
@@ -717,21 +685,40 @@ const Notifications = () => {
             quantity_no: 1,
           },
         }),
-        axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`),
+        record.operation_id
+          ? axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`)
+          : Promise.resolve({ data: [] }),
+        axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`).catch(() => ({ data: [] })),
+        axios
+          .get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+            params: {
+              part_id: record.part_number,
+              sales_order_id: record.order_id,
+              op_no: record.op_no,
+            },
+          })
+          .catch(() => ({ data: [] })),
       ]);
 
-      setFtpApproveRows(Array.isArray(res.data) ? res.data : []);
+      // Stage rows only store {master_boc_id}; attach full drawing bbox from master BOC for balloons.
+      const masters = Array.isArray(bocRes.data) ? bocRes.data : [];
+      const masterById = new Map(masters.map((m) => [Number(m.id), m]));
+      const stageRows = (Array.isArray(res.data) ? res.data : []).map((r) => {
+        const mid = parseMasterBocIdFromStageBbox(r.bbox);
+        const master = mid != null ? masterById.get(Number(mid)) : null;
+        return { ...r, _drawingBbox: master?.bbox || null };
+      });
+      setFtpApproveRows(stageRows);
 
-      const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
-      const baloonDoc = docs
-        .filter(isBalloonOperationDocument)
-        .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
+      const opDocs = Array.isArray(docsRes.data) ? docsRes.data : [];
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId } = resolvePlanDrawing(opDocs, partDocs);
 
-      if (baloonDoc) {
-        const name = baloonDoc.document_name || '';
-        setPlanDrawingIsPdf(/\.pdf$/i.test(name));
+      if (url) {
+        setPlanDrawingIsPdf(isPdf);
         setPlanDrawingFileName(name || null);
-        setPlanDrawingUrl(`${QUALITY_API_BASE_URL}/operation-documents/${baloonDoc.id}/preview`);
+        setPlanDrawingUrl(url);
+        setFtpDrawingDocumentId(apiDocumentId);
       }
     } catch (err) {
       console.error(err);
@@ -791,13 +778,16 @@ const Notifications = () => {
 
   const handleDownloadPlanDrawing = () => {
     if (!planDrawingUrl) return;
-    const id = planDrawingUrl.match(/operation-documents\/(\d+)\//)?.[1];
+    const id =
+      ftpDrawingDocumentId ??
+      planDrawingUrl.match(/(?:operation-documents|documents)\/(\d+)\//)?.[1];
     if (!id) return;
+    const endpoint = planDrawingUrl.includes('/documents/') ? 'documents' : 'operation-documents';
     const a = document.createElement('a');
-    a.href = `${QUALITY_API_BASE_URL}/operation-documents/${id}/download`;
+    a.href = `${QUALITY_API_BASE_URL}/${endpoint}/${id}/download`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.download = planDrawingFileName || `ftp_review_balloon.pdf`;
+    a.download = planDrawingFileName || `ftp_review_drawing.pdf`;
     a.click();
   };
 
@@ -866,82 +856,13 @@ const Notifications = () => {
     }
   };
 
-  const productionMachineOptions = useMemo(() => {
-    const machineMap = new Map();
-    notifications.forEach((record) => {
-      const machine = record.machine;
-      if (machine && machine.id !== undefined && machine.id !== null && !machineMap.has(machine.id)) {
-        const label = [machine.make, machine.model].filter(Boolean).join(' - ') || `Machine ${machine.id}`;
-        machineMap.set(machine.id, label);
-      }
-    });
-    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
-  }, [notifications]);
-
-  const productionOperationOptions = useMemo(() => {
-    const opMap = new Map();
-    notifications.forEach((record) => {
-      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return;
-      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return;
-
-      const opNum = record.operation?.operation_number;
-      if (opNum === undefined || opNum === null || opMap.has(opNum)) return;
-
-      const opName = record.operation?.operation_name;
-      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
-      opMap.set(opNum, label);
-    });
-    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
-  }, [notifications, selectedSaleOrder, selectedParts]);
-
-  const filteredNotifications = useMemo(() => {
-    return notifications.filter((record) => {
-      if (productionMachineFilter.length > 0) {
-        if (!record.machine?.id || !productionMachineFilter.includes(record.machine.id)) {
-          return false;
-        }
-      }
-
-      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) {
-        return false;
-      }
-
-      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) {
-        return false;
-      }
-
-      if (selectedOperations.length > 0 && !selectedOperations.includes(record.operation?.operation_number)) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [notifications, productionMachineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
-
-  const hasProductionFilters = useMemo(() => (
-    productionMachineFilter.length > 0 ||
-    selectedProjectId != null ||
-    selectedParts.length > 0 ||
-    selectedOperations.length > 0
-  ), [productionMachineFilter, selectedProjectId, selectedParts, selectedOperations]);
-
-  const clearProductionFilters = () => {
-    setProductionMachineFilter([]);
-    setSelectedProjectId(null);
-    setSelectedParts([]);
-    setSelectedOperations([]);
-    setParts([]);
-    setPagination((prev) => ({ ...prev, current: 1 }));
-  };
-
   const columns = [
     {
       title: 'Sl\nNo',
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) =>
-        (pagination.current - 1) * pagination.pageSize + index + 1,
+      render: (text, record, index) => index + 1,
     },
     {
       title: 'Project\nDetails',
@@ -1041,53 +962,19 @@ const Notifications = () => {
       title: 'Part\nQty',
       key: 'partQuantity',
       align: 'center',
-      width: 70,
-      render: (text, record) => {
-        const total = record.operation?.part?.quantity || 0;
-        const remaining = record.remaining_to_close;
-        return (
-          <div style={{ fontSize: 12 }}>
-            <div style={{ fontWeight: 'bold' }}>{total}</div>
-            {remaining !== null && remaining !== undefined && (
-              <div style={{ color: remaining === 0 ? '#52c41a' : '#1677ff', fontSize: 11 }}>
-                Left: {remaining}
-              </div>
-            )}
-          </div>
-        );
-      },
+      width: 60,
+      render: (text, record) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{record.operation?.part?.quantity || 0}</span>
+      ),
     },
     {
-      title: 'New\nProduced',
+      title: 'Produced\nQty',
       dataIndex: 'produced_quantity',
       key: 'producedQuantity',
       align: 'center',
-      width: 70,
+      width: 80,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text ?? 0}</span>
-      ),
-    },
-    {
-      title: 'Rework\nSubmit',
-      dataIndex: 'operator_rework_quantity',
-      key: 'operatorReworkQuantity',
-      align: 'center',
-      width: 70,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
-          {text ?? 0}
-        </span>
-      ),
-    },
-    {
-      title: 'Presented',
-      key: 'presented',
-      align: 'center',
-      width: 70,
-      render: (_, record) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>
-          {(record.produced_quantity || 0) + (record.operator_rework_quantity || 0)}
-        </span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
       ),
     },
     {
@@ -1095,48 +982,29 @@ const Notifications = () => {
       dataIndex: 'approved_quantity',
       key: 'approvedQuantity',
       align: 'center',
-      width: 70,
+      width: 80,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#52c41a' : undefined }}>
-          {text ?? '-'}
-        </span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
       ),
     },
     {
-      title: 'Rework\n(rev.)',
+      title: 'Rework\nQty',
       dataIndex: 'rework_quantity',
       key: 'reworkQuantity',
       align: 'center',
-      width: 70,
+      width: 80,
       render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#FA8C16' : undefined }}>
-          {text ?? '-'}
-        </span>
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
       ),
     },
     {
-      title: 'Rejected',
+      title: 'Rejected\nQty',
       dataIndex: 'rejected_quantity',
       key: 'rejectedQuantity',
       align: 'center',
-      width: 70,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px', color: text > 0 ? '#ff4d4f' : undefined }}>
-          {text ?? '-'}
-        </span>
-      ),
-    },
-    {
-      title: 'Due',
-      key: 'ledgerDue',
-      align: 'center',
       width: 80,
-      render: (_, record) => (
-        <div style={{ fontSize: 11 }}>
-          {(record.rework_due > 0) && <div style={{ color: '#FA8C16' }}>Rw: {record.rework_due}</div>}
-          {(record.reject_due > 0) && <div style={{ color: '#ff4d4f' }}>Rej: {record.reject_due}</div>}
-          {!record.rework_due && !record.reject_due && <span>-</span>}
-        </div>
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
       ),
     },
     {
@@ -1148,33 +1016,20 @@ const Notifications = () => {
       render: (text) => text || '-',
     },
     {
-      title: 'Approved By',
-      key: 'approvedBy',
-      align: 'center',
-      width: 100,
-      sorter: (a, b) => {
-        const nameA = a.supervisor?.user_name || a.reviewer?.user_name || '';
-        const nameB = b.supervisor?.user_name || b.reviewer?.user_name || '';
-        return nameA.localeCompare(nameB);
-      },
-      render: (_text, record) =>
-        record.supervisor?.user_name || record.reviewer?.user_name || 'N/A',
-    },
-    {
       title: 'Acknowledged At',
+      dataIndex: 'supervisor_acknowledged_at',
       key: 'acknowledgedAt',
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = new Date(a.acknowledged_at || a.supervisor_acknowledged_at || 0);
-        const dateB = new Date(b.acknowledged_at || b.supervisor_acknowledged_at || 0);
+        const dateA = new Date(a.supervisor_acknowledged_at);
+        const dateB = new Date(b.supervisor_acknowledged_at);
         return dateA - dateB;
       },
-      render: (_text, record) => {
-        const value = record.acknowledged_at || record.supervisor_acknowledged_at;
-        if (!value) return 'N/A';
+      render: (text) => {
+        if (!text) return 'N/A';
         try {
-          const date = new Date(value);
+          const date = new Date(text);
           return date.toLocaleString('en-GB', {
             day: '2-digit',
             month: '2-digit',
@@ -1195,26 +1050,17 @@ const Notifications = () => {
       align: 'center',
       width: 50,
       fixed: 'right',
-      render: (text, record) => {
-        const approvedByName = record.supervisor?.user_name || record.reviewer?.user_name;
-        return (
-          <Button
-            type="primary"
-            icon={<CheckOutlined />}
-            size="small"
-            onClick={() => handleAcknowledge(record.id)}
-            disabled={
-              Boolean(approvedByName) ||
-              record.supervisor_acknowledged_at ||
-              record.acknowledged_at ||
-              record.acknowledged ||
-              acknowledgingIds.has(record.id)
-            }
-          >
-            Acknowledge
-          </Button>
-        );
-      },
+      render: (text, record) => (
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          size="small"
+          onClick={() => handleAcknowledge(record.id)}
+          disabled={record.supervisor_acknowledged_at || record.acknowledged || acknowledgingIds.has(record.id)}
+        >
+          Acknowledge
+        </Button>
+      ),
     },
   ];
 
@@ -1229,38 +1075,29 @@ const Notifications = () => {
       title: 'Order',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
-      sorter: (a, b) =>
-        String(a.sale_order_number || a.order_id || '').localeCompare(
-          String(b.sale_order_number || b.order_id || '')
-        ),
       render: (text, record) => text || `ID ${record.order_id}`,
     },
     {
       title: 'Part',
       dataIndex: 'part_number',
       key: 'part_number',
-      sorter: (a, b) => String(a.part_number || '').localeCompare(String(b.part_number || '')),
     },
     {
-      title: 'OP NO',
+      title: 'OP',
       dataIndex: 'op_no',
       key: 'op_no',
       width: 60,
-      sorter: (a, b) => (Number(a.op_no) || 0) - (Number(b.op_no) || 0),
     },
     {
       title: 'Requested by',
       dataIndex: 'requested_by_username',
       key: 'requested_by_username',
-      sorter: (a, b) =>
-        String(a.requested_by_username || '').localeCompare(String(b.requested_by_username || '')),
       render: (t) => t || '—',
     },
     {
       title: 'Created',
       dataIndex: 'created_at',
       key: 'created_at',
-      sorter: (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
       render: (text) => (text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '—'),
     },
   ];
@@ -1268,11 +1105,10 @@ const Notifications = () => {
   const planColumns = [
     ...inspectionCommonColumns,
     {
-      title: 'Approved by',
+      title: 'Approved by Name',
       dataIndex: 'ack_by',
       key: 'ack_by',
       width: 150,
-      sorter: (a, b) => String(a.ack_by || '').localeCompare(String(b.ack_by || '')),
       render: (t) => t || '—',
     },
     {
@@ -1280,7 +1116,6 @@ const Notifications = () => {
       dataIndex: 'ack_at',
       key: 'ack_at',
       width: 150,
-      sorter: (a, b) => new Date(a.ack_at || 0).getTime() - new Date(b.ack_at || 0).getTime(),
       render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
     },
     {
@@ -1288,11 +1123,6 @@ const Notifications = () => {
       dataIndex: 'is_ack',
       key: 'is_ack',
       width: 120,
-      filters: [
-        { text: 'Pending', value: false },
-        { text: 'Acknowledged', value: true },
-      ],
-      onFilter: (value, record) => !!record.is_ack === value,
       render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Acknowledged' : 'Pending'}</Tag>,
     },
     {
@@ -1315,28 +1145,21 @@ const Notifications = () => {
   const ftpColumns = [
     ...inspectionCommonColumns,
     {
-      title: 'Approved by',
+      title: 'Approved by Name',
       dataIndex: 'ack_by',
       key: 'ack_by',
-      sorter: (a, b) => String(a.ack_by || '').localeCompare(String(b.ack_by || '')),
       render: (t) => t || '—',
     },
     {
       title: 'Approved At',
       dataIndex: 'ack_at',
       key: 'ack_at',
-      sorter: (a, b) => new Date(a.ack_at || 0).getTime() - new Date(b.ack_at || 0).getTime(),
       render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
     },
     {
       title: 'Status',
       dataIndex: 'is_ack',
       key: 'is_ack',
-      filters: [
-        { text: 'Pending Review', value: false },
-        { text: 'Approved', value: true },
-      ],
-      onFilter: (value, record) => !!record.is_ack === value,
       render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Approved' : 'Pending Review'}</Tag>,
     },
     {
@@ -1359,17 +1182,164 @@ const Notifications = () => {
     },
   ];
 
+  const pokayokeColumns = [
+    {
+      title: 'Sl\nNo',
+      key: 'slNo',
+      align: 'center',
+      width: 50,
+      render: (text, record, index) => index + 1,
+    },
+    {
+      title: 'Checklist\nName',
+      dataIndex: 'checklist_name',
+      key: 'checklistName',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => (a.checklist_name || '').localeCompare(b.checklist_name || ''),
+    },
+    {
+      title: 'Machine\nName',
+      dataIndex: 'machine_name',
+      key: 'machineName',
+      align: 'center',
+      width: 100,
+    },
+    {
+      title: 'Operator\nName',
+      dataIndex: 'operator_name',
+      key: 'operatorName',
+      align: 'center',
+      width: 100,
+    },
+    {
+      title: 'Completed\nAt',
+      dataIndex: 'completed_at',
+      key: 'completedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return dateA - dateB;
+      },
+      render: (text) => {
+        if (!text) return 'N/A';
+        try {
+          const date = new Date(text);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
+    },
+    {
+      title: 'Overall\nStatus',
+      dataIndex: 'overall_status',
+      key: 'overallStatus',
+      align: 'center',
+      width: 80,
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+      ],
+      onFilter: (value, record) => record.overall_status?.toLowerCase() === value,
+      render: (text) => (
+        <Tag color={getStatusColor(text)}>
+          {(text || 'N/A').toUpperCase()}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Acknowledged\nAt',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = a.supervisor_acknowledged_at ? new Date(a.supervisor_acknowledged_at).getTime() : 0;
+        const dateB = b.supervisor_acknowledged_at ? new Date(b.supervisor_acknowledged_at).getTime() : 0;
+        return dateA - dateB;
+      },
+      render: (_, record) => {
+        if (!record.supervisor_acknowledged_at) return 'N/A';
+        try {
+          const date = new Date(record.supervisor_acknowledged_at);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      align: 'center',
+      width: 50,
+      fixed: 'right',
+      render: (text, record) => (
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          size="small"
+          onClick={() => handlePokayokeAcknowledge(record.log_id)}
+          disabled={record.supervisor_acknowledged || acknowledgingIds.has(record.log_id)}
+        >
+          Acknowledge
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div style={{ padding: '16px' }}>
-      <style>{`
-        .modern-table .ant-table-thead > tr > th {
-          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
-          font-weight: 600;
-          border-bottom: 2px solid #1890ff;
-        }
-        .modern-table .ant-table-tbody > tr:hover > td { background: #f0f8ff !important; }
-        .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
-      `}</style>
+      {/* Header Card */}
+      <Card
+        style={{ borderRadius: 8, marginBottom: '16px' }}
+        styles={{ body: { padding: '16px' } }}
+      >
+        <Row justify="space-between" align="middle">
+          <Col>
+            <div>
+              <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
+                <BellOutlined /> Notifications
+              </Title>
+              <Text type="secondary">
+                View and acknowledge notifications from operators
+              </Text>
+            </div>
+          </Col>
+          <Col>
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              size="large"
+              onClick={() => {
+                fetchNotifications();
+                fetchInspectionNotifications();
+              }}
+            >
+              Refresh
+            </Button>
+          </Col>
+        </Row>
+      </Card>
 
       {/* Tabs Section */}
       <Card
@@ -1388,92 +1358,9 @@ const Notifications = () => {
               label: 'Production Logs',
               children: (
                 <Spin spinning={loading}>
-                  <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
-                    <Space wrap>
-                      <Select
-                        mode="multiple"
-                        showSearch
-                        allowClear
-                        placeholder="Filter by machine"
-                        style={{ minWidth: 220, maxWidth: 320 }}
-                        value={productionMachineFilter}
-                        onChange={(value) => {
-                          setProductionMachineFilter(value || []);
-                          setPagination((prev) => ({ ...prev, current: 1 }));
-                        }}
-                        options={productionMachineOptions}
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                      />
-                      <Select
-                        placeholder="Select Project"
-                        showSearch
-                        allowClear
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                        value={selectedProjectId}
-                        onChange={handleProjectChange}
-                        style={{ minWidth: 180 }}
-                        options={orders.map((o) => ({
-                          value: o.id,
-                          label: o.sale_order_number || `Order ${o.id}`,
-                        }))}
-                      />
-                      <Select
-                        mode="multiple"
-                        placeholder="Select Parts"
-                        showSearch
-                        allowClear
-                        disabled={!selectedProjectId}
-                        maxTagCount={1}
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                        value={selectedParts}
-                        onChange={(val) => {
-                          setSelectedParts(val);
-                          setSelectedOperations([]);
-                          setPagination((prev) => ({ ...prev, current: 1 }));
-                        }}
-                        style={{ minWidth: 220, maxWidth: 320 }}
-                        options={parts.map((p) => ({
-                          value: p.part_number,
-                          label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
-                        }))}
-                      />
-                      <Select
-                        mode="multiple"
-                        placeholder="Select Operations"
-                        showSearch
-                        allowClear
-                        disabled={!selectedProjectId}
-                        maxTagCount={1}
-                        filterOption={(input, option) =>
-                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                        }
-                        value={selectedOperations}
-                        onChange={(val) => {
-                          setSelectedOperations(val);
-                          setPagination((prev) => ({ ...prev, current: 1 }));
-                        }}
-                        style={{ minWidth: 220, maxWidth: 320 }}
-                        options={productionOperationOptions}
-                      />
-                      {hasProductionFilters && (
-                        <Button icon={<ClearOutlined />} onClick={clearProductionFilters}>
-                          Clear
-                        </Button>
-                      )}
-                    </Space>
-                    <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
-                      Refresh
-                    </Button>
-                  </div>
                   <Table
                     columns={columns}
-                    dataSource={filteredNotifications}
+                    dataSource={notifications}
                     rowKey="id"
                     pagination={{
                       current: pagination.current,
@@ -1521,7 +1408,6 @@ const Notifications = () => {
                   </div>
                   <Spin spinning={inspectionLoading}>
                     <Table
-                      className="modern-table"
                       rowKey="id"
                       dataSource={planRequests}
                       columns={planColumns}
@@ -1552,7 +1438,6 @@ const Notifications = () => {
                   </div>
                   <Spin spinning={inspectionLoading}>
                     <Table
-                      className="modern-table"
                       rowKey="id"
                       dataSource={ftpRequests}
                       columns={ftpColumns}
@@ -1827,12 +1712,12 @@ const Notifications = () => {
             )}
           </div>
 
-          {/* Right: Balloon Drawing Preview */}
+          {/* Right: Drawing View (base drawing + balloons like Measure Mode) */}
           <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Space>
                 <InfoCircleOutlined style={{ color: '#3b82f6' }} />
-                <Text strong style={{ color: '#111827', fontSize: 16 }}>Ballooned Drawing</Text>
+                <Text strong style={{ color: '#111827', fontSize: 16 }}>Drawing View</Text>
               </Space>
               {planDrawingUrl && (
                 <Button 
@@ -1845,40 +1730,24 @@ const Notifications = () => {
                 </Button>
               )}
             </div>
-            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {planDrawingUrl ? (
-                planDrawingIsPdf ? (
-                  <iframe
-                    src={pdfEmbedSrcForReview(planDrawingUrl)}
-                    width="100%"
-                    height="100%"
-                    title="FTP Drawing"
-                    style={{
-                      height: 'min(72vh, 900px)',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
+            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', minHeight: 0 }}>
+              {ftpApproveLoading ? (
+                <Spin />
+              ) : planDrawingUrl || ftpDrawingDocumentId ? (
+                <div style={{ width: '100%', height: 'min(72vh, 900px)', border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', boxShadow: '0 2px 10px rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                  <InteractiveDrawing
+                    pdfId={planDrawingIsPdf ? ftpDrawingDocumentId : null}
+                    directImageSrc={!planDrawingIsPdf ? planDrawingUrl : null}
+                    pageNumber={1}
+                    balloons={ftpInteractiveBalloons}
+                    activeBalloonId={ftpActiveBalloonId}
+                    onBalloonClick={(b) => setFtpActiveBalloonId(b.id)}
+                    balloonColor="blue"
                   />
-                ) : (
-                  <img
-                    src={planDrawingUrl}
-                    alt="Ballooned drawing"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
-                  />
-                )
+                </div>
               ) : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Empty description="No balloon document found for this operation" />
+                  <Empty description="No drawing found for this operation" />
                 </div>
               )}
             </div>
