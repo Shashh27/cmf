@@ -708,9 +708,9 @@ const PokaYokeChecklist = ({
       flex: 1,
       minHeight: 0,
       minWidth: 0,
-      background: '#f5f6fa',
+      background: isPage ? '#fff' : '#f5f6fa',
       overflow: 'hidden',
-      gap: 12,
+      gap: isPage ? 0 : 12,
       boxSizing: 'border-box',
     }}>
       {/* Left — checklist list */}
@@ -719,9 +719,10 @@ const PokaYokeChecklist = ({
         minWidth: 240,
         flexShrink: 0,
         background: '#fff',
-        borderRadius: 10,
-        border: '1px solid #e8eaed',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        borderRadius: isPage ? 0 : 10,
+        border: isPage ? 'none' : '1px solid #e8eaed',
+        borderRight: isPage ? '1px solid #f0f0f0' : undefined,
+        boxShadow: isPage ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -796,9 +797,9 @@ const PokaYokeChecklist = ({
         style={{
         flex: 1,
         background: '#fff',
-        borderRadius: 10,
-        border: '1px solid #e8eaed',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        borderRadius: isPage ? 0 : 10,
+        border: isPage ? 'none' : '1px solid #e8eaed',
+        boxShadow: isPage ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -1051,7 +1052,7 @@ const PokaYokeChecklist = ({
       )}
 
       <div style={{
-        padding: isPage ? '0 0 8px' : '12px 16px',
+        padding: isPage ? '14px 16px' : '12px 16px',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -1061,10 +1062,11 @@ const PokaYokeChecklist = ({
       }}>
         <div style={{
           background: '#fff',
-          border: '1px solid #e8eaed',
-          borderRadius: 10,
-          padding: '14px 16px',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+          // Page mode already wraps in one card — avoid a second bordered panel.
+          border: isPage ? 'none' : '1px solid #e8eaed',
+          borderRadius: isPage ? 0 : 10,
+          padding: isPage ? 0 : '14px 16px',
+          boxShadow: isPage ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
           flex: 1,
           minHeight: 0,
           display: 'flex',
@@ -1107,14 +1109,28 @@ const PokaYokeChecklist = ({
   if (isPage) {
     return (
       <div style={{
-        width: '100%',
-        height: 'calc(100vh - 100px)',
-        overflow: 'hidden',
+        padding: '24px',
+        background: '#f5f5f5',
+        minHeight: '100vh',
         boxSizing: 'border-box',
+        width: '100%',
         display: 'flex',
         flexDirection: 'column',
       }}>
-        {content}
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          height: 'calc(100vh - 148px)',
+          overflow: 'hidden',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          background: '#fff',
+          borderRadius: '8px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+        }}>
+          {content}
+        </div>
       </div>
     );
   }

@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Button, Select, Modal } from 'antd';
-import { SettingOutlined, LogoutOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { Minus, Plus, RefreshCw } from 'lucide-react';
 import machineSvg from '/assets/shopfloor/mch.svg';
-import { API_BASE_URL } from '../../Config/auth';
 import { getApiWsUrl } from '../../auth/apiUrl';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -93,19 +90,28 @@ const getMachineFilter = (state) => {
   return 'none';
 };
 
-// ─── Machine type zone styles (distinct from per-machine idle tooltips) ───────
-const LINE_TYPE_STYLES = {
-  MILLING:       { accent: '#0284c7', bg: 'rgba(224,242,254,0.95)', border: '#38bdf8', text: '#0c4a6e', short: 'M' },
-  TURNING:       { accent: '#059669', bg: 'rgba(209,250,229,0.95)', border: '#34d399', text: '#064e3b', short: 'T' },
-  GRINDING:      { accent: '#7c3aed', bg: 'rgba(237,233,254,0.95)', border: '#a78bfa', text: '#4c1d95', short: 'G' },
-  'DIE SINKING': { accent: '#ea580c', bg: 'rgba(255,237,213,0.95)', border: '#fb923c', text: '#7c2d12', short: 'D' },
-  DEFAULT:       { accent: '#64748b', bg: 'rgba(241,245,249,0.95)', border: '#94a3b8', text: '#334155', short: '•' },
+// ─── Work-center zone styles (labels above each work-center group) ────────────
+const WORK_CENTER_PALETTE = [
+  { accent: '#0f172a', bg: 'rgba(255,255,255,0.96)', border: '#cbd5e1', text: '#0f172a' },
+  { accent: '#0284c7', bg: 'rgba(255,255,255,0.96)', border: '#7dd3fc', text: '#0c4a6e' },
+  { accent: '#059669', bg: 'rgba(255,255,255,0.96)', border: '#6ee7b7', text: '#064e3b' },
+  { accent: '#7c3aed', bg: 'rgba(255,255,255,0.96)', border: '#c4b5fd', text: '#4c1d95' },
+  { accent: '#ea580c', bg: 'rgba(255,255,255,0.96)', border: '#fdba74', text: '#7c2d12' },
+  { accent: '#be123c', bg: 'rgba(255,255,255,0.96)', border: '#fda4af', text: '#881337' },
+];
+
+const getWorkCenterStyle = (name) => {
+  const key = (name || 'UNASSIGNED').trim().toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = ((hash << 5) - hash) + key.charCodeAt(i);
+  return WORK_CENTER_PALETTE[Math.abs(hash) % WORK_CENTER_PALETTE.length];
 };
 
-const getLineTypeStyle = (lineName) => {
-  const key = (lineName || '').trim().toUpperCase();
-  return LINE_TYPE_STYLES[key] || LINE_TYPE_STYLES.DEFAULT;
-};
+const STATUS_LEGEND = [
+  { key: 'PRODUCTION', label: 'PRODUCTION', color: '#10b981', glow: 'rgba(16,185,129,0.45)' },
+  { key: 'IDLE',       label: 'IDLE',       color: '#f59e0b', glow: 'rgba(245,158,11,0.45)' },
+  { key: 'OFF',        label: 'OFFLINE',    color: '#9ca3af', glow: 'rgba(156,163,175,0.45)' },
+];
 
 const TOOLTIP_STYLES = {
   IDLE:       { fill: 'rgba(15,23,42,0.96)', stroke: '#6b7280', text: '#ffffff', showDot: false, bounce: true },
@@ -189,35 +195,58 @@ const MachinePlatform = ({ machine, loading }) => {
 // ─── Normalise live-API record to internal shape ─────────────────────────────
 const normalizeLiveRecord = (m) => {
   const machine_state = normalizeDisplayStatus(m.status);
+  const workCenter = (m.work_center_name || m.work_center || 'Unassigned').trim();
   return {
     ...m,
     id:            m.machine_id,
     machine_name:  m.machine_name || `Machine ${m.machine_id}`,
     machine_state,
-    lineName:      (m.machine_type || 'LINE').toUpperCase(),
+    work_center_name: workCenter,
+    lineName:      workCenter.toUpperCase(),
   };
 };
 
 // ─── Position machines into isometric grid ────────────────────────────────────
-// Groups by m.lineName (machine_type from API), assigns gridU/gridV.
+// Groups by work center (lineName), assigns gridU/gridV.
 const positionMachines = (data) => {
   const { machineSpacing: spacing, lineGap, machinesPerRow: perRow } = CONFIG;
   let currentU = 0;
 
   const lineMap = new Map();
   data.forEach(m => {
-    const line = m.lineName || 'LINE';
+    const line = m.lineName || 'UNASSIGNED';
     if (!lineMap.has(line)) lineMap.set(line, []);
     lineMap.get(line).push(m);
   });
 
-  // Sort lines in specific order: MILLING, GRINDING, TURNING, DIE SINKING, then others alphabetically
-  const lineOrder = ['MILLING', 'GRINDING', 'TURNING', 'DIE SINKING'];
+  // Preferred work-center display order
+  const workCenterOrder = [
+    'MILLING',
+    'TURNING',
+    'CYLINDRICAL GRINDING',
+    'CUTTING MACHINE',
+    'DIE SINKING',
+    'SURFACE GRINDING',
+    'THREAD GRINDING',
+  ];
+  const normalizeWcKey = (name) => {
+    const n = (name || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    if (n.includes('CYLINDR') && n.includes('GRIND')) return 'CYLINDRICAL GRINDING';
+    if (n.includes('CUTTING')) return 'CUTTING MACHINE';
+    if (n.includes('DIE') && n.includes('SINK')) return 'DIE SINKING';
+    if (n.includes('SURFACE') && n.includes('GRIND')) return 'SURFACE GRINDING';
+    if (n.includes('THREAD') && n.includes('GRIND')) return 'THREAD GRINDING';
+    if (n === 'MILLING' || n.includes('MILLING')) return 'MILLING';
+    if (n === 'TURNING' || n.includes('TURNING')) return 'TURNING';
+    return n;
+  };
   const sortedLines = [...lineMap.keys()].sort((a, b) => {
-    const aNorm = a.trim().toUpperCase();
-    const bNorm = b.trim().toUpperCase();
-    const idxA = lineOrder.indexOf(aNorm);
-    const idxB = lineOrder.indexOf(bNorm);
+    const aNorm = normalizeWcKey(a);
+    const bNorm = normalizeWcKey(b);
+    if (aNorm === 'UNASSIGNED') return 1;
+    if (bNorm === 'UNASSIGNED') return -1;
+    const idxA = workCenterOrder.indexOf(aNorm);
+    const idxB = workCenterOrder.indexOf(bNorm);
     if (idxA !== -1 && idxB !== -1) return idxA - idxB;
     if (idxA !== -1) return -1;
     if (idxB !== -1) return 1;
@@ -227,6 +256,7 @@ const positionMachines = (data) => {
   const positioned = [];
   for (const lineName of sortedLines) {
     const machines = lineMap.get(lineName);
+    machines.sort((a, b) => (a.machine_name || '').localeCompare(b.machine_name || ''));
     const rows = Math.ceil(machines.length / perRow) || 1;
     machines.forEach((m, idx) => {
       const row = Math.floor(idx / perRow);
@@ -315,9 +345,11 @@ const computeLineLabels = (positioned) => {
 
 // ─── Compute tight viewBox to fit all machines ────────────────────────────────
 // Uses getMachineX/Y bounding rect + platform bottom for vertical extent.
-const computeFitViewBox = (positioned) => {
+const DEFAULT_ISO_ZOOM = 0.85;
+
+const computeFitViewBox = (positioned, absoluteZoom = DEFAULT_ISO_ZOOM) => {
   if (!positioned || positioned.length === 0) {
-    return { vb: { x: 0, y: 0, w: 1200, h: 800 }, scale: 1 };
+    return { vb: { x: 0, y: 0, w: 1200 / absoluteZoom, h: 800 / absoluteZoom }, scale: absoluteZoom };
   }
 
   let minX =  Infinity, minY =  Infinity;
@@ -338,29 +370,23 @@ const computeFitViewBox = (positioned) => {
   minX -= pad; minY -= pad;
   maxX += pad; maxY += pad;
 
-  const bw = maxX - minX;
-  const bh = maxY - minY;
-  const ar = 1200 / 800;
-
-  let fitW, fitH;
-  if (bw / bh > ar) { fitW = bw; fitH = bw / ar; }
-  else               { fitH = bh; fitW = bh * ar; }
-
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
+  const scale = Math.max(0.4, Math.min(6.0, absoluteZoom));
+  const viewW = 1200 / scale;
+  const viewH = 800 / scale;
 
   return {
-    vb: { x: cx - fitW / 2, y: cy - fitH / 2, w: fitW, h: fitH },
-    scale: 1200 / fitW,
+    vb: { x: cx - viewW / 2, y: cy - viewH / 2, w: viewW, h: viewH },
+    scale,
   };
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
 const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSelectedIds = [], liveMachines = null }) => {
-  const navigate = useNavigate();
-
   const [machines,           setMachines]           = useState([]);
   const [loading,            setLoading]            = useState(true);
+  const [isRefreshing,       setIsRefreshing]       = useState(false);
   const [viewBox,            setViewBox]            = useState({ x: 0, y: 0, w: 1200, h: 800 });
   const [zoomScale,          setZoomScale]          = useState(1.0);
   const [hoveredMachine,     setHoveredMachine]     = useState(null);
@@ -371,6 +397,8 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
   const [activeStatusFilter, setActiveStatusFilter] = useState(null);
   const [isMobile,           setIsMobile]           = useState(false);
   const svgRef = useRef(null);
+  const hasFittedRef = useRef(false);
+  const refreshFlashTimerRef = useRef(null);
 
   const computedViewBox = `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`;
 
@@ -378,11 +406,30 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
     bg: '#f1f5f9', panelBg: '#ffffff', panelBorder: '#e2e8f0',
     gridLine: 'rgba(100,116,139,0.18)',
     tooltipBg: '#1e293b', tooltipText: '#f1f5f9',
-    hudBg: 'rgba(255,255,255,0.85)', hudBorder: 'rgba(203,213,225,0.7)',
+    hudBg: 'rgba(255,255,255,0.92)', hudBorder: 'rgba(203,213,225,0.85)',
     hudText: '#475569', hudDivider: '#cbd5e1',
     fitBg: '#e0f2fe', fitText: '#0284c7',
     labelBg: '#000000', labelBorder: '#ffffff', labelText: '#ffffff',
   };
+
+  const flashRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    if (refreshFlashTimerRef.current) window.clearTimeout(refreshFlashTimerRef.current);
+    refreshFlashTimerRef.current = window.setTimeout(() => setIsRefreshing(false), 900);
+  }, []);
+
+  const applyPositioned = useCallback((positioned, { fit = false } = {}) => {
+    setMachines(positioned);
+    setLoading(false);
+    flashRefresh();
+    const shouldFit = (fit || !hasFittedRef.current) && positioned.length > 0;
+    if (shouldFit) {
+      const { vb, scale } = computeFitViewBox(positioned, DEFAULT_ISO_ZOOM);
+      setViewBox(vb);
+      setZoomScale(scale);
+      hasFittedRef.current = true;
+    }
+  }, [flashRefresh]);
 
   // ── Responsive ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -390,6 +437,10 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
     onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => () => {
+    if (refreshFlashTimerRef.current) window.clearTimeout(refreshFlashTimerRef.current);
   }, []);
 
   // ── Wheel zoom ────────────────────────────────────────────────────────────
@@ -424,11 +475,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
     if (Array.isArray(liveMachines)) {
       const data = liveMachines.map(normalizeLiveRecord);
       const positioned = positionMachines(data);
-      const { vb, scale } = computeFitViewBox(positioned);
-      setMachines(positioned);
-      setViewBox(vb);
-      setZoomScale(scale);
-      setLoading(false);
+      applyPositioned(positioned, { fit: !hasFittedRef.current });
       return undefined;
     }
 
@@ -440,11 +487,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
       const list = Array.isArray(raw) ? raw : [];
       const data = list.map(normalizeLiveRecord);
       const positioned = positionMachines(data);
-      const { vb, scale } = computeFitViewBox(positioned);
-      setMachines(positioned);
-      setViewBox(vb);
-      setZoomScale(scale);
-      setLoading(false);
+      applyPositioned(positioned, { fit: !hasFittedRef.current });
     };
 
     const connectSocket = () => {
@@ -476,7 +519,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
       if (fallbackTimer) window.clearTimeout(fallbackTimer);
       if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
     };
-  }, [liveMachines]);
+  }, [liveMachines, applyPositioned]);
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const filteredMachines = useMemo(() => {
@@ -541,7 +584,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
   const zoomOut = () => zoomToScale(zoomScale / 1.25);
 
   const fitView = useCallback(() => {
-    const { vb, scale } = computeFitViewBox(machines);
+    const { vb, scale } = computeFitViewBox(machines, DEFAULT_ISO_ZOOM);
     setViewBox(vb);
     setZoomScale(scale);
   }, [machines]);
@@ -572,8 +615,11 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100vh',
-      background: '#f1f5f9', padding: isMobile ? 8 : 12, boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column',
+      height: embedded ? '100%' : '100vh',
+      maxHeight: embedded ? '100%' : '100vh',
+      overflow: 'hidden',
+      background: '#f1f5f9', padding: embedded ? 0 : (isMobile ? 8 : 12), boxSizing: 'border-box',
     }}>
       <div style={{
         display: 'flex', flexDirection: isMobile ? 'column' : 'row',
@@ -581,24 +627,26 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
       }}>
         {/* Main card */}
         <div style={{
-          width: '100%', height: '100%', borderRadius: 6,
+          width: '100%', height: '100%', borderRadius: embedded ? 0 : 6,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           position: 'relative', background: svgColors.panelBg,
-          border: `1px solid ${svgColors.panelBorder}`,
+          border: embedded ? 'none' : `1px solid ${svgColors.panelBorder}`,
         }}>
 
           {/* Stage */}
           <div style={{
             flex: 1, minHeight: 0, width: '100%', position: 'relative',
             padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: svgColors.bg,
+            background: svgColors.bg, overflow: 'hidden',
           }}>
-            {/* KPI — clickable status filters */}
+            {/* Status KPI tiles */}
             <div style={{
               position: 'absolute', top: 16, left: 16, zIndex: 10,
-              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 4, padding: 8, borderRadius: 6, backdropFilter: 'blur(8px)',
-              background: 'rgba(255,255,255,0.9)', border: `1px solid ${svgColors.panelBorder}`,
+              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 4,
+              padding: 8, borderRadius: 8, backdropFilter: 'blur(8px)',
+              background: 'rgba(255,255,255,0.94)', border: `1px solid ${svgColors.panelBorder}`,
+              boxShadow: '0 4px 16px rgba(15,23,42,0.06)',
+              minWidth: 168,
             }}>
               {[
                 { label: 'TOTAL',      value: totalMachines,  bg: '#f8fafc', color: '#1e293b', filter: null },
@@ -627,20 +675,6 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
               })}
             </div>
 
-            {/* Live HUD */}
-            <div style={{
-              position: 'absolute', top: 16, right: 16, zIndex: 10,
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '6px 12px', borderRadius: 8, backdropFilter: 'blur(8px)',
-              background: svgColors.hudBg, border: `1px solid ${svgColors.hudBorder}`,
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
-              <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.5px', fontFamily: 'monospace', color: svgColors.hudText }}>
-                <span style={{ fontSize: 12, fontWeight: 900, marginRight: 4, color: '#1e293b' }}>{totalMachines}</span>
-                Machines Connected
-              </span>
-            </div>
-
             {/* Loading overlay */}
             {loading && (
               <div style={{
@@ -655,6 +689,20 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: '#334155' }}>Loading Live Factory Layout...</span>
                 </div>
+              </div>
+            )}
+
+            {/* Soft refresh flash on 5s websocket push */}
+            {isRefreshing && !loading && (
+              <div style={{
+                position: 'absolute', top: 16, right: 16, zIndex: 12,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 34, height: 34, borderRadius: 8,
+                background: 'rgba(240,253,244,0.95)', border: '1px solid #86efac',
+                boxShadow: '0 2px 10px rgba(22,163,74,0.12)',
+                pointerEvents: 'none',
+              }}>
+                <RefreshCw size={14} color="#16a34a" className="iso-refresh-spin" />
               </div>
             )}
 
@@ -694,11 +742,11 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                 })}
               </g>
 
-              {/* 2. Machine-type zone labels — bar above grid, dashed connector to first machine */}
+              {/* 2. Work-center labels */}
               {lineLabels.map(label => {
-                const typeStyle = getLineTypeStyle(label.name);
+                const typeStyle = getWorkCenterStyle(label.name);
                 const text = label.name;
-                const bw = Math.max(text.length * 7 + 34, 96);
+                const bw = Math.max(text.length * 7.5 + 28, 88);
                 const bh = 22;
                 const bx = label.bannerX;
                 const by = label.bannerY;
@@ -712,7 +760,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                       stroke={typeStyle.accent}
                       strokeWidth={1.2}
                       strokeDasharray="5,4"
-                      opacity={0.55}
+                      opacity={0.45}
                     />
                     <rect
                       x={bx - bw / 2} y={by}
@@ -722,20 +770,15 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                       stroke={typeStyle.border}
                       strokeWidth={1.2}
                     />
-                    <rect
-                      x={bx - bw / 2} y={by}
-                      width={4} height={bh}
-                      fill={typeStyle.accent}
-                    />
                     <text
-                      x={bx + 2}
+                      x={bx}
                       y={by + bh / 2}
                       textAnchor="middle"
                       dominantBaseline="central"
                       fill={typeStyle.text}
                       fontSize={10}
                       fontWeight="800"
-                      letterSpacing="1px"
+                      letterSpacing="1.2px"
                       fontFamily={CONFIG.fontFamily}
                     >
                       {text}
@@ -766,10 +809,8 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                     onMouseLeave={() => setHoveredMachine(null)}
                     onClick={() => !loading && setSelectedMachine(machine)}
                   >
-                    {/* Platform — top-face centre at getCellCentre.y, machine base also lands there */}
                     <MachinePlatform machine={machine} loading={loading} />
 
-                    {/* Machine image — scale-on-hover pivots from platform centre (cx, cy) */}
                     <g style={{
                       transformOrigin: `${cx}px ${cy}px`,
                       transform:  isHovered ? `scale(${CONFIG.hoverScale})` : 'scale(1)',
@@ -824,33 +865,46 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
               })}
             </svg>
 
-            {/* Zoom controls */}
+            {/* Zoom + Fit + Legend (bottom left) */}
             <div style={{
               position: 'absolute', bottom: 16, left: 16, zIndex: 10,
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 12px', borderRadius: 8, backdropFilter: 'blur(8px)',
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '7px 12px', borderRadius: 10, backdropFilter: 'blur(10px)',
               background: svgColors.hudBg, border: `1px solid ${svgColors.hudBorder}`,
+              boxShadow: '0 4px 18px rgba(15,23,42,0.08)',
             }}>
               <button onClick={zoomOut} title="Zoom Out"
-                style={{ padding: 6, border: 'none', background: 'transparent', color: svgColors.hudText, cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
-                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" strokeWidth={2.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
-                </svg>
+                style={{ padding: 4, border: 'none', background: 'transparent', color: svgColors.hudText, cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
+                <Minus size={15} strokeWidth={2.5} />
               </button>
-              <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold', minWidth: 45, textAlign: 'center', color: svgColors.hudText }}>
+              <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold', minWidth: 42, textAlign: 'center', color: svgColors.hudText }}>
                 {Math.round(zoomScale * 100)}%
               </span>
               <button onClick={zoomIn} title="Zoom In"
-                style={{ padding: 6, border: 'none', background: 'transparent', color: svgColors.hudText, cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
-                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" strokeWidth={2.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
+                style={{ padding: 4, border: 'none', background: 'transparent', color: svgColors.hudText, cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
+                <Plus size={15} strokeWidth={2.5} />
               </button>
-              <div style={{ width: 1, height: 16, background: svgColors.hudDivider, margin: '0 4px' }} />
+              <div style={{ width: 1, height: 18, background: svgColors.hudDivider }} />
               <button onClick={fitView}
-                style={{ padding: '4px 8px', border: 'none', background: svgColors.fitBg, color: svgColors.fitText, cursor: 'pointer', borderRadius: 4, fontSize: 12, fontWeight: 'bold' }}>
+                style={{ padding: '4px 10px', border: 'none', background: svgColors.fitBg, color: svgColors.fitText, cursor: 'pointer', borderRadius: 5, fontSize: 12, fontWeight: 700 }}>
                 Fit
               </button>
+              <div style={{ width: 1, height: 18, background: svgColors.hudDivider }} />
+              {STATUS_LEGEND.map((item) => (
+                <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
+                  <span style={{
+                    width: 11, height: 11, borderRadius: 2, background: item.color,
+                    boxShadow: `0 0 0 3px ${item.glow}`,
+                    display: 'inline-block',
+                  }} />
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                    color: '#475569', textTransform: 'uppercase',
+                  }}>
+                    {item.label}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -896,7 +950,15 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
                   ['SALE ORDER',    selectedMachine.sale_order_number || '—'],
                   ['PART NUMBER',   selectedMachine.part_number       || '—'],
                   ['OPERATION',     selectedMachine.operation_name    || '—'],
+                  ['WORK CENTER',   selectedMachine.work_center_name  || selectedMachine.lineName || '—'],
                   ['MACHINE TYPE',  selectedMachine.machine_type      || '—'],
+                  ...(selectedMachine.program_name
+                    ? [['PROGRAM', selectedMachine.program_name.includes('\\')
+                        ? selectedMachine.program_name.split('\\').pop()
+                        : selectedMachine.program_name.includes('/')
+                          ? selectedMachine.program_name.split('/').pop()
+                          : selectedMachine.program_name]]
+                    : []),
                 ].map(([label, value]) => (
                   <div key={label}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>{label}</div>
@@ -930,6 +992,11 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
 
       <style>{`
         @keyframes tooltipBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+        @keyframes isoRefreshSpin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .iso-refresh-spin { animation: isoRefreshSpin 0.8s linear infinite; }
       `}</style>
     </div>
   );

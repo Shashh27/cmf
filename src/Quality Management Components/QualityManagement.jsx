@@ -6,7 +6,7 @@ import QualityManagementBOM from './QualityManagementBOM';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InteractiveDrawing from './InspectorComponents/InteractiveDrawing';
-import { parseMasterBocBboxToPdfRect } from './InspectorComponents/bocMappers';
+import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from './InspectorComponents/bocMappers';
 import { resolveBaseDrawingDocument } from './InspectorComponents/drawingDocumentUtils';
 import InspectionReportModal from './InspectionReport/InspectionReportModal';
 import { downloadInspectionReportWord } from './InspectionReport/downloadInspectionReportWord';
@@ -877,12 +877,8 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
 
   const ftpApproveMeasurementsDone = useMemo(() => {
     if (!ftpApproveRows?.length) return false;
-    return ftpApproveRows.every((r) => {
-      const vals = (r.measurements || []).map(m => parseNum(m)).filter(v => v != null);
-      return vals.length >= 3;
-      // Relaxed from >= 3 to >= 1 to allow FTP approval even if fewer samples are entered
-      return vals.length >= 1;
-    });
+    // Match measure mode: every characteristic needs at least one numeric reading
+    return ftpApproveRows.every((r) => rowHasMeasured123(r));
   }, [ftpApproveRows]);
 
   const ftpApproveSummary = useMemo(() => {
@@ -895,33 +891,39 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   }, [ftpApproveDecoratedRows]);
 
   const interactiveBalloons = useMemo(() => {
-    return (ftpApproveRows || []).map((r, idx) => {
-      const rect = parseMasterBocBboxToPdfRect(r.bbox);
-      return {
-        id: String(r.id),
-        label: String(idx + 1),
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        page: rect.page || 1,
-      };
-    });
+    return (ftpApproveRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r._drawingBbox || r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
   }, [ftpApproveRows]);
 
   const planInteractiveBalloons = useMemo(() => {
-    return (planTableRows || []).map((r, idx) => {
-      const rect = parseMasterBocBboxToPdfRect(r.bbox);
-      return {
-        id: String(r.id),
-        label: String(idx + 1),
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        page: rect.page || 1,
-      };
-    });
+    return (planTableRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
   }, [planTableRows]);
 
   const fmtLimit = (val) => {
@@ -972,8 +974,8 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
         console.warn('stage-inspection/ensure', ensureErr);
       }
 
-      // Fetch measurements and balloon documents in parallel
-      const [res, docsRes] = await Promise.all([
+      // Fetch measurements + op docs + part docs (base drawing like measure mode)
+      const [res, docsRes, partDocsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
           params: {
             part_id: selectedItem.id,
@@ -983,13 +985,30 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
           },
         }),
         axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.id}`),
+        axios.get(`${QUALITY_API_BASE_URL}/documents/part/${selectedItem.id}`).catch(() => ({ data: [] })),
+        axios
+          .get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+            params: {
+              part_id: selectedItem.part_number,
+              sales_order_id: oid,
+              op_no: opNo,
+            },
+          })
+          .catch(() => ({ data: [] })),
       ]);
 
-      setFtpApproveRows(Array.isArray(res.data) ? res.data : []);
+      const masters = Array.isArray(bocRes.data) ? bocRes.data : [];
+      const masterById = new Map(masters.map((m) => [Number(m.id), m]));
+      const stageRows = (Array.isArray(res.data) ? res.data : []).map((r) => {
+        const mid = parseMasterBocIdFromStageBbox(r.bbox);
+        const master = mid != null ? masterById.get(Number(mid)) : null;
+        return { ...r, _drawingBbox: master?.bbox || null };
+      });
+      setFtpApproveRows(stageRows);
 
-      // Handle original drawing for interactive balloons
       const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
-      const { url, isPdf, name, apiDocumentId } = getDrawingInfo({ ...record, operation_documents: docs });
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId } = resolveBaseDrawingDocument(docs, partDocs);
 
       if (url) {
         setPlanDrawingIsPdf(isPdf);
@@ -2088,7 +2107,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                         />
                       ) : (
                         <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Empty description="No balloon document found for this operation" />
+                          <Empty description="No drawing found for this operation" />
                         </div>
                       )}
                     </div>
@@ -2554,7 +2573,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                         </div>
                       ) : (
                         <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Empty description="No balloon document found for this operation" />
+                          <Empty description="No drawing found for this operation" />
                         </div>
                       )}
                     </div>

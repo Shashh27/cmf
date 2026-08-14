@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, Button, message, Spin, Empty, Tag, Input, Space, Typography, Tabs, Modal, Tooltip, Alert } from 'antd';
+import { Table, Button, message, Spin, Empty, Tag, Space, Typography, Tabs, Modal, Tooltip, Alert } from 'antd';
 import { CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons';
 
 import dayjs from 'dayjs';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
+import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
+import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
+import { resolveBaseDrawingDocument } from '../Quality Management Components/InspectorComponents/drawingDocumentUtils';
 
 const { Text } = Typography;
 
@@ -27,10 +30,10 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const onCountRef = useLatestCallback(onCount);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [query, setQuery] = useState('');
 
   // FTP Modal States
   const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
@@ -40,6 +43,8 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const [planDrawingUrl, setPlanDrawingUrl] = useState(null);
   const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
   const [planDrawingFileName, setPlanDrawingFileName] = useState(null);
+  const [ftpDrawingDocumentId, setFtpDrawingDocumentId] = useState(null);
+  const [ftpActiveBalloonId, setFtpActiveBalloonId] = useState(null);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -47,18 +52,18 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       const res = await axios.get(`${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications`);
       const data = Array.isArray(res.data) ? res.data : [];
       setNotifications(data);
-      if (onCount) onCount(data.filter((n) => !n.is_ack).length);
+      onCountRef.current?.(data.filter((n) => !n.is_ack).length);
     } catch (error) {
       console.error(error);
       message.error(error.response?.data?.detail || error.message || 'Failed to load notifications');
     } finally {
       setLoading(false);
     }
-  }, [onCount]);
+  }, [onCountRef]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, refreshKey]);
 
   const { planRequests, ftpRequests } = useMemo(() => {
     let rows = notifications;
@@ -268,10 +273,7 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
 
   const ftpApproveMeasurementsDone = useMemo(() => {
     if (!ftpApproveRows?.length) return false;
-    return ftpApproveRows.every((r) => {
-      if (!Array.isArray(r.measurements) || r.measurements.length === 0) return false;
-      return r.measurements.every(m => parseNum(m) !== null);
-    });
+    return ftpApproveRows.every((r) => rowHasMeasured123(r));
   }, [ftpApproveRows]);
 
   const ftpApproveSummary = useMemo(() => {
@@ -283,18 +285,39 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     return { total, within, out, noTol, passRate };
   }, [ftpApproveDecoratedRows]);
 
+  const ftpInteractiveBalloons = useMemo(() => {
+    return (ftpApproveRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r._drawingBbox || r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
+  }, [ftpApproveRows]);
+
   const openFtpApproveModal = async (record) => {
-    let partPk = record.part_id;
+    let partPk = null;
     let opNameHint = '';
-    
-    // Resolve Part ID and Operation metadata if missing
+
     try {
-      const [pRes, opRes] = await Promise.all([
-        !partPk && record.part_number ? axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`) : Promise.resolve({ data: { id: partPk } }),
-        record.operation_id ? axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`) : Promise.resolve({ data: null })
-      ]);
-      partPk = pRes.data?.id;
-      opNameHint = opRes.data?.operation_name || '';
+      if (record.operation_id) {
+        const opRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`);
+        partPk = opRes.data?.part_id ?? null;
+        opNameHint = opRes.data?.operation_name || '';
+      }
+      if (!partPk && record.part_id) partPk = record.part_id;
+      if (!partPk && record.part_number) {
+        const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
+        partPk = pRes.data?.id;
+      }
     } catch (err) {
       console.warn('Metadata resolution failed:', err);
     }
@@ -307,13 +330,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     setFtpApproveContext({
       notificationId: record.id,
       opNo: record.op_no,
-      opName: opNameHint, 
+      opName: opNameHint,
       partNo: record.part_number,
       partId: partPk,
       orderId: record.order_id,
       operationId: record.operation_id,
       saleOrderNumber: record.sale_order_number || String(record.order_id),
-      isAck: record.is_ack
+      isAck: record.is_ack,
     });
     setFtpApproveModalOpen(true);
     setFtpApproveRows([]);
@@ -321,10 +344,11 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
     setPlanDrawingUrl(null);
     setPlanDrawingFileName(null);
     setPlanDrawingIsPdf(true);
+    setFtpDrawingDocumentId(null);
+    setFtpActiveBalloonId(null);
 
     const ipid = buildFtpIpid(record.part_number, record.op_no);
     try {
-      // Ensure records exist
       try {
         await axios.post(`${QUALITY_API_BASE_URL}/quality/stage-inspection/ensure`, null, {
           params: {
@@ -341,8 +365,7 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
         console.warn('stage-inspection/ensure', ensureErr);
       }
 
-      // Fetch measurements and balloon documents
-      const [res, docsRes] = await Promise.all([
+      const [res, docsRes, partDocsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
           params: {
             part_id: partPk,
@@ -351,22 +374,39 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
             quantity_no: 1,
           },
         }),
-        axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`),
+        record.operation_id
+          ? axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`)
+          : Promise.resolve({ data: [] }),
+        axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`).catch(() => ({ data: [] })),
+        axios
+          .get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+            params: {
+              part_id: record.part_number,
+              sales_order_id: record.order_id,
+              op_no: record.op_no,
+            },
+          })
+          .catch(() => ({ data: [] })),
       ]);
 
-      setFtpApproveRows(Array.isArray(res.data) ? res.data : []);
+      const masters = Array.isArray(bocRes.data) ? bocRes.data : [];
+      const masterById = new Map(masters.map((m) => [Number(m.id), m]));
+      const stageRows = (Array.isArray(res.data) ? res.data : []).map((r) => {
+        const mid = parseMasterBocIdFromStageBbox(r.bbox);
+        const master = mid != null ? masterById.get(Number(mid)) : null;
+        return { ...r, _drawingBbox: master?.bbox || null };
+      });
+      setFtpApproveRows(stageRows);
 
-      // Handle ballooned drawing
-      const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
-      const baloonDoc = docs
-        .filter(isBalloonOperationDocument)
-        .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
+      const opDocs = Array.isArray(docsRes.data) ? docsRes.data : [];
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId } = resolveBaseDrawingDocument(opDocs, partDocs);
 
-      if (baloonDoc) {
-        const name = baloonDoc.document_name || '';
-        setPlanDrawingIsPdf(/\.pdf$/i.test(name));
+      if (url) {
+        setPlanDrawingIsPdf(isPdf);
         setPlanDrawingFileName(name || null);
-        setPlanDrawingUrl(`${QUALITY_API_BASE_URL}/operation-documents/${baloonDoc.id}/preview`);
+        setPlanDrawingUrl(url);
+        setFtpDrawingDocumentId(apiDocumentId);
       }
     } catch (err) {
       console.error(err);
@@ -428,13 +468,16 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
 
   const handleDownloadPlanDrawing = () => {
     if (!planDrawingUrl) return;
-    const id = planDrawingUrl.match(/operation-documents\/(\d+)\//)?.[1];
+    const id =
+      ftpDrawingDocumentId ??
+      planDrawingUrl.match(/(?:operation-documents|documents)\/(\d+)\//)?.[1];
     if (!id) return;
+    const endpoint = planDrawingUrl.includes('/documents/') ? 'documents' : 'operation-documents';
     const a = document.createElement('a');
-    a.href = `${QUALITY_API_BASE_URL}/operation-documents/${id}/download`;
+    a.href = `${QUALITY_API_BASE_URL}/${endpoint}/${id}/download`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.download = planDrawingFileName || `ftp_review_balloon.pdf`;
+    a.download = planDrawingFileName || `ftp_review_drawing.pdf`;
     a.click();
   };
 
@@ -443,10 +486,11 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       title: 'Sl No',
       key: 'sl_no',
       width: 60,
+      sorter: false,
       render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
     },
     {
-      title: 'Order',
+      title: 'Project Number',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
       render: (text, record) => text || `ID ${record.order_id}`,
@@ -463,13 +507,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       width: 60,
     },
     {
-      title: 'Requested by',
+      title: 'Created By',
       dataIndex: 'requested_by_username',
       key: 'requested_by_username',
       render: (t) => t || '—',
     },
     {
-      title: 'Created',
+      title: 'Created At',
       dataIndex: 'created_at',
       key: 'created_at',
       render: (text) => (text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '—'),
@@ -479,39 +523,19 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const planColumns = [
     ...commonColumns,
     {
-      title: 'Approved by Name',
-      dataIndex: 'ack_by',
-      key: 'ack_by',
-      width: 150,
-      render: (t) => t || '—',
-    },
-    {
-      title: 'Approved At',
-      dataIndex: 'ack_at',
-      key: 'ack_at',
-      width: 150,
-      render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      width: 120,
-      render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Acknowledged' : 'Pending'}</Tag>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 250,
+      title: 'Acknowledged',
+      key: 'acknowledged',
+      sorter: false,
+      width: 220,
       render: (_, record) => (
         <Space wrap>
-          {!record.is_ack && (
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handleAcknowledge(record.id)}>
-              Acknowledge
-            </Button>
-          )}
-          <Button icon={<AppstoreOutlined />} onClick={() => handleOpenQmsSoftware(record)}>
-            Open QMS Software
+          {renderAckCell({
+            isAck: !!record.is_ack,
+            ackBy: record.ack_by,
+            onAcknowledge: () => handleAcknowledge(record.id),
+          })}
+          <Button icon={<AppstoreOutlined />} size="small" onClick={() => handleOpenQmsSoftware(record)}>
+            Open QMS
           </Button>
         </Space>
       ),
@@ -521,54 +545,41 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const ftpColumns = [
     ...commonColumns,
     {
-      title: 'Approved by Name',
-      dataIndex: 'ack_by',
-      key: 'ack_by',
-      render: (t) => t || '—',
-    },
-    {
-      title: 'Approved At',
-      dataIndex: 'ack_at',
-      key: 'ack_at',
-      render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Approved' : 'Pending Review'}</Tag>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 150,
-      render: (_, record) => (
-        <Space wrap>
-          {!record.is_ack ? (
-            <Button type="primary" danger icon={<CheckCircleOutlined />} onClick={() => openFtpApproveModal(record)}>
-              Approve FTP
-            </Button>
-          ) : (
-            <Button icon={<EyeOutlined />} onClick={() => openFtpApproveModal(record)}>
+      title: 'Acknowledged',
+      key: 'acknowledged',
+      sorter: false,
+      width: 180,
+      render: (_, record) =>
+        !record.is_ack ? (
+          <Button type="primary" danger icon={<CheckCircleOutlined />} onClick={() => openFtpApproveModal(record)}>
+            Approve FTP
+          </Button>
+        ) : (
+          <Space>
+            {renderAckCell({ isAck: true, ackBy: record.ack_by })}
+            <Button icon={<EyeOutlined />} size="small" onClick={() => openFtpApproveModal(record)}>
               Review
             </Button>
-          )}
-        </Space>
-      ),
+          </Space>
+        ),
     },
   ];
 
+  const paginationProps = {
+    current: currentPage,
+    pageSize,
+    showSizeChanger: true,
+    showQuickJumper: true,
+    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+    onChange: (p, ps) => {
+      setCurrentPage(p);
+      setPageSize(ps);
+    },
+  };
+
   return (
     <div>
-      <div style={{ marginBottom: 12, maxWidth: 360 }}>
-        <Input.Search
-          allowClear
-          placeholder="Search order, part, operator…"
-          onSearch={setQuery}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-
+      <ModernTableStyles />
       <Spin spinning={loading}>
         <Tabs
           defaultActiveKey="1"
@@ -578,15 +589,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
               label: `Approval Notifications (${planRequests.length})`,
               children: (
                 <Table
-                  rowKey="id"
-                  dataSource={planRequests}
-                  columns={planColumns}
-                  pagination={{
-                    current: currentPage,
-                    pageSize,
-                    onChange: (p, ps) => { setCurrentPage(p); setPageSize(ps); },
-                    showSizeChanger: true,
-                  }}
+                  {...getNotificationTableProps({
+                    columns: planColumns,
+                    dataSource: planRequests,
+                    rowKey: 'id',
+                    loading: false,
+                    pagination: paginationProps,
+                  })}
                   locale={{ emptyText: <Empty description="No inspection plan requests" /> }}
                 />
               ),
@@ -596,10 +605,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
               label: `FTP Notifications (${ftpRequests.length})`,
               children: (
                 <Table
-                  rowKey="id"
-                  dataSource={ftpRequests}
-                  columns={ftpColumns}
-                  pagination={{ pageSize: 10, showSizeChanger: true }}
+                  {...getNotificationTableProps({
+                    columns: ftpColumns,
+                    dataSource: ftpRequests,
+                    rowKey: 'id',
+                    loading: false,
+                    pagination: paginationProps,
+                  })}
                   locale={{ emptyText: <Empty description="No FTP approval requests" /> }}
                 />
               ),
@@ -770,12 +782,12 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
             )}
           </div>
 
-          {/* Right: Balloon Drawing Preview */}
+          {/* Right: Drawing View (base drawing + balloons like Measure Mode) */}
           <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Space>
                 <InfoCircleOutlined style={{ color: '#3b82f6' }} />
-                <Text strong style={{ color: '#111827', fontSize: 16 }}>Ballooned Drawing</Text>
+                <Text strong style={{ color: '#111827', fontSize: 16 }}>Drawing View</Text>
               </Space>
               {planDrawingUrl && (
                 <Button 
@@ -788,40 +800,24 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
                 </Button>
               )}
             </div>
-            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {planDrawingUrl ? (
-                planDrawingIsPdf ? (
-                  <iframe
-                    src={pdfEmbedSrcForReview(planDrawingUrl)}
-                    width="100%"
-                    height="100%"
-                    title="FTP Drawing"
-                    style={{
-                      height: 'min(72vh, 900px)',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
+            <div style={{ flex: 1, padding: 10, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', minHeight: 0 }}>
+              {ftpApproveLoading ? (
+                <Spin />
+              ) : planDrawingUrl || ftpDrawingDocumentId ? (
+                <div style={{ width: '100%', height: 'min(72vh, 900px)', border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', boxShadow: '0 2px 10px rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                  <InteractiveDrawing
+                    pdfId={planDrawingIsPdf ? ftpDrawingDocumentId : null}
+                    directImageSrc={!planDrawingIsPdf ? planDrawingUrl : null}
+                    pageNumber={1}
+                    balloons={ftpInteractiveBalloons}
+                    activeBalloonId={ftpActiveBalloonId}
+                    onBalloonClick={(b) => setFtpActiveBalloonId(b.id)}
+                    balloonColor="blue"
                   />
-                ) : (
-                  <img
-                    src={planDrawingUrl}
-                    alt="Ballooned drawing"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 10,
-                      background: '#fff',
-                      boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                    }}
-                  />
-                )
+                </div>
               ) : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Empty description="No balloon document found for this operation" />
+                  <Empty description="No drawing found for this operation" />
                 </div>
               )}
             </div>

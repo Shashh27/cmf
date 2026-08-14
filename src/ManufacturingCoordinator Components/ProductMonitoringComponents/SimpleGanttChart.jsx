@@ -41,6 +41,31 @@ const MACHINE_COLORS = [
   '#6EE7B7', // teal
 ];
 
+const ROW_TYPE_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'production', label: 'Operator Log' },
+  { value: 'live', label: 'Machine Timeline' },
+  { value: 'issues', label: 'Operator Issues' },
+];
+
+const ALL_ROW_TYPES = ['scheduled', 'production', 'live', 'issues'];
+
+const LegendSwatch = ({ color, label }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
+    <span
+      style={{
+        width: 14,
+        height: 14,
+        borderRadius: 3,
+        backgroundColor: color,
+        display: 'inline-block',
+        flexShrink: 0,
+      }}
+    />
+    <span style={{ fontSize: 12, color: '#374151', fontWeight: 400 }}>{label}</span>
+  </span>
+);
 const SimpleGanttChart = ({ 
   data = [],
   machines = [],
@@ -59,7 +84,7 @@ const SimpleGanttChart = ({
   const [countdown, setCountdown] = useState(60);
   const [viewMode, setViewMode] = useState('daily');
   const [selectedOrder, setSelectedOrder] = useState('all');
-  
+  const [selectedRowTypes, setSelectedRowTypes] = useState('all'); 
   // Extract unique production orders from data
   const productionOrders = React.useMemo(() => {
     const orders = new Set();
@@ -94,31 +119,69 @@ const SimpleGanttChart = ({
     }
   }, [selectedOrder, data]);
 
-  // Filter data based on selected machine and production order
+  // Filter data based on selected machine, production order, and row types
   const filteredData = React.useMemo(() => {
     let result = [...data];
-    
-    // Filter by machine - handle display names with IDs
-    if (selectedMachine && selectedMachine !== 'all') {
-      result = result.filter(item => {
-        // Check if selectedMachine is a display name with ID
-        if (selectedMachine.includes(' (')) {
-          const machineName = selectedMachine.split(' (')[0];
-          return item.machine === machineName;
+
+    const matchMachine = (itemMachine, selected) => {
+      if (!selected) return true;
+      if (selected.includes(' (')) {
+        return itemMachine === selected.split(' (')[0];
+      }
+      return itemMachine === selected;
+    };
+
+    // Default: only machines with Scheduled work. "all" = every machine with data.
+    if (!selectedMachine || selectedMachine === 'scheduled') {
+      const scheduledMachines = new Set(
+        data.filter((item) => item.type === 'scheduled').map((item) => item.machine)
+      );
+      result = result.filter((item) => scheduledMachines.has(item.machine));
+    } else if (selectedMachine !== 'all') {
+      result = result.filter((item) => matchMachine(item.machine, selectedMachine));
+    }
+
+    if (selectedOrder && selectedOrder !== 'all') {
+      const orderCore = result.filter(
+        (item) =>
+          (item.type === 'scheduled' || item.type === 'production') &&
+          (item.po === selectedOrder || item.sale_order_number === selectedOrder)
+      );
+      const orderMachines = new Set(orderCore.map((item) => item.machine));
+      let windowStart = null;
+      let windowEnd = null;
+      orderCore.forEach((item) => {
+        const s = dayjs(item.start_time);
+        const e = dayjs(item.end_time);
+        if (s.isValid()) {
+          windowStart = windowStart == null || s.isBefore(windowStart) ? s : windowStart;
         }
-        return item.machine === selectedMachine;
+        if (e.isValid()) {
+          windowEnd = windowEnd == null || e.isAfter(windowEnd) ? e : windowEnd;
+        }
+      });
+
+      result = result.filter((item) => {
+        if (item.type === 'scheduled' || item.type === 'production') {
+          return item.po === selectedOrder || item.sale_order_number === selectedOrder;
+        }
+        if ((item.type === 'live' || item.type === 'issues') && orderMachines.has(item.machine)) {
+          if (!windowStart || !windowEnd) return true;
+          const s = dayjs(item.start_time);
+          const e = dayjs(item.end_time);
+          if (!s.isValid() || !e.isValid()) return false;
+          return s.isBefore(windowEnd) && e.isAfter(windowStart);
+        }
+        return false;
       });
     }
-    
-    // Filter by production order
-    if (selectedOrder && selectedOrder !== 'all') {
-      result = result.filter(item => 
-        item.po === selectedOrder || item.sale_order_number === selectedOrder
-      );
+
+    if (selectedRowTypes && selectedRowTypes !== 'all') {
+      result = result.filter((item) => item.type === selectedRowTypes);
     }
-    
+
     return result;
-  }, [data, selectedMachine, selectedOrder]);
+  }, [data, selectedMachine, selectedOrder, selectedRowTypes]);
 
   // Handle auto-refresh with countdown
   useEffect(() => {
@@ -200,27 +263,22 @@ const SimpleGanttChart = ({
 
       console.log('Rendering timeline with data:', data.length, 'items');
 
-      // Get unique machines from both data and the machines prop
-      // First get machines from data
-      let dataMachines = [...new Set(data.map(item => {
-        // If machine name includes ID, extract just the name part
+      // Machines shown = those present in filtered data (scheduled-only by default)
+      let uniqueMachines = [...new Set(filteredData.map((item) => {
         if (item.machine && item.machine.includes(' (')) {
           return item.machine.split(' (')[0];
         }
         return item.machine;
-      }))].filter(Boolean);
-      
-      // Then add all machines from the machines prop (includes all machines even without data)
-      let allMachineNames = machines.map(machine => {
-        // If machine name includes ID, extract just the name part
-        if (machine.includes(' (')) {
-          return machine.split(' (')[0];
-        }
-        return machine;
-      });
-      
-      // Combine and deduplicate
-      let uniqueMachines = [...new Set([...dataMachines, ...allMachineNames])].sort();
+      }).filter(Boolean))].sort();
+
+      // When "All Machines" is selected, also include configured machines with no data
+      if (selectedMachine === 'all') {
+        const allMachineNames = machines.map((machine) => {
+          if (machine.includes(' (')) return machine.split(' (')[0];
+          return machine;
+        });
+        uniqueMachines = [...new Set([...uniqueMachines, ...allMachineNames])].sort();
+      }
       
       // Use the filtered data for rendering
       const itemsToRender = filteredData;
@@ -232,6 +290,9 @@ const SimpleGanttChart = ({
       
       uniqueMachines.forEach((machine, machineIndex) => {
         const machineColor = MACHINE_COLORS[machineIndex % MACHINE_COLORS.length];
+        const visibleTypes = selectedRowTypes === 'all' || !selectedRowTypes
+          ? ALL_ROW_TYPES
+          : [selectedRowTypes];
         
         // Check if this machine has any data
         const hasData = itemsToRender.some(item => {
@@ -247,45 +308,77 @@ const SimpleGanttChart = ({
           content: `
             <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-weight: 700; font-size: 14px;">
               <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ${machineColor}; border: 2px solid white; box-shadow: 0 0 0 1px ${machineColor};"></span>
-              <span style="color: ${machineColor};">${machine}</span>
-              ${!hasData ? '<span style="margin-left: 8px; font-size: 11px; color: #999;">(No Data)</span>' : ''}
+              <span style="color: #111827; font-weight: 700;">${machine}</span>
+              ${!hasData ? '<span style="margin-left: 8px; font-size: 11px; color: #999; font-weight: 400;">(No Data)</span>' : ''}
             </div>
           `,
-          style: `background: linear-gradient(90deg, ${machineColor}10, ${machineColor}05); border-left: 4px solid ${machineColor}; border-bottom: 1px solid ${machineColor}30; ${!hasData ? 'opacity: 0.6;' : ''}`,
+          style: `background: #ffffff; border-bottom: 1px solid #e5e7eb; ${!hasData ? 'opacity: 0.6;' : ''}`,
           order: machineIndex * 100,
-          nestedGroups: hasData ? [`${machine}-scheduled`, `${machine}-production`] : undefined,
+          nestedGroups: hasData ? visibleTypes.map((t) => `${machine}-${t}`) : undefined,
           showNested: hasData
         });
         
         // Only add subgroups if machine has data
         if (hasData) {
-          // Scheduled subgroup
-          groups.push({
-            id: `${machine}-scheduled`,
-            content: `
-              <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 500; font-size: 13px; min-height: 40px;">
-                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ffa940; border: 1px solid #d46b08;"></span>
-                <span style="color: #d46b08;">Scheduled</span>
-              </div>
-            `,
-            style: 'background-color: #fff7e6; border-bottom: 1px solid #ffe7ba;',
-            order: (machineIndex * 100) + 10,
-            parent: `machine-${machine}`
-          });
-          
-          // Production subgroup
-          groups.push({
-            id: `${machine}-production`,
-            content: `
-              <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 500; font-size: 13px; min-height: 40px;">
-                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #52c41a; border: 1px solid #389e0d;"></span>
-                <span style="color: #389e0d;">Actual</span>
-              </div>
-            `,
-            style: 'background-color: #f6ffed; border-bottom: 1px solid #d9f7be;',
-            order: (machineIndex * 100) + 20,
-            parent: `machine-${machine}`
-          });
+          if (visibleTypes.includes('scheduled')) {
+            groups.push({
+              id: `${machine}-scheduled`,
+              content: `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 400; font-size: 13px; min-height: 40px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ffa940;"></span>
+                  <span style="color: #d46b08; font-weight: 400;">Scheduled</span>
+                </div>
+              `,
+              style: 'background-color: #fff7e6; border-bottom: 1px solid #ffe7ba;',
+              order: (machineIndex * 100) + 10,
+              parent: `machine-${machine}`
+            });
+          }
+
+          if (visibleTypes.includes('production')) {
+            groups.push({
+              id: `${machine}-production`,
+              content: `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 400; font-size: 13px; min-height: 40px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #237804;"></span>
+                  <span style="color: #237804; font-weight: 400;">Operator Log</span>
+                </div>
+              `,
+              style: 'background-color: #f6ffed; border-bottom: 1px solid #d9f7be;',
+              order: (machineIndex * 100) + 20,
+              parent: `machine-${machine}`
+            });
+          }
+
+          if (visibleTypes.includes('live')) {
+            groups.push({
+              id: `${machine}-live`,
+              content: `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 400; font-size: 13px; min-height: 40px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #1677ff;"></span>
+                  <span style="color: #1677ff; font-weight: 400;">Machine Timeline</span>
+                </div>
+              `,
+              style: 'background-color: #e6f4ff; border-bottom: 1px solid #bae0ff;',
+              order: (machineIndex * 100) + 30,
+              parent: `machine-${machine}`
+            });
+          }
+
+          if (visibleTypes.includes('issues')) {
+            groups.push({
+              id: `${machine}-issues`,
+              content: `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 400; font-size: 13px; min-height: 40px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ef4444;"></span>
+                  <span style="color: #dc2626; font-weight: 400;">Operator Issues</span>
+                </div>
+              `,
+              style: 'background-color: #fef2f2; border-bottom: 1px solid #fecaca;',
+              order: (machineIndex * 100) + 40,
+              parent: `machine-${machine}`
+            });
+          }
         }
       });
 
@@ -304,28 +397,61 @@ const SimpleGanttChart = ({
 
           const duration = endTime.diff(startTime, 'minutes');
           const groupId = `${item.machine}-${item.type}`;
+          const liveStatus = (item.live_status || item.status || '').toString().toUpperCase();
+          const itemClass = item.type === 'live'
+            ? `live-item live-${liveStatus.toLowerCase()}`
+            : `${item.type}-item`;
+          const titleColor = item.type === 'scheduled'
+            ? '#d46b08'
+            : item.type === 'live'
+              ? (liveStatus === 'PRODUCTION' ? '#389e0d' : liveStatus === 'OFF' ? '#8c8c8c' : '#1677ff')
+              : item.type === 'issues'
+                ? '#dc2626'
+                : '#389e0d';
+          const typeLabel = item.type === 'live'
+            ? 'Machine Timeline'
+            : item.type === 'production'
+              ? 'Operator Log'
+              : item.type === 'scheduled'
+                ? 'Scheduled'
+                : item.type === 'issues'
+                  ? 'Operator Issues'
+                  : item.type;
+          const titleLabel = item.type === 'live'
+            ? liveStatus
+            : item.type === 'issues'
+              ? (item.issue_category || item.component || 'Issue')
+              : (item.component || 'N/A');
+          const barContent = item.type === 'live'
+            ? ''
+            : item.type === 'issues'
+              ? `${item.issue_category || 'Issue'}`
+              : `${item.component || 'N/A'}${item.operation_number ? ` - ${item.operation_number}` : ''}${item.operation_name ? ` - ${item.operation_name}` : ''}`;
           
           return {
             id: item.id || `item-${idx}`,
             group: groupId,
             start: startTime.toDate(),
             end: endTime.toDate(),
-            content: `
+            content: item.type === 'live'
+              ? ''
+              : `
               <div class="gantt-item-content">
-                <div class="item-title">${item.component || 'N/A'}${item.operation_number ? ` - ${item.operation_number}` : ''}${item.operation_name ? ` - ${item.operation_name}` : ''}</div>
+                <div class="item-title">${barContent}</div>
               </div>
             `,
-            className: `${item.type}-item`,
+            className: itemClass,
             title: `
-              <div style="font-weight: 600; margin-bottom: 8px; color: ${item.type === 'scheduled' ? '#d46b08' : '#389e0d'};">${item.component || 'N/A'}</div>
-              ${item.po ? `<div style="margin-bottom: 4px;"><strong>Order:</strong> ${item.po}</div>` : ''}
-              ${item.component ? `<div style="margin-bottom: 4px;"><strong>Part Name:</strong> ${item.component}</div>` : ''}
+              <div style="font-weight: 400; margin-bottom: 8px; color: ${titleColor};">${titleLabel}</div>
+              ${item.type === 'issues' && item.issue_reason ? `<div style="margin-bottom: 4px;"><strong>Reason:</strong> ${item.issue_reason}</div>` : ''}
+              ${item.type !== 'live' && item.type !== 'issues' && item.po ? `<div style="margin-bottom: 4px;"><strong>Order:</strong> ${item.po}</div>` : ''}
+              ${item.type !== 'live' && item.type !== 'issues' && item.component ? `<div style="margin-bottom: 4px;"><strong>Part Name:</strong> ${item.component}</div>` : ''}
               ${item.operation_name ? `<div style="margin-bottom: 4px;"><strong>Operation:</strong> ${item.operation_name}</div>` : ''}
               ${item.operation_number ? `<div style="margin-bottom: 4px;"><strong>Operation #:</strong> ${item.operation_number}</div>` : ''}
               <div style="margin-bottom: 4px;"><strong>Machine:</strong> ${item.machine}</div>
-              <div style="margin-bottom: 4px;"><strong>Type:</strong> ${item.type}</div>
+              <div style="margin-bottom: 4px;"><strong>Type:</strong> ${typeLabel}</div>
               ${item.status ? `<div style="margin-bottom: 4px;"><strong>Status:</strong> ${item.status}</div>` : ''}
-              <div style="margin-bottom: 4px;"><strong>Quantity:</strong> ${item.quantity || 0}</div>
+              ${item.type !== 'live' && item.type !== 'issues' ? `<div style="margin-bottom: 4px;"><strong>Quantity:</strong> ${item.quantity || 0}</div>` : ''}
               ${item.type === 'production' ? `
                 <div style="margin-bottom: 4px;"><strong>Produced Qty:</strong> ${item.produced_quantity || 0}</div>
                 <div style="margin-bottom: 4px;"><strong>Approved Qty:</strong> ${item.approved_quantity !== undefined ? item.approved_quantity : 0}</div>
@@ -367,12 +493,14 @@ const SimpleGanttChart = ({
         zoomable: true,
         moveable: true,
         zoomKey: 'ctrlKey',
+        zoomMin: 1000 * 60 * 2,
+        zoomMax: 1000 * 60 * 60 * 24 * 31,
         
         // Margins and spacing
         margin: {
           item: {
-            horizontal: 1,
-            vertical: 1
+            horizontal: 0,
+            vertical: 0
           },
           axis: 30
         },
@@ -391,12 +519,6 @@ const SimpleGanttChart = ({
         showMajorLabels: true,
         showMinorLabels: true,
         
-        // Time axis
-        timeAxis: {
-          scale: VIEW_MODES[viewMode].scale,
-          step: VIEW_MODES[viewMode].step
-        },
-        
         // Tooltip
         tooltip: {
           followMouse: true,
@@ -404,19 +526,27 @@ const SimpleGanttChart = ({
           delay: 300
         },
         
-        // Time formatting
+        // Time formatting — finer labels when zoomed in
         format: {
           minorLabels: {
+            millisecond: 'HH:mm:ss',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm',
             hour: 'HH:mm',
-            day: 'DD',
-            weekday: 'ddd DD',
+            weekday: 'ddd D',
+            day: 'D',
+            week: 'w',
             month: 'MMM',
             year: 'YYYY'
           },
           majorLabels: {
-            hour: 'ddd DD MMMM',
+            millisecond: 'HH:mm:ss',
+            second: 'D MMMM HH:mm',
+            minute: 'ddd D MMMM',
+            hour: 'ddd D MMMM',
+            weekday: 'MMMM YYYY',
             day: 'MMMM YYYY',
-            weekday: 'MMMM YYYY', 
+            week: 'MMMM YYYY',
             month: 'YYYY',
             year: ''
           }
@@ -426,7 +556,6 @@ const SimpleGanttChart = ({
         
         // Additional width and spacing options
         autoResize: true,
-        fit: true
       };
 
       // Create timeline
@@ -484,7 +613,7 @@ const SimpleGanttChart = ({
     } catch (error) {
       console.error('Error creating timeline:', error);
     }
-  }, [data, dateRange, viewMode, selectedMachine, selectedOrder]);
+  }, [data, dateRange, viewMode, selectedMachine, selectedOrder, selectedRowTypes, filteredData]);
 
   // Zoom and navigation functions
   const handleZoomIn = () => {
@@ -532,6 +661,7 @@ const SimpleGanttChart = ({
               onChange={onMachineChange}
               style={{ width: 250 }}
               options={[
+                { value: 'scheduled', label: 'Scheduled Machines' },
                 { value: 'all', label: 'All Machines' },
                 ...machines.map((m, idx) => ({
                   value: m,
@@ -588,6 +718,16 @@ const SimpleGanttChart = ({
               ]}
             />
 
+            {/* Row type filter */}
+            <Select
+              value={selectedRowTypes}
+              onChange={(val) => setSelectedRowTypes(val || 'all')}
+              style={{ width: 160 }}
+              placeholder="Rows"
+              disabled={isLoading}
+              options={ROW_TYPE_OPTIONS}
+            />
+
             {/* Date Range Picker */}
             <RangePicker
               value={dateRange}
@@ -638,14 +778,19 @@ const SimpleGanttChart = ({
             <div style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              gap: '8px', 
+              gap: '12px', 
               background: 'white', 
-              padding: '8px 12px', 
+              padding: '8px 14px', 
               borderRadius: '6px', 
-              border: '1px solid #d9d9d9' 
+              border: '1px solid #d9d9d9',
+              flexWrap: 'wrap',
             }}>
-              <Badge color="#52c41a" text="Actual" />
-              <Badge color="#ffa940" text="Scheduled" />
+              <LegendSwatch color="#ffa940" label="Scheduled" />
+              <LegendSwatch color="#237804" label="Operator Log" />
+              <LegendSwatch color="#1677ff" label="ON" />
+              <LegendSwatch color="#95de64" label="Production" />
+              <LegendSwatch color="#8c8c8c" label="OFF" />
+              <LegendSwatch color="#ef4444" label="Operator Issues" />
             </div>
             
             {/* Auto Refresh */}
@@ -757,21 +902,23 @@ const SimpleGanttChart = ({
         }
 
         .gantt-item-content {
-          padding: 6px 10px;
-          border-radius: 4px;
-          background: white;
+          padding: 4px 8px;
+          border-radius: 0;
+          background: transparent;
           font-size: 11px;
           line-height: 1.3;
-          min-height: 30px;
+          height: 100%;
+          min-height: 100%;
+          box-sizing: border-box;
           display: flex;
           flex-direction: column;
           justify-content: center;
         }
 
         .item-title {
-          font-weight: 600;
+          font-weight: 400 !important;
           font-size: 12px;
-          margin-bottom: 2px;
+          margin-bottom: 0;
         }
 
         .item-details {
@@ -786,30 +933,104 @@ const SimpleGanttChart = ({
         }
 
         .scheduled-item {
-          border: 2px solid #d46b08 !important;
-          border-left: 4px solid #d46b08 !important;
-          background-color: rgba(255, 169, 64, 0.15) !important;
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(255, 169, 64, 0.72) !important;
+          box-shadow: none !important;
         }
 
         .scheduled-item .item-title {
           color: #d46b08 !important;
-          font-weight: 600 !important;
+          font-weight: 400 !important;
         }
 
         .production-item {
-          border: 2px solid #389e0d !important;
-          border-left: 4px solid #389e0d !important;
-          background-color: rgba(82, 196, 26, 0.15) !important;
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(35, 120, 4, 0.88) !important;
+          box-shadow: none !important;
         }
 
         .production-item .item-title {
-          color: #389e0d !important;
+          color: #ffffff !important;
+          font-weight: 400 !important;
+        }
+
+        .issues-item {
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(239, 68, 68, 0.72) !important;
+          box-shadow: none !important;
+        }
+
+        .issues-item .item-title {
+          color: #ffffff !important;
+          font-weight: 400 !important;
+        }
+
+        .live-item.live-production {
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(149, 222, 100, 0.9) !important;
+          box-shadow: none !important;
+        }
+
+        .live-item.live-on {
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(22, 119, 255, 0.78) !important;
+          box-shadow: none !important;
+        }
+
+        .live-item.live-off {
+          border: none !important;
+          border-left: none !important;
+          background-color: rgba(140, 140, 140, 0.72) !important;
+          box-shadow: none !important;
+        }
+
+        .live-item .item-title,
+        .live-item .gantt-item-content {
+          display: none !important;
         }
 
         .vis-item {
-          border-radius: 4px !important;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important;
-          font-weight: 600 !important;
+          border: none !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          font-weight: 400 !important;
+          height: 100% !important;
+          top: 0 !important;
+          bottom: 0 !important;
+        }
+
+        .vis-item .vis-item-overflow {
+          height: 100% !important;
+        }
+
+        .vis-item .vis-item-content {
+          padding: 0 4px !important;
+          height: 100% !important;
+          display: flex !important;
+          align-items: center !important;
+        }
+
+        .vis-item.live-item .vis-item-content {
+          padding: 0 !important;
+        }
+
+        .vis-labelset .vis-label {
+          font-weight: 400 !important;
+          text-align: left !important;
+        }
+
+        .vis-labelset .vis-label.vis-nesting-group {
+          font-weight: 700 !important;
+          background: #ffffff !important;
+        }
+
+        .vis-labelset .vis-label.vis-nesting-group .vis-inner {
+          font-weight: 700 !important;
         }
 
         .vis-time-axis .vis-grid.vis-minor {

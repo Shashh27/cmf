@@ -46,7 +46,7 @@ const useGanttStore = create((set, get) => ({
       const response = await api.get(url);
 
       // Ensure we have arrays even if the API returns null/undefined
-      const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};
+      const { planned_operations = [], actual_production_logs = [], all_machines = [], live_status_segments = [], operator_issue_segments = [] } = response.data || {};
 
       // Transform planned operations
       const plannedItems = (planned_operations || [])
@@ -104,8 +104,49 @@ const useGanttStore = create((set, get) => ({
             approved_quantity: log.approved_quantity
           };
         });
+
+      // Transform live machine status segments from machine_live_history
+      const liveItems = (live_status_segments || [])
+        .filter((seg) => {
+          const hasRequired = seg.start_time && seg.end_time && seg.machine_name && seg.status;
+          return hasRequired && dayjs(seg.start_time).isValid() && dayjs(seg.end_time).isValid();
+        })
+        .map((seg) => ({
+          id: seg.id || `live-${seg.machine_id}-${seg.start_time}`,
+          machine: seg.machine_name,
+          type: 'live',
+          start_time: seg.start_time,
+          end_time: seg.end_time,
+          component: seg.status,
+          description: `Live ${seg.status}`,
+          quantity: null,
+          po: null,
+          status: seg.status,
+          live_status: seg.status,
+        }));
+
+      // Transform operator issues from maintenance.oee_issues
+      const issueItems = (operator_issue_segments || [])
+        .filter((seg) => {
+          const hasRequired = seg.start_time && seg.end_time && seg.machine_name;
+          return hasRequired && dayjs(seg.start_time).isValid() && dayjs(seg.end_time).isValid();
+        })
+        .map((seg) => ({
+          id: seg.id || `issue-${seg.machine_id}-${seg.start_time}`,
+          machine: seg.machine_name,
+          type: 'issues',
+          start_time: seg.start_time,
+          end_time: seg.end_time,
+          component: seg.issue_category || 'Issue',
+          description: seg.issue_reason || 'Operator issue',
+          quantity: null,
+          po: null,
+          status: seg.issue_category,
+          issue_category: seg.issue_category,
+          issue_reason: seg.issue_reason,
+        }));
       
-      const combinedData = [...plannedItems, ...productionItems];
+      const combinedData = [...plannedItems, ...productionItems, ...liveItems, ...issueItems];
 
       // Filter out "Default" machines from the entire dataset, checking if the name includes "default"
       const allDataFiltered = combinedData.filter(item => 
@@ -117,9 +158,9 @@ const useGanttStore = create((set, get) => ({
 
       set({
         allGanttData: allDataFiltered, // Store all valid data
-        ganttData: allDataFiltered, // Initially display all valid data
-        machines: uniqueMachines, // Set the dynamic machine list (only machines with data)
-        selectedMachine: 'all', // Reset selection to 'all'
+        ganttData: allDataFiltered, // Default: show all machines
+        machines: uniqueMachines,
+        selectedMachine: 'all',
         isLoading: false,
         lastRefresh: dayjs(),
         error: null
@@ -149,12 +190,17 @@ const useGanttStore = create((set, get) => ({
 
   setSelectedMachine: (machine) => {
     const { allGanttData } = get();
-    // Filter the displayed data on the client side (like BEL)
-    const newGanttData = machine === 'all'
-      ? allGanttData
-      : allGanttData.filter(item => item.machine === machine);
+    let newGanttData = allGanttData;
+    if (machine === 'scheduled') {
+      const scheduledMachines = new Set(
+        allGanttData.filter((item) => item.type === 'scheduled').map((item) => item.machine)
+      );
+      newGanttData = allGanttData.filter((item) => scheduledMachines.has(item.machine));
+    } else if (machine !== 'all') {
+      newGanttData = allGanttData.filter((item) => item.machine === machine);
+    }
 
-    set({ 
+    set({
       selectedMachine: machine,
       ganttData: newGanttData
     });
@@ -171,7 +217,7 @@ const useGanttStore = create((set, get) => ({
       const response = await api.get(url);
 
       // Ensure we have arrays even if the API returns null/undefined
-      const { planned_operations = [], actual_production_logs = [], all_machines = [] } = response.data || {};
+      const { planned_operations = [], actual_production_logs = [], all_machines = [], live_status_segments = [], operator_issue_segments = [] } = response.data || {};
 
       // Transform planned operations
       const plannedItems = (planned_operations || [])
@@ -229,8 +275,49 @@ const useGanttStore = create((set, get) => ({
             approved_quantity: log.approved_quantity
           };
         });
+
+      // Transform live machine status segments from machine_live_history
+      const liveItems = (live_status_segments || [])
+        .filter((seg) => {
+          const hasRequired = seg.start_time && seg.end_time && seg.machine_name && seg.status;
+          return hasRequired && dayjs(seg.start_time).isValid() && dayjs(seg.end_time).isValid();
+        })
+        .map((seg) => ({
+          id: seg.id || `live-${seg.machine_id}-${seg.start_time}`,
+          machine: seg.machine_name,
+          type: 'live',
+          start_time: seg.start_time,
+          end_time: seg.end_time,
+          component: seg.status,
+          description: `Live ${seg.status}`,
+          quantity: null,
+          po: null,
+          status: seg.status,
+          live_status: seg.status,
+        }));
+
+      // Transform operator issues from maintenance.oee_issues
+      const issueItems = (operator_issue_segments || [])
+        .filter((seg) => {
+          const hasRequired = seg.start_time && seg.end_time && seg.machine_name;
+          return hasRequired && dayjs(seg.start_time).isValid() && dayjs(seg.end_time).isValid();
+        })
+        .map((seg) => ({
+          id: seg.id || `issue-${seg.machine_id}-${seg.start_time}`,
+          machine: seg.machine_name,
+          type: 'issues',
+          start_time: seg.start_time,
+          end_time: seg.end_time,
+          component: seg.issue_category || 'Issue',
+          description: seg.issue_reason || 'Operator issue',
+          quantity: null,
+          po: null,
+          status: seg.issue_category,
+          issue_category: seg.issue_category,
+          issue_reason: seg.issue_reason,
+        }));
       
-      const combinedData = [...plannedItems, ...productionItems];
+      const combinedData = [...plannedItems, ...productionItems, ...liveItems, ...issueItems];
 
       // Filter out "Default" machines from the entire dataset, checking if the name includes "default"
       const allDataFiltered = combinedData.filter(item => 
@@ -242,9 +329,9 @@ const useGanttStore = create((set, get) => ({
 
       set({
         allGanttData: allDataFiltered, // Store all valid data
-        ganttData: allDataFiltered, // Initially display all valid data
-        machines: uniqueMachines, // Set the dynamic machine list (only machines with data)
-        selectedMachine: 'all', // Reset selection to 'all'
+        ganttData: allDataFiltered, // Default: show all machines
+        machines: uniqueMachines,
+        selectedMachine: 'all',
         isLoading: false,
         lastRefresh: dayjs(),
         error: null

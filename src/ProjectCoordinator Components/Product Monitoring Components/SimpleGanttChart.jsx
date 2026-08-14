@@ -213,7 +213,7 @@ const SimpleGanttChart = ({
           `,
           style: `background: linear-gradient(90deg, ${machineColor}10, ${machineColor}05); border-left: 4px solid ${machineColor}; border-bottom: 1px solid ${machineColor}30;`,
           order: machineIndex * 100,
-          nestedGroups: [`${machine}-scheduled`, `${machine}-production`],
+          nestedGroups: [`${machine}-scheduled`, `${machine}-production`, `${machine}-live`],
           showNested: true
         });
         
@@ -237,11 +237,25 @@ const SimpleGanttChart = ({
           content: `
             <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 500; font-size: 13px; min-height: 40px;">
               <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #52c41a; border: 1px solid #389e0d;"></span>
-              <span style="color: #389e0d;">Production</span>
+              <span style="color: #389e0d;">Operator Log</span>
             </div>
           `,
           style: 'background-color: #f6ffed; border-bottom: 1px solid #d9f7be;',
           order: (machineIndex * 100) + 20,
+          parent: `machine-${machine}`
+        });
+
+        // Live status subgroup
+        groups.push({
+          id: `${machine}-live`,
+          content: `
+            <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 40px; font-weight: 500; font-size: 13px; min-height: 40px;">
+              <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #1677ff; border: 1px solid #0958d9;"></span>
+              <span style="color: #1677ff;">Machine Timeline</span>
+            </div>
+          `,
+          style: 'background-color: #e6f4ff; border-bottom: 1px solid #bae0ff;',
+          order: (machineIndex * 100) + 30,
           parent: `machine-${machine}`
         });
       });
@@ -259,6 +273,16 @@ const SimpleGanttChart = ({
 
           const duration = endTime.diff(startTime, 'minutes');
           const groupId = `${item.machine}-${item.type}`;
+          const liveStatus = (item.live_status || item.status || '').toString().toUpperCase();
+          const liveClass = item.type === 'live'
+            ? `live-item live-${liveStatus.toLowerCase()}`
+            : `${item.type}-item`;
+          const titleColor = item.type === 'scheduled'
+            ? '#d46b08'
+            : item.type === 'live'
+              ? (liveStatus === 'PRODUCTION' ? '#389e0d' : liveStatus === 'OFF' ? '#8c8c8c' : '#1677ff')
+              : '#389e0d';
+          const titleLabel = item.type === 'live' ? liveStatus : (item.component || 'N/A');
           
           return {
             id: item.id || `item-${idx}`,
@@ -267,20 +291,20 @@ const SimpleGanttChart = ({
             end: endTime.toDate(),
             content: `
               <div class="gantt-item-content">
-                <div class="item-title">${item.component || 'N/A'}${item.operation_number ? ` - ${item.operation_number}` : ''}${item.operation_name ? ` - ${item.operation_name}` : ''}</div>
+                <div class="item-title">${item.type === 'live' ? liveStatus : `${item.component || 'N/A'}${item.operation_number ? ` - ${item.operation_number}` : ''}${item.operation_name ? ` - ${item.operation_name}` : ''}`}</div>
               </div>
             `,
-            className: `${item.type}-item`,
+            className: liveClass,
             title: `
-              <div style="font-weight: 600; margin-bottom: 8px; color: ${item.type === 'scheduled' ? '#d46b08' : '#389e0d'};">${item.component || 'N/A'}</div>
-              ${item.po ? `<div style="margin-bottom: 4px;"><strong>Order:</strong> ${item.po}</div>` : ''}
-              ${item.component ? `<div style="margin-bottom: 4px;"><strong>Part Name:</strong> ${item.component}</div>` : ''}
+              <div style="font-weight: 600; margin-bottom: 8px; color: ${titleColor};">${titleLabel}</div>
+              ${item.type !== 'live' && item.po ? `<div style="margin-bottom: 4px;"><strong>Order:</strong> ${item.po}</div>` : ''}
+              ${item.type !== 'live' && item.component ? `<div style="margin-bottom: 4px;"><strong>Part Name:</strong> ${item.component}</div>` : ''}
               ${item.operation_name ? `<div style="margin-bottom: 4px;"><strong>Operation:</strong> ${item.operation_name}</div>` : ''}
               ${item.operation_number ? `<div style="margin-bottom: 4px;"><strong>Operation #:</strong> ${item.operation_number}</div>` : ''}
               <div style="margin-bottom: 4px;"><strong>Machine:</strong> ${item.machine}</div>
-              <div style="margin-bottom: 4px;"><strong>Type:</strong> ${item.type}</div>
+              <div style="margin-bottom: 4px;"><strong>Type:</strong> ${item.type === 'live' ? 'Machine Timeline' : item.type === 'production' ? 'Operator Log' : item.type === 'scheduled' ? 'Scheduled' : item.type}</div>
               ${item.status ? `<div style="margin-bottom: 4px;"><strong>Status:</strong> ${item.status}</div>` : ''}
-              <div style="margin-bottom: 4px;"><strong>Quantity:</strong> ${item.quantity || 0}</div>
+              ${item.type !== 'live' ? `<div style="margin-bottom: 4px;"><strong>Quantity:</strong> ${item.quantity || 0}</div>` : ''}
               ${item.type === 'production' ? `
                 <div style="margin-bottom: 4px;"><strong>Produced Qty:</strong> ${item.produced_quantity || 0}</div>
                 <div style="margin-bottom: 4px;"><strong>Approved Qty:</strong> ${item.approved_quantity !== undefined ? item.approved_quantity : 0}</div>
@@ -597,8 +621,11 @@ const SimpleGanttChart = ({
               borderRadius: '6px', 
               border: '1px solid #d9d9d9' 
             }}>
-              <Badge color="#52c41a" text="Production" />
               <Badge color="#ffa940" text="Scheduled" />
+              <Badge color="#52c41a" text="Operator Log" />
+              <Badge color="#1677ff" text="ON" />
+              <Badge color="#52c41a" text="Production" />
+              <Badge color="#8c8c8c" text="OFF" />
             </div>
             
             {/* Auto Refresh */}
@@ -757,6 +784,29 @@ const SimpleGanttChart = ({
 
         .production-item .item-title {
           color: #389e0d !important;
+        }
+
+        .live-item.live-production {
+          border: 2px solid #389e0d !important;
+          border-left: 4px solid #389e0d !important;
+          background-color: rgba(82, 196, 26, 0.35) !important;
+        }
+
+        .live-item.live-on {
+          border: 2px solid #1677ff !important;
+          border-left: 4px solid #1677ff !important;
+          background-color: rgba(22, 119, 255, 0.25) !important;
+        }
+
+        .live-item.live-off {
+          border: 2px solid #8c8c8c !important;
+          border-left: 4px solid #8c8c8c !important;
+          background-color: rgba(140, 140, 140, 0.25) !important;
+        }
+
+        .live-item .item-title {
+          font-weight: 600 !important;
+          color: inherit !important;
         }
 
         .vis-item {

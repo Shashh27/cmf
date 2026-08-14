@@ -23,6 +23,15 @@ function isDrawingDocument(d) {
   const type = (d.document_type || '').toLowerCase();
   const name = (d.document_name || '').toLowerCase();
   const url = (d.document_url || '').toLowerCase();
+  // Reject clearly non-drawing media (videos, STEP, etc.) even if type is empty.
+  if (
+    type.includes('video') ||
+    type.includes('3d') ||
+    /\.(mkv|mp4|avi|mov|step|stp|stl|sldprt|sldasm)$/i.test(url) ||
+    /\.(mkv|mp4|avi|mov|step|stp|stl)$/i.test(name)
+  ) {
+    return false;
+  }
   const isPdfFile = url.endsWith('.pdf') || type.includes('pdf');
   return (
     type.includes('2d') ||
@@ -62,11 +71,11 @@ export function resolveBaseDrawingDocument(operationDocs, partDocs) {
     (d) => !isBalloonOperationDocument(d) && !isBalloonDocumentName(d.document_name),
   );
 
+  // Never fall back to arbitrary first docs (e.g. video/STEP) — InteractiveDrawing needs a real PDF/image.
   const previewDrawing =
     opDocs.find(isDrawingDocument) ||
     partDocList.find(isDrawingDocument) ||
-    opDocs[0] ||
-    partDocList[0];
+    null;
 
   if (!previewDrawing) {
     return { url: null, isPdf: false, name: '', apiDocumentId: null, endpoint: null };

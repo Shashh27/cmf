@@ -585,11 +585,12 @@ const Notifications = () => {
   ];
 
   return (
-    <div style={{ padding: '16px' }}>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
 
       {/* Tabs Section */}
       <Card
-        style={{ borderRadius: 8 }}
+        bordered={false}
+        style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}
         styles={{ body: { padding: '0 16px' } }}
       >
         <Tabs
