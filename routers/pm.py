@@ -37,6 +37,7 @@ from DB.schemas.configuration import (
 )
 from services.pm_service import (
     validate_checklist_item_frequency,
+    validate_assignment_frequency,
     create_initial_schedule,
     update_schedule_on_completion,
     get_due_checkpoints_for_machine,
@@ -61,6 +62,20 @@ SUBMISSION_DETAIL_LOAD = (
 )
 
 
+def _ensure_unique_item_code(db: Session, checklist_id: int, item_code: str, exclude_id: Optional[int] = None) -> None:
+    q = db.query(PMChecklistItem).filter(
+        PMChecklistItem.checklist_id == checklist_id,
+        func.lower(PMChecklistItem.item_code) == item_code.lower(),
+    )
+    if exclude_id is not None:
+        q = q.filter(PMChecklistItem.id != exclude_id)
+    if q.first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Checkpoint code '{item_code}' already exists in this checklist",
+        )
+
+
 # =======================
 # Checklist APIs
 # =======================
@@ -70,6 +85,11 @@ def create_checklist(payload: PMChecklistCreate, db: Session = Depends(get_db)):
     """Create a PM checklist with checkpoints. Checkpoints are mandatory."""
     for item in payload.items:
         validate_checklist_item_frequency(item)
+
+    # Duplicate codes inside the same create payload
+    codes = [i.item_code.upper() for i in payload.items]
+    if len(codes) != len(set(codes)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate checkpoint codes in request")
 
     db_checklist = PMChecklist(
         name=payload.name,
@@ -91,9 +111,15 @@ def create_checklist(payload: PMChecklistCreate, db: Session = Depends(get_db)):
     return db_checklist
 
 
-@router.get("/checklists", response_model=List[PMChecklistSchema])
+@router.get("/checklists", response_model=List[PMChecklistWithItems])
 def get_all_checklists(db: Session = Depends(get_db)):
-    return db.query(PMChecklist).order_by(PMChecklist.id.desc()).all()
+    """All checklists with checkpoints in one response (avoids N+1 detail fetches)."""
+    return (
+        db.query(PMChecklist)
+        .options(joinedload(PMChecklist.items))
+        .order_by(PMChecklist.id.desc())
+        .all()
+    )
 
 
 @router.get("/checklists/{checklist_id}", response_model=PMChecklistWithItems)
@@ -160,6 +186,7 @@ def add_checkpoint(checklist_id: int, payload: PMChecklistItemCreate, db: Sessio
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
 
     validate_checklist_item_frequency(payload)
+    _ensure_unique_item_code(db, checklist_id, payload.item_code)
 
     db_item = PMChecklistItem(checklist_id=checklist_id, **payload.model_dump())
     db.add(db_item)
@@ -189,20 +216,8 @@ def update_checkpoint(item_id: int, payload: PMChecklistItemUpdate, db: Session 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checkpoint not found")
 
     update_data = payload.model_dump(exclude_unset=True)
-    if update_data:
-        merged = PMChecklistItemCreate(
-            item_text=update_data.get("item_text", db_item.item_text),
-            sequence_number=update_data.get("sequence_number", db_item.sequence_number),
-            item_type=update_data.get("item_type", db_item.item_type),
-            expected_value=update_data.get("expected_value", db_item.expected_value),
-            frequency_type=update_data.get("frequency_type", db_item.frequency_type),
-            interval_value=update_data.get("interval_value", db_item.interval_value),
-            interval_unit=update_data.get("interval_unit", db_item.interval_unit),
-            trigger_hours=update_data.get("trigger_hours", db_item.trigger_hours),
-            remarks=update_data.get("remarks", db_item.remarks),
-        )
-        validate_checklist_item_frequency(merged)
-
+    if "item_code" in update_data and update_data["item_code"] is not None:
+        _ensure_unique_item_code(db, db_item.checklist_id, update_data["item_code"], exclude_id=item_id)
     for key, value in update_data.items():
         setattr(db_item, key, value)
 
@@ -245,8 +260,9 @@ def delete_checkpoint(item_id: int, db: Session = Depends(get_db)):
 def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session = Depends(get_db)):
     """
     Assign a checklist to a machine.
-    Only checkpoints marked is_required=true are stored in pm_assignment_items and shown to operators.
-    The assigner may include optional checkpoints in the payload; those are ignored unless required.
+    Only checkpoints marked is_required=true are stored.
+    Frequency is mandatory per selected checkpoint (per-machine).
+    is_compulsory=true → miss by end of shift notifies Admin/MC.
     """
     machine = db.query(Machine).filter(Machine.id == payload.machine_id).first()
     if not machine:
@@ -296,6 +312,14 @@ def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session 
             detail="At least one required checkpoint must be assigned to the machine",
         )
 
+    for config in items_to_assign:
+        validate_assignment_frequency(
+            config.frequency_type,
+            config.interval_value,
+            config.interval_unit,
+            config.trigger_hours,
+        )
+
     assignment = PMMachineAssignment(
         machine_id=payload.machine_id,
         checklist_id=payload.checklist_id,
@@ -305,11 +329,15 @@ def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session 
     db.flush()
 
     for config in items_to_assign:
-        checklist_item_id = config.checklist_item_id
         assignment_item = PMAssignmentItem(
             assignment_id=assignment.id,
-            checklist_item_id=checklist_item_id,
+            checklist_item_id=config.checklist_item_id,
             is_required=True,
+            is_compulsory=bool(config.is_compulsory),
+            frequency_type=config.frequency_type,
+            interval_value=config.interval_value,
+            interval_unit=config.interval_unit,
+            trigger_hours=config.trigger_hours,
         )
         db.add(assignment_item)
         db.flush()
@@ -330,13 +358,21 @@ def assign_checklist_to_machine(payload: PMMachineAssignmentCreate, db: Session 
     )
 
 
-@router.get("/assignments", response_model=List[PMMachineAssignmentSchema])
+@router.get("/assignments", response_model=List[PMMachineAssignmentWithDetails])
 def get_all_assignments(
     machine_id: Optional[int] = None,
     checklist_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(PMMachineAssignment)
+    """All assignments with checklist + items + schedules in one response (avoids N+1)."""
+    query = (
+        db.query(PMMachineAssignment)
+        .options(
+            joinedload(PMMachineAssignment.checklist),
+            joinedload(PMMachineAssignment.assignment_items).joinedload(PMAssignmentItem.checklist_item),
+            joinedload(PMMachineAssignment.assignment_items).joinedload(PMAssignmentItem.schedule),
+        )
+    )
     if machine_id is not None:
         query = query.filter(PMMachineAssignment.machine_id == machine_id)
     if checklist_id is not None:
@@ -468,7 +504,7 @@ def submit_pm_responses(payload: PMOperatorSubmitRequest, db: Session = Depends(
         update_schedule_on_completion(
             db,
             schedule,
-            checklist_item,
+            assignment_item,
             completion_date=completion_date,
         )
         created.append(submission)
@@ -624,3 +660,55 @@ def get_supervisor_submissions(
         ]
 
     return [enrich_submission(s) for s in submissions]
+
+# =======================
+# Missed compulsory notifications (Admin / MC / Supervisor — PM module)
+# =======================
+
+@router.get("/missed-notifications")
+def list_pm_missed_notifications(
+    pending_only: bool = True,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    from DB.models.notifications import PMMissedNotification
+
+    q = db.query(PMMissedNotification).order_by(PMMissedNotification.created_at.desc())
+    if pending_only:
+        q = q.filter(PMMissedNotification.is_ack.is_(False))
+    rows = q.limit(min(limit, 500)).all()
+    return [
+        {
+            "id": r.id,
+            "assignment_item_id": r.assignment_item_id,
+            "machine_id": r.machine_id,
+            "checklist_id": r.checklist_id,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+            "item_text": r.item_text,
+            "machine_label": r.machine_label,
+            "checklist_name": r.checklist_name,
+            "message": r.message,
+            "is_ack": r.is_ack,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/missed-notifications/{notification_id}/ack")
+def ack_pm_missed_notification(
+    notification_id: int,
+    ack_by: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    from DB.models.notifications import PMMissedNotification
+    from datetime import datetime, timezone
+
+    row = db.query(PMMissedNotification).filter(PMMissedNotification.id == notification_id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    row.is_ack = True
+    row.ack_by = ack_by or "user"
+    row.ack_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True}

@@ -1,11 +1,61 @@
 from typing import Optional, List, Text, TYPE_CHECKING
+import re
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from typing_extensions import Self
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, field_serializer
 from .inventory import ToolsList
+
+MAX_CYCLE_HOURS = 100
+_CYCLE_HMS_RE = re.compile(
+    r"^(?:(\d+)\s+days?,\s*)?(\d+):(\d{1,2})(?::(\d{1,2})(?:\.\d+)?)?$",
+    re.IGNORECASE,
+)
+
+
+def _format_cycle_hms(hours: int, minutes: int, seconds: int) -> str:
+    if minutes < 0 or minutes > 59 or seconds < 0 or seconds > 59:
+        raise ValueError("cycle_time minutes and seconds must be 0-59")
+    if hours < 0 or hours > MAX_CYCLE_HOURS or (
+        hours == MAX_CYCLE_HOURS and (minutes > 0 or seconds > 0)
+    ):
+        raise ValueError(f"cycle_time cannot exceed {MAX_CYCLE_HOURS} hours")
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_cycle_duration(v):
+    """Parse cycle time as duration HHH:MM:SS with hours 0-100."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, timedelta):
+        total = int(v.total_seconds())
+        if total < 0:
+            raise ValueError("cycle_time cannot be negative")
+        hours, rem = divmod(total, 3600)
+        minutes, seconds = divmod(rem, 60)
+        return _format_cycle_hms(hours, minutes, seconds)
+    if isinstance(v, time):
+        return _format_cycle_hms(v.hour, v.minute, v.second)
+    if isinstance(v, datetime):
+        t = v.time()
+        return _format_cycle_hms(t.hour, t.minute, t.second)
+    if isinstance(v, str):
+        text = v.strip()
+        if not text:
+            return None
+        match = _CYCLE_HMS_RE.match(text)
+        if not match:
+            raise ValueError(
+                f"Invalid cycle_time format: {v}. Expected HH:MM:SS (hours 0-{MAX_CYCLE_HOURS})"
+            )
+        days = int(match.group(1) or 0)
+        hours = days * 24 + int(match.group(2))
+        minutes = int(match.group(3))
+        seconds = int(match.group(4) or 0)
+        return _format_cycle_hms(hours, minutes, seconds)
+    raise ValueError(f"Invalid cycle_time type: {type(v)}")
 
 if TYPE_CHECKING:
     from .configuration import Customer
@@ -181,7 +231,7 @@ class OperationBase(BaseModel):
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
     setup_time: Optional[time] = None
-    cycle_time: Optional[time] = None
+    cycle_time: Optional[str] = None
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: int
@@ -190,9 +240,9 @@ class OperationBase(BaseModel):
     notes: Optional[str] = None
     vendor_id: Optional[int] = None  # Vendor for outsourced operations
 
-    @field_validator('setup_time', 'cycle_time', mode='before')
+    @field_validator('setup_time', mode='before')
     @classmethod
-    def parse_time(cls, v):
+    def parse_setup_time(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
@@ -219,6 +269,11 @@ class OperationBase(BaseModel):
             return v.time()
         else:
             raise ValueError(f"Invalid time type: {type(v)}")
+
+    @field_validator('cycle_time', mode='before')
+    @classmethod
+    def parse_cycle_time(cls, v):
+        return parse_cycle_duration(v)
 
 
 class OperationCreate(OperationBase):
@@ -232,7 +287,7 @@ class OperationUpdate(BaseModel):
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
     setup_time: Optional[time] = None
-    cycle_time: Optional[time] = None
+    cycle_time: Optional[str] = None
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: Optional[int] = None
@@ -241,9 +296,9 @@ class OperationUpdate(BaseModel):
     notes: Optional[str] = None
     vendor_id: Optional[int] = None  # Vendor for outsourced operations
 
-    @field_validator('setup_time', 'cycle_time', mode='before')
+    @field_validator('setup_time', mode='before')
     @classmethod
-    def parse_time(cls, v):
+    def parse_setup_time(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
@@ -270,6 +325,11 @@ class OperationUpdate(BaseModel):
             return v.time()
         else:
             raise ValueError(f"Invalid time type: {type(v)}")
+
+    @field_validator('cycle_time', mode='before')
+    @classmethod
+    def parse_cycle_time(cls, v):
+        return parse_cycle_duration(v)
 
 
 class Operation(OperationBase):
@@ -284,6 +344,14 @@ class Operation(OperationBase):
     tools: List['ToolWithPart'] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_serializer('cycle_time')
+    def serialize_cycle_time(self, v):
+        if v is None:
+            return None
+        if isinstance(v, time):
+            return f"{v.hour:02d}:{v.minute:02d}:{v.second:02d}"
+        return str(v)
 
     class Config:
         from_attributes = True

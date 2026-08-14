@@ -10,7 +10,13 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OutSourcePartStatus
+    OutSourcePartStatus,
+)
+from .chatbox import (
+    ChatConversation,
+    ChatParticipant,
+    ChatMessage,
+    ChatMessageReadStatus,
 )
 from .configuration import (
     workcenter,
@@ -62,6 +68,10 @@ __all__ = [
     "OrderDocument",
     "OperationDocument",
     "OutSourcePartStatus",
+    "ChatConversation",
+    "ChatParticipant",
+    "ChatMessage",
+    "ChatMessageReadStatus",
     "workcenter",
     "Machine",
     "Customer",

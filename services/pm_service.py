@@ -25,51 +25,61 @@ from DB.schemas.configuration import (
 
 
 def validate_checklist_item_frequency(item: PMChecklistItemCreate | PMChecklistItemUpdate, *, partial: bool = False) -> None:
-    """Validate frequency fields based on frequency_type."""
-    data = item.model_dump(exclude_unset=partial)
-    frequency_type = data.get("frequency_type")
+    """No-op: frequency lives on assignment items, not checkpoint master."""
+    return
 
-    if frequency_type is None and partial:
-        return
 
+def validate_assignment_frequency(
+    frequency_type: Optional[str],
+    interval_value: Optional[int] = None,
+    interval_unit: Optional[str] = None,
+    trigger_hours: Optional[float] = None,
+) -> None:
+    """Frequency is mandatory when assigning a checkpoint to a machine."""
+    if not frequency_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Frequency is required when assigning a checkpoint to a machine",
+        )
+    if frequency_type not in ("Time Based", "Usage Based", "Condition Based"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid frequency_type",
+        )
     if frequency_type == "Time Based":
-        interval_value = data.get("interval_value")
-        interval_unit = data.get("interval_unit")
         if interval_value is None or interval_unit is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Time Based checkpoints require interval_value and interval_unit",
+                detail="Time Based requires interval_value and interval_unit",
             )
         if interval_value <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="interval_value must be greater than 0",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interval_value must be greater than 0")
     elif frequency_type == "Condition Based":
-        interval_value = data.get("interval_value")
-        interval_unit = data.get("interval_unit")
         if (interval_value is None) ^ (interval_unit is None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Condition Based checkpoints must provide both interval_value and interval_unit together, or neither",
+                detail="Condition Based must provide both interval_value and interval_unit, or neither",
             )
         if interval_value is not None and interval_value <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="interval_value must be greater than 0",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interval_value must be greater than 0")
     elif frequency_type == "Usage Based":
-        trigger_hours = data.get("trigger_hours")
         if trigger_hours is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Usage Based checkpoints require trigger_hours",
+                detail="Usage Based requires trigger_hours",
             )
         if trigger_hours <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="trigger_hours must be greater than 0",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="trigger_hours must be greater than 0")
+
+
+def resolve_frequency(assignment_item: PMAssignmentItem, checklist_item: Optional[PMChecklistItem] = None) -> dict:
+    """Frequency always comes from the assignment item (per machine)."""
+    return {
+        "frequency_type": assignment_item.frequency_type or "Time Based",
+        "interval_value": assignment_item.interval_value,
+        "interval_unit": assignment_item.interval_unit,
+        "trigger_hours": assignment_item.trigger_hours,
+    }
 
 
 def calculate_next_due_date(
@@ -126,31 +136,33 @@ def create_initial_schedule(
 def update_schedule_on_completion(
     db: Session,
     schedule: PMSchedule,
-    checklist_item: PMChecklistItem,
+    assignment_item: PMAssignmentItem,
     completion_date: Optional[date] = None,
 ) -> PMSchedule:
     """
     Automatically update schedule when operator completes a submission.
-    Sets last_completed_date = submission day and recalculates next_due_date from frequency.
-    Never creates a new schedule row.
+    Sets last_completed_date = submission day and recalculates next_due_date from
+    assignment-item frequency (falls back to checklist item for legacy rows).
     """
     completed = completion_date or date.today()
     schedule.last_completed_date = completed
+    freq = resolve_frequency(assignment_item)
     schedule.next_due_date = calculate_next_due_date(
         completed,
-        checklist_item.frequency_type,
-        checklist_item.interval_value,
-        checklist_item.interval_unit,
+        freq["frequency_type"],
+        freq["interval_value"],
+        freq["interval_unit"],
     )
     db.flush()
     return schedule
 
 
-def is_condition_on_demand(checklist_item: PMChecklistItem) -> bool:
+def is_condition_on_demand(assignment_item: PMAssignmentItem, checklist_item: Optional[PMChecklistItem] = None) -> bool:
     """Condition-based checkpoint with no interval — submit anytime from the full assignment view."""
+    freq = resolve_frequency(assignment_item, checklist_item)
     return (
-        checklist_item.frequency_type == "Condition Based"
-        and (checklist_item.interval_value is None or checklist_item.interval_unit is None)
+        freq["frequency_type"] == "Condition Based"
+        and (freq["interval_value"] is None or freq["interval_unit"] is None)
     )
 
 
@@ -182,22 +194,25 @@ def build_operator_checkpoint_fields(
 ) -> dict:
     today = today or date.today()
     latest_submission_id, last_submitted_at = get_latest_submission_info(db, assignment_item.id)
-    due_by_schedule = is_checkpoint_due(checklist_item, schedule, today)
-    on_demand = is_condition_on_demand(checklist_item)
+    due_by_schedule = is_checkpoint_due(assignment_item, schedule, today)
+    on_demand = is_condition_on_demand(assignment_item, checklist_item)
+    freq = resolve_frequency(assignment_item, checklist_item)
     return {
         "assignment_item_id": assignment_item.id,
         "schedule_id": schedule.id,
         "checklist_item_id": checklist_item.id,
         "sequence_number": checklist_item.sequence_number,
+        "item_code": getattr(checklist_item, "item_code", None) or f"CP-{checklist_item.id}",
         "item_text": checklist_item.item_text,
         "item_type": checklist_item.item_type,
         "expected_value": checklist_item.expected_value,
-        "frequency_type": checklist_item.frequency_type,
-        "interval_value": checklist_item.interval_value,
-        "interval_unit": checklist_item.interval_unit,
-        "trigger_hours": checklist_item.trigger_hours,
+        "frequency_type": freq["frequency_type"],
+        "interval_value": freq["interval_value"],
+        "interval_unit": freq["interval_unit"],
+        "trigger_hours": freq["trigger_hours"],
         "remarks": checklist_item.remarks,
         "is_required": assignment_item.is_required,
+        "is_compulsory": bool(getattr(assignment_item, "is_compulsory", False)),
         "last_completed_date": schedule.last_completed_date,
         "next_due_date": schedule.next_due_date,
         "is_due": due_by_schedule or on_demand,
@@ -207,7 +222,7 @@ def build_operator_checkpoint_fields(
 
 
 def is_checkpoint_due(
-    checklist_item: PMChecklistItem,
+    assignment_item: PMAssignmentItem,
     schedule: PMSchedule,
     today: Optional[date] = None,
 ) -> bool:
@@ -217,8 +232,9 @@ def is_checkpoint_due(
     date-based checkpoint in the due list.
     """
     today = today or date.today()
-    if checklist_item.frequency_type == "Condition Based":
-        if checklist_item.interval_value is None or checklist_item.interval_unit is None:
+    freq = resolve_frequency(assignment_item)
+    if freq["frequency_type"] == "Condition Based":
+        if freq["interval_value"] is None or freq["interval_unit"] is None:
             return False
     return schedule.next_due_date <= today
 
@@ -254,9 +270,10 @@ def get_due_checkpoints_for_machine(db: Session, machine_id: int) -> List[dict]:
                 continue
 
             latest_submission_id, last_submitted_at = get_latest_submission_info(db, assignment_item.id)
-            if not is_checkpoint_due(checklist_item, schedule, today):
+            if not is_checkpoint_due(assignment_item, schedule, today):
                 continue
 
+            freq = resolve_frequency(assignment_item, checklist_item)
             due_items.append(
                 {
                     "schedule_id": schedule.id,
@@ -265,15 +282,17 @@ def get_due_checkpoints_for_machine(db: Session, machine_id: int) -> List[dict]:
                     "machine_id": machine_id,
                     "checklist_id": assignment.checklist_id,
                     "checklist_name": assignment.checklist.name if assignment.checklist else "",
+                    "item_code": getattr(checklist_item, "item_code", None) or f"CP-{checklist_item.id}",
                     "item_text": checklist_item.item_text,
                     "sequence_number": checklist_item.sequence_number,
                     "item_type": checklist_item.item_type,
                     "expected_value": checklist_item.expected_value,
-                    "frequency_type": checklist_item.frequency_type,
-                    "interval_value": checklist_item.interval_value,
-                    "interval_unit": checklist_item.interval_unit,
-                    "trigger_hours": checklist_item.trigger_hours,
+                    "frequency_type": freq["frequency_type"],
+                    "interval_value": freq["interval_value"],
+                    "interval_unit": freq["interval_unit"],
+                    "trigger_hours": freq["trigger_hours"],
                     "is_required": assignment_item.is_required,
+                    "is_compulsory": bool(getattr(assignment_item, "is_compulsory", False)),
                     "last_completed_date": schedule.last_completed_date,
                     "next_due_date": schedule.next_due_date,
                     "latest_submission_id": latest_submission_id,
@@ -437,6 +456,7 @@ def enrich_submission(submission: PMCheckpointSubmission) -> dict:
     assignment = assignment_item.assignment if assignment_item else None
     machine = assignment.machine if assignment else None
     checklist = assignment.checklist if assignment else None
+    freq = resolve_frequency(assignment_item, checklist_item) if assignment_item else {}
 
     return {
         "id": submission.id,
@@ -452,4 +472,9 @@ def enrich_submission(submission: PMCheckpointSubmission) -> dict:
         "checklist_name": checklist.name if checklist else None,
         "machine_id": assignment.machine_id if assignment else None,
         "machine_label": get_machine_label(machine),
+        "frequency_type": freq.get("frequency_type"),
+        "interval_value": freq.get("interval_value"),
+        "interval_unit": freq.get("interval_unit"),
+        "trigger_hours": freq.get("trigger_hours"),
+        "is_compulsory": assignment_item.is_compulsory if assignment_item else None,
     }

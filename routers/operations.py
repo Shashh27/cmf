@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import List, Optional
 from urllib.parse import urlparse
-from datetime import time
+from datetime import datetime, time, timedelta
 import os
 import io
 import csv
@@ -78,6 +78,71 @@ def _match_column(header: str) -> Optional[str]:
     return None
 
 
+def _hms_from_seconds(total_seconds: int) -> str:
+    sign = "-" if total_seconds < 0 else ""
+    total_seconds = abs(int(total_seconds))
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return f"{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+_DAY_HMS_RE = re.compile(
+    r"^(?:(\d+)\s+days?,\s*)?(-?\d+):(\d{1,2})(?::(\d{1,2})(?:\.\d+)?)?$",
+    re.IGNORECASE,
+)
+
+
+def _format_duration_cell(value) -> Optional[str]:
+    """Keep durations such as 100:00:00 instead of Excel's '4 days, 4:00:00'."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return _hms_from_seconds(int(value.total_seconds()))
+    if isinstance(value, time):
+        return f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+    if isinstance(value, datetime):
+        t = value.time()
+        return f"{t.hour:02d}:{t.minute:02d}:{t.second:02d}"
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        days = float(value)
+        # Excel stores time/duration as a fraction of a day (100h ≈ 4.1667)
+        if 0 <= days < 5:
+            return _hms_from_seconds(int(round(days * 24 * 3600)))
+        text = str(value).strip()
+    else:
+        text = _sanitize_singleline_text(value)
+    if not text:
+        return None
+    match = _DAY_HMS_RE.match(text)
+    if match:
+        days = int(match.group(1) or 0)
+        hours = int(match.group(2))
+        minutes = int(match.group(3))
+        seconds = int(match.group(4) or 0)
+        return _hms_from_seconds(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+    return text
+
+
+def _is_zero_hms(val) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, time):
+        return val.hour == 0 and val.minute == 0 and val.second == 0
+    text = str(val).strip()
+    if not text:
+        return True
+    parts = text.split(":")
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1]) if len(parts) > 1 else 0
+        seconds = int(str(parts[2]).split(".")[0]) if len(parts) > 2 else 0
+        return hours == 0 and minutes == 0 and seconds == 0
+    except (ValueError, IndexError):
+        return False
+
+
 def _sanitize_singleline_text(value) -> str:
     """Flatten cell text for op number, times, names, etc."""
     if value is None:
@@ -149,9 +214,10 @@ def _parse_rows(rows: list) -> List[OperationPreview]:
 
     result: List[OperationPreview] = []
     for row in rows[header_idx + 1:]:
-        raw_cells = [str(c) if c is not None else "" for c in row]
-        while len(raw_cells) <= max(header_map.values()):
-            raw_cells.append("")
+        orig = list(row)
+        while len(orig) <= max(header_map.values()):
+            orig.append(None)
+        raw_cells = [str(c) if c is not None else "" for c in orig]
 
         cells = [_sanitize_singleline_text(c) for c in raw_cells]
 
@@ -169,8 +235,8 @@ def _parse_rows(rows: list) -> List[OperationPreview]:
         data = {
             "operation_number":  op_num,
             "operation_name":    op_name,
-            "setup_time":        cells[header_map["setup_time"]]        if "setup_time"        in header_map else None,
-            "cycle_time":        cells[header_map["cycle_time"]]        if "cycle_time"        in header_map else None,
+            "setup_time":        _format_duration_cell(orig[header_map["setup_time"]]) if "setup_time" in header_map else None,
+            "cycle_time":        _format_duration_cell(orig[header_map["cycle_time"]]) if "cycle_time" in header_map else None,
             "work_instructions": _sanitize_multiline_text(raw_cells[header_map["work_instructions"]]) if "work_instructions" in header_map else None,
             "notes":             _sanitize_multiline_text(raw_cells[header_map["notes"]])             if "notes"             in header_map else None,
         }
@@ -259,14 +325,8 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     # Validate required times only for non Out-Source operations
     setup_time_val = data.get("setup_time")
     cycle_time_val = data.get("cycle_time")
-    zero_time = time(0, 0, 0)
     if part_type_id != 2:
-        if (
-            not setup_time_val
-            or not cycle_time_val
-            or setup_time_val == zero_time
-            or cycle_time_val == zero_time
-        ):
+        if _is_zero_hms(setup_time_val) or _is_zero_hms(cycle_time_val):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",
@@ -402,14 +462,8 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
 
             setup_time_val = data.get("setup_time")
             cycle_time_val = data.get("cycle_time")
-            zero_time = time(0, 0, 0)
             if pt_id != 2:
-                if (
-                    not setup_time_val
-                    or not cycle_time_val
-                    or setup_time_val == zero_time
-                    or cycle_time_val == zero_time
-                ):
+                if _is_zero_hms(setup_time_val) or _is_zero_hms(cycle_time_val):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",
@@ -670,16 +724,10 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
                 detail="Outsource operations require from_date and to_date",
             )
 
-    zero_time = time(0, 0, 0)
     new_setup = update_data.get("setup_time") if "setup_time" in update_data else db_operation.setup_time
     new_cycle = update_data.get("cycle_time") if "cycle_time" in update_data else db_operation.cycle_time
     if part_type_id != 2:
-        if (
-            not new_setup
-            or not new_cycle
-            or new_setup == zero_time
-            or new_cycle == zero_time
-        ):
+        if _is_zero_hms(new_setup) or _is_zero_hms(new_cycle):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",

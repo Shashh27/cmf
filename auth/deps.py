@@ -143,7 +143,8 @@ async def jwt_auth_http_middleware(request: Request, call_next):
         request.state.current_user = None
         return await call_next(request)
 
-    token = extract_bearer_token(request.headers.get("authorization"))
+    auth_header = request.headers.get("authorization")
+    token = extract_bearer_token(auth_header)
     if not token:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
