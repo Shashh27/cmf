@@ -151,6 +151,28 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
   return null;
 };
 
+const isPositiveDimension = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0;
+};
+
+const arePlannedDimensionsValid = (formType, dimensions = {}) => {
+  if (formType === 'Round') {
+    return isPositiveDimension(dimensions.diameter) && isPositiveDimension(dimensions.length);
+  }
+  if (formType === 'Square') {
+    return isPositiveDimension(dimensions.length)
+      && isPositiveDimension(dimensions.breadth)
+      && isPositiveDimension(dimensions.height);
+  }
+  if (formType === 'Pipe') {
+    return isPositiveDimension(dimensions.outer_diameter)
+      && isPositiveDimension(dimensions.inner_diameter)
+      && isPositiveDimension(dimensions.length);
+  }
+  return false;
+};
+
 const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [loading, setLoading] = useState(false);
   const [ordersData, setOrdersData] = useState([]);
@@ -178,6 +200,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [colPartNumber, setColPartNumber] = useState([]);
   const [colFormType, setColFormType] = useState([]);
   const [colSource, setColSource] = useState([]);
+  const [colHasRecommendations, setColHasRecommendations] = useState(false);
   const plannedRmFetchKeyRef = useRef('');
 
   useEffect(() => { fetchAllOrdersHierarchy(); }, []);
@@ -801,6 +824,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       }
       
       const planning = planningData[row.key] || {};
+      if (!arePlannedDimensionsValid(planning.formType, planning.dimensions)) {
+        message.error('Enter all dimensions greater than 0 before saving.');
+        return;
+      }
       const updateData = buildPlannedRMPayload(row, planning, resolvedMaterialId);
       const isManualFirstSave = !row.extractedDataId;
       const isUpdate = !!savedRows[row.key] && !!row.extractedDataId;
@@ -1161,6 +1188,18 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         const label = src === 'order' ? 'Procured' : src === 'general' ? 'General Stock' : 'Not Assigned';
         if (!colSource.includes(label)) return false;
       }
+      // Filter for rows with stock recommendations
+      if (colHasRecommendations === true) {
+        // Yes: show only rows with recommendations and not assigned
+        const recommendations = plannedBasedRecommendations[r.key] || [];
+        const hasStockAssigned = !!linkedStockMap[r.partId];
+        if (!recommendations || recommendations.length === 0 || hasStockAssigned) return false;
+      } else if (colHasRecommendations === false) {
+        // No: show rows without recommendations OR already assigned
+        const recommendations = plannedBasedRecommendations[r.key] || [];
+        const hasStockAssigned = !!linkedStockMap[r.partId];
+        if (recommendations && recommendations.length > 0 && !hasStockAssigned) return false;
+      }
       return true;
     });
     const orderCount = {};
@@ -1180,7 +1219,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       rmSeen[k] = true;
       return { ...r, orderRowSpan: oSpan, rmRowSpan: rSpan };
     });
-  }, [tableData, selectedOrder, selectedRM, selectedPartName, selectedPartNumber, selectedStockSource, selectedDocStatus, linkedStockMap, colOrder, colRM, colPartName, colPartNumber, colFormType, colSource, planningData]); // eslint-disable-line
+  }, [tableData, selectedOrder, selectedRM, selectedPartName, selectedPartNumber, selectedStockSource, selectedDocStatus, linkedStockMap, colOrder, colRM, colPartName, colPartNumber, colFormType, colSource, planningData, plannedBasedRecommendations, colHasRecommendations]); // eslint-disable-line
 
   const border = '1px solid #000';
   const isMobile = window.innerWidth <= 768;
@@ -1221,6 +1260,16 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           >
             <Option value="all">All</Option>
             <Option value="no_2d">No 2D Document</Option>
+          </Select>
+          <Select
+            value={colHasRecommendations === true ? 'yes' : colHasRecommendations === false ? 'no' : undefined}
+            placeholder="Recommending Stock"
+            allowClear
+            style={{ minWidth: isMobile ? 130 : 160 }}
+            onChange={(val) => setColHasRecommendations(val === 'yes' ? true : val === 'no' ? false : undefined)}
+          >
+            <Option value="yes">Yes</Option>
+            <Option value="no">No</Option>
           </Select>
           <PlanProcureRMDownload tableData={filteredRows} planningData={planningData} savedRows={savedRows} />
         </div>
@@ -1436,7 +1485,8 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                           disabled={
                             isPartStockLocked(row.partId) ||
                             (!row.needsManualPlanning && !row.materialExists) ||
-                            (row.needsManualPlanning && !getSelectedMaterialId(row))
+                            (row.needsManualPlanning && !getSelectedMaterialId(row)) ||
+                            !arePlannedDimensionsValid(planningData[row.key]?.formType, planningData[row.key]?.dimensions)
                           }
                           icon={savedRows[row.key] ? <CheckOutlined /> : <SaveOutlined />}
                           style={{ 

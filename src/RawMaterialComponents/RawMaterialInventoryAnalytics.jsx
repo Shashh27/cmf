@@ -1,12 +1,12 @@
-import React, { useMemo } from "react";
-import { Card, Row, Col, Statistic, Empty, Spin } from "antd";
-import { 
+import React, { useMemo, useState, useEffect } from "react";
+import { Card, Row, Col, Statistic, Empty, Spin, Select, Button } from "antd";
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, Treemap
 } from "recharts";
-import { 
-  Package, Layers, Box, CheckCircle, AlertTriangle, 
-  Ruler, Circle, Square, Activity 
+import {
+  Package, Layers, Box, CheckCircle, AlertTriangle,
+  Ruler, Circle, Square, Activity, RotateCcw
 } from "lucide-react";
 
 const COLORS = {
@@ -26,6 +26,39 @@ const fmtDim = (s) => {
 };
 
 const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) => {
+  const [selectedMaterial, setSelectedMaterial] = useState([]);
+  const [selectedProcess, setSelectedProcess] = useState([]);
+  const [selectedForm, setSelectedForm] = useState([]);
+  const [selectedSource, setSelectedSource] = useState([]);
+  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
+
+  const handleResetFilters = () => {
+    setSelectedMaterial([]);
+    setSelectedProcess([]);
+    setSelectedForm([]);
+    setSelectedSource([]);
+  };
+
+  // Get unique filter options from inventory data
+  const filterOptions = useMemo(() => {
+    const materials = inventoryData.map(m => ({ id: m.id, name: m.material_name }));
+    const processes = [...new Set(inventoryData.flatMap(m => (m.stocks || []).map(s => s.process_type).filter(Boolean)))];
+    const forms = [...new Set(inventoryData.flatMap(m => (m.stocks || []).map(s => s.form_type).filter(Boolean)))];
+    const sources = [...new Set(inventoryData.flatMap(m => (m.stocks || []).map(s => s.source_type).filter(Boolean)))];
+    return { materials, processes, forms, sources };
+  }, [inventoryData]);
+
   const analyticsData = useMemo(() => {
     if (!inventoryData.length) return null;
 
@@ -42,7 +75,19 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
     const formTypeStats = [];
     const sourceTypeStats = [];
 
-    inventoryData.forEach((material) => {
+    // Filter inventory data based on selected filters
+    const filteredInventory = inventoryData.map(material => {
+      if (selectedMaterial.length > 0 && !selectedMaterial.includes(material.id)) return null;
+      const filteredStocks = (material.stocks || []).filter(stock => {
+        if (selectedProcess.length > 0 && !selectedProcess.includes(stock.process_type)) return false;
+        if (selectedForm.length > 0 && !selectedForm.includes(stock.form_type)) return false;
+        if (selectedSource.length > 0 && !selectedSource.includes(stock.source_type)) return false;
+        return true;
+      });
+      return { ...material, stocks: filteredStocks };
+    }).filter(m => m !== null && m.stocks.length > 0);
+
+    filteredInventory.forEach((material) => {
       totalMaterials++;
       const stocks = material.stocks || [];
       totalStocks += stocks.length;
@@ -60,7 +105,8 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
         if (dimStr !== "-") {
           materialDimensions.push({
             dimensions: dimStr,
-            formType: stock.form_type,
+            processType: stock.process_type || "-",
+            formType: stock.form_type || "-",
             totalUnits: units.length,
             availableUnits: units.filter(u => u.status === "available").length,
             partiallyUsedUnits: units.filter(u => u.status === "partially_used").length,
@@ -159,7 +205,7 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
         { name: "Not Available", value: notAvailableUnits, color: COLORS.not_available }
       ]
     };
-  }, [inventoryData]);
+  }, [inventoryData, selectedMaterial, selectedProcess, selectedForm, selectedSource]);
 
   if (loading) {
     return (
@@ -175,87 +221,187 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
 
   const { overview, materialStats, dimensionStats, formTypeStats, sourceTypeStats, unitStatusData } = analyticsData;
 
+  const { Option } = Select;
+
   return (
     <div className="space-y-6">
+      {/* Analytics Filters */}
+      <Card className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
+        <div className="flex justify-end items-center gap-2 flex-wrap">
+          <Select
+            mode="multiple"
+            placeholder="Materials"
+            allowClear
+            value={selectedMaterial}
+            onChange={setSelectedMaterial}
+            style={{ minWidth: 150, maxWidth: 200 }}
+            size="small"
+            maxTagCount="responsive"
+          >
+            {filterOptions.materials.map(m => (
+              <Option key={m.id} value={m.id}>{m.name}</Option>
+            ))}
+          </Select>
+          <Select
+            mode="multiple"
+            placeholder="Processes"
+            allowClear
+            value={selectedProcess}
+            onChange={setSelectedProcess}
+            style={{ minWidth: 120, maxWidth: 160 }}
+            size="small"
+            maxTagCount="responsive"
+          >
+            {filterOptions.processes.map(p => (
+              <Option key={p} value={p}>{p}</Option>
+            ))}
+          </Select>
+          <Select
+            mode="multiple"
+            placeholder="Forms"
+            allowClear
+            value={selectedForm}
+            onChange={setSelectedForm}
+            style={{ minWidth: 120, maxWidth: 160 }}
+            size="small"
+            maxTagCount="responsive"
+          >
+            {filterOptions.forms.map(f => (
+              <Option key={f} value={f}>{f}</Option>
+            ))}
+          </Select>
+          <Select
+            mode="multiple"
+            placeholder="Sources"
+            allowClear
+            value={selectedSource}
+            onChange={setSelectedSource}
+            style={{ minWidth: 120, maxWidth: 160 }}
+            size="small"
+            maxTagCount="responsive"
+          >
+            {filterOptions.sources.map(s => (
+              <Option key={s} value={s}>{s}</Option>
+            ))}
+          </Select>
+          <Button
+            icon={<RotateCcw className="w-4 h-4" />}
+            onClick={handleResetFilters}
+            size="small"
+            type="default"
+          >
+            Reset
+          </Button>
+        </div>
+      </Card>
+
       {/* Overview Cards */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={6}>
-          <Card className="shadow-sm" bordered={false}>
+      <Row gutter={[8, 8]}>
+        <Col xs={12} sm={12} md={6} lg={6}>
+          <Card className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <Statistic
-              title={<span className="text-gray-600 text-sm font-medium">Total Materials</span>}
+              title={<span className="text-gray-600 text-xs font-medium">Total Materials</span>}
               value={overview.totalMaterials}
-              prefix={<Package className="w-5 h-5 text-blue-500" />}
-              valueStyle={{ color: "#1890ff" }}
+              prefix={<Package className="w-4 h-4 text-blue-500" />}
+              valueStyle={{ color: "#1890ff", fontSize: '20px' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card className="shadow-sm" bordered={false}>
+        <Col xs={12} sm={12} md={6} lg={6}>
+          <Card className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <Statistic
-              title={<span className="text-gray-600 text-sm font-medium">Total Stocks</span>}
+              title={<span className="text-gray-600 text-xs font-medium">Total Stocks</span>}
               value={overview.totalStocks}
-              prefix={<Layers className="w-5 h-5 text-green-500" />}
-              valueStyle={{ color: "#52c41a" }}
+              prefix={<Layers className="w-4 h-4 text-green-500" />}
+              valueStyle={{ color: "#52c41a", fontSize: '20px' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card className="shadow-sm" bordered={false}>
+        <Col xs={12} sm={12} md={6} lg={6}>
+          <Card className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <Statistic
-              title={<span className="text-gray-600 text-sm font-medium">Total Units</span>}
+              title={<span className="text-gray-600 text-xs font-medium">Total Units</span>}
               value={overview.totalUnits}
-              prefix={<Box className="w-5 h-5 text-orange-500" />}
-              valueStyle={{ color: "#fa8c16" }}
+              prefix={<Box className="w-4 h-4 text-orange-500" />}
+              valueStyle={{ color: "#fa8c16", fontSize: '20px' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card className="shadow-sm" bordered={false}>
+        <Col xs={12} sm={12} md={6} lg={6}>
+          <Card className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <Statistic
-              title={<span className="text-gray-600 text-sm font-medium">Available Units</span>}
+              title={<span className="text-gray-600 text-xs font-medium">Available Units</span>}
               value={overview.availableUnits}
-              prefix={<CheckCircle className="w-5 h-5 text-green-600" />}
-              valueStyle={{ color: "#52c41a" }}
-              suffix={`/ ${overview.totalUnits}`}
+              prefix={<CheckCircle className="w-4 h-4 text-green-600" />}
+              valueStyle={{ color: "#52c41a", fontSize: '20px' }}
+              suffix={<span className="text-xs text-gray-500">/ {overview.totalUnits}</span>}
             />
           </Card>
         </Col>
       </Row>
 
       {/* Unit Status Distribution */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} md={12}>
-          <Card title="Unit Status Distribution" className="shadow-sm" bordered={false}>
+      <Row gutter={[12, 12]}>
+        <Col xs={24} sm={24} md={12}>
+          <Card title={<span className="text-sm font-semibold">Unit Status Distribution</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={unitStatusData}
+                  data={unitStatusData.filter(d => d.value > 0)}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
+                  label={({ name, percent, value }) => {
+                    const percentage = (percent * 100).toFixed(1);
+                    if (parseFloat(percentage) < 5) {
+                      return ''; // Don't show label for very small slices
+                    }
+                    return `${percentage}%`;
+                  }}
+                  outerRadius={windowWidth < 768 ? 80 : 110}
+                  innerRadius={windowWidth < 768 ? 40 : 50}
                   fill="#8884d8"
                   dataKey="value"
+                  labelStyle={{ fontSize: windowWidth < 768 ? '11px' : '13px', fontWeight: 700, fill: '#fff' }}
                 >
-                  {unitStatusData.map((entry, index) => (
+                  {unitStatusData.filter(d => d.value > 0).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip
+                  formatter={(value, name, props) => {
+                    const percentage = ((value / unitStatusData.reduce((sum, d) => sum + d.value, 0)) * 100).toFixed(1);
+                    return [`${value} units (${percentage}%)`, name];
+                  }}
+                  contentStyle={{ fontSize: '12px', fontWeight: 500 }}
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  height={60}
+                  iconType="circle"
+                  wrapperStyle={{ fontSize: windowWidth < 768 ? '11px' : '13px', fontWeight: 600 }}
+                  payload={unitStatusData.filter(d => d.value > 0).map(entry => {
+                    const percentage = ((entry.value / unitStatusData.reduce((sum, d) => sum + d.value, 0)) * 100).toFixed(1);
+                    return {
+                      value: `${entry.name}: ${entry.value} (${percentage}%)`,
+                      type: 'circle',
+                      color: entry.color
+                    };
+                  })}
+                />
               </PieChart>
             </ResponsiveContainer>
           </Card>
         </Col>
-        <Col xs={24} md={12}>
-          <Card title="Source Type Distribution" className="shadow-sm" bordered={false}>
+        <Col xs={24} sm={24} md={12}>
+          <Card title={<span className="text-sm font-semibold">Source Type Distribution</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={sourceTypeStats}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ fontSize: '11px' }} />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
                 <Bar dataKey="count" fill="#2E8B57" name="Units" />
               </BarChart>
             </ResponsiveContainer>
@@ -264,14 +410,14 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
       </Row>
 
       {/* Material-wise Breakdown */}
-      <Card title="Material-wise Inventory Overview" className="shadow-sm" bordered={false}>
-        <ResponsiveContainer width="100%" height={400}>
+      <Card title={<span className="text-sm font-semibold">Material-wise Inventory Overview</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
+        <ResponsiveContainer width="100%" height={windowWidth < 768 ? 300 : 400}>
           <BarChart data={materialStats} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" />
-            <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 11 }} />
-            <Tooltip />
-            <Legend />
+            <XAxis type="number" tick={{ fontSize: 10 }} />
+            <YAxis dataKey="name" type="category" width={windowWidth < 768 ? 100 : 150} tick={{ fontSize: windowWidth < 768 ? 9 : 11 }} />
+            <Tooltip contentStyle={{ fontSize: '11px' }} />
+            <Legend wrapperStyle={{ fontSize: '11px' }} />
             <Bar dataKey="totalUnits" fill="#2E8B57" name="Total Units" />
             <Bar dataKey="availableUnits" fill="#52c41a" name="Available Units" />
           </BarChart>
@@ -279,85 +425,89 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
       </Card>
 
       {/* Dimensions Breakdown */}
-      <Card title="Stock Dimensions & Unit Availability" className="shadow-sm" bordered={false}>
-        <ResponsiveContainer width="100%" height={500}>
-          <BarChart data={dimensionStats.slice(0, 15)}>
+      <Card title={<span className="text-sm font-semibold">Stock Dimensions & Unit Availability</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
+        <ResponsiveContainer width="100%" height={windowWidth < 768 ? 400 : 500}>
+          <BarChart data={dimensionStats.slice(0, windowWidth < 768 ? 8 : 15)}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis 
-              dataKey="dimensions" 
-              angle={-45} 
-              textAnchor="end" 
-              height={100}
-              tick={{ fontSize: 10 }}
+            <XAxis
+              dataKey="dimensions"
+              angle={-45}
+              textAnchor="end"
+              height={windowWidth < 768 ? 80 : 100}
+              tick={{ fontSize: windowWidth < 768 ? 8 : 10 }}
+              interval={0}
             />
-            <YAxis />
-            <Tooltip />
-            <Legend />
+            <YAxis tick={{ fontSize: 10 }} />
+            <Tooltip contentStyle={{ fontSize: '11px' }} />
+            <Legend wrapperStyle={{ fontSize: '11px' }} />
             <Bar dataKey="totalUnits" fill="#2E8B57" name="Total Units" />
             <Bar dataKey="availableUnits" fill="#52c41a" name="Available Units" />
             <Bar dataKey="partiallyUsedUnits" fill="#faad14" name="Partially Used" />
             <Bar dataKey="exhaustedUnits" fill="#ff4d4f" name="Exhausted" />
           </BarChart>
         </ResponsiveContainer>
-        {dimensionStats.length > 15 && (
-          <div className="text-center text-gray-500 text-sm mt-2">
-            Showing top 15 dimensions by unit count
+        {dimensionStats.length > (windowWidth < 768 ? 8 : 15) && (
+          <div className="text-center text-gray-500 text-xs mt-2">
+            Showing top {windowWidth < 768 ? 8 : 15} dimensions by unit count
           </div>
         )}
       </Card>
 
       {/* Form Type Distribution */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} md={12}>
-          <Card title="Form Type Distribution" className="shadow-sm" bordered={false}>
+      <Row gutter={[12, 12]}>
+        <Col xs={24} sm={24} md={12}>
+          <Card title={<span className="text-sm font-semibold">Form Type Distribution</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
                   data={formTypeStats}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
+                  labelLine={true}
+                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                  outerRadius={windowWidth < 768 ? 70 : 80}
                   fill="#8884d8"
                   dataKey="count"
+                  labelStyle={{ fontSize: windowWidth < 768 ? '9px' : '11px' }}
                 >
                   {formTypeStats.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS.chart[index % COLORS.chart.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip contentStyle={{ fontSize: '11px' }} />
+                <Legend wrapperStyle={{ fontSize: windowWidth < 768 ? '9px' : '11px' }} />
               </PieChart>
             </ResponsiveContainer>
           </Card>
         </Col>
-        <Col xs={24} md={12}>
-          <Card 
+        <Col xs={24} sm={24} md={12}>
+          <Card
             title={
               <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-blue-500" />
-                <span>Availability Summary</span>
+                <Activity className="w-4 h-4 text-blue-500" />
+                <span className="text-sm font-semibold">Availability Summary</span>
               </div>
-            } 
-            className="shadow-sm" 
+            }
+            className="shadow-sm"
             bordered={false}
+            bodyStyle={{ padding: '12px' }}
           >
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-gray-600">Availability Rate</span>
-                <span className="text-2xl font-bold text-green-600">{overview.availabilityRate}%</span>
+                <span className="text-gray-600 text-xs">Availability Rate</span>
+                <span className="text-xl font-bold text-green-600">{overview.availabilityRate}%</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-600">Partially Used</span>
-                <span className="text-xl font-semibold text-orange-500">{overview.partiallyUsedUnits}</span>
+                <span className="text-gray-600 text-xs">Partially Used</span>
+                <span className="text-lg font-semibold text-orange-500">{overview.partiallyUsedUnits}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-600">Exhausted Units</span>
-                <span className="text-xl font-semibold text-red-500">{overview.exhaustedUnits}</span>
+                <span className="text-gray-600 text-xs">Exhausted Units</span>
+                <span className="text-lg font-semibold text-red-500">{overview.exhaustedUnits}</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div 
-                  className="bg-green-500 h-3 rounded-full transition-all duration-300" 
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${overview.availabilityRate}%` }}
                 ></div>
               </div>
@@ -367,46 +517,50 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
       </Row>
 
       {/* Detailed Material Dimensions Table */}
-      <Card title="Detailed Material & Dimensions Breakdown" className="shadow-sm" bordered={false}>
-        <div className="space-y-4">
+      <Card title={<span className="text-sm font-semibold">Detailed Material & Dimensions Breakdown</span>} className="shadow-sm" bordered={false} bodyStyle={{ padding: '12px' }}>
+        <div className="space-y-3">
           {materialStats.map((material) => (
-            <div key={material.name} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold text-gray-800">{material.name}</h3>
-                <div className="flex gap-4 text-sm">
+            <div key={material.name} className="border border-gray-200 rounded-lg p-3">
+              <div className="flex flex-wrap justify-between items-center mb-2 gap-2">
+                <h3 className="text-sm font-semibold text-gray-800">{material.name}</h3>
+                <div className="flex flex-wrap gap-3 text-xs">
                   <span className="text-gray-600">Stocks: <strong>{material.totalStocks}</strong></span>
                   <span className="text-gray-600">Units: <strong>{material.totalUnits}</strong></span>
                   <span className="text-green-600">Available: <strong>{material.availableUnits}</strong></span>
                 </div>
               </div>
               {material.dimensions.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {material.dimensions.map((dim, idx) => (
-                    <div key={idx} className="bg-gray-50 rounded p-3 border border-gray-100">
-                      <div className="font-medium text-sm text-gray-700 mb-2 font-mono">
-                        {dim.dimensions}
+                    <div key={idx} className="bg-gray-50 rounded p-2 border border-gray-100">
+                      <div className="flex items-center gap-2 mb-1 text-xs">
+                        <span className="font-medium text-gray-700 font-mono">{dim.dimensions}</span>
+                        <span className="text-gray-400">|</span>
+                        <span className="text-gray-500">Process: <span className="font-semibold text-gray-700">{dim.processType}</span></span>
+                        <span className="text-gray-400">|</span>
+                        <span className="text-gray-500">Form: <span className="font-semibold text-gray-700">{dim.formType}</span></span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="grid grid-cols-2 gap-1 text-xs">
                         <div>
                           <span className="text-gray-500">Total:</span>
                           <span className="font-semibold ml-1">{dim.totalUnits}</span>
                         </div>
                         <div>
-                          <span className="text-green-600">Available:</span>
+                          <span className="text-green-600">Avail:</span>
                           <span className="font-semibold ml-1">{dim.availableUnits}</span>
                         </div>
                         <div>
-                          <span className="text-orange-500">Partial:</span>
+                          <span className="text-orange-500">Part:</span>
                           <span className="font-semibold ml-1">{dim.partiallyUsedUnits}</span>
                         </div>
                         <div>
-                          <span className="text-red-500">Exhausted:</span>
+                          <span className="text-red-500">Exh:</span>
                           <span className="font-semibold ml-1">{dim.exhaustedUnits}</span>
                         </div>
                       </div>
-                      <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-green-500 h-2 rounded-full" 
+                      <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
+                        <div
+                          className="bg-green-500 h-1.5 rounded-full"
                           style={{ width: `${dim.totalUnits > 0 ? (dim.availableUnits / dim.totalUnits) * 100 : 0}%` }}
                         ></div>
                       </div>
@@ -414,7 +568,7 @@ const RawMaterialInventoryAnalytics = ({ inventoryData = [], loading = false }) 
                   ))}
                 </div>
               ) : (
-                <div className="text-gray-400 italic text-sm">No dimensions available</div>
+                <div className="text-gray-400 italic text-xs">No dimensions available</div>
               )}
             </div>
           ))}

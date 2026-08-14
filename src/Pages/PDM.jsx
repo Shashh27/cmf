@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Layout, Drawer, Button, Tabs, Tooltip } from "antd";
+import { Layout, Drawer, Button, Tabs, Tooltip, App } from "antd";
 import { MenuOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
@@ -11,6 +11,8 @@ import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import QualityManagement from "../Quality Management Components/QualityManagement";
 import Recyclebin from "./Recyclebin";
 import AdminDocumentNotifications from "./AdminDocumentNotifications";
+import OrderChatPanel, { OrderChatButton, useOrderChat } from "../chatbox/OrderChatPanel";
+import { useAuth } from "../auth/AuthContext.jsx";
 import "../PDM Components/pdm-theme.css";
 
 const { Sider, Content } = Layout;
@@ -33,6 +35,16 @@ const PDM = () => {
   const fromOms = (searchParams.get("from") || "").toLowerCase() === "oms";
   const initialProductId = routeProductId || searchParams.get("productId");
   const initialOrderId = searchParams.get("orderId");
+  const [chatOpen, setChatOpen] = useState(false);
+  const { message: messageApi } = App.useApp();
+  const { user } = useAuth();
+  const orderIdNum = initialOrderId ? Number(initialOrderId) : null;
+  const chat = useOrderChat({
+    orderId: orderIdNum,
+    panelOpen: chatOpen,
+    currentUserId: user?.id,
+    messageApi,
+  });
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [partDocuments, setPartDocuments] = useState([]);
@@ -45,7 +57,6 @@ const PDM = () => {
   const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
   const [bomCollapsed, setBomCollapsed] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userId = user?.id;
 
   const isMobile = viewportWidth < 768;
@@ -180,6 +191,12 @@ const PDM = () => {
               ]}
             />
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+              {initialOrderId && (
+                <OrderChatButton
+                  totalUnread={chat.totalUnread}
+                  onClick={() => setChatOpen(true)}
+                />
+              )}
               <AdminDocumentNotifications orderId={initialOrderId} />
               <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
                 {viewportWidth < 900 ? "Back" : "Back to Orders"}
@@ -271,7 +288,7 @@ const PDM = () => {
               open={useBomDrawer && mobileDrawerOpen}
               size={Math.min(420, Math.round(viewportWidth * 0.92))}
               styles={{ body: { padding: 0, height: "100%", overflow: "hidden" } }}
-              destroyOnClose={false}
+              destroyOnHidden={false}
             >
               {bomPanel}
             </Drawer>
@@ -348,6 +365,15 @@ const PDM = () => {
           </div>
         ) : null}
       </div>
+
+      {initialOrderId && (
+        <OrderChatPanel
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          orderId={orderIdNum}
+          chat={chat}
+        />
+      )}
     </>
   );
 };

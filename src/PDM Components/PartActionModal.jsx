@@ -4,6 +4,7 @@ import { API_BASE_URL } from '../Config/auth';
 import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
+import DurationHmsInput, { durationHmsRules, toDurationHms } from './DurationHmsInput.jsx';
 import { api } from '../api/client.js';
 
 const { TextArea } = Input;
@@ -154,7 +155,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
             from_date: op.from_date ? dayjs(op.from_date) : null, 
             to_date: op.to_date ? dayjs(op.to_date) : null,
             setup_time:        op.setup_time ? dayjs(op.setup_time, 'HH:mm:ss') : null,
-            cycle_time:        op.cycle_time ? dayjs(op.cycle_time, 'HH:mm:ss') : null,
+            cycle_time:        toDurationHms(op.cycle_time),
             workcenter_id:     op.workcenter_id || null,
             machine_id:        op.machine_id || null,
             work_instructions: op.work_instructions || '',
@@ -214,7 +215,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
           from_date: ts(item.from_date),
           to_date: ts(item.to_date),
           setup_time: out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
-          cycle_time: out ? null : (item.cycle_time?.format('HH:mm:ss') ?? null),
+          cycle_time: out ? null : (toDurationHms(item.cycle_time) ?? null),
           workcenter_id: out ? null : (item.workcenter_id ? parseInt(item.workcenter_id) : null),
           machine_id: out ? null : (item.machine_id ? parseInt(item.machine_id) : null),
           work_instructions: out ? null : (item.work_instructions || null),
@@ -401,8 +402,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                         </Form.Item>
                                       </Col>
                                       <Col xs={12} sm={12} md={6}>
-                                        <Form.Item {...restField} name={[name, 'cycle_time']} label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
-                                          <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                                        <Form.Item {...restField} name={[name, 'cycle_time']} label="Cycle Time" tooltip="Hours : Minutes. Up to 100 hours." required rules={durationHmsRules('Cycle Time')}>
+                                          <DurationHmsInput />
                                         </Form.Item>
                                       </Col>
                                     </>

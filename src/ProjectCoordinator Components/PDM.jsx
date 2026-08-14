@@ -1,151 +1,338 @@
-import React, { useState } from "react";
-import { Layout, Drawer, Button } from "antd";
-import { MenuOutlined } from "@ant-design/icons";
+import React, { useState, useEffect, useMemo } from "react";
+import { Layout, Drawer, Button, Tabs, Tooltip, App } from "antd";
+import { MenuOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import { useNavigate, useSearchParams, useParams, useLocation } from "react-router-dom";
 import BillOfMaterials from "./PDM Components/BillOfMaterials";
 import ProductDetails from "./PDM Components/ProductDetails";
 import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
+import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import Recyclebin from "./Recyclebin";
+import PCOrderChatPanel, { OrderChatButton, useOrderChat } from "./chatbox/OrderChatPanel";
+import { useAuth } from "../auth/AuthContext.jsx";
 
 const { Sider, Content } = Layout;
 
+const BOM_SIDER_COLLAPSED = 48;
+
+function getBomWidth(viewportWidth) {
+  if (viewportWidth >= 1600) return Math.min(520, Math.round(viewportWidth * 0.28));
+  if (viewportWidth >= 1400) return Math.min(460, Math.round(viewportWidth * 0.3));
+  if (viewportWidth >= 1200) return Math.min(420, Math.round(viewportWidth * 0.32));
+  if (viewportWidth >= 992) return Math.min(360, Math.round(viewportWidth * 0.34));
+  return Math.min(320, Math.round(viewportWidth * 0.42));
+}
+
 const PDM = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { productId: routeProductId } = useParams();
+  const [searchParams] = useSearchParams();
+  const fromOms = (searchParams.get("from") || "").toLowerCase() === "oms";
+  const initialProductId = routeProductId || searchParams.get("productId");
+  const productIdNum = initialProductId != null ? Number(initialProductId) : null;
+  const initialOrderId = searchParams.get("orderId");
+  const { projectName, projectNumber } = location.state || {};
+  const [chatOpen, setChatOpen] = useState(false);
+  const { message: messageApi } = App.useApp();
+  const { user } = useAuth();
+  const orderIdNum = initialOrderId ? Number(initialOrderId) : null;
+  const chat = useOrderChat({
+    orderId: orderIdNum,
+    panelOpen: chatOpen,
+    currentUserId: user?.id,
+    messageApi,
+  });
+
   const [selectedItem, setSelectedItem] = useState(null);
   const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
   const [productHierarchies, setProductHierarchies] = useState({});
+  const [activeTopTab, setActiveTopTab] = useState("pdm");
+  const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
+  const [bomCollapsed, setBomCollapsed] = useState(false);
 
-  // Detect screen size
-  React.useEffect(() => {
+  const useBomDrawer = viewportWidth < 992;
+  const bomWidth = useMemo(() => getBomWidth(viewportWidth), [viewportWidth]);
+
+  useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) setMobileDrawerOpen(false);
+      const w = window.innerWidth;
+      setViewportWidth(w);
+      if (w >= 992) setMobileDrawerOpen(false);
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "auto";
+    };
   }, []);
 
   const handleItemSelected = (item) => {
     setSelectedItem(item);
     setPartDocuments([]);
-    if (isMobile) setMobileDrawerOpen(false); // Close drawer on mobile after selection
+    if (useBomDrawer) setMobileDrawerOpen(false);
   };
   const handleHierarchyLoaded = (productId, hierarchy) => {
-    setProductHierarchies(prev => ({ ...prev, [productId]: hierarchy }));
+    setProductHierarchies((prev) => ({ ...prev, [productId]: hierarchy }));
+  };
+  const handlePartsCreated = () => {
+    setBomRefreshTrigger((prev) => prev + 1);
   };
   const isProductSelected = selectedItem?.itemType === "product";
+
+  const bomPanel = (
+    <BillOfMaterials
+      onItemSelected={handleItemSelected}
+      onHierarchyLoaded={handleHierarchyLoaded}
+      singleProductId={Number.isFinite(productIdNum) ? productIdNum : null}
+      disableProductCreate
+      projectName={projectName}
+      projectNumber={projectNumber}
+    />
+  );
 
   return (
     <>
       <style>{`
-        @media (max-width: 768px) {
-          .pdm-mobile-toggle {
-            position: fixed;
-            top: 80px;
-            left: 16px;
-            z-index: 1001;
-            background: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            border-radius: 8px;
-          }
+        .pc-pdm-shell {
+          height: 100%;
+          width: 100%;
+          min-width: 0;
+          min-height: 0;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        }
+        .pc-pdm-main {
+          flex: 1;
+          min-height: 0;
+          min-width: 0;
+          width: 100%;
+          overflow: hidden;
+          display: flex !important;
+        }
+        .pc-pdm-bom-sider.ant-layout-sider {
+          flex: 0 0 auto !important;
+          max-width: none !important;
+          min-width: 0 !important;
+        }
+        .pc-pdm-bom-sider .ant-layout-sider-children {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .pc-pdm-detail {
+          flex: 1 1 auto !important;
+          min-width: 0 !important;
+        }
+        .pc-pdm-bom-toggle {
+          position: fixed;
+          top: 12px;
+          left: 12px;
+          z-index: 1001;
+          background: #fff;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        @media (min-width: 768px) and (max-width: 991px) {
+          .pc-pdm-bom-toggle { left: 96px; }
         }
       `}</style>
-      
-      <Layout style={{ height: "100vh", overflow: "hidden" }}>
-        {/* Mobile: Hamburger button */}
-        {isMobile && (
-          <Button
-            type="text"
-            icon={<MenuOutlined />}
-            onClick={() => setMobileDrawerOpen(true)}
-            className="pdm-mobile-toggle"
-          />
-        )}
 
-        {/* Desktop: Fixed Sidebar */}
-        {!isMobile && (
-          <Sider 
-            width="33%" 
-            theme="light" 
-            style={{ 
-              borderRight: "1px solid #f0f0f0", 
-              overflow: 'auto',
-              minWidth: 300,
-              maxWidth: 500
+      <div className="pc-pdm-shell" style={{ paddingTop: fromOms ? 0 : 8 }}>
+        {fromOms && (
+          <div
+            style={{
+              padding: "0 8px 8px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 8,
+              flexShrink: 0,
             }}
           >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
-              onHierarchyLoaded={handleHierarchyLoaded}
+            <Tabs
+              activeKey={activeTopTab}
+              onChange={setActiveTopTab}
+              size={viewportWidth < 1100 ? "small" : "middle"}
+              items={[
+                { key: "pdm", label: "PDM" },
+                { key: "pps", label: "PPS" },
+                { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
+              ]}
             />
-          </Sider>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {initialOrderId && (
+                <OrderChatButton
+                  totalUnread={chat.totalUnread}
+                  onClick={() => setChatOpen(true)}
+                />
+              )}
+              <Button size="small" onClick={() => navigate("/project_coordinator/oms/orders")}>
+                {viewportWidth < 900 ? "Back" : "Back to Orders"}
+              </Button>
+            </div>
+          </div>
         )}
 
-        {/* Mobile: Drawer for BOM */}
-        {isMobile && (
-          <Drawer
-            placement="left"
-            onClose={() => setMobileDrawerOpen(false)}
-            open={mobileDrawerOpen}
-            style={{ width: '85%' }}
-            styles={{ body: { padding: 0 } }}
-          >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
-              onHierarchyLoaded={handleHierarchyLoaded}
-            />
-          </Drawer>
-        )}
-        
-        {/* Right: Product summary for product; otherwise details + documents */}
-        <Content 
-          style={{ 
-            display: "flex", 
-            flexDirection: "column", 
-            overflow: "hidden", 
-            backgroundColor: "#f8fafc", 
-            height: "100%",
-            marginLeft: isMobile ? 0 : undefined
-          }}
-        >
-          {isProductSelected ? (
-            <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-              <ProductSummary 
-                productId={selectedItem?.id} 
-                initialHierarchy={productHierarchies[selectedItem?.id]}
-              />
-            </div>
-          ) : (
-            <>
-              {/* Top panel: only show detailed part view for parts; assemblies/products handled separately */}
-              {selectedItem?.itemType === 'part' && (
-                <div 
-                  style={{ 
-                    flexShrink: 0, 
-                    maxHeight: isMobile ? "30vh" : "38vh", 
-                    minHeight: 0, 
-                    overflow: "hidden" 
+        {!fromOms || activeTopTab === "pdm" ? (
+          <Layout className="pc-pdm-main">
+            {useBomDrawer && (
+              <Button
+                type="default"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileDrawerOpen(true)}
+                className="pc-pdm-bom-toggle"
+              >
+                BOM
+              </Button>
+            )}
+
+            {!useBomDrawer && (
+              <Sider
+                className="pc-pdm-bom-sider"
+                width={bomWidth}
+                collapsedWidth={BOM_SIDER_COLLAPSED}
+                collapsed={bomCollapsed}
+                collapsible
+                trigger={null}
+                theme="light"
+                style={{
+                  borderRight: "1px solid #f0f0f0",
+                  overflow: "hidden",
+                  height: "100%",
+                  transition: "all 0.2s",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: bomCollapsed ? "center" : "space-between",
+                    padding: bomCollapsed ? "8px 0" : "6px 10px",
+                    borderBottom: "1px solid #f0f0f0",
+                    flexShrink: 0,
+                    background: "#fafafa",
                   }}
                 >
-                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments} />
+                  {!bomCollapsed && (
+                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>BOM panel</span>
+                  )}
+                  <Tooltip
+                    title={bomCollapsed ? "Expand Bill of Materials" : "Minimise Bill of Materials"}
+                    placement="right"
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={bomCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                      onClick={() => setBomCollapsed((c) => !c)}
+                    />
+                  </Tooltip>
                 </div>
-              )}
-              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                {selectedItem?.itemType === 'assembly' ? (
-                  <AssemblyDocumentsPanel selectedItem={selectedItem} />
-                ) : (
-                  <DocumentsPanel
-                    selectedItem={selectedItem}
-                    onDocumentsLoaded={setPartDocuments}
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    display: bomCollapsed ? "none" : "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {bomPanel}
+                </div>
+              </Sider>
+            )}
+
+            <Drawer
+              title="Bill of Materials"
+              placement="left"
+              onClose={() => setMobileDrawerOpen(false)}
+              open={useBomDrawer && mobileDrawerOpen}
+              size={Math.min(420, Math.round(viewportWidth * 0.92))}
+              styles={{ body: { padding: 0, height: "100%", overflow: "hidden" } }}
+              destroyOnHidden={false}
+            >
+              {bomPanel}
+            </Drawer>
+
+            <Content
+              className="pc-pdm-detail"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                backgroundColor: "#f8fafc",
+                height: "100%",
+                margin: 0,
+                padding: useBomDrawer ? "48px 8px 8px" : 0,
+                minWidth: 0,
+              }}
+            >
+              {isProductSelected ? (
+                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                  <ProductSummary
+                    productId={selectedItem?.id}
+                    orderId={initialOrderId}
+                    userId={user?.id}
+                    initialHierarchy={productHierarchies[selectedItem?.id]}
                   />
-                )}
-              </div>
-            </>
-          )}
-        </Content>
-      </Layout>
+                </div>
+              ) : (
+                <>
+                  {selectedItem?.itemType === "part" && (
+                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                      <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                        <DocumentsPanel
+                          selectedItem={selectedItem}
+                          onDocumentsLoaded={setPartDocuments}
+                        />
+                      </ProductDetails>
+                    </div>
+                  )}
+                  {selectedItem?.itemType === "assembly" && (
+                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                      <AssemblyDocumentsPanel
+                        selectedItem={selectedItem}
+                        onPartsCreated={handlePartsCreated}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </Content>
+          </Layout>
+        ) : activeTopTab === "pps" ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+            <ProcessPlanning initialOrderId={initialOrderId} />
+          </div>
+        ) : activeTopTab === "recycle-bin" ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+            <Recyclebin orderId={initialOrderId} />
+          </div>
+        ) : null}
+      </div>
+
+      {initialOrderId && (
+        <PCOrderChatPanel
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          orderId={orderIdNum}
+          chat={chat}
+        />
+      )}
     </>
   );
 };

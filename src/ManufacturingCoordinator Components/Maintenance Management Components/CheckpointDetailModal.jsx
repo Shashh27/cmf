@@ -8,23 +8,46 @@ import {
 } from './pmUtils';
 import dayjs from 'dayjs';
 
-function getIntervalLabel(ci) {
-  if (!ci) return '—';
-  if (ci.frequency_type === 'Usage Based') return ci.trigger_hours != null ? String(ci.trigger_hours) : '—';
-  if (ci.interval_value != null) return String(ci.interval_value);
+function resolveFrequency(ai, ci) {
+  if (ai?.frequency_type) {
+    return {
+      frequency_type: ai.frequency_type,
+      interval_value: ai.interval_value,
+      interval_unit: ai.interval_unit,
+      trigger_hours: ai.trigger_hours,
+    };
+  }
+  return ci || null;
+}
+
+function intervalUnitLabel(freq) {
+  if (!freq?.interval_unit) return null;
+  const n = freq.interval_value;
+  if (freq.interval_unit === 'Week') return n === 1 ? 'Weekly' : `Every ${n} Weeks`;
+  if (freq.interval_unit === 'Month') return n === 1 ? 'Monthly' : `Every ${n} Months`;
+  if (freq.interval_unit === 'Year') return n === 1 ? 'Yearly' : `Every ${n} Years`;
+  if (freq.interval_unit === 'Day') return n === 1 ? 'Daily' : `Every ${n} Days`;
+  return freq.interval_unit;
+}
+
+function getIntervalLabel(freq) {
+  if (!freq) return '—';
+  if (freq.frequency_type === 'Usage Based') return freq.trigger_hours != null ? `${freq.trigger_hours} hrs` : '—';
+  if (freq.interval_value != null && freq.interval_unit) {
+    return `${freq.interval_value} ${freq.interval_unit}${freq.interval_value === 1 ? '' : 's'}`;
+  }
+  if (freq.interval_value != null) return String(freq.interval_value);
   return '—';
 }
 
-function getFrequencyLabel(ci) {
-  if (!ci) return '—';
-  if (ci.frequency_type === 'Condition Based') return 'Condition Based';
-  if (ci.frequency_type === 'Usage Based') return `Usage · ${ci.trigger_hours ?? '—'} hrs`;
-  if (ci.frequency_type === 'Time Based' && ci.interval_value === 1 && ci.interval_unit === 'Day') return 'Daily';
-  if (ci.interval_unit === 'Week') return ci.interval_value === 1 ? 'Weekly' : `Every ${ci.interval_value} Weeks`;
-  if (ci.interval_unit === 'Month') return ci.interval_value === 1 ? 'Monthly' : `Every ${ci.interval_value} Months`;
-  if (ci.interval_unit === 'Year') return ci.interval_value === 1 ? 'Yearly' : `Every ${ci.interval_value} Years`;
-  if (ci.interval_unit === 'Day') return ci.interval_value === 1 ? 'Daily' : `Every ${ci.interval_value} Days`;
-  return ci.frequency_type;
+function getFrequencyLabel(freq) {
+  if (!freq?.frequency_type) return '—';
+  if (freq.frequency_type === 'Condition Based') {
+    const unit = intervalUnitLabel(freq);
+    return unit ? `Condition Based · ${unit}` : 'Condition Based';
+  }
+  if (freq.frequency_type === 'Usage Based') return `Usage · ${freq.trigger_hours ?? '—'} hrs`;
+  return intervalUnitLabel(freq) || freq.frequency_type;
 }
 
 function responseColor(val) {
@@ -94,8 +117,9 @@ const CheckpointDetailModal = ({ item, allSubmissions, open, onClose, onDelete }
   const ai = item.assignmentItem;
   const ci = ai.checklist_item;
   const assignment = item.assignment;
-  const frequencyLabel = getFrequencyLabel(ci);
-  const intervalText = getIntervalLabel(ci);
+  const freq = resolveFrequency(ai, ci);
+  const frequencyLabel = getFrequencyLabel(freq);
+  const intervalText = getIntervalLabel(freq);
 
   const nextDueDate = ai.schedule?.next_due_date;
   const cycleDueDate = nextDueDate;

@@ -225,9 +225,9 @@ export async function fetchChecklistDetails(id) {
 }
 
 export async function fetchAllChecklistsWithItems() {
+  // GET /checklists now returns items inline — no per-id N+1
   const list = await pmFetch('/checklists');
-  const detailed = await Promise.all(list.map((c) => fetchChecklistDetails(c.id)));
-  return detailed;
+  return Array.isArray(list) ? list : [];
 }
 
 export function buildCheckpointPayload(item, index) {
@@ -236,10 +236,6 @@ export function buildCheckpointPayload(item, index) {
     sequence_number: index + 1,
     item_type: item.item_type,
     expected_value: item.expected_value || null,
-    frequency_type: item.frequency_type,
-    interval_value: item.interval_value ? Number(item.interval_value) : null,
-    interval_unit: item.interval_unit || null,
-    trigger_hours: item.trigger_hours ? Number(item.trigger_hours) : null,
     remarks: item.remarks || null,
   };
 }
@@ -251,10 +247,6 @@ export function emptyCheckpoint(seq = 1) {
     sequence_number: seq,
     item_type: 'Boolean',
     expected_value: '',
-    frequency_type: 'Time Based',
-    interval_value: 1,
-    interval_unit: 'Week',
-    trigger_hours: null,
     remarks: '',
   };
 }
@@ -265,7 +257,6 @@ export function validateCheckpoint(item) {
     return 'Maximum character limit exceeded';
   }
   if (!item.item_type) return 'Checkpoint type is required';
-  if (!item.frequency_type) return 'Frequency type is required';
   if (item.expected_value && String(item.expected_value).length > PM_FIELD_LIMITS.expectedValue) {
     return `Expected value must be at most ${PM_FIELD_LIMITS.expectedValue} characters`;
   }
@@ -275,20 +266,25 @@ export function validateCheckpoint(item) {
   if (item.remarks && String(item.remarks).length > PM_FIELD_LIMITS.remarks) {
     return `Remarks must be at most ${PM_FIELD_LIMITS.remarks} characters`;
   }
+  return null;
+}
+
+export function validateAssignFrequency(item) {
+  if (!item.frequency_type) return 'Frequency is required for selected checkpoints';
   if (item.frequency_type === 'Time Based') {
     if (!item.interval_value || !item.interval_unit) {
-      return 'Interval value and unit are required for time-based checkpoints';
+      return 'Interval value and unit are required for time-based frequency';
     }
   }
   if (item.frequency_type === 'Condition Based') {
     const hasValue = item.interval_value != null && item.interval_value !== '';
     const hasUnit = !!item.interval_unit;
     if (hasValue !== hasUnit) {
-      return 'Provide both interval value and unit, or leave both empty for condition-based checkpoints';
+      return 'Provide both interval value and unit, or leave both empty for condition-based';
     }
   }
   if (item.frequency_type === 'Usage Based' && !item.trigger_hours) {
-    return 'Trigger hours are required for usage-based checkpoints';
+    return 'Trigger hours are required for usage-based frequency';
   }
   if (item.interval_value != null && (item.interval_value < 1 || item.interval_value > PM_FIELD_LIMITS.intervalMax)) {
     return `Interval value must be between 1 and ${PM_FIELD_LIMITS.intervalMax}`;

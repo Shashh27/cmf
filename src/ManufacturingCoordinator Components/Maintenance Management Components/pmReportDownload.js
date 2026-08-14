@@ -229,7 +229,7 @@ export function buildAssignmentsReportConfig(assignments, machines = [], metaLin
         checklistName,
         ci?.item_text || '—',
         itemTypeShort(ci?.item_type),
-        frequencySummary(ci),
+        frequencySummary(ai.frequency_type ? ai : ci),
         ai.is_required ? 'Yes' : 'No',
         formatDate(a.assigned_at),
         formatDate(ai.schedule?.next_due_date),

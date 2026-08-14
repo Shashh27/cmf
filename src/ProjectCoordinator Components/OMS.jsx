@@ -381,10 +381,10 @@ const OMS = () => {
           </Tooltip>
         ) : (
           <Link
-            to={`/project_coordinator/oms/product/${pid}`}
+            to={`/project_coordinator/pdm/${pid}?from=oms&orderId=${record.id}`}
             state={{
               projectName: getProductName(pid, record),
-              projectNumber: record.sale_order_number
+              projectNumber: record.sale_order_number,
             }}
             className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
           >
