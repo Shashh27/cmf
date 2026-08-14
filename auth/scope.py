@@ -51,7 +51,13 @@ def scope_ids_from_user(user: Any) -> dict[str, Optional[int]]:
 
 
 def apply_order_role_scope(query, order_model, user: Any):
-    """Filter an Order query by the caller's role ownership columns."""
+    """Filter an Order query by the caller's role ownership columns.
+
+    Roles such as operator, supervisor, and inventory_supervisor are not direct
+    order owners, but the dashboard/report/issue flows still need to read the
+    available order catalog. For those roles, return the unfiltered query so the
+    UI can continue loading orders after JWT auth is enabled.
+    """
     role = normalize_role(getattr(user, "role", None))
     uid = int(user.id)
     if role == "admin":
@@ -60,4 +66,6 @@ def apply_order_role_scope(query, order_model, user: Any):
         return query.filter(order_model.manufacturing_coordinator_id == uid)
     if role == "project_coordinator":
         return query.filter(order_model.project_coordinator_id == uid)
+    if role in {"operator", "supervisor", "inventory_supervisor"}:
+        return query
     return query.filter(order_model.user_id == uid)

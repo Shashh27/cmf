@@ -35,8 +35,12 @@ def get_all_document_notifications(
 ):
     """Get ALL document notifications for Admin (not filtered by user)"""
     _ = current_user  # require JWT
-    # Build query - fetch all notifications
-    q = db.query(MCNotificationModel)
+    # Only released documents (PC clicked Release)
+    q = (
+        db.query(MCNotificationModel)
+        .join(DocumentModel, MCNotificationModel.document_id == DocumentModel.id)
+        .filter(DocumentModel.is_acknowledged == True)  # noqa: E712
+    )
     
     # Filter by order_id if provided
     if order_id:
@@ -51,9 +55,9 @@ def get_all_document_notifications(
             
             # Filter notifications to only those with documents linked to these parts
             if part_ids:
-                q = q.join(DocumentModel, MCNotificationModel.document_id == DocumentModel.id).filter(
-                    DocumentModel.part_id.in_(part_ids)
-                )
+                q = q.filter(DocumentModel.part_id.in_(part_ids))
+            else:
+                q = q.filter(MCNotificationModel.id == -1)
     
     if pending_only:
         q = q.filter(MCNotificationModel.is_acknowledged == False, MCNotificationModel.is_rejected == False)  # noqa: E712
@@ -132,10 +136,16 @@ def get_pending_count(
 ):
     """Get count of pending document notifications for Admin"""
     _ = current_user
-    count = db.query(MCNotificationModel).filter(
-        MCNotificationModel.is_acknowledged == False,  # noqa: E712
-        MCNotificationModel.is_rejected == False  # noqa: E712
-    ).count()
+    count = (
+        db.query(MCNotificationModel)
+        .join(DocumentModel, MCNotificationModel.document_id == DocumentModel.id)
+        .filter(
+            MCNotificationModel.is_acknowledged == False,  # noqa: E712
+            MCNotificationModel.is_rejected == False,  # noqa: E712
+            DocumentModel.is_acknowledged == True,  # noqa: E712
+        )
+        .count()
+    )
     
     return {"pending_count": count}
 
@@ -202,7 +212,11 @@ def reject_document(
     request: RejectRequest,
     db: Session = Depends(get_db),
 ):
-    """Admin can reject any document notification with optional remarks"""
+    """Admin can reject any document notification. Remarks are required."""
+    remarks = (request.remarks or "").strip()
+    if not remarks:
+        raise HTTPException(status_code=400, detail="Rejection remarks are required")
+
     notif = db.query(MCNotificationModel).filter(MCNotificationModel.id == notification_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
@@ -215,7 +229,7 @@ def reject_document(
     try:
         # Update notification
         notif.is_rejected = True
-        notif.reject_remarks = request.remarks
+        notif.reject_remarks = remarks
         notif.reject_at = datetime.now(IST)
         db.add(notif)
         
@@ -234,7 +248,7 @@ def reject_document(
             mc_user_id=notif.mc_user_id,
             mc_user_name=mc_user_name,
             mc_user_role=mc_user_role,
-            remarks=request.remarks
+            remarks=remarks
         )
         
         db.commit()

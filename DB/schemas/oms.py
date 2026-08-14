@@ -332,6 +332,10 @@ class DocumentBase(BaseModel):
     mc_ack_remarks: Optional[str] = None
     mc_reject_remarks: Optional[str] = None
     mc_is_rejected: bool = False
+    mc_is_acknowledged: bool = False
+    mc_user_name: Optional[str] = None
+    mc_ack_at: Optional[datetime] = None
+    mc_reject_at: Optional[datetime] = None
 
 
 class DocumentCreate(DocumentBase):
