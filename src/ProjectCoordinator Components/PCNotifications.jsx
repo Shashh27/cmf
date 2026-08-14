@@ -267,7 +267,7 @@ const PCNotifications = () => {
         <Col xs={12} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
-              title="Orders"
+              title="Projects"
               value={getCountByType("order")}
               prefix={<ShoppingFilled />}
               styles={{ content: { color: "#722ed1" } }}
@@ -300,7 +300,7 @@ const PCNotifications = () => {
               value={selectedOrderId}
               onChange={setSelectedOrderId}
               style={{ width: 180 }}
-              placeholder="Select Order"
+              placeholder="Select Project"
               allowClear
               showSearch
               optionFilterProp="children"
@@ -407,7 +407,7 @@ const PCNotifications = () => {
                         </Tag>
                         {notif.sale_order_number && (
                           <Tag color="purple" style={{ fontSize: "11px" }}>
-                            Order: {notif.sale_order_number}
+                            Project: {notif.sale_order_number}
                           </Tag>
                         )}
                       </Space>

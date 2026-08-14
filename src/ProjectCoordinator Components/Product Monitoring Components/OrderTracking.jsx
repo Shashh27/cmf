@@ -17,7 +17,7 @@ import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 
 const { Title, Text } = Typography;
 
-/* ─── STATUS TAG ─────────────────────────────────────────────────────────── */
+/* ─── STATUS TAG [INSIDE PDM, ORDER TRACKING TAB]─────────────────────────────────────────────────────────── */
 const getStatusTag = (status) => {
   const colorMap = {
     'completed': 'success',
@@ -249,12 +249,25 @@ const OrderTracking = ({ productId }) => {
           <div style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
             <Select
               showSearch
-              placeholder="Filter parts..."
+              allowClear
+              placeholder="Search parts..."
               style={{ width: '100%' }}
+              searchValue={searchPart}
               onSearch={setSearchPart}
-              onChange={setSelectedPartId}
+              onChange={(value) => {
+                setSelectedPartId(value ?? null);
+                setSearchPart('');
+              }}
+              onClear={() => {
+                setSelectedPartId(null);
+                setSearchPart('');
+              }}
+              onOpenChange={(open) => {
+                if (!open) setSearchPart('');
+              }}
               value={selectedPartId}
               filterOption={false}
+              notFoundContent={searchPart ? 'No matching parts' : 'No parts'}
             >
               {filteredParts.map(part => (
                 <Select.Option key={part.part_id} value={part.part_id}>

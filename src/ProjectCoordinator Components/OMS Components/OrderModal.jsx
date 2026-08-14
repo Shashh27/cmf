@@ -521,7 +521,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         <div className="flex items-center gap-2">
           <FileTextOutlined className="text-blue-500" />
           <span className="font-bold text-gray-800 text-sm sm:text-base">
-            {editingOrder ? "Edit Order" : "Create New Order"}
+            {editingOrder ? "Edit Project" : "Create New Project"}
           </span>
         </div>
       }
@@ -767,7 +767,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 px-1 gap-2">
               <h4 className="text-sm sm:text-base font-bold text-gray-800 flex items-center gap-2 m-0">
                 <FileTextOutlined className="text-blue-500" />
-                Order Documents (Optional)
+                Project Documents (Optional)
               </h4>
               <Button
                 type="dashed"
@@ -921,7 +921,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             size="large"
             className="no-hover-btn rounded-md px-10 font-semibold w-full sm:w-auto"
           >
-            {editingOrder ? "Update Order" : "Create Order"}
+            {editingOrder ? "Update Project" : "Create Project"}
           </Button>
         </div>
       </Form>

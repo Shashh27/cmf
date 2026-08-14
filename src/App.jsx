@@ -405,6 +405,8 @@ function App() {
 
           <Route path="/project_coordinator/notifications" element={<PCNotifications />} />
 
+          <Route path="/project_coordinator/configuration" element={<ProjectCoordinatorDashboard />} />
+
 
 
          

@@ -79,6 +79,18 @@ const AssemblyPartsUploadPanel = ({
   const [submitting, setSubmitting]       = useState(false);
   const [submitResults, setSubmitResults] = useState(null); // { created, duplicates, errors }
 
+  const [internalPartTypes, setInternalPartTypes] = useState([]);
+  const effectivePartTypes = partTypes.length > 0 ? partTypes : internalPartTypes;
+
+  const fetchPartTypes = async () => {
+    try {
+      const res = await api.get(`/part-types/`);
+      setInternalPartTypes(res.data || []);
+    } catch (e) {
+      console.error("Error fetching part types:", e);
+    }
+  };
+
   // ── helpers ───────────────────────────────────────────────────────────────
   const getCurrentUserId = () => {
     try {
@@ -120,6 +132,7 @@ const AssemblyPartsUploadPanel = ({
       const extracted = (res.data?.parts || []).map((p, i) => ({
         _key: i,
         ...p,
+        type_id: p.type_id || 1,
         _status: "pending", // "pending" | "success" | "duplicate" | "error"
         _error: null,
       }));
@@ -130,6 +143,10 @@ const AssemblyPartsUploadPanel = ({
         );
         setParsing(false);
         return false;
+      }
+
+      if (partTypes.length === 0) {
+        fetchPartTypes();
       }
 
       setRows(extracted);
@@ -221,7 +238,7 @@ const AssemblyPartsUploadPanel = ({
         assembly_id:     selectedItem?.id ?? null,
         product_id:      selectedItem?.product_id ?? null,
         user_id:         uid,
-        size:            row.size || null,
+        size:            null,
         qty:             row.qty || 1,
       })),
     };
@@ -345,19 +362,6 @@ const AssemblyPartsUploadPanel = ({
       ),
     },
     {
-      title: <span className="text-xs font-semibold">SIZE</span>,
-      dataIndex: "size",
-      key: "size",
-      width: 160,
-      render: (val, record) => (
-        <EditableCell
-          value={val}
-          placeholder="e.g. 25x25x160"
-          onChange={(v) => updateRow(record._key, "size", v)}
-        />
-      ),
-    },
-    {
       title: <span className="text-xs font-semibold">QTY</span>,
       dataIndex: "qty",
       key: "qty",
@@ -393,8 +397,8 @@ const AssemblyPartsUploadPanel = ({
           onChange={(v) => updateRow(record._key, "type_id", v)}
           style={{ width: 130 }}
           options={
-            partTypes.length > 0
-              ? partTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
+            effectivePartTypes.length > 0
+              ? effectivePartTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
               : [{ value: 1, label: "In-house (default)" }]
           }
         />

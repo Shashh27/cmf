@@ -543,7 +543,7 @@ const OMS = () => {
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
-          <Tooltip title="Edit Order">
+          <Tooltip title="Edit Project">
             <Button
                 type="text"
                 size="small"
@@ -564,7 +564,7 @@ const OMS = () => {
                 }}
             />
           </Tooltip>
-          <Tooltip title="Delete Order">
+          <Tooltip title="Delete Project">
             <Button
                 type="text"
                 size="small"
@@ -690,7 +690,7 @@ const OMS = () => {
           >
             <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Orders</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Projects</div>
                 <div className="text-lg sm:text-xl font-bold text-blue-700 leading-tight">{totalOrders}</div>
               </div>
               <ShoppingOutlined className="text-blue-600 text-lg sm:text-xl" />

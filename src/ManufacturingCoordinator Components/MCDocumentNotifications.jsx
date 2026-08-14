@@ -3,6 +3,7 @@ import { BellOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, Fi
 import { Badge, Button, Modal, Input, Empty, Spin, Tag, Typography, Tooltip, message, Table, Space, Select, Card } from "antd";
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import ModelViewer3D from './PDM Components/ModelViewer3D';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -14,6 +15,8 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [ackRemarks, setAckRemarks] = useState("");
   const [rejectRemarks, setRejectRemarks] = useState("");
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -84,8 +87,57 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
     fetchNotifications();
   };
 
-  const handlePreview = (document) => {
+  const getPreviewType = (document) => {
+    // Check document_url first as it has the actual file extension
+    let url = document?.document_url || '';
+    let name = document?.document_name || '';
+    
+    // Extract extension from URL if available, otherwise from name
+    let ext = '';
+    if (url) {
+      const urlParts = url.split('/');
+      const filename = urlParts[urlParts.length - 1];
+      ext = filename.split('.').pop().toLowerCase();
+    } else if (name) {
+      ext = name.split('.').pop().toLowerCase();
+    }
+    
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
+    if (ext === 'pdf') return 'pdf';
+    if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
+    return 'other';
+  };
+
+  const handlePreview = async (document) => {
     setPreviewDoc(document);
+    setPreviewUrl(null);
+    setPreviewLoading(true);
+
+    const previewType = getPreviewType(document);
+    if (previewType === 'pdf' || previewType === 'image') {
+      try {
+        const response = await api.get(`/documents/${document.id}/preview`, {
+          responseType: 'blob'
+        });
+        const url = URL.createObjectURL(response.data);
+        setPreviewUrl(url);
+      } catch (error) {
+        console.error("Error loading preview:", error);
+        message.error("Failed to load preview");
+      } finally {
+        setPreviewLoading(false);
+      }
+    } else {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    setPreviewDoc(null);
   };
 
   const handleAcknowledge = async () => {
@@ -108,10 +160,14 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
 
   const handleReject = async () => {
     if (!selectedNotification) return;
+    if (!rejectRemarks.trim()) {
+      message.warning("Rejection remarks are required");
+      return;
+    }
 
     try {
       await api.put(`/mc-notifications/${selectedNotification.id}/reject`, {
-        remarks: rejectRemarks
+        remarks: rejectRemarks.trim()
       });
       message.success("Document rejected successfully");
       setRejectModalOpen(false);
@@ -136,29 +192,16 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
     setRejectModalOpen(true);
   };
 
-  const getPreviewType = (document) => {
-    // Check document_url first as it has the actual file extension
-    let url = document?.document_url || '';
-    let name = document?.document_name || '';
-    
-    // Extract extension from URL if available, otherwise from name
-    let ext = '';
-    if (url) {
-      const urlParts = url.split('/');
-      const filename = urlParts[urlParts.length - 1];
-      ext = filename.split('.').pop().toLowerCase();
-    } else if (name) {
-      ext = name.split('.').pop().toLowerCase();
-    }
-    
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
-    if (ext === 'pdf') return 'pdf';
-    if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
-    return 'other';
-  };
-
   // Get unique part numbers for filter dropdown
   const uniquePartNumbers = [...new Set(notifications.map(n => n.part?.part_number).filter(Boolean))];
+
+  const formatDateTime = (date) => {
+    if (!date) return '-';
+    return new Date(date).toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+  };
 
   const columns = [
 
@@ -211,11 +254,24 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
       },
     },
     {
-      title: 'Date',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 120,
-      render: (date) => <Text style={{ fontSize: '12px' }}>{new Date(date).toLocaleDateString()}</Text>,
+      title: 'Uploaded At',
+      key: 'uploaded_time',
+      width: 160,
+      render: (_, record) => (
+        <Text style={{ fontSize: '12px' }}>
+          {formatDateTime(record.document?.created_at || record.created_at)}
+        </Text>
+      ),
+    },
+    {
+      title: 'Acknowledged At',
+      key: 'ack_time',
+      width: 160,
+      render: (_, record) => (
+        <Text style={{ fontSize: '12px' }}>
+          {formatDateTime(record.is_rejected ? record.reject_at : record.ack_at)}
+        </Text>
+      ),
     },
     {
       title: 'Actions',
@@ -347,42 +403,72 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
       <Modal
         title="Document Preview"
         open={!!previewDoc}
-        onCancel={() => setPreviewDoc(null)}
+        onCancel={handleClosePreview}
         footer={[
-          <Button key="close" onClick={() => setPreviewDoc(null)}>
+          <Button key="close" onClick={handleClosePreview}>
             Close
           </Button>
         ]}
         width={1200}
         style={{ top: 20 }}
+        styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflow: 'auto', padding: '16px' } }}
       >
-        {previewDoc && (
+        {previewLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <Spin size="large" />
+            <p style={{ marginTop: '16px' }}>Loading preview...</p>
+          </div>
+        ) : previewDoc && (
           <div style={{ textAlign: 'center' }}>
             {getPreviewType(previewDoc) === 'pdf' ? (
-              <iframe
-                src={`/documents/${previewDoc.id}/preview`}
-                style={{ width: '100%', height: '700px', border: 'none' }}
-                title="PDF Preview"
-              />
+              previewUrl ? (
+                <iframe
+                  src={previewUrl}
+                  style={{ width: '100%', height: '700px', border: 'none' }}
+                  title="PDF Preview"
+                />
+              ) : (
+                <div style={{ padding: '40px' }}>
+                  <p>Failed to load PDF preview</p>
+                </div>
+              )
             ) : getPreviewType(previewDoc) === 'image' ? (
-              <img
-                src={`/documents/${previewDoc.id}/preview`}
-                alt={previewDoc.document_name}
-                style={{ maxWidth: '100%', maxHeight: '700px' }}
-              />
+              previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt={previewDoc.document_name}
+                  style={{ maxWidth: '100%', maxHeight: '700px' }}
+                />
+              ) : (
+                <div style={{ padding: '40px' }}>
+                  <p>Failed to load image preview</p>
+                </div>
+              )
+            ) : getPreviewType(previewDoc) === '3d' ? (
+              <ModelViewer3D documentId={previewDoc.id} height={700} showControls={true} showEdgeButton={true} restrictZoom={false} />
             ) : (
               <div style={{ padding: '40px' }}>
                 <FileTextOutlined style={{ fontSize: '48px', color: '#8c8c8c' }} />
                 <p>Preview not available for this file type</p>
                 <Button
                   type="primary"
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = `/documents/${previewDoc.id}/download`;
-                    a.setAttribute('download', previewDoc.document_name);
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
+                  onClick={async () => {
+                    try {
+                      const response = await api.get(`/documents/${previewDoc.id}/download`, {
+                        responseType: 'blob'
+                      });
+                      const url = URL.createObjectURL(response.data);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.setAttribute('download', previewDoc.document_name);
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(url);
+                    } catch (error) {
+                      console.error("Error downloading document:", error);
+                      message.error("Failed to download document");
+                    }
                   }}
                 >
                   Download
@@ -433,7 +519,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
         }}
         okText="Reject"
         cancelText="Cancel"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: !rejectRemarks.trim() }}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           <Text>Do you want to reject this document?</Text>
@@ -446,6 +532,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
             placeholder="Please provide technical reasons for rejection..."
             value={rejectRemarks}
             onChange={(e) => setRejectRemarks(e.target.value)}
+            status={!rejectRemarks.trim() ? 'error' : ''}
           />
         </Space>
       </Modal>

@@ -56,13 +56,13 @@ const exportPDF = (orders, label) => {
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
-    doc.text("ORDER MANAGEMENT SYSTEM - ORDERS REPORT", pageW / 2, 14.5, { align: "center" });
+    doc.text("ORDER MANAGEMENT SYSTEM - PROJECTS REPORT", pageW / 2, 14.5, { align: "center" });
 
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 100, 100);
     doc.text(`Generated: ${generatedAt}`, margin, 22);
-    doc.text(`Total Orders: ${orders.length}  |  ${label}`, pageW / 2, 22, { align: "center" });
+    doc.text(`Total Projects: ${orders.length}  |  ${label}`, pageW / 2, 22, { align: "center" });
     doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
 
     doc.setDrawColor(30, 64, 175);
@@ -170,7 +170,7 @@ const exportPDF = (orders, label) => {
     },
   });
 
-  doc.save(`OMS_Orders_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`OMS_Projects_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ const exportExcel = async (orders, label) => {
 
   ws.mergeCells(1, 1, 1, COLUMNS.length);
   const t = ws.getCell("A1");
-  t.value = "ORDER MANAGEMENT SYSTEM - ORDERS REPORT";
+  t.value = "ORDER MANAGEMENT SYSTEM - PROJECTS REPORT";
   t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
   t.alignment = { horizontal: "center", vertical: "middle" };
   t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
@@ -281,7 +281,7 @@ const exportExcel = async (orders, label) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `OMS_Orders_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `OMS_Projects_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 };
@@ -340,7 +340,7 @@ const OMSOrdersPdfDownload = ({ orders, orderCount, getOrdersForExport, label = 
   return (
     <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading || resolvedOrderCount === 0}>
       <Button icon={<DownloadOutlined />} loading={!!loading} size="middle" style={{ fontSize: 13 }}>
-        Download Orders
+        Download Projects
       </Button>
     </Dropdown>
   );
