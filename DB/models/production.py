@@ -9,7 +9,7 @@ class ShiftSummary(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=False)
-    shift = Column(Integer, nullable=False)  # 1, 2, 3
+    shift = Column(Integer, ForeignKey("ems.shift_info.id"), nullable=False)
     timestamp = Column(DateTime, nullable=False)
 
     updatedate = Column(DateTime, default=datetime.now)
@@ -39,7 +39,6 @@ class ShiftSummary(Base):
     quality_loss = Column(Float, default=0.0)
 
     oee = Column(Float, default=0.0)
-    
+
     machine = relationship("Machine")
-
-
+    shift_info = relationship("ShiftInfo", foreign_keys=[shift])

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -49,9 +49,10 @@ def list_order_notifications(
     order_ids = [n.order_id for n in notifs]
     orders = (
         db.query(OrderModel)
+        .options(joinedload(OrderModel.product), joinedload(OrderModel.customer), joinedload(OrderModel.user))
         .filter(OrderModel.id.in_(order_ids))
         .all()
-    )
+    ) if order_ids else []
     order_map = {o.id: o for o in orders}
     result = []
     for n in notifs:
@@ -68,6 +69,13 @@ def list_order_notifications(
         # Admin should only see notifications if they are the assigned admin
         if admin_id and (o.admin_id is None or o.admin_id != admin_id):
             continue
+        product_name = getattr(getattr(o, "product", None), "product_name", None) if o else None
+        customer = getattr(o, "customer", None) if o else None
+        customer_name = None
+        if customer is not None:
+            company = getattr(customer, "company_name", None)
+            branch = getattr(customer, "branch", None)
+            customer_name = f"{company} ({branch})" if company and branch else company
         result.append({
             "id": n.id,
             "order_id": n.order_id,
@@ -83,8 +91,9 @@ def list_order_notifications(
             "created_at": n.created_at,
             "updated_at": n.updated_at,
             "sale_order_number": getattr(o, "sale_order_number", None) if o else None,
-            "project_name": getattr(o, "project_name", None) if o else None,
-            "product_name": getattr(getattr(o, "product", None), "product_name", None) if o else None,
+            "project_name": product_name or getattr(o, "project_name", None),
+            "product_name": product_name,
+            "customer_name": customer_name,
             "created_by": getattr(getattr(o, "user", None), "user_name", None) if o else None,
             "order_status": getattr(o, "status", None) if o else None,
         })
@@ -114,9 +123,10 @@ def list_pending_order_notifications(
     order_ids = [n.order_id for n in notifs]
     orders = (
         db.query(OrderModel)
+        .options(joinedload(OrderModel.product), joinedload(OrderModel.customer), joinedload(OrderModel.user))
         .filter(OrderModel.id.in_(order_ids))
         .all()
-    )
+    ) if order_ids else []
     order_map = {o.id: o for o in orders}
     result = []
     for n in notifs:
@@ -140,6 +150,13 @@ def list_pending_order_notifications(
             continue
         if admin_id and n.admin_is_ack:
             continue
+        product_name = getattr(getattr(o, "product", None), "product_name", None) if o else None
+        customer = getattr(o, "customer", None) if o else None
+        customer_name = None
+        if customer is not None:
+            company = getattr(customer, "company_name", None)
+            branch = getattr(customer, "branch", None)
+            customer_name = f"{company} ({branch})" if company and branch else company
         result.append({
             "id": n.id,
             "order_id": n.order_id,
@@ -155,8 +172,9 @@ def list_pending_order_notifications(
             "created_at": n.created_at,
             "updated_at": n.updated_at,
             "sale_order_number": getattr(o, "sale_order_number", None) if o else None,
-            "project_name": getattr(o, "project_name", None) if o else None,
-            "product_name": getattr(getattr(o, "product", None), "product_name", None) if o else None,
+            "project_name": product_name or getattr(o, "project_name", None),
+            "product_name": product_name,
+            "customer_name": customer_name,
             "created_by": getattr(getattr(o, "user", None), "user_name", None) if o else None,
             "order_status": getattr(o, "status", None) if o else None,
         })
