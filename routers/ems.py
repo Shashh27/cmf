@@ -132,8 +132,22 @@ parameter_tracker = MachineParameterTracker()
 # DB Query Helpers
 # ──────────────────────────────────────────────
 
+def _machine_display_name(machine) -> str:
+    """Full display name = make + model from configuration.machines."""
+    if not machine:
+        return "Unknown"
+    make = (machine.make or "").strip()
+    model = (machine.model or "").strip()
+    if make and model:
+        # Avoid "BFW BMV-50 BMV-50" if make already includes model
+        if model.lower() in make.lower():
+            return make
+        return f"{make} {model}"
+    return make or model or f"Machine-{machine.id}"
+
+
 def _machine_dict(db: Session):
-    return {m.id: m.make for m in db.query(Machine).all()}
+    return {m.id: _machine_display_name(m) for m in db.query(Machine).all()}
 
 
 def _mean(*values):
@@ -213,7 +227,7 @@ def _all_parameters(db: Session):
 
 def _single_machine_params(db: Session, machine_id: int):
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    name = machine.make if machine else f"Machine-{machine_id}"
+    name = _machine_display_name(machine) if machine else f"Machine-{machine_id}"
     row = db.query(MachineEMSLive).filter(MachineEMSLive.machine_id == machine_id).first()
     if not row:
         return {
@@ -270,7 +284,7 @@ class MachineInfo(BaseModel):
 
 @router.get("/machines", response_model=List[MachineInfo])
 def get_machines(db: Session = Depends(get_db)):
-    return [MachineInfo(machine_id=m.id, machine_name=m.make) for m in db.query(Machine).all()]
+    return [MachineInfo(machine_id=m.id, machine_name=_machine_display_name(m)) for m in db.query(Machine).all()]
 
 
 @router.get("/machine-status-stream")
@@ -351,7 +365,7 @@ async def stream_single_machine(machine_id: int, request: Request, db: Session =
 @router.get("/shiftwise-energy/live")
 def shiftwise_live(db: Session = Depends(get_db)):
     from DB.models.configuration import Machine
-    machine_names = {m.id: m.make for m in db.query(Machine.id, Machine.make).all()}
+    machine_names = {m.id: _machine_display_name(m) for m in db.query(Machine).all()}
     return [
         {"machine_id": r.machine_id, "machine_name": machine_names.get(r.machine_id, f"Machine-{r.machine_id}"),
          "timestamp": r.timestamp.isoformat(),
@@ -368,13 +382,13 @@ def shiftwise_history(
     db: Session = Depends(get_db),
 ):
     """
-    Historical energy for Productivity page.
-    Prefer ems.machine_ems_history (timestamp column) for a date range;
-    fall back to ems.shiftwise_energy_history when no range is given.
+    Historical shift-wise energy for Productivity page.
+    When a date range is given, aggregate ems.shiftwise_energy_history by summing
+    first_shift, second_shift, and total_energy per machine within the range.
     """
     from DB.models.configuration import Machine
 
-    machine_names = {m.id: m.make for m in db.query(Machine.id, Machine.make).all()}
+    machine_names = {m.id: _machine_display_name(m) for m in db.query(Machine).all()}
 
     start_dt = end_dt = None
     if start_date or end_date:
@@ -385,7 +399,6 @@ def shiftwise_history(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    # Date-range history from machine_ems_history (energy delta per machine)
     if start_dt is not None and end_dt is not None:
         params = {"start": start_dt, "end": end_dt}
         machine_filter = ""
@@ -399,9 +412,10 @@ def shiftwise_history(
                 SELECT
                     machine_id,
                     MAX(timestamp) AS last_ts,
-                    MIN(active_energy_delivered) AS min_energy,
-                    MAX(active_energy_delivered) AS max_energy
-                FROM ems.machine_ems_history
+                    COALESCE(SUM(first_shift), 0) AS first_shift,
+                    COALESCE(SUM(second_shift), 0) AS second_shift,
+                    COALESCE(SUM(total_energy), 0) AS total_energy
+                FROM ems.shiftwise_energy_history
                 WHERE timestamp >= :start
                   AND timestamp < :end
                   {machine_filter}
@@ -412,29 +426,20 @@ def shiftwise_history(
             params,
         ).fetchall()
 
-        data = []
-        for r in rows:
-            mid = r[0]
-            min_e = r[2]
-            max_e = r[3]
-            total = None
-            if min_e is not None and max_e is not None:
-                total = round(float(max_e) - float(min_e), 4)
-                if total < 0:
-                    total = round(float(max_e), 4)
-            data.append(
-                {
-                    "machine_id": mid,
-                    "machine_name": machine_names.get(mid, f"Machine-{mid}"),
-                    "timestamp": r[1].isoformat() if r[1] is not None else None,
-                    "first_shift": 0.0,
-                    "second_shift": 0.0,
-                    "total_energy": total if total is not None else 0.0,
-                }
-            )
+        data = [
+            {
+                "machine_id": r[0],
+                "machine_name": machine_names.get(r[0], f"Machine-{r[0]}"),
+                "timestamp": r[1].isoformat() if r[1] is not None else None,
+                "first_shift": round(float(r[2] or 0), 4),
+                "second_shift": round(float(r[3] or 0), 4),
+                "total_energy": round(float(r[4] or 0), 4),
+            }
+            for r in rows
+        ]
         return ShiftwiseEnergyResponse(data=data, timestamp=datetime.now().isoformat())
 
-    # No date filter — return shiftwise_energy_history rows
+    # No date filter — return latest shiftwise_energy_history rows per machine
     q = db.query(ShiftwiseEnergyHistory)
     if machine_id:
         q = q.filter(ShiftwiseEnergyHistory.machine_id == machine_id)
@@ -503,7 +508,7 @@ def list_machines(db: Session = Depends(get_db)):
     return [
         {
             "id": m.id,
-            "machine_name": m.make or m.model or f"Machine-{m.id}",
+            "machine_name": _machine_display_name(m),
             "workshop_name": wc_name,  # work center name (no separate workshop column)
             "work_center_name": wc_name,
         }
@@ -960,7 +965,7 @@ def filtered_history_data(
 
 def _get_history_window(db: Session, machine_id: int, parameter: str, window_minutes: int = 30):
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    machine_name = machine.make if machine else f"Machine-{machine_id}"
+    machine_name = _machine_display_name(machine) if machine else f"Machine-{machine_id}"
     latest = (
         db.query(MachineEMSHistory)
         .filter(MachineEMSHistory.machine_id == machine_id)

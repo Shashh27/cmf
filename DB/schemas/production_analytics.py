@@ -94,9 +94,9 @@ class DetailedShiftSummary(BaseModel):
     machine_name: str
     machine_id: int
     timestamp: Optional[datetime] = None
-    production_time: Optional[time] = None
-    idle_time: Optional[time] = None
-    off_time: Optional[time] = None
+    production_time: Optional[str] = None
+    idle_time: Optional[str] = None
+    off_time: Optional[str] = None
     total_parts: Optional[int] = None
     good_parts: Optional[int] = None
     bad_parts: Optional[int] = None
@@ -109,6 +109,7 @@ class DetailedShiftSummary(BaseModel):
     oee: Optional[float] = None
     oee_metrics: Optional[dict] = None
     updatedate: Optional[datetime] = None
+    row_count: Optional[int] = None
 
 class OverallOEEAnalysis(BaseModel):
     period_start: datetime
@@ -173,7 +174,29 @@ class MachineInfo(BaseModel):
     work_center: Optional[str] = None
     type: str
 
+
+class LiveStatusSegment(BaseModel):
+    id: str
+    machine_id: int
+    machine_name: Optional[str] = None
+    status: str
+    start_time: datetime
+    end_time: datetime
+
+
+class OperatorIssueSegment(BaseModel):
+    id: str
+    machine_id: int
+    machine_name: Optional[str] = None
+    issue_category: Optional[str] = None
+    issue_reason: Optional[str] = None
+    start_time: datetime
+    end_time: datetime
+
+
 class CombinedScheduleProductionResponse(BaseModel):
     planned_operations: List[PlannedOperation]
     actual_production_logs: List[ActualProductionLog]
     all_machines: List[MachineInfo]
+    live_status_segments: List[LiveStatusSegment] = []
+    operator_issue_segments: List[OperatorIssueSegment] = []

@@ -1,19 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, text, cast, DateTime as SQLAlchemyDateTime
+from sqlalchemy import text
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from DB.database import get_db
 from DB.models.production import ShiftSummary
-from DB.models.monitoring import MachineLiveStatus
-from DB.models.configuration import Machine, workcenter
+from DB.models.monitoring import MachineLiveHistory
+from DB.models.configuration import Machine
 from DB.models.oms import Operation, Part
 from DB.models.access_control import AccessUser
 from auth.deps import get_current_user
 from auth.scope import scope_ids_from_user
 from DB.schemas.production_analytics import (
     OverallOEEAnalysis, OEELosses, OEETrend, ShiftOEE, MachineOEE,
-    DetailedShiftSummary, CombinedScheduleProductionResponse, PlannedOperation, ActualProductionLog, MachineInfo
+    DetailedShiftSummary, CombinedScheduleProductionResponse, PlannedOperation,
+    ActualProductionLog, MachineInfo, LiveStatusSegment, OperatorIssueSegment
 )
 
 router = APIRouter(
@@ -21,437 +22,571 @@ router = APIRouter(
     tags=["production-analytics"]
 )
 
-def get_correct_shift(timestamp, db):
-    """
-    Calculate correct shift based on 8-hour shifts starting from 8:30 AM
-    Shift Number Assignment:
-    - Shift 1: 08:30:00 → 16:30:00 (8 hours)
-    - Shift 2: 16:30:00 → 00:30:00 (8 hours) 
-    - Shift 3: 00:30:00 → 08:30:00 (8 hours)
-    """
-    try:
-        hour = timestamp.hour
-        minute = timestamp.minute
-        time_in_minutes = hour * 60 + minute
-        
-        # Convert shift times to minutes from midnight
-        # Shift 1: 08:30 (8:30 AM = 8*60 + 30 = 510 minutes)
-        # Shift 2: 16:30 (4:30 PM = 16*60 + 30 = 990 minutes) 
-        # Shift 3: 00:30 (12:30 AM = 0*60 + 30 = 30 minutes)
-        
-        if 510 <= time_in_minutes < 990:  # 08:30 to 16:30
-            return 1
-        elif 990 <= time_in_minutes < 1440 or 0 <= time_in_minutes < 30:  # 16:30 to 00:30
-            return 2
-        else:  # 00:30 to 08:30
-            return 3
-            
-    except Exception as e:
-        # Fallback logic in case of error
-        hour = timestamp.hour
-        if 8 <= hour < 16:
-            return 1
-        elif 16 <= hour < 24:
-            return 2
-        else:
-            return 3
-
 def build_machine_display_name(machine: Optional[Machine]) -> str:
     if not machine:
         return ""
     make_model = f"{machine.make or ''} {machine.model or ''}".strip()
     return make_model or machine.type or f"Machine {machine.id}"
 
-def build_empty_machine_oee(machine_id: int, machine_name: str) -> MachineOEE:
-    return MachineOEE(
-        machine_id=machine_id,
-        machine_name=machine_name,
-        oee=None,
-        availability=None,
-        performance=None,
-        quality=None,
-        total_parts=None,
-        good_parts=None,
-        bad_parts=None,
-        losses=None,
-    )
 
-def build_empty_detailed_summary(
-    machine_id: int,
-    machine_name: str,
-    analysis_date: datetime,
-    shift_label: str,
-) -> DetailedShiftSummary:
-    return DetailedShiftSummary(
-        date=analysis_date.strftime("%Y-%m-%d"),
-        shift=shift_label,
-        machine_name=machine_name,
-        machine_id=machine_id,
-        production_time=None,
-        idle_time=None,
-        off_time=None,
-        total_parts=None,
-        good_parts=None,
-        bad_parts=None,
-        oee_metrics=None,
-        updatedate=None,
-    )
+def _avg(values: List[float]) -> float:
+    return (sum(values) / len(values)) if values else 0.0
 
-def build_machine_breakdown_from_data(
+
+
+def _parse_dt(value: Optional[str], field_name: str) -> Optional[datetime]:
+    if value is None or str(value).strip() == "":
+        return None
+    raw = str(value).strip().replace("Z", "")
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            candidate = raw[:19] if ("T" in raw and len(raw) > 19) else raw
+            return datetime.strptime(candidate, fmt)
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400, detail=f"Invalid {field_name}. Use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
+
+
+def _secs_to_hms(total_seconds: Optional[float]) -> Optional[str]:
+    if total_seconds is None:
+        return None
+    secs = int(max(0, round(float(total_seconds))))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def _resolve_oee_range(
+    date_str: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> tuple:
+    """Resolve analysis window; prefer start/end; cap to protect DB."""
+    max_days = 366
+    parsed_start = _parse_dt(start_date, "start_date")
+    parsed_end = _parse_dt(end_date, "end_date")
+
+    if parsed_start or parsed_end:
+        if not parsed_start or not parsed_end:
+            raise HTTPException(status_code=400, detail="Both start_date and end_date are required")
+        if parsed_end < parsed_start:
+            raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+        if end_date and len(str(end_date).strip()) <= 10:
+            parsed_end = parsed_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+        if (parsed_end - parsed_start) > timedelta(days=max_days):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Date range too large. Maximum allowed is {max_days} days.",
+            )
+        return parsed_start, parsed_end
+
+    if date_str:
+        analysis_date = _parse_dt(date_str, "date")
+    else:
+        analysis_date = datetime.now()
+    start = analysis_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = analysis_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return start, end
+
+
+def _shift_filter_id(shift: Optional[str]) -> Optional[int]:
+    if not shift or str(shift).lower() == "all":
+        return None
+    try:
+        shift_id = int(shift)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Shift must be '1', '2', or 'all'")
+    if shift_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="Shift must be '1', '2', or 'all'")
+    return shift_id
+
+
+def build_live_status_segments(
     db: Session,
-    all_machines: List[Machine],
-    machine_data: Dict[int, Dict[str, Any]],
-) -> List[MachineOEE]:
-    breakdown = []
-    for machine in all_machines:
-        mid = machine.id
-        m_name = build_machine_display_name(machine)
-        data = machine_data.get(mid)
-        if not data:
-            breakdown.append(build_empty_machine_oee(mid, m_name))
+    machine_details: Dict[int, str],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    machine_id: Optional[int] = None,
+) -> List[LiveStatusSegment]:
+    """
+    Convert machine_live_history rows into status segments.
+    Status at last_updated_i runs until last_updated_{i+1}.
+    The latest row runs from its last_updated until current time (clipped to range).
+    Example: 08:00 ON, 09:30 OFF, 10:00 PRODUCTION →
+      ON 08:00–09:30, OFF 09:30–10:00, PRODUCTION 10:00–now.
+    """
+    now = datetime.now()
+    range_end = end_date or now
+    range_start = start_date
+
+    query = db.query(MachineLiveHistory)
+    if machine_id is not None:
+        query = query.filter(MachineLiveHistory.machine_id == machine_id)
+    # Include history before the window so a segment that started earlier can be clipped in
+    query = query.filter(MachineLiveHistory.last_updated <= range_end)
+    rows = query.order_by(MachineLiveHistory.machine_id, MachineLiveHistory.last_updated.asc()).all()
+
+    by_machine: Dict[int, list] = {}
+    for row in rows:
+        by_machine.setdefault(row.machine_id, []).append(row)
+
+    segments: List[LiveStatusSegment] = []
+    seg_idx = 0
+    for mid, history in by_machine.items():
+        machine_name = machine_details.get(mid, f"Machine-{mid}")
+        for i, rec in enumerate(history):
+            seg_start = rec.last_updated
+            if i + 1 < len(history):
+                seg_end = history[i + 1].last_updated
+            else:
+                # Last row: extend to current time (within the selected range)
+                seg_end = min(now, range_end)
+
+            if seg_end <= seg_start:
+                continue
+            if range_start and seg_end <= range_start:
+                continue
+            if seg_start >= range_end:
+                continue
+
+            clipped_start = max(seg_start, range_start) if range_start else seg_start
+            clipped_end = min(seg_end, range_end)
+            if clipped_end <= clipped_start:
+                continue
+
+            status = (rec.status or "OFF").strip().upper()
+
+            seg_idx += 1
+            segments.append(LiveStatusSegment(
+                id=f"live-{mid}-{seg_idx}",
+                machine_id=mid,
+                machine_name=machine_name,
+                status=status,
+                start_time=clipped_start,
+                end_time=clipped_end,
+            ))
+
+    return segments
+
+
+def build_operator_issue_segments(
+    db: Session,
+    machine_details: Dict[int, str],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    machine_id: Optional[int] = None,
+) -> List[OperatorIssueSegment]:
+    """Load maintenance.oee_issues overlapping the selected window."""
+    now = datetime.now()
+    range_end = end_date or now
+    range_start = start_date
+
+    issues_query = """
+        SELECT id, machine_id, issue_category, issue_reason, start_time, end_time
+        FROM maintenance.oee_issues
+        WHERE start_time IS NOT NULL
+          AND (:machine_id IS NULL OR machine_id = :machine_id)
+          AND (:range_end IS NULL OR start_time <= :range_end)
+          AND (
+                end_time IS NULL
+                OR :range_start IS NULL
+                OR end_time >= :range_start
+              )
+        ORDER BY machine_id, start_time
+    """
+    rows = db.execute(text(issues_query), {
+        "machine_id": machine_id,
+        "range_start": range_start,
+        "range_end": range_end,
+    }).fetchall()
+
+    segments: List[OperatorIssueSegment] = []
+    for row in rows:
+        seg_start = row.start_time
+        seg_end = row.end_time or min(now, range_end)
+        if seg_end <= seg_start:
+            continue
+        if range_start and seg_end <= range_start:
+            continue
+        if seg_start >= range_end:
             continue
 
-        count = data["count"]
-        m_avail = data["avail"] / count
-        m_perf = data["perf"] / count
-        m_qual = data["qual"] / count
-        breakdown.append(MachineOEE(
-            machine_id=mid,
-            machine_name=m_name,
-            oee=data["oee"] / count,
-            availability=m_avail,
-            performance=m_perf,
-            quality=m_qual,
-            total_parts=data["t_parts"],
-            good_parts=data["g_parts"],
-            bad_parts=data["b_parts"],
-            losses=OEELosses(
-                availability_loss=100 - m_avail,
-                performance_loss=100 - m_perf,
-                quality_loss=100 - m_qual,
-            ),
-        ))
-    return breakdown
-
-def build_detailed_summaries_from_data(
-    all_machines: List[Machine],
-    machine_data: Dict[int, Dict[str, Any]],
-    analysis_date: datetime,
-    shift_label: str,
-) -> List[DetailedShiftSummary]:
-    summaries = []
-    for machine in all_machines:
-        mid = machine.id
-        m_name = build_machine_display_name(machine)
-        data = machine_data.get(mid)
-        if not data:
-            summaries.append(build_empty_detailed_summary(mid, m_name, analysis_date, shift_label))
+        clipped_start = max(seg_start, range_start) if range_start else seg_start
+        clipped_end = min(seg_end, range_end)
+        if clipped_end <= clipped_start:
             continue
 
-        count = data["count"]
-        m_avail = data["avail"] / count
-        m_perf = data["perf"] / count
-        m_qual = data["qual"] / count
-        summaries.append(DetailedShiftSummary(
-            date=analysis_date.strftime("%Y-%m-%d"),
-            shift=shift_label,
-            machine_name=m_name,
+        mid = row.machine_id
+        segments.append(OperatorIssueSegment(
+            id=f"issue-{row.id}",
             machine_id=mid,
-            production_time=480,
-            idle_time=(100 - m_avail) / 100 * 480,
-            off_time=0,
-            total_parts=data["t_parts"],
-            good_parts=data["g_parts"],
-            bad_parts=data["b_parts"],
-            oee_metrics={
-                "oee": data["oee"] / count,
-                "availability": m_avail,
-                "performance": m_perf,
-                "quality": m_qual,
-            },
-            updatedate=analysis_date,
+            machine_name=machine_details.get(mid, f"Machine-{mid}"),
+            issue_category=row.issue_category,
+            issue_reason=row.issue_reason,
+            start_time=clipped_start,
+            end_time=clipped_end,
         ))
-    return summaries
+
+    return segments
+
 
 @router.get("/overall-oee-analytics/", response_model=OverallOEEAnalysis)
 def get_overall_oee_analytics(
-    date_str: Optional[str] = Query(None, alias="date", description="Date for analysis (YYYY-MM-DD)"),
-    shift: Optional[str] = Query("all", description="Filter by shift: '1', '2', '3', or 'all'"),
+    date_str: Optional[str] = Query(None, alias="date", description="Legacy single day (YYYY-MM-DD)"),
+    start_date: Optional[str] = Query(None, description="Range start (YYYY-MM-DD[ HH:MM:SS])"),
+    end_date: Optional[str] = Query(None, description="Range end (YYYY-MM-DD[ HH:MM:SS])"),
+    shift: Optional[str] = Query("all", description="Filter by shift id: '1', '2', or 'all'"),
     db: Session = Depends(get_db)
 ):
     """
-    Get overall OEE analytics for the entire factory across all machines for a specific date.
-    Calculated from migrated production logs in shift_summary.
+    Aggregate production_monitoring.shift_summary for a date/time range.
+    times + parts: SUM; percentage metrics: AVG. Aggregation runs in SQL.
     """
     try:
-        # Parse date
-        if date_str:
-            try:
-                analysis_date = datetime.strptime(date_str, "%Y-%m-%d")
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-        else:
-            analysis_date = datetime.utcnow()
+        range_start, range_end = _resolve_oee_range(date_str, start_date, end_date)
+        shift_id = _shift_filter_id(shift)
 
-        # Set start and end times for the entire day
-        start_date = analysis_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = analysis_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-        # Build query from ShiftSummary
-        query = db.query(ShiftSummary).filter(
-            ShiftSummary.timestamp >= start_date,
-            ShiftSummary.timestamp <= end_date
-        )
-
-        # Add shift filter
-        if shift and shift.lower() != 'all':
-            try:
-                shift_number = int(shift)
-                query = query.filter(ShiftSummary.shift == shift_number)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Shift must be '1', '2', '3', or 'all'")
-
-        summaries = query.all()
         all_machines = db.query(Machine).order_by(Machine.id).all()
-        shift_label = shift if shift and shift.lower() != 'all' else 'all'
+        machines = {m.id: m for m in all_machines}
 
-        if not summaries:
-            machine_breakdown = [
-                build_empty_machine_oee(m.id, build_machine_display_name(m))
-                for m in all_machines
-            ]
-            detailed_summaries = [
-                build_empty_detailed_summary(m.id, build_machine_display_name(m), analysis_date, shift_label)
-                for m in all_machines
-            ]
-            return OverallOEEAnalysis(
-                period_start=start_date,
-                period_end=end_date,
-                overall_oee=0.0,
-                overall_availability=0.0,
-                overall_performance=0.0,
-                overall_quality=0.0,
-                shift_breakdown=[],
-                machine_breakdown=machine_breakdown,
-                detailed_summaries=detailed_summaries,
-                daily_trends=[],
-                losses=OEELosses(
-                    availability_loss=0.0,
-                    performance_loss=0.0,
-                    quality_loss=0.0
-                ),
-                total_production=0,
-                total_good_parts=0,
-                total_bad_parts=0,
-                machine_count=len(all_machines)
-            )
+        params = {
+            "start_ts": range_start,
+            "end_ts": range_end,
+            "shift_id": shift_id,
+        }
 
-        # Calculate metrics
-        total_parts = sum(s.total_parts or 0 for s in summaries)
-        total_good_parts = sum(s.good_parts or 0 for s in summaries)
-        total_bad_parts = sum(s.bad_parts or 0 for s in summaries)
+        overall_sql = text("""
+            SELECT
+                COUNT(*)::int AS row_count,
+                COALESCE(AVG(availability), 0) AS availability,
+                COALESCE(AVG(performance), 0) AS performance,
+                COALESCE(AVG(quality), 0) AS quality,
+                COALESCE(AVG(oee), 0) AS oee,
+                COALESCE(AVG(COALESCE(availability_loss, 100 - COALESCE(availability, 0))), 0) AS availability_loss,
+                COALESCE(AVG(COALESCE(performance_loss, 100 - COALESCE(performance, 0))), 0) AS performance_loss,
+                COALESCE(AVG(COALESCE(quality_loss, 100 - COALESCE(quality, 0))), 0) AS quality_loss,
+                COALESCE(SUM(total_parts), 0)::int AS total_parts,
+                COALESCE(SUM(good_parts), 0)::int AS good_parts,
+                COALESCE(SUM(bad_parts), 0)::int AS bad_parts
+            FROM production_monitoring.shift_summary
+            WHERE timestamp >= :start_ts
+              AND timestamp <= :end_ts
+              AND (:shift_id IS NULL OR shift = :shift_id)
+        """)
+        overall = db.execute(overall_sql, params).mappings().first() or {}
+        row_count = int(overall.get("row_count") or 0)
 
-        record_count = len(summaries)
-        total_oee = sum(s.oee or 0 for s in summaries)
-        total_availability = sum(s.availability or 0 for s in summaries)
-        total_performance = sum(s.performance or 0 for s in summaries)
-        total_quality = sum(s.quality or 0 for s in summaries)
+        machine_sql = text("""
+            SELECT
+                machine_id,
+                COALESCE(AVG(availability), 0) AS availability,
+                COALESCE(AVG(performance), 0) AS performance,
+                COALESCE(AVG(quality), 0) AS quality,
+                COALESCE(AVG(oee), 0) AS oee,
+                COALESCE(AVG(COALESCE(availability_loss, 100 - COALESCE(availability, 0))), 0) AS availability_loss,
+                COALESCE(AVG(COALESCE(performance_loss, 100 - COALESCE(performance, 0))), 0) AS performance_loss,
+                COALESCE(AVG(COALESCE(quality_loss, 100 - COALESCE(quality, 0))), 0) AS quality_loss,
+                COALESCE(SUM(total_parts), 0)::int AS total_parts,
+                COALESCE(SUM(good_parts), 0)::int AS good_parts,
+                COALESCE(SUM(bad_parts), 0)::int AS bad_parts
+            FROM production_monitoring.shift_summary
+            WHERE timestamp >= :start_ts
+              AND timestamp <= :end_ts
+              AND (:shift_id IS NULL OR shift = :shift_id)
+            GROUP BY machine_id
+        """)
+        machine_rows = db.execute(machine_sql, params).mappings().all()
+        machine_agg = {int(r["machine_id"]): r for r in machine_rows}
 
-        unique_machines = set(s.machine_id for s in summaries)
-        machine_count = len(all_machines)
+        shift_sql = text("""
+            SELECT
+                shift,
+                COALESCE(AVG(availability), 0) AS availability,
+                COALESCE(AVG(performance), 0) AS performance,
+                COALESCE(AVG(quality), 0) AS quality,
+                COALESCE(AVG(oee), 0) AS oee,
+                COALESCE(SUM(total_parts), 0)::int AS total_parts,
+                COALESCE(SUM(good_parts), 0)::int AS good_parts,
+                COALESCE(SUM(bad_parts), 0)::int AS bad_parts
+            FROM production_monitoring.shift_summary
+            WHERE timestamp >= :start_ts
+              AND timestamp <= :end_ts
+              AND (:shift_id IS NULL OR shift = :shift_id)
+            GROUP BY shift
+            ORDER BY shift
+        """)
+        shift_rows = db.execute(shift_sql, params).mappings().all()
 
-        avg_oee = total_oee / record_count
-        avg_availability = total_availability / record_count
-        avg_performance = total_performance / record_count
-        avg_quality = total_quality / record_count
+        detail_sql = text("""
+            SELECT
+                machine_id,
+                shift,
+                COUNT(*)::int AS row_count,
+                MIN(timestamp) AS first_ts,
+                MAX(timestamp) AS last_ts,
+                COALESCE(SUM(EXTRACT(EPOCH FROM off_time)), 0) AS off_secs,
+                COALESCE(SUM(EXTRACT(EPOCH FROM idle_time)), 0) AS idle_secs,
+                COALESCE(SUM(EXTRACT(EPOCH FROM production_time)), 0) AS production_secs,
+                COALESCE(SUM(total_parts), 0)::int AS total_parts,
+                COALESCE(SUM(good_parts), 0)::int AS good_parts,
+                COALESCE(SUM(bad_parts), 0)::int AS bad_parts,
+                COALESCE(AVG(availability), 0) AS availability,
+                COALESCE(AVG(performance), 0) AS performance,
+                COALESCE(AVG(quality), 0) AS quality,
+                COALESCE(AVG(COALESCE(availability_loss, 100 - COALESCE(availability, 0))), 0) AS availability_loss,
+                COALESCE(AVG(COALESCE(performance_loss, 100 - COALESCE(performance, 0))), 0) AS performance_loss,
+                COALESCE(AVG(COALESCE(quality_loss, 100 - COALESCE(quality, 0))), 0) AS quality_loss,
+                COALESCE(AVG(oee), 0) AS oee
+            FROM production_monitoring.shift_summary
+            WHERE timestamp >= :start_ts
+              AND timestamp <= :end_ts
+              AND (:shift_id IS NULL OR shift = :shift_id)
+            GROUP BY machine_id, shift
+            ORDER BY machine_id, shift
+            LIMIT 5000
+        """)
+        detail_rows = db.execute(detail_sql, params).mappings().all()
 
-        # Recalculate loss based on the pillars (Loss = 100 - Pillar)
-        avg_availability_loss = 100 - avg_availability
-        avg_performance_loss = 100 - avg_performance
-        avg_quality_loss = 100 - avg_quality
-
-        # Aggregate per-machine metrics from shift summaries
-        machine_data = {}
-        for s in summaries:
-            if s.machine_id not in machine_data:
-                machine_data[s.machine_id] = {
-                    "oee": 0, "avail": 0, "perf": 0, "qual": 0,
-                    "count": 0, "t_parts": 0, "g_parts": 0, "b_parts": 0,
-                    "a_loss": 0, "p_loss": 0, "q_loss": 0,
-                }
-            md = machine_data[s.machine_id]
-            md["oee"] += s.oee or 0
-            md["avail"] += s.availability or 0
-            md["perf"] += s.performance or 0
-            md["qual"] += s.quality or 0
-            md["count"] += 1
-            md["t_parts"] += s.total_parts or 0
-            md["g_parts"] += s.good_parts or 0
-            md["b_parts"] += s.bad_parts or 0
-            md["a_loss"] += s.availability_loss or 0
-            md["p_loss"] += s.performance_loss or 0
-            md["q_loss"] += s.quality_loss or 0
-
-        # Calculate machine-wise breakdown (includes all configured machines)
-        machine_breakdown = build_machine_breakdown_from_data(db, all_machines, machine_data)
-        detailed_summaries = build_detailed_summaries_from_data(
-            all_machines, machine_data, analysis_date, shift_label
+        same_day = range_start.date() == range_end.date()
+        date_label = (
+            range_start.strftime("%Y-%m-%d")
+            if same_day
+            else f"{range_start.strftime('%Y-%m-%d')} → {range_end.strftime('%Y-%m-%d')}"
         )
 
-        shift_breakdown = []
-        if shift and shift.lower() == 'all':
-            shift_data = {}
-            for s in summaries:
-                if s.shift not in shift_data:
-                    shift_data[s.shift] = {
-                        "shift": s.shift,
-                        "total_oee": 0,
-                        "total_availability": 0,
-                        "total_performance": 0,
-                        "total_quality": 0,
-                        "count": 0,
-                        "total_parts": 0,
-                        "good_parts": 0,
-                        "bad_parts": 0
-                    }
-                sd = shift_data[s.shift]
-                sd["total_oee"] += s.oee or 0
-                sd["total_availability"] += s.availability or 0
-                sd["total_performance"] += s.performance or 0
-                sd["total_quality"] += s.quality or 0
-                sd["count"] += 1
-                sd["total_parts"] += s.total_parts or 0
-                sd["good_parts"] += s.good_parts or 0
-                sd["bad_parts"] += s.bad_parts or 0
+        detailed_summaries: List[DetailedShiftSummary] = []
+        for r in detail_rows:
+            mid = int(r["machine_id"])
+            machine = machines.get(mid)
+            m_name = build_machine_display_name(machine) or f"Machine {mid}"
+            avail = float(r["availability"] or 0)
+            perf = float(r["performance"] or 0)
+            qual = float(r["quality"] or 0)
+            oee_v = float(r["oee"] or 0)
+            detailed_summaries.append(DetailedShiftSummary(
+                date=date_label,
+                shift=str(r["shift"]),
+                machine_name=m_name,
+                machine_id=mid,
+                timestamp=r["last_ts"],
+                production_time=_secs_to_hms(r["production_secs"]),
+                idle_time=_secs_to_hms(r["idle_secs"]),
+                off_time=_secs_to_hms(r["off_secs"]),
+                total_parts=int(r["total_parts"] or 0),
+                good_parts=int(r["good_parts"] or 0),
+                bad_parts=int(r["bad_parts"] or 0),
+                availability=round(avail, 2),
+                performance=round(perf, 2),
+                quality=round(qual, 2),
+                availability_loss=round(float(r["availability_loss"] or 0), 2),
+                performance_loss=round(float(r["performance_loss"] or 0), 2),
+                quality_loss=round(float(r["quality_loss"] or 0), 2),
+                oee=round(oee_v, 2),
+                oee_metrics={
+                    "oee": round(oee_v, 2),
+                    "availability": round(avail, 2),
+                    "performance": round(perf, 2),
+                    "quality": round(qual, 2),
+                },
+                row_count=int(r["row_count"] or 0),
+            ))
 
-            for sid, data in shift_data.items():
-                count = data["count"]
-                shift_breakdown.append(ShiftOEE(
-                    shift=sid,
-                    oee=data["total_oee"] / count,
-                    availability=data["total_availability"] / count,
-                    performance=data["total_performance"] / count,
-                    quality=data["total_quality"] / count,
-                    total_parts=data["total_parts"],
-                    good_parts=data["good_parts"],
-                    bad_parts=data["bad_parts"]
+        machine_breakdown = []
+        for machine in all_machines:
+            mid = machine.id
+            m_name = build_machine_display_name(machine)
+            data = machine_agg.get(mid)
+            if not data:
+                machine_breakdown.append(MachineOEE(
+                    machine_id=mid,
+                    machine_name=m_name,
+                    oee=None,
+                    availability=None,
+                    performance=None,
+                    quality=None,
+                    total_parts=None,
+                    good_parts=None,
+                    bad_parts=None,
+                    losses=None,
                 ))
+                continue
 
-        daily_trends = [OEETrend(
-            date=analysis_date.date(),
-            oee=avg_oee,
-            availability=avg_availability,
-            performance=avg_performance,
-            quality=avg_quality
-        )]
+            machine_breakdown.append(MachineOEE(
+                machine_id=mid,
+                machine_name=m_name,
+                oee=round(float(data["oee"] or 0), 2),
+                availability=round(float(data["availability"] or 0), 2),
+                performance=round(float(data["performance"] or 0), 2),
+                quality=round(float(data["quality"] or 0), 2),
+                total_parts=int(data["total_parts"] or 0),
+                good_parts=int(data["good_parts"] or 0),
+                bad_parts=int(data["bad_parts"] or 0),
+                losses=OEELosses(
+                    availability_loss=round(float(data["availability_loss"] or 0), 2),
+                    performance_loss=round(float(data["performance_loss"] or 0), 2),
+                    quality_loss=round(float(data["quality_loss"] or 0), 2),
+                ),
+            ))
+
+        shift_breakdown = [
+            ShiftOEE(
+                shift=int(r["shift"]),
+                oee=round(float(r["oee"] or 0), 2),
+                availability=round(float(r["availability"] or 0), 2),
+                performance=round(float(r["performance"] or 0), 2),
+                quality=round(float(r["quality"] or 0), 2),
+                total_parts=int(r["total_parts"] or 0),
+                good_parts=int(r["good_parts"] or 0),
+                bad_parts=int(r["bad_parts"] or 0),
+            )
+            for r in shift_rows
+        ]
+
+        overall_oee = round(float(overall.get("oee") or 0), 2) if row_count else 0.0
+        overall_availability = round(float(overall.get("availability") or 0), 2) if row_count else 0.0
+        overall_performance = round(float(overall.get("performance") or 0), 2) if row_count else 0.0
+        overall_quality = round(float(overall.get("quality") or 0), 2) if row_count else 0.0
 
         return OverallOEEAnalysis(
-            period_start=start_date,
-            period_end=end_date,
-            overall_oee=avg_oee,
-            overall_availability=avg_availability,
-            overall_performance=avg_performance,
-            overall_quality=avg_quality,
+            period_start=range_start,
+            period_end=range_end,
+            overall_oee=overall_oee,
+            overall_availability=overall_availability,
+            overall_performance=overall_performance,
+            overall_quality=overall_quality,
             shift_breakdown=shift_breakdown,
             machine_breakdown=machine_breakdown,
             detailed_summaries=detailed_summaries,
-            daily_trends=daily_trends,
+            daily_trends=[OEETrend(
+                date=range_end.date(),
+                oee=overall_oee,
+                availability=overall_availability,
+                performance=overall_performance,
+                quality=overall_quality,
+            )],
             losses=OEELosses(
-                availability_loss=avg_availability_loss,
-                performance_loss=avg_performance_loss,
-                quality_loss=avg_quality_loss
+                availability_loss=round(float(overall.get("availability_loss") or (100 - overall_availability)), 2) if row_count else 0.0,
+                performance_loss=round(float(overall.get("performance_loss") or (100 - overall_performance)), 2) if row_count else 0.0,
+                quality_loss=round(float(overall.get("quality_loss") or (100 - overall_quality)), 2) if row_count else 0.0,
             ),
-            total_production=total_parts,
-            total_good_parts=total_good_parts,
-            total_bad_parts=total_bad_parts,
-            machine_count=machine_count
+            total_production=int(overall.get("total_parts") or 0) if row_count else 0,
+            total_good_parts=int(overall.get("good_parts") or 0) if row_count else 0,
+            total_bad_parts=int(overall.get("bad_parts") or 0) if row_count else 0,
+            machine_count=len(all_machines),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/detailed-shift-summary/")
 def get_detailed_shift_summary(
-    date_str: Optional[str] = Query(None, alias="date", description="Date for analysis (YYYY-MM-DD)"),
-    shift: Optional[str] = Query("all", description="Filter by shift: '1', '2', '3', or 'all'"),
+    date_str: Optional[str] = Query(None, alias="date", description="Legacy single day (YYYY-MM-DD)"),
+    start_date: Optional[str] = Query(None, description="Range start"),
+    end_date: Optional[str] = Query(None, description="Range end"),
+    shift: Optional[str] = Query("all", description="Filter by shift id: '1', '2', or 'all'"),
     machine_id: Optional[int] = Query(None, description="Filter by machine ID"),
     db: Session = Depends(get_db)
 ):
-    """
-    Get detailed shift-wise summary for each machine.
-    Calculated directly from production logs.
-    """
+    """Aggregated shift_summary rows for the selected range (SUM times/parts, AVG %)."""
     try:
-        if date_str:
-            analysis_date = datetime.strptime(date_str, "%Y-%m-%d")
-        else:
-            analysis_date = datetime.utcnow()
+        range_start, range_end = _resolve_oee_range(date_str, start_date, end_date)
+        shift_id = _shift_filter_id(shift)
 
-        # Build query using raw SQL
-        query = """
-            SELECT pl.operation_id, pl.produced_quantity, pl.approved_quantity, mls.machine_id
-            FROM scheduling.production_logs pl
-            JOIN production_monitoring.machine_live_status mls ON pl.operation_id = mls.current_operation_id
-            WHERE pl.from_date = :analysis_date
-        """
-        params = {'analysis_date': analysis_date.date()}
-        
-        if machine_id:
-            query += " AND mls.machine_id = :machine_id"
-            params['machine_id'] = machine_id
+        params = {
+            "start_ts": range_start,
+            "end_ts": range_end,
+            "shift_id": shift_id,
+            "machine_id": machine_id,
+        }
+        detail_sql = text("""
+            SELECT
+                machine_id,
+                shift,
+                COUNT(*)::int AS row_count,
+                MAX(timestamp) AS last_ts,
+                COALESCE(SUM(EXTRACT(EPOCH FROM off_time)), 0) AS off_secs,
+                COALESCE(SUM(EXTRACT(EPOCH FROM idle_time)), 0) AS idle_secs,
+                COALESCE(SUM(EXTRACT(EPOCH FROM production_time)), 0) AS production_secs,
+                COALESCE(SUM(total_parts), 0)::int AS total_parts,
+                COALESCE(SUM(good_parts), 0)::int AS good_parts,
+                COALESCE(SUM(bad_parts), 0)::int AS bad_parts,
+                COALESCE(AVG(availability), 0) AS availability,
+                COALESCE(AVG(performance), 0) AS performance,
+                COALESCE(AVG(quality), 0) AS quality,
+                COALESCE(AVG(oee), 0) AS oee
+            FROM production_monitoring.shift_summary
+            WHERE timestamp >= :start_ts
+              AND timestamp <= :end_ts
+              AND (:shift_id IS NULL OR shift = :shift_id)
+              AND (:machine_id IS NULL OR machine_id = :machine_id)
+            GROUP BY machine_id, shift
+            ORDER BY machine_id, shift
+            LIMIT 5000
+        """)
+        rows = db.execute(detail_sql, params).mappings().all()
+        machine_ids = {int(r["machine_id"]) for r in rows}
+        machines = {
+            m.id: m
+            for m in db.query(Machine).filter(Machine.id.in_(machine_ids)).all()
+        } if machine_ids else {}
 
-        logs = db.execute(text(query), params).fetchall()
-        
-        # Group logs by machine
-        machine_logs = {}
-        for log in logs:
-            m_id = log.machine_id
-            if m_id not in machine_logs:
-                machine_logs[m_id] = {"produced": 0, "approved": 0}
-            
-            machine_logs[m_id]["produced"] += (log.produced_quantity or 0)
-            machine_logs[m_id]["approved"] += (log.approved_quantity or 0)
+        same_day = range_start.date() == range_end.date()
+        date_label = (
+            range_start.strftime("%Y-%m-%d")
+            if same_day
+            else f"{range_start.strftime('%Y-%m-%d')} → {range_end.strftime('%Y-%m-%d')}"
+        )
 
         results = []
-        for m_id, stats in machine_logs.items():
-            machine = db.query(Machine).filter(Machine.id == m_id).first()
-            m_name = f"{machine.work_center.work_center_name}-{machine.type}" if machine and machine.work_center else (machine.type if machine else f"Machine {m_id}")
-            
-            quality = (stats["approved"] / stats["produced"] * 100) if stats["produced"] > 0 else 0
-            
+        for r in rows:
+            mid = int(r["machine_id"])
+            machine = machines.get(mid)
+            m_name = build_machine_display_name(machine) or f"Machine {mid}"
             results.append({
-                "date": analysis_date.strftime("%Y-%m-%d"),
-                "shift": "all",
+                "date": date_label,
+                "shift": str(r["shift"]),
                 "machine_name": m_name,
-                "machine_id": m_id,
-                "production_time": 480,
-                "idle_time": 0,
-                "off_time": 0,
-                "total_parts": stats["produced"],
-                "good_parts": stats["approved"],
-                "bad_parts": stats["produced"] - stats["approved"],
+                "machine_id": mid,
+                "production_time": _secs_to_hms(r["production_secs"]),
+                "idle_time": _secs_to_hms(r["idle_secs"]),
+                "off_time": _secs_to_hms(r["off_secs"]),
+                "total_parts": int(r["total_parts"] or 0),
+                "good_parts": int(r["good_parts"] or 0),
+                "bad_parts": int(r["bad_parts"] or 0),
                 "oee_metrics": {
-                    "oee": (85.0 * 80.0 * (quality/100)) * 100,
-                    "availability": 85.0,
-                    "performance": 80.0,
-                    "quality": quality
-                }
+                    "oee": round(float(r["oee"] or 0), 2),
+                    "availability": round(float(r["availability"] or 0), 2),
+                    "performance": round(float(r["performance"] or 0), 2),
+                    "quality": round(float(r["quality"] or 0), 2),
+                },
+                "row_count": int(r["row_count"] or 0),
             })
-        
         return results
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error in detailed-shift-summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/machine-oee-analysis/{machine_id}")
 def get_machine_oee_analysis(
     machine_id: int,
     date_str: Optional[str] = Query(None, alias="date", description="Date for analysis (YYYY-MM-DD)"),
-    shift: Optional[str] = Query("all", description="Filter by shift: '1', '2', '3', or 'all'"),
+    shift: Optional[str] = Query("all", description="Filter by shift id: '1', '2', or 'all'"),
     db: Session = Depends(get_db)
 ):
     """
-    Get detailed OEE analysis for a specific machine from production logs.
+    Machine card averages for the selected date/shift, plus a 7-day trend
+    from production_monitoring.shift_summary rows.
     """
     try:
         if date_str:
@@ -459,84 +594,67 @@ def get_machine_oee_analysis(
         else:
             analysis_date = datetime.utcnow()
 
-        # Build query using raw SQL
-        query = """
-            SELECT pl.produced_quantity, pl.approved_quantity
-            FROM scheduling.production_logs pl
-            JOIN production_monitoring.machine_live_status mls ON pl.operation_id = mls.current_operation_id
-            WHERE pl.from_date = :analysis_date AND mls.machine_id = :machine_id
-        """
-        logs = db.execute(text(query), {
-            'analysis_date': analysis_date.date(),
-            'machine_id': machine_id
-        }).fetchall()
+        day_start = analysis_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = analysis_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        trend_start = (analysis_date - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
 
         machine = db.query(Machine).filter(Machine.id == machine_id).first()
-        m_name = f"{machine.work_center.work_center_name}-{machine.type}" if machine and machine.work_center else (machine.type if machine else f"Machine {machine_id}")
+        m_name = build_machine_display_name(machine) or f"Machine {machine_id}"
 
-        if not logs:
-            return {
-                "machine_id": machine_id,
-                "machine_name": m_name,
-                "average_oee": 0.0,
-                "average_availability": 0.0,
-                "average_performance": 0.0,
-                "average_quality": 0.0,
-                "losses": {"availability_loss": 0.0, "performance_loss": 0.0, "quality_loss": 0.0},
-                "oee_trends": []
-            }
+        day_query = db.query(ShiftSummary).filter(
+            ShiftSummary.machine_id == machine_id,
+            ShiftSummary.timestamp >= day_start,
+            ShiftSummary.timestamp <= day_end,
+        )
+        trend_query = db.query(ShiftSummary).filter(
+            ShiftSummary.machine_id == machine_id,
+            ShiftSummary.timestamp >= trend_start,
+            ShiftSummary.timestamp <= day_end,
+        )
 
-        total_produced = sum(log.produced_quantity or 0 for log in logs)
-        total_approved = sum(log.approved_quantity or 0 for log in logs)
-        
-        quality = (total_approved / total_produced * 100) if total_produced > 0 else 0
-            
-        # Calculate availability based on actual downtime
-        downtime_data = db.execute(text('''
-            SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))/60), 0) as total_downtime_minutes
-            FROM scheduling.machine_downtimes 
-            WHERE machine_id = :machine_id 
-            AND DATE(start_time) = :date
-        '''), {'machine_id': machine_id, 'date': analysis_date.date()}).fetchone()
-        
-        total_downtime = downtime_data[0] or 0
-        planned_shift_time = 480  # 8 hours
-        actual_runtime = max(0, planned_shift_time - total_downtime)
-        avail = (actual_runtime / planned_shift_time) * 100
-        
-        # Calculate performance based on production efficiency
-        if logs and actual_runtime > 0:
-            total_produced_logs = sum(log.produced_quantity or 0 for log in logs)
-            avg_parts_per_hour = total_produced_logs / (actual_runtime / 60)
-            perf = min(95.0, (avg_parts_per_hour / 10) * 100)
-            perf = max(70.0, perf)
-        else:
-            perf = 85.0
-        
-        oee = (avail/100 * perf/100 * quality/100) * 100
+        if shift and str(shift).lower() != "all":
+            try:
+                shift_id = int(shift)
+                if shift_id not in (1, 2):
+                    raise HTTPException(status_code=400, detail="Shift must be '1', '2', or 'all'")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Shift must be '1', '2', or 'all'")
+            day_query = day_query.filter(ShiftSummary.shift == shift_id)
+            trend_query = trend_query.filter(ShiftSummary.shift == shift_id)
+
+        summaries = day_query.order_by(ShiftSummary.shift).all()
+        trend_rows = trend_query.order_by(ShiftSummary.timestamp, ShiftSummary.shift).all()
+
+        avg_oee = _avg([s.oee or 0 for s in summaries]) if summaries else 0.0
+        avg_avail = _avg([s.availability or 0 for s in summaries]) if summaries else 0.0
+        avg_perf = _avg([s.performance or 0 for s in summaries]) if summaries else 0.0
+        avg_qual = _avg([s.quality or 0 for s in summaries]) if summaries else 0.0
 
         return {
             "machine_id": machine_id,
             "machine_name": m_name,
-            "average_oee": oee,
-            "average_availability": avail,
-            "average_performance": perf,
-            "average_quality": quality,
+            "average_oee": avg_oee,
+            "average_availability": avg_avail,
+            "average_performance": avg_perf,
+            "average_quality": avg_qual,
             "losses": {
-                "availability_loss": 100 - avail,
-                "performance_loss": 100 - perf,
-                "quality_loss": 100 - quality
+                "availability_loss": 100 - avg_avail,
+                "performance_loss": 100 - avg_perf,
+                "quality_loss": 100 - avg_qual,
             },
             "oee_trends": [{
-                "date": analysis_date.strftime("%Y-%m-%d"),
-                "oee": oee,
-                "availability": avail,
-                "performance": perf,
-                "quality": quality
-            }]
+                "date": (s.timestamp.strftime("%Y-%m-%d") if s.timestamp else analysis_date.strftime("%Y-%m-%d")),
+                "label": f"{(s.timestamp.strftime('%m/%d') if s.timestamp else analysis_date.strftime('%m/%d'))} S{s.shift}",
+                "shift": s.shift,
+                "oee": s.oee or 0,
+                "availability": s.availability or 0,
+                "performance": s.performance or 0,
+                "quality": s.quality or 0,
+            } for s in trend_rows],
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error in machine-oee-analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -709,10 +827,28 @@ def get_combined_schedule_production(
                 print(f"Error processing production log row {log.id}: {e}")
                 continue
 
+        live_status_segments = build_live_status_segments(
+            db=db,
+            machine_details=machine_details,
+            start_date=start_date,
+            end_date=end_date,
+            machine_id=machine_id,
+        )
+
+        operator_issue_segments = build_operator_issue_segments(
+            db=db,
+            machine_details=machine_details,
+            start_date=start_date,
+            end_date=end_date,
+            machine_id=machine_id,
+        )
+
         return CombinedScheduleProductionResponse(
             planned_operations=planned_operations,
             actual_production_logs=actual_production_logs,
-            all_machines=all_machines_info
+            all_machines=all_machines_info,
+            live_status_segments=live_status_segments,
+            operator_issue_segments=operator_issue_segments,
         )
 
     except Exception as e:

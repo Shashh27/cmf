@@ -46,6 +46,7 @@ class OrderNotificationWithDetails(OrderNotification):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
+    customer_name: Optional[str] = None
     created_by: Optional[str] = None
     order_status: Optional[str] = None
 
@@ -109,6 +110,10 @@ class ToolIssuesNotification(ToolIssuesNotificationBase):
 
 class ToolIssuesNotificationWithDetails(ToolIssuesNotification):
     tool_name: Optional[str] = None
+    tool_description: Optional[str] = None
+    range: Optional[str] = None
+    identification_code: Optional[str] = None
+    quantity: Optional[int] = None
     tool_issue_qty: Optional[int] = None
     status: Optional[str] = None
     created_by: Optional[str] = None
