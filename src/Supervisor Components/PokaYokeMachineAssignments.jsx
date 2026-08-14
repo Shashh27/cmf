@@ -1,18 +1,172 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import {
-  Button, Modal, Form, Select, message, Typography, Space, Table, Tag, Switch, Popconfirm, Spin, Badge, Tooltip, Collapse, DatePicker,
+  Button, Modal, Form, Select, message, Typography, Space, Tag, Checkbox, Popconfirm, Spin, Badge, Tooltip, Collapse, DatePicker, Input,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, DeleteOutlined, CalendarOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, CalendarOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 import {
-  PM_T, btnSharp, pmFetch, fetchChecklistDetails, getCurrentUserId, formatDate, formatDateTime,
-  machineLabel, frequencySummary, itemTypeShort, STATUS_COLORS, isDateInRange,
+  PM_T, btnSharp, pmFetch, getCurrentUserId, formatDate, formatDateTime,
+  machineLabel, frequencySummary, STATUS_COLORS, isDateInRange,
   disableFutureDates, normalizeDateRange,
+  FREQUENCY_TYPES, INTERVAL_UNITS, validateAssignFrequency,
 } from './pmUtils';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
+import { Grid } from 'react-window';
 import CheckpointDetailModal from './CheckpointDetailModal';
 import PmDownloadButton from './PmDownloadButton';
 import { buildAssignmentsReportConfig } from './pmReportDownload';
+
+const ASSIGN_ROW_H = 92;
+
+const highlightText = (text, q) => {
+  if (!q || !text) return text || '';
+  const lower = String(text).toLowerCase();
+  const qi = lower.indexOf(q.toLowerCase());
+  if (qi < 0) return text;
+  return (
+    <>
+      {text.slice(0, qi)}
+      <mark style={{ background: '#FEF08A', padding: 0 }}>{text.slice(qi, qi + q.length)}</mark>
+      {text.slice(qi + q.length)}
+    </>
+  );
+};
+
+const AssignCheckpointCell = memo(function AssignCheckpointCell({
+  ariaAttributes,
+  columnIndex,
+  rowIndex,
+  style,
+  rows,
+  colCount,
+  onPatch,
+  searchQ,
+}) {
+  const idx = rowIndex * colCount + columnIndex;
+  const r = rows[idx];
+  if (!r) {
+    return <div style={{ ...style, boxSizing: 'border-box' }} {...ariaAttributes} />;
+  }
+  const selected = !!r.is_required;
+  const q = searchQ.trim();
+
+  return (
+    <div
+      {...ariaAttributes}
+      style={{
+        ...style,
+        boxSizing: 'border-box',
+        padding: 4,
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          border: `1px solid ${selected ? '#93C5FD' : '#E5E7EB'}`,
+          background: selected ? '#F0F7FF' : '#fff',
+          borderRadius: 4,
+          padding: '6px 8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+          <Checkbox
+            checked={selected}
+            onChange={(e) => onPatch(r.checklist_item_id, {
+              is_required: e.target.checked,
+              ...(e.target.checked && !r.frequency_type
+                ? { frequency_type: 'Time Based', interval_value: 1, interval_unit: 'Week', trigger_hours: null }
+                : {}),
+            })}
+            style={{ marginTop: 1 }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, lineHeight: 1.2 }}>
+              {r.checklist_name}
+              <span style={{ fontWeight: 400 }}> · #{r.sequence_number}</span>
+            </div>
+            <div
+              title={r.item_text}
+              style={{
+                fontSize: 12,
+                color: '#111827',
+                lineHeight: 1.25,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {highlightText(r.item_text, q)}
+            </div>
+          </div>
+          <Checkbox
+            disabled={!selected}
+            checked={!!r.is_compulsory}
+            onChange={(e) => onPatch(r.checklist_item_id, { is_compulsory: e.target.checked })}
+            style={{ flexShrink: 0 }}
+          >
+            <span style={{ fontSize: 10 }}>Comp.</span>
+          </Checkbox>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', marginTop: 'auto' }}>
+          <Select
+            size="small"
+            disabled={!selected}
+            style={{ flex: '1 1 110px', minWidth: 100 }}
+            placeholder="Freq *"
+            value={selected ? (r.frequency_type || undefined) : undefined}
+            options={FREQUENCY_TYPES}
+            onChange={(v) => onPatch(r.checklist_item_id, {
+              frequency_type: v,
+              interval_value: v === 'Usage Based' ? null : (r.interval_value || 1),
+              interval_unit: v === 'Usage Based' ? null : (r.interval_unit || 'Week'),
+              trigger_hours: v === 'Usage Based' ? (r.trigger_hours || 100) : null,
+            })}
+          />
+          {selected && ['Time Based', 'Condition Based'].includes(r.frequency_type) ? (
+            <>
+              <Select
+                size="small"
+                style={{ width: 78 }}
+                value={r.interval_unit || undefined}
+                options={INTERVAL_UNITS.map((u) => ({ value: u, label: u }))}
+                onChange={(v) => onPatch(r.checklist_item_id, { interval_unit: v })}
+              />
+              <Input
+                size="small"
+                type="number"
+                min={1}
+                style={{ width: 52 }}
+                value={r.interval_value ?? ''}
+                onChange={(e) => onPatch(r.checklist_item_id, {
+                  interval_value: e.target.value === '' ? null : Number(e.target.value),
+                })}
+              />
+            </>
+          ) : null}
+          {selected && r.frequency_type === 'Usage Based' ? (
+            <Input
+              size="small"
+              type="number"
+              min={1}
+              style={{ width: 72 }}
+              placeholder="Hrs"
+              value={r.trigger_hours ?? ''}
+              onChange={(e) => onPatch(r.checklist_item_id, {
+                trigger_hours: e.target.value === '' ? null : Number(e.target.value),
+              })}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -266,9 +420,18 @@ export function getCheckpointsForDate(assignments, submissions, date) {
     (assignment.assignment_items || []).forEach((ai) => {
       const ci = ai.checklist_item;
       if (!ci) return;
+      // Prefer frequency set at assign-time; fall back to master for legacy rows
+      const freq = ai.frequency_type
+        ? {
+          frequency_type: ai.frequency_type,
+          interval_value: ai.interval_value,
+          interval_unit: ai.interval_unit,
+          trigger_hours: ai.trigger_hours,
+        }
+        : ci;
 
-      const isCondition = isConditionBased(ci);
-      const isDaily = isTimeDaily(ci);
+      const isCondition = isConditionBased(freq);
+      const isDaily = isTimeDaily(freq);
       let indication = null;
 
       if (isAssignDay) {
@@ -277,8 +440,8 @@ export function getCheckpointsForDate(assignments, submissions, date) {
         indication = 'condition';
       } else if (isDaily) {
         indication = 'daily';
-      } else if (isScheduledDueOnDate(ci, ai.schedule, dateKey)) {
-        indication = getFrequencyIndication(ci);
+      } else if (isScheduledDueOnDate(freq, ai.schedule, dateKey)) {
+        indication = getFrequencyIndication(freq);
       }
 
       if (!indication) return;
@@ -419,8 +582,114 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const [viewYear, setViewYear] = useState(dayjs().year());
   const [viewMonth, setViewMonth] = useState(dayjs().month());
   const [checkpointConfig, setCheckpointConfig] = useState([]);
+  const [assignChecklistFilter, setAssignChecklistFilter] = useState(null);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [assignLoadingCheckpoints, setAssignLoadingCheckpoints] = useState(false);
   const [detailItem, setDetailItem] = useState(null);
   const [form] = Form.useForm();
+
+  const buildCheckpointConfig = (list, filterId = null) => {
+    const source = filterId
+      ? (list || []).filter((c) => c.id === filterId)
+      : (list || []);
+    const rows = [];
+    source.forEach((cl) => {
+      const items = [...(cl.items || [])].sort(
+        (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0),
+      );
+      items.forEach((item) => {
+        rows.push({
+          checklist_item_id: item.id,
+          checklist_id: cl.id,
+          checklist_name: cl.name,
+          item_text: item.item_text,
+          sequence_number: item.sequence_number,
+          item_type: item.item_type,
+          expected_value: item.expected_value,
+          remarks: item.remarks,
+          is_required: false,
+          is_compulsory: false,
+          frequency_type: null,
+          interval_value: null,
+          interval_unit: null,
+          trigger_hours: null,
+        });
+      });
+    });
+    return rows;
+  };
+
+  const checkpointsByChecklist = useMemo(() => {
+    const q = assignSearch.trim().toLowerCase();
+    const map = new Map();
+    checkpointConfig.forEach((row) => {
+      if (q) {
+        const hay = [
+          row.item_text,
+          row.checklist_name,
+          row.frequency_type,
+          row.interval_unit,
+          row.expected_value,
+          row.remarks,
+          row.item_type,
+          String(row.interval_value ?? ''),
+          String(row.trigger_hours ?? ''),
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return;
+      }
+      const key = row.checklist_id;
+      if (!map.has(key)) {
+        map.set(key, { id: key, name: row.checklist_name || `Checklist #${key}`, items: [] });
+      }
+      map.get(key).items.push(row);
+    });
+    return Array.from(map.values());
+  }, [checkpointConfig, assignSearch]);
+
+  const filteredCheckpointRows = useMemo(
+    () => checkpointsByChecklist.flatMap((g) => g.items),
+    [checkpointsByChecklist],
+  );
+
+  const assignSelectedCount = useMemo(
+    () => checkpointConfig.filter((c) => c.is_required).length,
+    [checkpointConfig],
+  );
+
+  const closeAssignModal = () => {
+    setAssignOpen(false);
+    form.resetFields();
+    setCheckpointConfig([]);
+    setAssignChecklistFilter(null);
+    setAssignSearch('');
+  };
+
+  const patchAssignCheckpoint = useCallback((checklistItemId, patch) => {
+    setCheckpointConfig((prev) => prev.map((x) => (
+      x.checklist_item_id === checklistItemId ? { ...x, ...patch } : x
+    )));
+  }, []);
+
+  const assignGridRef = useRef(null);
+  const [assignGridSize, setAssignGridSize] = useState({ width: 0, height: 0 });
+  const assignColCount = assignGridSize.width >= 1200 ? 3 : (assignGridSize.width >= 640 ? 2 : 1);
+  const assignRowCount = Math.ceil(filteredCheckpointRows.length / Math.max(assignColCount, 1));
+
+  useEffect(() => {
+    if (!assignOpen) return undefined;
+    const el = assignGridRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (!cr) return;
+      setAssignGridSize({
+        width: Math.max(0, Math.floor(cr.width)),
+        height: Math.max(0, Math.floor(cr.height)),
+      });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [assignOpen, assignLoadingCheckpoints, filteredCheckpointRows.length]);
 
   const assignedChecklists = useMemo(() => {
     const map = new Map();
@@ -520,30 +789,17 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         pmFetch('/assignments'),
         pmFetch('/submissions'),
       ]);
-      const enriched = await Promise.all(
-        data.map(async (a) => {
-          const detail = await pmFetch(`/assignments/${a.id}`);
-          return {
-            ...detail,
-            checklistName: detail.checklist?.name || 'Unknown',
-            itemsCount: detail.assignment_items?.length || 0,
-          };
-        })
-      );
+      const enriched = (Array.isArray(data) ? data : []).map((detail) => ({
+        ...detail,
+        checklistName: detail.checklist?.name || 'Unknown',
+        itemsCount: detail.assignment_items?.length || 0,
+      }));
       setAssignments(enriched);
       setSubmissions(submissionData || []);
     } catch (e) {
       message.error(e.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadChecklists = async () => {
-    try {
-      setChecklists(await pmFetch('/checklists'));
-    } catch (e) {
-      message.error(e.message);
     }
   };
 
@@ -570,55 +826,92 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     message.success('Refreshed');
   };
 
-  const onChecklistChange = async (checklistId) => {
-    if (!checklistId) return setCheckpointConfig([]);
+  const openAssignModal = async () => {
+    fetchMachines?.();
+    form.setFieldsValue({ machine_ids: selectedMachine ? [selectedMachine] : [] });
+    setAssignChecklistFilter(null);
+    setAssignSearch('');
+    setAssignOpen(true);
+    setAssignLoadingCheckpoints(true);
     try {
-      const detail = await fetchChecklistDetails(checklistId);
-      setCheckpointConfig(
-        (detail.items || []).map((item) => ({
-          ...item,
-          checklist_item_id: item.id,
-          is_required: true,
-        }))
-      );
+      const list = await pmFetch('/checklists');
+      const arr = Array.isArray(list) ? list : [];
+      setChecklists(arr);
+      setCheckpointConfig(buildCheckpointConfig(arr, null));
     } catch (e) {
-      message.error(e.message);
+      message.error(e.message || 'Failed to load checkpoints');
+      setCheckpointConfig([]);
+    } finally {
+      setAssignLoadingCheckpoints(false);
     }
   };
 
+  const onAssignChecklistFilterChange = (checklistId) => {
+    const filterId = checklistId || null;
+    setAssignChecklistFilter(filterId);
+    setCheckpointConfig(buildCheckpointConfig(checklists, filterId));
+  };
+
   const handleAssign = async (values) => {
-    if (!checkpointConfig.length) return message.error('Checklist has no checkpoints');
+    if (!checkpointConfig.length) return message.error('No checkpoints available');
     const toAssign = checkpointConfig.filter((c) => c.is_required);
     if (!toAssign.length) return message.error('Select at least one checkpoint to assign');
+
+    for (const row of toAssign) {
+      const err = validateAssignFrequency(row);
+      if (err) {
+        return message.error(`${row.item_text || 'Checkpoint'}: ${err}`);
+      }
+    }
+
     const machineIds = values.machine_ids || [];
     if (!machineIds.length) return message.error('Select at least one machine');
 
+    const byChecklist = new Map();
+    toAssign.forEach((row) => {
+      if (!byChecklist.has(row.checklist_id)) byChecklist.set(row.checklist_id, []);
+      byChecklist.get(row.checklist_id).push(row);
+    });
+
     let ok = 0;
+    let fail = 0;
     for (const machineId of machineIds) {
-      try {
-        await pmFetch('/assignments', {
-          method: 'POST',
-          body: JSON.stringify({
-            machine_id: machineId,
-            checklist_id: values.checklist_id,
-            assigned_by: getCurrentUserId(),
-            items: checkpointConfig.map((c) => ({
-              checklist_item_id: c.checklist_item_id,
-              is_required: c.is_required,
-            })),
-          }),
-        });
-        ok++;
-      } catch (e) {
-        message.error(`Machine ${machineLabel(machines.find((m) => m.id === machineId))}: ${e.message}`);
+      for (const [checklistId, rows] of byChecklist.entries()) {
+        try {
+          await pmFetch('/assignments', {
+            method: 'POST',
+            body: JSON.stringify({
+              machine_id: machineId,
+              checklist_id: checklistId,
+              assigned_by: getCurrentUserId(),
+              items: rows.map((c) => ({
+                checklist_item_id: c.checklist_item_id,
+                is_required: true,
+                is_compulsory: !!c.is_compulsory,
+                frequency_type: c.frequency_type,
+                interval_value: c.interval_value != null ? Number(c.interval_value) : null,
+                interval_unit: c.interval_unit || null,
+                trigger_hours: c.trigger_hours != null ? Number(c.trigger_hours) : null,
+              })),
+            }),
+          });
+          ok += 1;
+        } catch (e) {
+          fail += 1;
+          message.error(
+            `${machineLabel(machines.find((m) => m.id === machineId))} / ${rows[0]?.checklist_name || checklistId}: ${e.message}`,
+          );
+        }
       }
     }
-    if (ok) message.success(`Assigned to ${ok} machine(s)`);
+    if (ok) message.success(`Created ${ok} assignment(s)${fail ? ` (${fail} failed)` : ''}`);
     setAssignOpen(false);
     form.resetFields();
     setCheckpointConfig([]);
-    if (selectedMachine) await loadAllAssignments();
-    else if (machineIds.length === 1) setSelectedMachine(machineIds[0]);
+    setAssignChecklistFilter(null);
+    setAssignSearch('');
+    await loadAllAssignments();
+    if (!selectedMachine && machineIds.length === 1) setSelectedMachine(machineIds[0]);
   };
 
   const legendItems = ['assigned', 'condition', 'daily', 'weekly', 'monthly', 'yearly', 'usage'];
@@ -741,7 +1034,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           />
           <Button icon={<ReloadOutlined />} loading={loading} onClick={handleRefresh} style={btnSharp}>Refresh</Button>
           <Button type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
-            onClick={() => { loadChecklists(); fetchMachines(); form.setFieldsValue({ machine_ids: selectedMachine ? [selectedMachine] : [] }); setAssignOpen(true); }}>
+            onClick={openAssignModal}>
             New Assignment
           </Button>
         </Space>
@@ -901,47 +1194,180 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         onDelete={handleDeleteCheckpoint}
       />
 
-      <Modal title="New Assignment" open={assignOpen} onCancel={() => { setAssignOpen(false); form.resetFields(); setCheckpointConfig([]); }}
-        footer={null} width={960} destroyOnClose>
-        <Form form={form} layout="vertical" onFinish={handleAssign}>
-          <Form.Item name="machine_ids" label="Machines (one or more)" rules={[{ required: true }]}>
-            <Select mode="multiple" showSearch placeholder="Select machines" optionFilterProp="children">
-              {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
-            </Select>
-          </Form.Item>
-          <Form.Item name="checklist_id" label="Checklist" rules={[{ required: true }]}>
-            <Select showSearch placeholder="Select checklist" onChange={onChecklistChange} optionFilterProp="children">
-              {checklists.map((c) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
-            </Select>
-          </Form.Item>
-          {checkpointConfig.length > 0 && (
-            <Table size="small" bordered pagination={false} rowKey="checklist_item_id" dataSource={checkpointConfig}
-              scroll={{ x: 860 }}
-              columns={[
-                { title: '#', width: 40, align: 'center', render: (_, r) => r.sequence_number },
-                { title: 'Checkpoint', dataIndex: 'item_text', width: 160, ellipsis: true },
-                { title: 'Type', width: 72, render: (_, r) => <Tag style={{ borderRadius: 0, fontSize: 10, margin: 0 }}>{itemTypeShort(r.item_type)}</Tag> },
-                { title: 'Expected', dataIndex: 'expected_value', width: 90, ellipsis: true, render: (v) => v || '—' },
-                { title: 'Frequency', width: 110, render: (_, r) => <Tag style={{ borderRadius: 0, fontSize: 10, margin: 0 }}>{r.frequency_type}</Tag> },
-                { title: 'Unit', width: 72, render: (_, r) => r.interval_unit || '—' },
-                { title: 'Interval / Hrs', width: 90, render: (_, r) => r.interval_value ?? r.trigger_hours ?? '—' },
-                { title: 'Remarks', dataIndex: 'remarks', width: 120, ellipsis: true, render: (v) => v || '—' },
-                { title: 'Assign', width: 72, align: 'center', fixed: 'right', render: (_, r) => (
-                  <Switch size="small" checked={r.is_required} onChange={(c) =>
-                    setCheckpointConfig((p) => p.map((x) => x.checklist_item_id === r.checklist_item_id ? { ...x, is_required: c } : x))
-                  } />
-                )},
-              ]}
-              style={{ marginBottom: 12 }}
-            />
-          )}
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+      <Modal
+        title={(
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingRight: 28 }}>
+            <span>New Assignment</span>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+              {assignLoadingCheckpoints
+                ? 'Loading…'
+                : `${filteredCheckpointRows.length.toLocaleString()} shown · ${assignSelectedCount.toLocaleString()} selected of ${checkpointConfig.length.toLocaleString()}`}
+            </Text>
+          </div>
+        )}
+        open={assignOpen}
+        onCancel={closeAssignModal}
+        footer={null}
+        width="92vw"
+        style={{ top: 24, paddingBottom: 0, maxWidth: 1280 }}
+        styles={{
+          body: {
+            padding: '8px 10px 10px',
+            height: 'calc(100vh - 120px)',
+            maxHeight: 780,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          },
+          content: { borderRadius: 8 },
+        }}
+        destroyOnClose
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleAssign}
+          style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
+        >
+          <div
+            className="pm-assign-top"
+            style={{
+              flexShrink: 0,
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
+              gap: 8,
+              marginBottom: 6,
+            }}
+          >
+            <Form.Item
+              name="machine_ids"
+              label={<span style={{ fontSize: 12 }}>Machines</span>}
+              rules={[{ required: true }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Select
+                mode="multiple"
+                showSearch
+                maxTagCount="responsive"
+                placeholder="Select machine(s)"
+                optionFilterProp="children"
+                size="middle"
+              >
+                {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item
+              label={<span style={{ fontSize: 12 }}>Search</span>}
+              style={{ marginBottom: 0 }}
+            >
+              <Input
+                allowClear
+                size="middle"
+                prefix={<SearchOutlined style={{ color: '#9CA3AF' }} />}
+                placeholder="oil, coolant, hydraulic…"
+                value={assignSearch}
+                onChange={(e) => setAssignSearch(e.target.value)}
+              />
+            </Form.Item>
+          </div>
+
+          <div style={{ flexShrink: 0, marginBottom: 6 }}>
+            <div style={{
+              display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2,
+              WebkitOverflowScrolling: 'touch',
+            }}
+            >
+              <Tag
+                color={assignChecklistFilter == null ? 'blue' : 'default'}
+                style={{ cursor: 'pointer', margin: 0, borderRadius: 0, userSelect: 'none', flexShrink: 0, fontSize: 11 }}
+                onClick={() => onAssignChecklistFilterChange(null)}
+              >
+                All ({checkpointConfig.length})
+              </Tag>
+              {checklists.map((c) => {
+                const count = (c.items || []).length;
+                const active = assignChecklistFilter === c.id;
+                return (
+                  <Tag
+                    key={c.id}
+                    color={active ? 'blue' : 'default'}
+                    style={{ cursor: 'pointer', margin: 0, borderRadius: 0, userSelect: 'none', flexShrink: 0, fontSize: 11 }}
+                    onClick={() => onAssignChecklistFilterChange(c.id)}
+                  >
+                    {c.name} ({count})
+                  </Tag>
+                );
+              })}
+            </div>
+            <Text type="secondary" style={{ fontSize: 10 }}>
+              {assignColCount} col · {filteredCheckpointRows.length.toLocaleString()} shown
+              {assignSearch.trim() ? ` · “${assignSearch.trim()}”` : ''}
+              {' · select + set frequency'}
+            </Text>
+          </div>
+
+          <div
+            ref={assignGridRef}
+            style={{ flex: 1, minHeight: 0, border: `1px solid ${PM_T.border}`, background: '#F8FAFC', overflow: 'hidden' }}
+          >
+            {assignLoadingCheckpoints ? (
+              <div style={{ padding: 32, textAlign: 'center' }}><Spin size="large" /></div>
+            ) : filteredCheckpointRows.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center' }}>
+                <Text type="secondary">
+                  {assignSearch.trim() ? `No checkpoints match “${assignSearch.trim()}”.` : 'No checkpoints found.'}
+                </Text>
+              </div>
+            ) : assignGridSize.width > 0 && assignGridSize.height > 0 ? (
+              <Grid
+                cellComponent={AssignCheckpointCell}
+                cellProps={{
+                  rows: filteredCheckpointRows,
+                  colCount: assignColCount,
+                  onPatch: patchAssignCheckpoint,
+                  searchQ: assignSearch,
+                }}
+                columnCount={assignColCount}
+                columnWidth={`${100 / assignColCount}%`}
+                rowCount={assignRowCount}
+                rowHeight={ASSIGN_ROW_H}
+                overscanCount={4}
+                style={{ height: assignGridSize.height, width: assignGridSize.width }}
+              />
+            ) : null}
+          </div>
+
+          <div style={{
+            flexShrink: 0,
+            marginTop: 8,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+          >
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {assignSelectedCount.toLocaleString()} selected
+            </Text>
             <Space>
-              <Button onClick={() => setAssignOpen(false)} style={btnSharp}>Cancel</Button>
-              <Button type="primary" htmlType="submit" disabled={!checkpointConfig.some((c) => c.is_required)} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}>Assign</Button>
+              <Button onClick={closeAssignModal} style={btnSharp}>Cancel</Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                disabled={!checkpointConfig.some((c) => c.is_required) || assignLoadingCheckpoints}
+                style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
+              >
+                Assign
+              </Button>
             </Space>
-          </Form.Item>
+          </div>
         </Form>
+        <style>{`
+          @media (max-width: 720px) {
+            .pm-assign-top { grid-template-columns: 1fr !important; }
+          }
+        `}</style>
       </Modal>
     </div>
   );

@@ -1,8 +1,8 @@
 import React, { Suspense, useEffect, useState, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, PresentationControls, Html, Environment, Grid } from '@react-three/drei';
-import { Typography, Button, Spin, Space, Badge } from 'antd';
-import { ArrowLeftOutlined, BarChartOutlined } from '@ant-design/icons';
+import { Typography, Button, Spin, Space, Badge, Tooltip } from 'antd';
+import { ArrowLeftOutlined, BarChartOutlined, SyncOutlined } from '@ant-design/icons';
 import MachineOverlay from './MachineOverlay';
 import Productivity from './Productivity';
 import * as THREE from 'three';
@@ -15,13 +15,31 @@ import { getApiWsUrl } from '../auth/apiUrl.js';
 
 const { Title, Text } = Typography;
 
-// Rotating Machines Component
-function RotatingMachines({ children, speed = 0.0005 }) {
+const NORMAL_SPIN_SPEED = 0.0005;
+const BOOST_SPIN_SPEED = 0.09;
+const BOOST_ROUNDS = 15;
+const BOOST_RADIANS = BOOST_ROUNDS * Math.PI * 2;
+
+// Rotating Machines Component — slow by default; fast while boostRemainingRef > 0
+function RotatingMachines({ children, boostRemainingRef, onBoostComplete }) {
   const groupRef = useRef();
-  
+  const completedRef = useRef(false);
+
   useFrame(() => {
-    if (groupRef.current) {
-      groupRef.current.rotation.y += speed;
+    if (!groupRef.current) return;
+    const remaining = boostRemainingRef?.current ?? 0;
+    if (remaining > 0) {
+      completedRef.current = false;
+      const step = Math.min(BOOST_SPIN_SPEED, remaining);
+      groupRef.current.rotation.y += step;
+      boostRemainingRef.current = remaining - step;
+      if (boostRemainingRef.current <= 0 && !completedRef.current) {
+        completedRef.current = true;
+        boostRemainingRef.current = 0;
+        onBoostComplete?.();
+      }
+    } else {
+      groupRef.current.rotation.y += NORMAL_SPIN_SPEED;
     }
   });
 
@@ -48,7 +66,7 @@ const StatusLegend = ({ machineStates, machines, selectedFilter, onFilterChange 
     <div style={{
       position: 'absolute',
       top: '20px',
-      right: '20px',
+      left: '20px',
       background: 'white',
       padding: '12px',
       borderRadius: '8px',
@@ -387,6 +405,8 @@ const Machines = ({ onBack }) => {
   const [hoveredMachine, setHoveredMachine] = useState(null);
   const [showProductivity, setShowProductivity] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('total');
+  const [isBoostSpinning, setIsBoostSpinning] = useState(false);
+  const boostRemainingRef = useRef(0);
 
   const fetchMachines = async () => {
     try {
@@ -462,13 +482,14 @@ const Machines = ({ onBack }) => {
 
   const handleMachineClick = (machineId) => {
     const selectedMachine = machines.find(machine => machine.id === machineId);
-    console.log("Selected machine:", selectedMachine);
-    console.log("Setting machineId:", machineId);
-    console.log("Setting machineName:", selectedMachine?.machine_name);
     setSelectedMachineId(machineId);
     setSelectedMachineName(selectedMachine?.machine_name);
-    // Reset the tab state to 'overview' when opening a new machine
-    localStorage.setItem(`machine_${machineId}_tab`, 'overview');
+  };
+
+  const handleBoostSpin = () => {
+    if (isBoostSpinning) return;
+    boostRemainingRef.current = BOOST_RADIANS;
+    setIsBoostSpinning(true);
   };
 
   // Filter machines based on selected filter
@@ -505,56 +526,60 @@ const Machines = ({ onBack }) => {
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ 
-        position: 'absolute',
-        top: '20px',
-        right: '20px',
-        zIndex: 10
-      }}>
-        {!selectedMachineId && (
-          <Button 
-            type="primary" 
-            icon={<BarChartOutlined />}
-            onClick={() => setShowProductivity(true)}
-            style={{
-              backgroundColor: '#52c41a',
-              borderRadius: '6px'
-            }}
-          >
-            Productivity
-          </Button>
-        )}
-      </div>
-
-      {!selectedMachineId && (
-        <Title 
-          level={2} 
-          style={{ 
-            margin: 0, 
-            textAlign: 'center', 
-            padding: '20px',
-            color: '#000000',
-            fontWeight: 600
-          }}
-        >
-          CMF Shop Floor
-        </Title>
-      )}
-
+    <div style={{ position: 'relative', width: '100%', maxWidth: '100%', overflow: 'hidden', boxSizing: 'border-box' }}>
       <div style={{ 
         width: '100%', 
-        height: 'calc(100vh - 150px)',
-        position: 'relative'
+        maxWidth: '100%',
+        height: 'calc(100vh - 120px)',
+        position: 'relative',
+        overflow: 'hidden',
+        boxSizing: 'border-box',
       }}>
         {!selectedMachineId ? (
           <>
+            {!selectedMachineId && (
+              <Button 
+                type="primary" 
+                icon={<BarChartOutlined />}
+                onClick={() => setShowProductivity(true)}
+                style={{
+                  position: 'absolute',
+                  top: 20,
+                  right: 20,
+                  zIndex: 1001,
+                  backgroundColor: '#52c41a',
+                  borderRadius: '6px',
+                }}
+              >
+                Productivity
+              </Button>
+            )}
             <StatusLegend 
               machineStates={machineStates} 
               machines={machines}
               selectedFilter={selectedFilter}
               onFilterChange={setSelectedFilter}
             />
+            <Tooltip title={isBoostSpinning ? 'Spinning fast…' : 'Spin faster (15 turns)'}>
+              <Button
+                type="default"
+                shape="circle"
+                size="small"
+                icon={<SyncOutlined spin={isBoostSpinning} />}
+                onClick={handleBoostSpin}
+                disabled={isBoostSpinning}
+                style={{
+                  position: 'absolute',
+                  right: 20,
+                  bottom: 20,
+                  zIndex: 1000,
+                  width: 36,
+                  height: 36,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  background: '#fff',
+                }}
+              />
+            </Tooltip>
             <Canvas
               camera={{ position: [0, 35, 45], fov: 45 }}
               shadows
@@ -572,7 +597,10 @@ const Machines = ({ onBack }) => {
                 {/* Add Central Hub */}
                 <CentralHub />
 
-                <RotatingMachines speed={0.0005}>
+                <RotatingMachines
+                  boostRemainingRef={boostRemainingRef}
+                  onBoostComplete={() => setIsBoostSpinning(false)}
+                >
                   {getFilteredMachines().map((machine, index) => {
                     const machineState = machineStates[machine.id];
                     const filteredMachines = getFilteredMachines();

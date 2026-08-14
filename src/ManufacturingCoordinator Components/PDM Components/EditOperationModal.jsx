@@ -13,6 +13,7 @@ import {
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../../Config/auth';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
+import DurationHmsInput, { durationHmsRules, toDurationHms } from './DurationHmsInput.jsx';
 import OperationToolsSelector from './OperationToolsSelector';
 
 const { TextArea } = Input;
@@ -192,7 +193,7 @@ const EditOperationModal = ({
       from_date:         operation.from_date  ? dayjs(operation.from_date) : null,
       to_date:           operation.to_date    ? dayjs(operation.to_date) : null,
       setup_time:        operation.setup_time ? dayjs(operation.setup_time, 'HH:mm:ss') : null,
-      cycle_time:        operation.cycle_time ? dayjs(operation.cycle_time, 'HH:mm:ss') : null,
+      cycle_time:        toDurationHms(operation.cycle_time),
       workcenter_id:     operation.workcenter_id,
       machine_id:        operation.machine_id,
       work_instructions: operation.work_instructions,
@@ -376,7 +377,7 @@ const EditOperationModal = ({
       const payload = {
         ...rest,
         setup_time:        out ? null : (setup_time?.format('HH:mm:ss') ?? null),
-        cycle_time:        out ? null : (cycle_time?.format('HH:mm:ss') ?? null),
+        cycle_time:        out ? null : (toDurationHms(cycle_time) ?? null),
         from_date:         ts(from_date),
         to_date:           ts(to_date),
         workcenter_id:     out ? null : (workcenter_id ?? null),
@@ -725,8 +726,8 @@ const EditOperationModal = ({
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="cycle_time" label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
-                    <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                  <Form.Item name="cycle_time" label="Cycle Time" tooltip="Hours : Minutes. Up to 100 hours." required rules={durationHmsRules('Cycle Time')}>
+                    <DurationHmsInput />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>

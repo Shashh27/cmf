@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, Button, message, Spin, Empty, Tag, Input, Space, Typography, Tabs, Modal, Tooltip, Alert } from 'antd';
+import { Table, Button, message, Spin, Empty, Tag, Space, Typography, Tabs, Modal, Tooltip, Alert } from 'antd';
 import { CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons';
 
 import dayjs from 'dayjs';
@@ -12,14 +12,28 @@ import { resolveBaseDrawingDocument } from '../Quality Management Components/Ins
 
 const { Text } = Typography;
 
+/** Helper: Matches new "Balloon document" uploads and legacy BALOON / typo baloon. */
+function isBalloonOperationDocument(d) {
+  if (!d) return false;
+  const t = String(d.document_type || '').trim().toLowerCase();
+  return t === 'baloon' || t === 'balloon' || t.includes('balloon');
+}
+
+/** Helper: PDF iframes in preview/review: hide toolbar and left thumbnail/outline pane. */
+function pdfEmbedSrcForReview(url) {
+  if (!url) return '';
+  const base = url.split('#')[0];
+  return `${base}#toolbar=0&navpanes=0&pagemode=none`;
+}
+
 const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const onCountRef = useLatestCallback(onCount);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [query, setQuery] = useState('');
 
   // FTP Modal States
   const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
@@ -38,18 +52,18 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       const res = await axios.get(`${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications`);
       const data = Array.isArray(res.data) ? res.data : [];
       setNotifications(data);
-      if (onCount) onCount(data.filter((n) => !n.is_ack).length);
+      onCountRef.current?.(data.filter((n) => !n.is_ack).length);
     } catch (error) {
       console.error(error);
       message.error(error.response?.data?.detail || error.message || 'Failed to load notifications');
     } finally {
       setLoading(false);
     }
-  }, [onCount]);
+  }, [onCountRef]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, refreshKey]);
 
   const { planRequests, ftpRequests } = useMemo(() => {
     let rows = notifications;
@@ -472,10 +486,11 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       title: 'Sl No',
       key: 'sl_no',
       width: 60,
+      sorter: false,
       render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
     },
     {
-      title: 'Order',
+      title: 'Project Number',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
       render: (text, record) => text || `ID ${record.order_id}`,
@@ -492,13 +507,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
       width: 60,
     },
     {
-      title: 'Requested by',
+      title: 'Created By',
       dataIndex: 'requested_by_username',
       key: 'requested_by_username',
       render: (t) => t || '—',
     },
     {
-      title: 'Created',
+      title: 'Created At',
       dataIndex: 'created_at',
       key: 'created_at',
       render: (text) => (text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '—'),
@@ -508,39 +523,19 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const planColumns = [
     ...commonColumns,
     {
-      title: 'Approved by Name',
-      dataIndex: 'ack_by',
-      key: 'ack_by',
-      width: 150,
-      render: (t) => t || '—',
-    },
-    {
-      title: 'Approved At',
-      dataIndex: 'ack_at',
-      key: 'ack_at',
-      width: 150,
-      render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      width: 120,
-      render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Acknowledged' : 'Pending'}</Tag>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 250,
+      title: 'Acknowledged',
+      key: 'acknowledged',
+      sorter: false,
+      width: 220,
       render: (_, record) => (
         <Space wrap>
-          {!record.is_ack && (
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handleAcknowledge(record.id)}>
-              Acknowledge
-            </Button>
-          )}
-          <Button icon={<AppstoreOutlined />} onClick={() => handleOpenQmsSoftware(record)}>
-            Open QMS Software
+          {renderAckCell({
+            isAck: !!record.is_ack,
+            ackBy: record.ack_by,
+            onAcknowledge: () => handleAcknowledge(record.id),
+          })}
+          <Button icon={<AppstoreOutlined />} size="small" onClick={() => handleOpenQmsSoftware(record)}>
+            Open QMS
           </Button>
         </Space>
       ),
@@ -550,54 +545,41 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
   const ftpColumns = [
     ...commonColumns,
     {
-      title: 'Approved by Name',
-      dataIndex: 'ack_by',
-      key: 'ack_by',
-      render: (t) => t || '—',
-    },
-    {
-      title: 'Approved At',
-      dataIndex: 'ack_at',
-      key: 'ack_at',
-      render: (t) => (t ? dayjs(t).format('DD/MM/YYYY HH:mm') : '—'),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      render: (val) => <Tag color={val ? 'green' : 'orange'}>{val ? 'Approved' : 'Pending Review'}</Tag>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 150,
-      render: (_, record) => (
-        <Space wrap>
-          {!record.is_ack ? (
-            <Button type="primary" danger icon={<CheckCircleOutlined />} onClick={() => openFtpApproveModal(record)}>
-              Approve FTP
-            </Button>
-          ) : (
-            <Button icon={<EyeOutlined />} onClick={() => openFtpApproveModal(record)}>
+      title: 'Acknowledged',
+      key: 'acknowledged',
+      sorter: false,
+      width: 180,
+      render: (_, record) =>
+        !record.is_ack ? (
+          <Button type="primary" danger icon={<CheckCircleOutlined />} onClick={() => openFtpApproveModal(record)}>
+            Approve FTP
+          </Button>
+        ) : (
+          <Space>
+            {renderAckCell({ isAck: true, ackBy: record.ack_by })}
+            <Button icon={<EyeOutlined />} size="small" onClick={() => openFtpApproveModal(record)}>
               Review
             </Button>
-          )}
-        </Space>
-      ),
+          </Space>
+        ),
     },
   ];
 
+  const paginationProps = {
+    current: currentPage,
+    pageSize,
+    showSizeChanger: true,
+    showQuickJumper: true,
+    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+    onChange: (p, ps) => {
+      setCurrentPage(p);
+      setPageSize(ps);
+    },
+  };
+
   return (
     <div>
-      <div style={{ marginBottom: 12, maxWidth: 360 }}>
-        <Input.Search
-          allowClear
-          placeholder="Search order, part, operator…"
-          onSearch={setQuery}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-
+      <ModernTableStyles />
       <Spin spinning={loading}>
         <Tabs
           defaultActiveKey="1"
@@ -607,15 +589,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
               label: `Approval Notifications (${planRequests.length})`,
               children: (
                 <Table
-                  rowKey="id"
-                  dataSource={planRequests}
-                  columns={planColumns}
-                  pagination={{
-                    current: currentPage,
-                    pageSize,
-                    onChange: (p, ps) => { setCurrentPage(p); setPageSize(ps); },
-                    showSizeChanger: true,
-                  }}
+                  {...getNotificationTableProps({
+                    columns: planColumns,
+                    dataSource: planRequests,
+                    rowKey: 'id',
+                    loading: false,
+                    pagination: paginationProps,
+                  })}
                   locale={{ emptyText: <Empty description="No inspection plan requests" /> }}
                 />
               ),
@@ -625,10 +605,13 @@ const InspectionPlanNotifications = ({ dateRange, onCount }) => {
               label: `FTP Notifications (${ftpRequests.length})`,
               children: (
                 <Table
-                  rowKey="id"
-                  dataSource={ftpRequests}
-                  columns={ftpColumns}
-                  pagination={{ pageSize: 10, showSizeChanger: true }}
+                  {...getNotificationTableProps({
+                    columns: ftpColumns,
+                    dataSource: ftpRequests,
+                    rowKey: 'id',
+                    loading: false,
+                    pagination: paginationProps,
+                  })}
                   locale={{ emptyText: <Empty description="No FTP approval requests" /> }}
                 />
               ),

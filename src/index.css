@@ -136,3 +136,24 @@ input[type='number'] {
 .ant-input-number-handler-wrap {
   display: none !important;
 }
+
+/* Notification tables: keep Ant Design measure-row collapsed so row heights stay equal */
+.notif-table .ant-table-measure-row {
+  height: 0 !important;
+  font-size: 0 !important;
+}
+.notif-table .ant-table-measure-row > td {
+  padding: 0 !important;
+  border: 0 !important;
+  height: 0 !important;
+  line-height: 0 !important;
+  font-size: 0 !important;
+  overflow: hidden !important;
+}
+.notif-table .ant-table-tbody > tr:not(.ant-table-measure-row) > td {
+  height: 40px !important;
+  max-height: 40px !important;
+  padding: 6px 8px !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+}

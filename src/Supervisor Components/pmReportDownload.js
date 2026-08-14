@@ -5,7 +5,7 @@ import {
   formatDateTime, formatDate, machineLabel, itemTypeShort, frequencySummary,
 } from './pmUtils';
 
-const BRAND = 'CMF DIGITIZATION - CMTI';
+const BRAND = 'CMF DIGITALIZATION - CMTI';
 const HEADER_FILL = 'FF4A6CF7';
 const HEADER_FONT = 'FFFFFFFF';
 const ALT_FILL = 'FFF8FAFC';
@@ -229,7 +229,7 @@ export function buildAssignmentsReportConfig(assignments, machines = [], metaLin
         checklistName,
         ci?.item_text || '—',
         itemTypeShort(ci?.item_type),
-        frequencySummary(ci),
+        frequencySummary(ai.frequency_type ? ai : ci),
         ai.is_required ? 'Yes' : 'No',
         formatDate(a.assigned_at),
         formatDate(ai.schedule?.next_due_date),

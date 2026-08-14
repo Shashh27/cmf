@@ -131,7 +131,7 @@ const OperationImportModal = ({ open, onCancel, existingOperations = [], onUseOp
       title: "Cycle Time",
       dataIndex: "cycle_time",
       key: "cycle_time",
-      width: 120
+      width: 130
     },
     {
       title: "Work Instructions",

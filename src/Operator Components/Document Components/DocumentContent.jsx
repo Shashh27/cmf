@@ -3,10 +3,11 @@ import { Table, Empty, Typography, Button, Tag, Space, message, Modal, Select } 
 import {
   FolderOutlined, 
   FileOutlined, 
-  EyeOutlined
+  EyeOutlined,
 } from '@ant-design/icons';
 import { authFetch } from '../../api/client.js';
 import { API_BASE_URL } from "../../Config/auth";
+import DocumentPreviewer, { getPreviewKind } from './DocumentPreviewer';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -146,48 +147,8 @@ const OperatorDocumentContent = ({ selectedNode }) => {
     }
   };
 
-  const getFileExtension = (path) => {
-    if (!path) return '';
-    const cleanPath = path.split('?')[0];
-    return cleanPath.toLowerCase().split('.').pop();
-  };
-
   const isPreviewable = (document) => {
-    const ext = getFileExtension(document.url);
-    const previewableTypes = ['pdf', 'jpg', 'jpeg', 'png', 'gif'];
-    return previewableTypes.includes(ext);
-  };
-
-  const getPreviewContent = (document) => {
-    const ext = getFileExtension(document.url);
-
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) {
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#f5f5f5' }}>
-          <img 
-            src={document.url} 
-            alt={document.file_name} 
-            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-          />
-        </div>
-      );
-    } else if (ext === 'pdf') {
-      return (
-        <iframe
-          src={`${document.url}#toolbar=0`}
-          title={document.file_name}
-          width="100%"
-          height="100%"
-          style={{ border: 'none' }}
-        />
-      );
-    } else {
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          <Empty description="Preview not available for this file type" />
-        </div>
-      );
-    }
+    return getPreviewKind(document.url, document) !== 'unsupported';
   };
 
   if (!selectedNode) {
@@ -406,12 +367,18 @@ const OperatorDocumentContent = ({ selectedNode }) => {
             Close
           </Button>
         ]}
-        width={1000}
-        style={{ top: 20 }}
-        bodyStyle={{ height: '80vh', padding: 0 }}
+        width="90%"
+        style={{ top: 16 }}
+        styles={{ body: { height: '80vh', padding: 0, overflow: 'hidden' } }}
+        destroyOnClose
       >
         {previewingDocument ? (
-          getPreviewContent(previewingDocument)
+          <DocumentPreviewer
+            url={previewingDocument.url}
+            fileName={previewingDocument.file_name}
+            meta={previewingDocument}
+            height="100%"
+          />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
             <Empty description="No document selected" />

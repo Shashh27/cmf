@@ -1,17 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { Tabs, message, Card } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Tabs, message, Card, Badge } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
+import PokaYokeCompletedLogs from './PokaYokeCompletedLogs';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
-import PokaYokeHistoryCalendar from './PokaYokeHistoryCalendar';
+import PMMissedNotifications from './PMMissedNotifications';
 import { API_BASE_URL } from '../Config/auth';
 import { authFetch } from '../api/client.js';
+import { pmFetch } from './pmUtils';
 
 const PreventiveMaintenance = () => {
   const [activeTab, setActiveTab] = useState('checklists');
   const [machines, setMachines] = useState([]);
   const [machinesLoading, setMachinesLoading] = useState(false);
+  const [missedCount, setMissedCount] = useState(0);
 
-  const fetchMachines = async () => {
+  const fetchMachines = useCallback(async () => {
     setMachinesLoading(true);
     try {
       const res = await authFetch(`${API_BASE_URL}/machines/`);
@@ -23,11 +26,24 @@ const PreventiveMaintenance = () => {
     } finally {
       setMachinesLoading(false);
     }
-  };
+  }, []);
+
+  const fetchMissedCount = useCallback(async () => {
+    try {
+      const data = await pmFetch('/missed-notifications?pending_only=true&limit=500');
+      const list = Array.isArray(data) ? data : [];
+      setMissedCount(list.filter((n) => !n.is_ack).length);
+    } catch {
+      setMissedCount(0);
+    }
+  }, []);
 
   useEffect(() => {
     fetchMachines();
-  }, []);
+    fetchMissedCount();
+    const t = setInterval(fetchMissedCount, 60000);
+    return () => clearInterval(t);
+  }, [fetchMachines, fetchMissedCount]);
 
   const tabItems = [
     { key: 'checklists', label: 'Checklists', children: <PokaYokeChecklists /> },
@@ -43,37 +59,47 @@ const PreventiveMaintenance = () => {
       ),
     },
     {
-      key: 'history',
-      label: 'History',
+      key: 'submission-history',
+      label: 'Submission History',
       children: (
-        <PokaYokeHistoryCalendar
+        <PokaYokeCompletedLogs
           machines={machines}
-          fetchMachines={fetchMachines}
           machinesLoading={machinesLoading}
         />
       ),
     },
+    {
+      key: 'missed-notifications',
+      label: (
+        <span>
+          Missed Notifications
+          <Badge
+            count={missedCount}
+            overflowCount={99}
+            size="small"
+            offset={[6, -2]}
+            style={{ backgroundColor: '#dc2626' }}
+          />
+        </span>
+      ),
+      children: <PMMissedNotifications onCount={setMissedCount} roleLabel="Supervisor" />,
+    },
   ];
 
   return (
-    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
-      <Card
-        bordered={false}
-        style={{
-          borderRadius: '8px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-        }}
-        styles={{ body: { padding: '16px 20px 20px' } }}
-      >
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={tabItems}
-          size="middle"
-          style={{ marginBottom: 0, marginTop: 0 }}
-        />
-      </Card>
-    </div>
+    <Card
+      className="shadow-sm"
+      styles={{ body: { padding: '16px 20px 20px' } }}
+    >
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={tabItems}
+        size="middle"
+        destroyInactiveTabPane
+        style={{ marginBottom: 0, marginTop: 0 }}
+      />
+    </Card>
   );
 };
 

@@ -29,6 +29,28 @@ const formatMatchPercent = (rec) => {
 
 const formatLengthExcess = (rec) => rec?.length_excess_mm ?? rec?.nearest_fit ?? 0;
 
+const isPositiveDimension = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0;
+};
+
+const arePlannedDimensionsValid = (formType, dimensions = {}) => {
+  if (formType === 'Round') {
+    return isPositiveDimension(dimensions.diameter) && isPositiveDimension(dimensions.length);
+  }
+  if (formType === 'Square') {
+    return isPositiveDimension(dimensions.length)
+      && isPositiveDimension(dimensions.breadth)
+      && isPositiveDimension(dimensions.height);
+  }
+  if (formType === 'Pipe') {
+    return isPositiveDimension(dimensions.outer_diameter)
+      && isPositiveDimension(dimensions.inner_diameter)
+      && isPositiveDimension(dimensions.length);
+  }
+  return false;
+};
+
 const formatRecommendedStockSummary = (rec) => {
   const parts = [rec.stock_size];
   const matchPercent = formatMatchPercent(rec);
@@ -107,7 +129,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   );
 
   // Check if raw material is planned and saved
-  const isMaterialPlanned = isSaved;
+  const isMaterialPlanned = isSaved && arePlannedDimensionsValid(plannedFormType, plannedDims);
 
   // Check if material is already linked to general stock (from prop)
   const isAlreadyLinkedToGeneralStock = linkedStock?.sourceType === 'general';
@@ -249,11 +271,19 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   };
 
   const handleOpenLinkModal = () => {
+    if (!arePlannedDimensionsValid(plannedFormType, plannedDims)) {
+      message.warning('Enter all planned dimensions greater than 0 before assigning stock.');
+      return;
+    }
     setLinkModalVisible(true);
     fetchGeneralStock();
   };
 
   const handleOpenProcureModal = () => {
+    if (!arePlannedDimensionsValid(plannedFormType, plannedDims)) {
+      message.warning('Enter all planned dimensions greater than 0 before procuring.');
+      return;
+    }
     setProcureModalVisible(true);
   };
 

@@ -17,22 +17,22 @@ import { buildChecklistsReportConfig } from './pmReportDownload';
 
 const { Title, Text } = Typography;
 
-/* ── Inline checkpoint row for create modal ── */
+/* ── Inline checkpoint row for create modal (frequency set at assign) ── */
 const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
   <>
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '30px 250px 70px 75px 95px 80px 80px 1fr 30px',
+      gridTemplateColumns: '30px 1.6fr 80px 100px 1.2fr 30px',
       background: '#fafafa', padding: '8px 6px', borderBottom: '1px solid #d9d9d9',
       fontSize: 11, fontWeight: 600, gap: 6,
     }}>
       <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
-      <div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div />
+      <div>Remarks / Method</div><div />
     </div>
     {items.map((item, index) => (
       <div key={item.id} style={{
         display: 'grid',
-        gridTemplateColumns: '30px 250px 70px 75px 95px 80px 80px 1fr 30px',
+        gridTemplateColumns: '30px 1.6fr 80px 100px 1.2fr 30px',
         padding: 6, gap: 6, alignItems: 'center',
         borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
         background: index % 2 === 0 ? '#fff' : '#fafafa',
@@ -47,27 +47,7 @@ const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
         </select>
         <Input size="small" value={item.expected_value} placeholder="Expected" maxLength={PM_FIELD_LIMITS.expectedValue}
           onChange={(e) => onChange(item.id, { expected_value: clampText(e.target.value, PM_FIELD_LIMITS.expectedValue) })} style={{ fontSize: 11, borderRadius: 0 }} />
-        <select value={item.frequency_type} onChange={(e) => onChange(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
-          <option value="Time Based">Time</option>
-          <option value="Usage Based">Usage</option>
-          <option value="Condition Based">Condition</option>
-        </select>
-        {['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-          <select value={item.interval_unit || ''} onChange={(e) => onChange(item.id, { interval_unit: e.target.value })} style={nativeSelectStyle}>
-            <option value="">Unit</option>
-            {['Day', 'Week', 'Month', 'Year'].map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        ) : <div />}
-        {item.frequency_type === 'Usage Based' ? (
-          <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.triggerHoursMax} placeholder="Hours" value={item.trigger_hours || ''}
-            onChange={(e) => onChange(item.id, { trigger_hours: clampInt(e.target.value, 1, PM_FIELD_LIMITS.triggerHoursMax) })}
-            style={{ fontSize: 10, borderRadius: 0 }} />
-        ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-          <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.intervalMax} placeholder="Value" value={item.interval_value || ''}
-            onChange={(e) => onChange(item.id, { interval_value: clampInt(e.target.value, 1, PM_FIELD_LIMITS.intervalMax) })}
-            style={{ fontSize: 10, borderRadius: 0 }} />
-        ) : <div />}
-        <Input size="small" value={item.remarks || ''} placeholder="Remarks" maxLength={PM_FIELD_LIMITS.remarks}
+        <Input size="small" value={item.remarks || ''} placeholder="Remarks / method" maxLength={PM_FIELD_LIMITS.remarks}
           onChange={(e) => onChange(item.id, { remarks: clampText(e.target.value, PM_FIELD_LIMITS.remarks) })} style={{ fontSize: 10, borderRadius: 0 }} />
         <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
           disabled={items.length <= 1}
@@ -88,8 +68,8 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
   }
 
   const gridCols = compact
-    ? '28px 1fr 58px 68px 88px 58px 58px 1fr'
-    : '50px 1fr 80px 100px 100px 80px 80px 1fr';
+    ? '28px 1fr 58px 68px 1fr'
+    : '50px 1fr 80px 100px 1fr';
   const cellFont = compact ? 11 : 12;
   const tagStyle = compact
     ? { fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 4px' }
@@ -111,8 +91,7 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
           fontWeight: 600,
           gap: compact ? 6 : 12,
         }}>
-          <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
-          <div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div>
+          <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div>
         </div>
         {items.map((item, index) => (
           <div key={item.id} style={{
@@ -138,9 +117,6 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
             </div>
             <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
             <div style={{ fontSize: cellFont }}>{item.expected_value || '-'}</div>
-            <Tag color={FREQ_TAG_COLORS[item.frequency_type] || 'default'} style={tagStyle}>{item.frequency_type || '-'}</Tag>
-            <div style={{ fontSize: cellFont }}>{item.interval_unit || '-'}</div>
-            <div style={{ fontSize: cellFont }}>{item.interval_value || item.trigger_hours || '-'}</div>
             <div style={{
               fontSize: cellFont,
               overflow: 'hidden',
@@ -209,7 +185,7 @@ const PokaYokeChecklists = () => {
   };
 
   const handleCreateChecklist = async (values) => {
-    const validItems = initialItems.filter((i) => i.item_text && i.item_type && i.frequency_type);
+    const validItems = initialItems.filter((i) => i.item_text && i.item_type);
     if (!validItems.length) return message.error('At least one checkpoint is required');
     for (const cp of validItems) {
       const err = validateCheckpoint(cp);
@@ -249,7 +225,7 @@ const PokaYokeChecklists = () => {
         });
       }
 
-      const validCheckpoints = editCheckpoints.filter((i) => i.item_text && i.item_type && i.frequency_type);
+      const validCheckpoints = editCheckpoints.filter((i) => i.item_text && i.item_type);
       if (!validCheckpoints.length) return message.error('At least one checkpoint is required');
 
       for (const item of validCheckpoints) {
@@ -268,10 +244,6 @@ const PokaYokeChecklists = () => {
           item.item_text !== original.item_text ||
           item.item_type !== original.item_type ||
           item.expected_value !== original.expected_value ||
-          item.frequency_type !== original.frequency_type ||
-          item.interval_unit !== original.interval_unit ||
-          item.interval_value !== original.interval_value ||
-          item.trigger_hours !== original.trigger_hours ||
           item.remarks !== original.remarks;
 
         if (!fieldsChanged) continue;
@@ -283,10 +255,6 @@ const PokaYokeChecklists = () => {
         if (item.item_text !== original.item_text) payload.item_text = item.item_text;
         if (item.item_type !== original.item_type) payload.item_type = item.item_type;
         if (item.expected_value !== original.expected_value) payload.expected_value = item.expected_value || null;
-        if (item.frequency_type !== original.frequency_type) payload.frequency_type = item.frequency_type;
-        if (item.interval_unit !== original.interval_unit) payload.interval_unit = item.interval_unit || null;
-        if (item.interval_value !== original.interval_value) payload.interval_value = item.interval_value || null;
-        if (item.trigger_hours !== original.trigger_hours) payload.trigger_hours = item.trigger_hours || null;
         if (item.remarks !== original.remarks) payload.remarks = item.remarks || null;
 
         await pmFetch(`/checklist-items/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -427,7 +395,7 @@ const PokaYokeChecklists = () => {
 
   const renderEditCheckpointRow = (item, index) => {
     const isEditing = editingCheckpointId === item.id;
-    const gridCols = '30px 200px 60px 70px 85px 70px 70px 1fr 100px';
+    const gridCols = '30px 1.6fr 70px 90px 1fr 100px';
     if (isEditing) {
       return (
         <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
@@ -439,21 +407,6 @@ const PokaYokeChecklists = () => {
           </select>
           <Input size="small" value={item.expected_value || ''} maxLength={PM_FIELD_LIMITS.expectedValue}
             onChange={(e) => patchEditItem(item.id, { expected_value: clampText(e.target.value, PM_FIELD_LIMITS.expectedValue) })} style={{ borderRadius: 0 }} />
-          <select value={item.frequency_type} onChange={(e) => patchEditItem(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
-            <option value="Time Based">Time</option><option value="Usage Based">Usage</option><option value="Condition Based">Condition</option>
-          </select>
-          {['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-            <select value={item.interval_unit || ''} onChange={(e) => patchEditItem(item.id, { interval_unit: e.target.value })} style={nativeSelectStyle}>
-              <option value="">Unit</option>{['Day','Week','Month','Year'].map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
-          ) : <div />}
-          {item.frequency_type === 'Usage Based' ? (
-            <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.triggerHoursMax} value={item.trigger_hours || ''}
-              onChange={(e) => patchEditItem(item.id, { trigger_hours: clampInt(e.target.value, 1, PM_FIELD_LIMITS.triggerHoursMax) })} style={{ borderRadius: 0 }} />
-          ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
-            <Input size="small" type="number" min={1} max={PM_FIELD_LIMITS.intervalMax} value={item.interval_value || ''}
-              onChange={(e) => patchEditItem(item.id, { interval_value: clampInt(e.target.value, 1, PM_FIELD_LIMITS.intervalMax) })} style={{ borderRadius: 0 }} />
-          ) : <div />}
           <Input size="small" value={item.remarks || ''} maxLength={PM_FIELD_LIMITS.remarks}
             onChange={(e) => patchEditItem(item.id, { remarks: clampText(e.target.value, PM_FIELD_LIMITS.remarks) })} style={{ borderRadius: 0 }} />
           <Space size={4}>
@@ -474,9 +427,6 @@ const PokaYokeChecklists = () => {
         <div style={{ fontSize: 10, fontWeight: 600 }}>{item.item_text}</div>
         <Tag style={{ fontSize: 9, borderRadius: 0 }}>{itemTypeShort(item.item_type)}</Tag>
         <div style={{ fontSize: 10 }}>{item.expected_value || '-'}</div>
-        <Tag color={FREQ_TAG_COLORS[item.frequency_type]} style={{ fontSize: 9, borderRadius: 0 }}>{item.frequency_type || '-'}</Tag>
-        <div style={{ fontSize: 10 }}>{item.interval_unit || '-'}</div>
-        <div style={{ fontSize: 10 }}>{item.interval_value || item.trigger_hours || '-'}</div>
         <div style={{ fontSize: 10 }}>{item.remarks || '-'}</div>
         <Space size={4}>
           <Button type="text" icon={<EditOutlined />} onClick={() => setEditingCheckpointId(item.id)} style={{ color: '#1890ff', padding: 2 }} />
@@ -659,8 +609,8 @@ const PokaYokeChecklists = () => {
             <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
           </div>
           <div style={{ border: '1px solid #d9d9d9', maxHeight: 420, overflowY: 'auto', marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '30px 200px 60px 70px 85px 70px 70px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
-              <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div>Actions</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '30px 1.6fr 70px 90px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
+              <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div><div>Actions</div>
             </div>
             {editCheckpoints.map((item, i) => renderEditCheckpointRow(item, i))}
           </div>
@@ -682,7 +632,7 @@ const PokaYokeChecklists = () => {
           </Text>
         )}
         <Form form={itemForm} layout="vertical" onFinish={handleAddItem}
-          initialValues={{ item_type: 'Boolean', frequency_type: 'Time Based', interval_value: 1, interval_unit: 'Week' }}>
+          initialValues={{ item_type: 'Boolean' }}>
           <Form.Item name="item_text" label="Checkpoint" rules={checkpointTextRules}>
             <Input maxLength={PM_FIELD_LIMITS.checkpointText} style={{ borderRadius: 0 }} />
           </Form.Item>
@@ -696,53 +646,12 @@ const PokaYokeChecklists = () => {
           <Form.Item name="expected_value" label="Expected Value" rules={expectedValueRules}>
             <Input maxLength={PM_FIELD_LIMITS.expectedValue} style={{ borderRadius: 0 }} />
           </Form.Item>
-          <Form.Item name="frequency_type" label="Frequency Type" rules={[{ required: true }]}>
-            <Select style={{ borderRadius: 0 }} options={[
-              { value: 'Time Based', label: 'Time Based' },
-              { value: 'Usage Based', label: 'Usage Based' },
-              { value: 'Condition Based', label: 'Condition Based' },
-            ]} />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate={(p, c) => p.frequency_type !== c.frequency_type}>
-            {({ getFieldValue }) => {
-              const ft = getFieldValue('frequency_type');
-              if (ft === 'Usage Based') {
-                return (
-                  <Form.Item name="trigger_hours" label="Trigger Hours" rules={[{ required: true, message: 'Trigger hours are required' }]}>
-                    <InputNumber min={1} max={PM_FIELD_LIMITS.triggerHoursMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
-                  </Form.Item>
-                );
-              }
-              if (ft === 'Time Based') {
-                return (
-                  <>
-                    <Form.Item name="interval_unit" label="Unit" rules={[{ required: true, message: 'Unit is required' }]}>
-                      <Select style={{ borderRadius: 0 }} options={['Day', 'Week', 'Month', 'Year'].map((u) => ({ value: u, label: u }))} />
-                    </Form.Item>
-                    <Form.Item name="interval_value" label="Value" rules={[{ required: true, message: 'Value is required' }]}>
-                      <InputNumber min={1} max={PM_FIELD_LIMITS.intervalMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
-                    </Form.Item>
-                  </>
-                );
-              }
-              if (ft === 'Condition Based') {
-                return (
-                  <>
-                    <Form.Item name="interval_unit" label="Unit (optional)">
-                      <Select allowClear placeholder="Optional" style={{ borderRadius: 0 }} options={['Day', 'Week', 'Month', 'Year'].map((u) => ({ value: u, label: u }))} />
-                    </Form.Item>
-                    <Form.Item name="interval_value" label="Value (optional)">
-                      <InputNumber min={1} max={PM_FIELD_LIMITS.intervalMax} precision={0} style={{ width: '100%', borderRadius: 0 }} />
-                    </Form.Item>
-                  </>
-                );
-              }
-              return null;
-            }}
-          </Form.Item>
-          <Form.Item name="remarks" label="Remarks" rules={remarksRules}>
+          <Form.Item name="remarks" label="Remarks / Method" rules={remarksRules}>
             <Input maxLength={PM_FIELD_LIMITS.remarks} style={{ borderRadius: 0 }} />
           </Form.Item>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 12 }}>
+            Frequency is set when assigning this checkpoint to a machine.
+          </Text>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setAddItemModalVisible(false)} style={btnSharp}>Cancel</Button>

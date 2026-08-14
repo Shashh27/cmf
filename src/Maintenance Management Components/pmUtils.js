@@ -53,6 +53,7 @@ export const INTERVAL_UNITS = ['Day', 'Week', 'Month', 'Year'];
 export const PM_FIELD_LIMITS = {
   checklistName: 50,
   description: 50,
+  checkpointCode: 32,
   checkpointText: 50,
   expectedValue: 50,
   remarks: 100,
@@ -80,6 +81,11 @@ export const descriptionRules = [
 export const checkpointTextRules = [
   { required: true, whitespace: true, message: 'Checkpoint text is required' },
   { max: PM_FIELD_LIMITS.checkpointText, message: MAX_MSG },
+];
+
+export const checkpointCodeRules = [
+  { required: true, whitespace: true, message: 'Checkpoint code is required' },
+  { max: PM_FIELD_LIMITS.checkpointCode, message: MAX_MSG },
 ];
 
 export const expectedValueRules = [
@@ -225,21 +231,18 @@ export async function fetchChecklistDetails(id) {
 }
 
 export async function fetchAllChecklistsWithItems() {
+  // GET /checklists now returns items inline — no per-id N+1
   const list = await pmFetch('/checklists');
-  const detailed = await Promise.all(list.map((c) => fetchChecklistDetails(c.id)));
-  return detailed;
+  return Array.isArray(list) ? list : [];
 }
 
 export function buildCheckpointPayload(item, index) {
   return {
+    item_code: String(item.item_code || '').trim().toUpperCase(),
     item_text: item.item_text,
     sequence_number: index + 1,
     item_type: item.item_type,
     expected_value: item.expected_value || null,
-    frequency_type: item.frequency_type,
-    interval_value: item.interval_value ? Number(item.interval_value) : null,
-    interval_unit: item.interval_unit || null,
-    trigger_hours: item.trigger_hours ? Number(item.trigger_hours) : null,
     remarks: item.remarks || null,
   };
 }
@@ -247,25 +250,26 @@ export function buildCheckpointPayload(item, index) {
 export function emptyCheckpoint(seq = 1) {
   return {
     id: `tmp-${Date.now()}-${Math.random()}`,
+    item_code: '',
     item_text: '',
     sequence_number: seq,
     item_type: 'Boolean',
     expected_value: '',
-    frequency_type: 'Time Based',
-    interval_value: 1,
-    interval_unit: 'Week',
-    trigger_hours: null,
     remarks: '',
   };
 }
 
 export function validateCheckpoint(item) {
+  const code = String(item.item_code || '').trim();
+  if (!code) return 'Checkpoint code is required';
+  if (code.length > PM_FIELD_LIMITS.checkpointCode) {
+    return `Checkpoint code must be at most ${PM_FIELD_LIMITS.checkpointCode} characters`;
+  }
   if (!item.item_text?.trim()) return 'Checkpoint text is required';
   if (item.item_text.trim().length > PM_FIELD_LIMITS.checkpointText) {
     return 'Maximum character limit exceeded';
   }
   if (!item.item_type) return 'Checkpoint type is required';
-  if (!item.frequency_type) return 'Frequency type is required';
   if (item.expected_value && String(item.expected_value).length > PM_FIELD_LIMITS.expectedValue) {
     return `Expected value must be at most ${PM_FIELD_LIMITS.expectedValue} characters`;
   }
@@ -275,20 +279,25 @@ export function validateCheckpoint(item) {
   if (item.remarks && String(item.remarks).length > PM_FIELD_LIMITS.remarks) {
     return `Remarks must be at most ${PM_FIELD_LIMITS.remarks} characters`;
   }
+  return null;
+}
+
+export function validateAssignFrequency(item) {
+  if (!item.frequency_type) return 'Frequency is required for selected checkpoints';
   if (item.frequency_type === 'Time Based') {
     if (!item.interval_value || !item.interval_unit) {
-      return 'Interval value and unit are required for time-based checkpoints';
+      return 'Interval value and unit are required for time-based frequency';
     }
   }
   if (item.frequency_type === 'Condition Based') {
     const hasValue = item.interval_value != null && item.interval_value !== '';
     const hasUnit = !!item.interval_unit;
     if (hasValue !== hasUnit) {
-      return 'Provide both interval value and unit, or leave both empty for condition-based checkpoints';
+      return 'Provide both interval value and unit, or leave both empty for condition-based';
     }
   }
   if (item.frequency_type === 'Usage Based' && !item.trigger_hours) {
-    return 'Trigger hours are required for usage-based checkpoints';
+    return 'Trigger hours are required for usage-based frequency';
   }
   if (item.interval_value != null && (item.interval_value < 1 || item.interval_value > PM_FIELD_LIMITS.intervalMax)) {
     return `Interval value must be between 1 and ${PM_FIELD_LIMITS.intervalMax}`;
@@ -303,4 +312,45 @@ export function machineLabel(machine) {
   if (!machine) return '-';
   if (machine.make && machine.model) return `${machine.make} - ${machine.model}`;
   return machine.make || machine.type || `Machine ${machine.id}`;
+}
+
+export function isPositiveResponse(responseValue, expectedValue = 'yes') {
+  const val = String(responseValue ?? '').toLowerCase().trim();
+  const expected = String(expectedValue ?? 'yes').toLowerCase().trim();
+  const truthy = new Set(['true', 'yes', 'y', '1', 'on', 'ok', 'pass', 'passed', 'accept', 'accepted']);
+  const falsy = new Set([
+    'false', 'no', 'n', '0', 'off', 'reject', 'rejected', 'fail', 'failed', 'wrong',
+    'non-conforming', 'non conforming', 'nonconforming',
+  ]);
+  if (falsy.has(val)) {
+    if (falsy.has(expected)) return true;
+    return false;
+  }
+  if (truthy.has(val) && truthy.has(expected)) return true;
+  if (truthy.has(val) && falsy.has(expected)) return false;
+  return val === expected;
+}
+
+/** True when operator response fails / mismatches expected. */
+export function isRejectedResponse(responseValue, expectedValue = 'yes') {
+  const val = String(responseValue ?? '').toLowerCase().trim();
+  if (!val) return false;
+  const rejectWords = new Set([
+    'reject', 'rejected', 'fail', 'failed', 'wrong', 'no', 'n', 'false', '0', 'off',
+    'non-conforming', 'non conforming', 'nonconforming',
+  ]);
+  if (rejectWords.has(val)) return true;
+  return !isPositiveResponse(responseValue, expectedValue);
+}
+
+/** Shift end for PM submission deadline (5 PM local). */
+export const PM_SHIFT_END_HOUR = 17;
+
+/** Past day, or today at/after 5 PM → miss deadline reached. */
+export function isPastSubmissionDeadline(ymd, now = new Date()) {
+  if (!ymd) return false;
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (ymd < today) return true;
+  if (ymd > today) return false;
+  return now.getHours() >= PM_SHIFT_END_HOUR;
 }

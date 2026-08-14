@@ -52,6 +52,8 @@ import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 
 import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
 
+import ProjectCoordinatorPDM from "./ProjectCoordinator Components/PDM";
+
 import OrderTrackingSidebar from "./ProjectCoordinator Components/OrderTrackingSidebar";
 
 import Recyclebin from "./ProjectCoordinator Components/Recyclebin";
@@ -384,6 +386,8 @@ function App() {
 
 
           <Route path="/project_coordinator/pdm" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
+
+          <Route path="/project_coordinator/pdm/:productId" element={<ProjectCoordinatorPDM />} />
 
 
 
