@@ -195,18 +195,18 @@ class PMChecklist(Base):
 
 class PMChecklistItem(Base):
     __tablename__ = "pm_checklist_items"
-    __table_args__ = {'schema': 'configuration'}
+    __table_args__ = (
+        UniqueConstraint('checklist_id', 'item_code', name='uq_pm_checklist_item_code'),
+        {'schema': 'configuration'},
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     checklist_id = Column(Integer, ForeignKey("configuration.pm_checklists.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_code = Column(String(32), nullable=False)  # e.g. CL-01, CO-010, HY-03
     item_text = Column(String, nullable=False)
     sequence_number = Column(Integer, nullable=False)
     item_type = Column(String, nullable=False)  # Boolean, Numeric, Text
     expected_value = Column(String, nullable=True)
-    frequency_type = Column(String, nullable=False)  # Time Based, Usage Based, Condition Based
-    interval_value = Column(Integer, nullable=True)
-    interval_unit = Column(String, nullable=True)  # Day, Week, Month, Year
-    trigger_hours = Column(Float, nullable=True)
     remarks = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -241,6 +241,13 @@ class PMAssignmentItem(Base):
     assignment_id = Column(Integer, ForeignKey("configuration.pm_machine_assignments.id", ondelete="CASCADE"), nullable=False, index=True)
     checklist_item_id = Column(Integer, ForeignKey("configuration.pm_checklist_items.id"), nullable=False, index=True)
     is_required = Column(Boolean, nullable=False, default=True)
+    # Frequency per machine (set at assign time)
+    frequency_type = Column(String, nullable=False)  # Time Based, Usage Based, Condition Based
+    interval_value = Column(Integer, nullable=True)
+    interval_unit = Column(String, nullable=True)  # Day, Week, Month, Year
+    trigger_hours = Column(Float, nullable=True)
+    # If true and not submitted by end of shift → notify Admin/MC
+    is_compulsory = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     assignment = relationship("PMMachineAssignment", back_populates="assignment_items")

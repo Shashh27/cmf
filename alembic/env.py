@@ -63,6 +63,7 @@ def run_migrations_online() -> None:
             "ems",
             "notifications",
             "production_monitoring",
+            "chatbox",
         ):
             connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         connection.commit()

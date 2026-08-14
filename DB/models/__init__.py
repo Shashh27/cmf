@@ -10,7 +10,13 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OutSourcePartStatus
+    OutSourcePartStatus,
+)
+from .chatbox import (
+    ChatConversation,
+    ChatParticipant,
+    ChatMessage,
+    ChatMessageReadStatus,
 )
 from .configuration import (
     workcenter,
@@ -47,8 +53,9 @@ from .documents import (
     CommonFolder,
     CommonDocument
 )
-from .monitoring import MachineLiveStatus
+from .monitoring import MachineLiveStatus, MachineProcessData
 from .production import ShiftSummary
+from .ems import ShiftInfo
 
 __all__ = [
     "Product",
@@ -62,6 +69,10 @@ __all__ = [
     "OrderDocument",
     "OperationDocument",
     "OutSourcePartStatus",
+    "ChatConversation",
+    "ChatParticipant",
+    "ChatMessage",
+    "ChatMessageReadStatus",
     "workcenter",
     "Machine",
     "Customer",
@@ -90,6 +101,8 @@ __all__ = [
     "CommonFolder",
     "CommonDocument",
     "MachineLiveStatus",
+    "MachineProcessData",
     "ShiftSummary",
+    "ShiftInfo",
     "Base"
 ]

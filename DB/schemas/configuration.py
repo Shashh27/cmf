@@ -411,15 +411,15 @@ class SubmissionWithDetails(Submission):
 PM_ITEM_TYPES = ("Boolean", "Numeric", "Text")
 PM_FREQUENCY_TYPES = ("Time Based", "Usage Based", "Condition Based")
 PM_INTERVAL_UNITS = ("Day", "Week", "Month", "Year")
+
+
 class PMChecklistItemBase(BaseModel):
+    """Checkpoint master definition — frequency is set at machine assignment."""
+    item_code: str
     item_text: str
     sequence_number: int
     item_type: str
     expected_value: Optional[str] = None
-    frequency_type: str
-    interval_value: Optional[int] = None
-    interval_unit: Optional[str] = None
-    trigger_hours: Optional[float] = None
     remarks: Optional[str] = None
 
     @field_validator("item_type")
@@ -429,33 +429,15 @@ class PMChecklistItemBase(BaseModel):
             raise ValueError(f"item_type must be one of {PM_ITEM_TYPES}")
         return v
 
-    @field_validator("frequency_type")
+    @field_validator("item_code")
     @classmethod
-    def validate_frequency_type(cls, v: str) -> str:
-        if v not in PM_FREQUENCY_TYPES:
-            raise ValueError(f"frequency_type must be one of {PM_FREQUENCY_TYPES}")
-        return v
-
-    @field_validator("interval_unit")
-    @classmethod
-    def validate_interval_unit(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in PM_INTERVAL_UNITS:
-            raise ValueError(f"interval_unit must be one of {PM_INTERVAL_UNITS}")
-        return v
-
-    @field_validator("interval_value")
-    @classmethod
-    def validate_interval_value(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v <= 0:
-            raise ValueError("interval_value must be greater than 0")
-        return v
-
-    @field_validator("trigger_hours")
-    @classmethod
-    def validate_trigger_hours(cls, v: Optional[float]) -> Optional[float]:
-        if v is not None and v <= 0:
-            raise ValueError("trigger_hours must be greater than 0")
-        return v
+    def validate_item_code(cls, v: str) -> str:
+        code = (v or "").strip().upper()
+        if not code:
+            raise ValueError("item_code is required")
+        if len(code) > 32:
+            raise ValueError("item_code must be at most 32 characters")
+        return code
 
 
 class PMChecklistItemCreate(PMChecklistItemBase):
@@ -463,15 +445,24 @@ class PMChecklistItemCreate(PMChecklistItemBase):
 
 
 class PMChecklistItemUpdate(BaseModel):
+    item_code: Optional[str] = None
     item_text: Optional[str] = None
     sequence_number: Optional[int] = None
     item_type: Optional[str] = None
     expected_value: Optional[str] = None
-    frequency_type: Optional[str] = None
-    interval_value: Optional[int] = None
-    interval_unit: Optional[str] = None
-    trigger_hours: Optional[float] = None
     remarks: Optional[str] = None
+
+    @field_validator("item_code")
+    @classmethod
+    def validate_item_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        code = v.strip().upper()
+        if not code:
+            raise ValueError("item_code cannot be empty")
+        if len(code) > 32:
+            raise ValueError("item_code must be at most 32 characters")
+        return code
 
 
 class PMChecklistItem(PMChecklistItemBase):
@@ -521,6 +512,25 @@ class PMChecklistWithItems(PMChecklist):
 class PMAssignmentItemConfig(BaseModel):
     checklist_item_id: int
     is_required: bool = True
+    is_compulsory: bool = False
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
+
+    @field_validator("frequency_type")
+    @classmethod
+    def validate_frequency_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in PM_FREQUENCY_TYPES:
+            raise ValueError(f"frequency_type must be one of {PM_FREQUENCY_TYPES}")
+        return v
+
+    @field_validator("interval_unit")
+    @classmethod
+    def validate_interval_unit(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in PM_INTERVAL_UNITS:
+            raise ValueError(f"interval_unit must be one of {PM_INTERVAL_UNITS}")
+        return v
 
 
 class PMMachineAssignmentCreate(BaseModel):
@@ -544,6 +554,11 @@ class PMAssignmentItem(BaseModel):
     assignment_id: int
     checklist_item_id: int
     is_required: bool
+    is_compulsory: bool = False
+    frequency_type: str
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
     created_at: datetime
 
     class Config:
@@ -595,6 +610,7 @@ class PMOperatorCheckpoint(BaseModel):
     schedule_id: int
     checklist_item_id: int
     sequence_number: int
+    item_code: str
     item_text: str
     item_type: str
     expected_value: Optional[str] = None
@@ -604,6 +620,7 @@ class PMOperatorCheckpoint(BaseModel):
     trigger_hours: Optional[float] = None
     remarks: Optional[str] = None
     is_required: bool
+    is_compulsory: bool = False
     last_completed_date: Optional[date] = None
     next_due_date: date
     is_due: bool
@@ -633,6 +650,7 @@ class DueCheckpointResponse(BaseModel):
     machine_id: int
     checklist_id: int
     checklist_name: str
+    item_code: str
     item_text: str
     sequence_number: int
     item_type: str
@@ -687,6 +705,11 @@ class PMCheckpointSubmissionWithDetails(PMCheckpointSubmission):
     checklist_name: Optional[str] = None
     machine_id: Optional[int] = None
     machine_label: Optional[str] = None
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
+    is_compulsory: Optional[bool] = None
 
 
 class PMSupervisorSubmissionFilters(BaseModel):

@@ -15,7 +15,7 @@ JWT_SECRET_KEY = os.getenv(
     "CHANGE-ME-cmf-jwt-secret-key-use-a-long-random-string",
 )
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 JWT_ISSUER = os.getenv("JWT_ISSUER", "cmf-api")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "cmf-frontend")

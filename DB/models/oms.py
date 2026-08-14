@@ -289,7 +289,8 @@ class Operation(Base):
 
     setup_time = Column(TIME)
 
-    cycle_time = Column(TIME)
+    # Duration as HHH:MM:SS (hours may exceed 23, max 100)
+    cycle_time = Column(String(16), nullable=True)
 
     workcenter_id = Column(Integer)
 
@@ -511,7 +512,11 @@ class Order(Base):
 
     additional_costs = relationship("OrderAdditionalCost", back_populates="order", cascade="all, delete-orphan")
 
-
+    chat_conversations = relationship(
+        "ChatConversation",
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
 
     # Kept for backward compatibility in code that still expects an
 

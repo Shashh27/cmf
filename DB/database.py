@@ -65,3 +65,25 @@ def verify_database_connection() -> None:
     """Lightweight readiness check — no DDL."""
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
+
+
+# Schemas referenced by SQLAlchemy models (must exist before create_all).
+_APP_SCHEMAS = (
+    "accesscontrol",
+    "oms",
+    "configuration",
+    "inventory",
+    "documents",
+    "maintenance",
+    "ems",
+    "notifications",
+    "production_monitoring",
+    "chatbox",
+)
+
+
+def ensure_app_schemas() -> None:
+    """Create application schemas if missing (used with ALLOW_AUTO_SCHEMA bootstrap)."""
+    with engine.begin() as conn:
+        for schema in _APP_SCHEMAS:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))

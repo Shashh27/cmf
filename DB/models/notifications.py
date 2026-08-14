@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, func, text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, func, text, JSON, Date
 from ..database import Base
 
 
@@ -122,5 +122,25 @@ class MCNotification(Base):
     is_rejected = Column(Boolean, nullable=False, server_default=text("false"), index=True)
     reject_remarks = Column(String, nullable=True)  # Remarks when rejecting
     reject_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PMMissedNotification(Base):
+    """Compulsory PM checkpoint missed by end of shift — for Admin/MC."""
+    __tablename__ = "pm_missed_notifications"
+    __table_args__ = {"schema": "notifications"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    assignment_item_id = Column(Integer, nullable=False, index=True)
+    machine_id = Column(Integer, nullable=False, index=True)
+    checklist_id = Column(Integer, nullable=True)
+    due_date = Column(Date, nullable=False, index=True)
+    item_text = Column(String, nullable=True)
+    machine_label = Column(String, nullable=True)
+    checklist_name = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    is_ack = Column(Boolean, nullable=False, server_default=text("false"))
+    ack_by = Column(String, nullable=True)
+    ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

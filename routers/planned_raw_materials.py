@@ -81,11 +81,49 @@ def _ensure_planned_rm_editable(db: Session, extracted_entry: DocumentExtractedD
         )
 
 
+def _is_positive_dimension(value) -> bool:
+    try:
+        return value is not None and float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_planned_dimensions(request: PlannedRawMaterialRequest) -> None:
+    form_type = request.planned_form_type
+    if form_type == "Round":
+        required = {
+            "Diameter": request.planned_diameter,
+            "Length": request.planned_length,
+        }
+    elif form_type == "Square":
+        required = {
+            "Length": request.planned_length,
+            "Breadth": request.planned_breadth,
+            "Height": request.planned_height,
+        }
+    elif form_type == "Pipe":
+        required = {
+            "Outer diameter": request.planned_outer_diameter,
+            "Inner diameter": request.planned_inner_diameter,
+            "Length": request.planned_length,
+        }
+    else:
+        return
+
+    missing = [name for name, value in required.items() if not _is_positive_dimension(value)]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"All planned dimensions must be greater than 0. Invalid: {', '.join(missing)}",
+        )
+
+
 def _apply_planned_rm_fields(
     extracted_entry: DocumentExtractedDataModel,
     request: PlannedRawMaterialRequest,
 ) -> None:
     """Apply planned fields and clear dimensions not used by the selected form type."""
+    _validate_planned_dimensions(request)
     if request.planned_form_type is not None:
         extracted_entry.planned_form_type = request.planned_form_type
 

@@ -85,6 +85,8 @@ def list_tool_issues_notifications(
         op = operator_map.get(issue.get("operator_id"))
         # Shop-floor alerts: Admin / MC / PC see all tool-issue notifications.
         # operator_id is who filed the issue — not the viewer role id.
+        tool_description = getattr(tool, "item_description", None) if tool else None
+        tool_issue_qty = issue.get("tool_issue_qty")
         response.append(ToolIssuesNotificationWithDetails(
             id=n.id,
             tool_issues_id=n.tool_issues_id,
@@ -93,8 +95,12 @@ def list_tool_issues_notifications(
             ack_at=n.ack_at,
             created_at=n.created_at,
             updated_at=n.updated_at,
-            tool_name=getattr(tool, "item_description", None) if tool else None,
-            tool_issue_qty=issue.get("tool_issue_qty"),
+            tool_name=tool_description,
+            tool_description=tool_description,
+            range=getattr(tool, "range", None) if tool else None,
+            identification_code=getattr(tool, "identification_code", None) if tool else None,
+            quantity=tool_issue_qty,
+            tool_issue_qty=tool_issue_qty,
             status=issue.get("status"),
             created_by=getattr(op, "user_name", None) if op else None,
         ))

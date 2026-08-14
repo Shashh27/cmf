@@ -615,8 +615,8 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                 "part_type_name": part_type_map.get(op.part_type_id) if op.part_type_id else None,
                 "from_date": op.from_date,
                 "to_date": op.to_date,
-                "setup_time": op.setup_time,
-                "cycle_time": op.cycle_time,
+                "setup_time": str(op.setup_time) if op.setup_time else None,
+                "cycle_time": str(op.cycle_time) if op.cycle_time else None,
                 "workcenter_id": op.workcenter_id,
                 "machine_id": op.machine_id,
                 "part_id": op.part_id,
@@ -1071,27 +1071,34 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                     groups[root] = doc
             return list(groups.values())
 
-        def _pc_doc_row_status(pc_docs):
+        def _doc_row_status(latest_docs):
             """uploaded=white, released=yellow, all accepted=green, any rejected=red."""
-            if not pc_docs:
+            if not latest_docs:
                 return 'none'
             any_rejected = False
             any_released = False
             all_accepted = True
-            for doc in pc_docs:
+            has_pc = any(_is_pc_upload(d) for d in latest_docs)
+            for doc in latest_docs:
                 mc_notif = mc_notifications.get(doc.id)
+                is_pc = _is_pc_upload(doc)
                 rejected = bool(mc_notif and mc_notif.is_rejected)
-                accepted = bool(mc_notif and mc_notif.is_acknowledged and not mc_notif.is_rejected)
-                released = bool(doc.is_acknowledged) or bool(mc_notif)
+                accepted = bool(mc_notif and mc_notif.is_acknowledged and not rejected)
+                released = bool(getattr(doc, 'is_acknowledged', False)) or bool(mc_notif)
                 if rejected:
                     any_rejected = True
-                if released:
-                    any_released = True
-                if not accepted:
-                    all_accepted = False
+                if is_pc or mc_notif:
+                    if released:
+                        any_released = True
+                    if not accepted:
+                        all_accepted = False
+                elif not has_pc:
+                    # Admin/MC-only files: no PC release step
+                    if not accepted:
+                        all_accepted = False
             if any_rejected:
                 return 'rejected'
-            if all_accepted:
+            if has_pc and all_accepted and any_released:
                 return 'accepted'
             if any_released:
                 return 'released'
@@ -1124,8 +1131,8 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                         # Admin/MC uploads don't require acknowledgment
                         acknowledged_count += 1
 
-                latest_pc_docs = [d for d in _latest_docs_by_lineage(part_docs) if _is_pc_upload(d)]
-                row_status = _pc_doc_row_status(latest_pc_docs)
+                latest_docs = _latest_docs_by_lineage(part_docs)
+                row_status = _doc_row_status(latest_docs)
                 
                 part_document_ack_map[part_id] = {
                     'has_documents': True,
@@ -1133,6 +1140,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                     'total_documents': len(part_docs),
                     'acknowledged_count': acknowledged_count,
                     'row_status': row_status,
+                    'latest_version': part_latest_version_map.get(part_id),
                 }
             else:
                 part_document_ack_map[part_id] = {
@@ -1141,6 +1149,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                     'total_documents': 0,
                     'acknowledged_count': 0,
                     'row_status': 'none',
+                    'latest_version': None,
                 }
 
     # Get all raw materials for mapping (name only)

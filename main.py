@@ -11,6 +11,7 @@ import os
 from DB.database import (
     engine,
     verify_database_connection,
+    ensure_app_schemas,
     MINIO_ENDPOINT,
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
@@ -104,6 +105,9 @@ from recyclebin_router.recyclebin import router as recycle_bin_router
 
 # Import chatbot router
 from chatbot.chatbot import router as chatbot_router
+
+# Import order chatbox router (human messaging, not LLM)
+from chatbox.chatbox import router as chatbox_router
 
 # Import scheduling router
 
@@ -221,6 +225,7 @@ async def startup_event():
     try:
         allow_auto = os.getenv("ALLOW_AUTO_SCHEMA", "false").lower() in ("1", "true", "yes")
         if allow_auto:
+            ensure_app_schemas()
             Base.metadata.create_all(bind=engine)
             ensure_refresh_tokens_schema()
             print("SUCCESS: Database tables created/verified (ALLOW_AUTO_SCHEMA)")
@@ -339,6 +344,7 @@ api_router.include_router(operation_checklists_router)
 api_router.include_router(machine_mhr_router)
 api_router.include_router(recycle_bin_router)
 api_router.include_router(planned_raw_materials_router)
+api_router.include_router(chatbox_router)
 
 # Include notification routers
 api_router.include_router(component_issues_notification_router)
