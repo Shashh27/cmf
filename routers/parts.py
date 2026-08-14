@@ -35,8 +35,16 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
         # Find all orders for this product
         orders = db.query(Order).filter(Order.product_id == db_part.product_id).all()
         
-        # Get current max priority globally
-        max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
+        # Get current max priority among active live-queue rows only
+        max_priority = (
+            db.query(func.max(OrderPartPriority.priority))
+            .filter(
+                OrderPartPriority.status == "active",
+                OrderPartPriority.priority > 0,
+            )
+            .scalar()
+            or 0
+        )
         
         for index, order in enumerate(orders):
             # Create priority entry
@@ -44,7 +52,8 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
                 order_id=order.id,
                 product_id=db_part.product_id,
                 part_id=db_part.id,
-                priority=max_priority + 1 + index
+                priority=max_priority + 1 + index,
+                status="active",
             )
             db.add(priority_entry)
         

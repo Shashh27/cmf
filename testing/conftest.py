@@ -200,12 +200,26 @@ def db_session(db_engine):
         __tablename__ = 'production_logs'
         id = Column(Integer, primary_key=True)
         operation_id = Column(Integer, ForeignKey('operations.id'))
+        operator_id = Column(Integer)
         from_date = Column(Date)
         from_time = Column(Time)
         to_date = Column(Date)
         to_time = Column(Time)
+        status = Column(String)
+        operator_status = Column(String)
         approved_quantity = Column(Integer)
         remaining_quantity_to_be_produced = Column(Integer)
+
+    class TestOperationStatus(TestBase):
+        __tablename__ = 'operation_status'
+        id = Column(Integer, primary_key=True)
+        order_id = Column(Integer)
+        part_id = Column(Integer)
+        operation_id = Column(Integer)
+        operator_id = Column(Integer)
+        status = Column(String)
+        started_at = Column(DateTime)
+        completed_at = Column(DateTime)
     
     class TestRawMaterial(TestBase):
         __tablename__ = 'raw_materials'
@@ -257,6 +271,7 @@ def db_session(db_engine):
         'EfficiencyFactor': TestEfficiencyFactor,
         'Rescheduling': TestRescheduling,
         'ProductionLog': TestProductionLog,
+        'OperationStatus': TestOperationStatus,
         'RawMaterial': TestRawMaterial,
         'RawMaterialUsage': TestRawMaterialUsage,
         'OutSourceOperationStatus': TestOutSourceOperationStatus,

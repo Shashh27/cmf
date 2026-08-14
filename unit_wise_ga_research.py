@@ -60,7 +60,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,7 @@ from unit_wise_scheduler import (
     _machines_for_workcenter,
     _pick_machine,
     _place_within_shifts_engine,
+    _planned_start_for_operation,
     _preferred_machine_id,
     _rework_due_for_operation,
     _schedulable_operations,
@@ -259,7 +260,8 @@ def build_activities(db: Session, scope: List[Dict[str, Any]]) -> List[Activity]
 
         for op_i, operation in enumerate(ops):
             approved = int(total_approved_for_operation(db, operation.id) or 0)
-            rework_due = _rework_due_for_operation(db, operation.id)
+            approved = max(0, min(approved, qty))
+            rework_due = _rework_due_for_operation(db, operation.id, qty, approved)
             machines = _machines_for_workcenter(db, operation.workcenter_id)
             preferred_id = _preferred_machine_id(db, operation, order.id)
             if preferred_id and not any(m.id == preferred_id for m in machines):
@@ -395,9 +397,30 @@ def evaluate_segments(
         if u is not None:
             utils.append(u)
 
-    # Prefer counted setups; else fall back to flags on segments
+    # Prefer counted setups; else fall back to flags / changeover heuristic
     if setup_count <= 0:
         setup_count = sum(1 for s in segments if s.get("is_setup"))
+    if setup_count <= 0 and segments:
+        # Same changeover rule as NSGA decode: first (part, op) on a machine,
+        # or a different (part, op) after another job, counts as a setup.
+        last_ctx: Dict[Any, Any] = {}
+        op_seen: Set[Tuple[Any, Any]] = set()
+        for s in sorted(
+            segments,
+            key=lambda x: (x.get("start_time") or datetime.min, x.get("machine_id") or 0),
+        ):
+            mid = s.get("machine_id")
+            pid = s.get("part_id")
+            oid = s.get("operation_id")
+            if mid is None or pid is None or oid is None:
+                continue
+            op_key = (pid, oid)
+            same_run = last_ctx.get(mid) == op_key
+            skip = same_run or op_key in op_seen or bool(s.get("rework_slot"))
+            if not skip:
+                setup_count += 1
+            op_seen.add(op_key)
+            last_ctx[mid] = op_key
 
     return {
         "makespan_hours": makespan,
@@ -469,9 +492,19 @@ def decode_activity_priority(
         for operation in _schedulable_operations(db, part.id):
             approved = int(total_approved_for_operation(db, operation.id) or 0)
             actual_end = _actual_end_for_operation(db, operation.id)
-            for u in range(1, min(approved, qty) + 1):
-                done_at = actual_end or unit_ready[(part.id, u)]
-                unit_ready[(part.id, u)] = max(unit_ready[(part.id, u)], done_at)
+            planned_start = _planned_start_for_operation(db, operation.id)
+            # Apply completion time to ALL units:
+            # 1. If production logs exist, use actual end time from production logs
+            # 2. If no production logs (production not started), use planned start time
+            # 3. If neither exists, keep current unit_ready value
+            if actual_end is not None:
+                # Production has started - cascade from actual completion time
+                for u in range(1, qty + 1):
+                    unit_ready[(part.id, u)] = actual_end
+            elif planned_start is not None:
+                # Production not started - use planned start time
+                for u in range(1, qty + 1):
+                    unit_ready[(part.id, u)] = max(unit_ready[(part.id, u)], planned_start)
 
     # Track first placement per (part, op) for setup skip
     op_started: Dict[Tuple[int, int], bool] = {}
@@ -526,7 +559,9 @@ def decode_activity_priority(
 
             ready = unit_ready[(act.part_id, act.unit_index)]
             free = machine_free.get(machine.id, ready)
-            start_candidate = max(ready, free, now)
+            # Don't use 'now' when cascading from actual production log completion times
+            # This ensures the schedule starts from the actual end time, not current time
+            start_candidate = max(ready, free)
 
             # Honour breakdown / OFF windows explicitly before shift placement
             try:
@@ -1256,6 +1291,45 @@ def run_single_nsga2(
 # ---------------------------------------------------------------------------
 
 
+def plan_dominates_greedy(
+    selected_obj: Dict[str, Any],
+    greedy_obj: Dict[str, Any],
+) -> bool:
+    """
+    True when selected Pareto-dominates greedy on the four shop objectives:
+    minimize makespan / mean tardiness / setups; maximize utilization.
+    Requires at least one strict improvement and no strict regression.
+    """
+    nsga2_ms = float(selected_obj.get("makespan_hours") or 1e12)
+    greedy_ms = float(greedy_obj.get("makespan_hours") or 1e12)
+    nsga2_tard = float(selected_obj.get("mean_tardiness_hours") or 0.0)
+    greedy_tard = float(greedy_obj.get("mean_tardiness_hours") or 0.0)
+    nsga2_util = float(selected_obj.get("avg_utilization_pct") or 0.0)
+    greedy_util = float(greedy_obj.get("avg_utilization_pct") or 0.0)
+    nsga2_setups = float(selected_obj.get("setup_count") or 0.0)
+    greedy_setups = float(greedy_obj.get("setup_count") or 0.0)
+
+    better = False
+    worse = False
+    for nsga_v, greedy_v, higher_is_better in (
+        (nsga2_ms, greedy_ms, False),
+        (nsga2_tard, greedy_tard, False),
+        (nsga2_util, greedy_util, True),
+        (nsga2_setups, greedy_setups, False),
+    ):
+        if higher_is_better:
+            if nsga_v > greedy_v + 1e-6:
+                better = True
+            elif nsga_v < greedy_v - 1e-6:
+                worse = True
+        else:
+            if nsga_v < greedy_v - 1e-6:
+                better = True
+            elif nsga_v > greedy_v + 1e-6:
+                worse = True
+    return bool(better and not worse)
+
+
 def optimize_unit_plan_research(
     db: Session,
     scope: List[Dict[str, Any]],
@@ -1327,8 +1401,8 @@ def optimize_unit_plan_research(
         greedy["ga"] = {**meta, "reason": "too_few_activities"}
         return greedy
 
-    # Scale down on huge instances
-    if len(activities) > 120:
+    # Scale down on large instances (shop-floor safety)
+    if len(activities) > 80:
         cfg.population = min(cfg.population, 24)
         cfg.generations = min(cfg.generations, 30)
         cfg.runs = min(cfg.runs, 2)
@@ -1337,15 +1411,32 @@ def optimize_unit_plan_research(
         meta["generations"] = cfg.generations
         meta["runs"] = cfg.runs
 
+    max_seconds = float(
+        (config_overrides or {}).get(
+            "max_seconds",
+            _env_float("UNIT_WISE_GA_MAX_SECONDS", 240.0),
+        )
+    )
+    meta["max_seconds"] = max_seconds
+
     base_seed = cfg.seed if cfg.seed is not None else _env_int("UNIT_WISE_GA_SEED", 42)
 
     all_pareto_fronts: List[List[Individual]] = []
     all_perf_metrics_debug: List[Dict[str, Any]] = []
     run_summaries = []
     all_cmax = []
-    ga_start_time = time.perf_counter() if debug else 0.0
+    ga_start_time = time.perf_counter()
 
     for r in range(cfg.runs):
+        if max_seconds > 0 and (time.perf_counter() - ga_start_time) >= max_seconds:
+            meta["timed_out"] = True
+            meta["timeout_after_runs"] = r
+            logger.warning(
+                "NSGA-II wall-clock budget exhausted before run %s",
+                r,
+                extra={"event": "unit_wise_nsga2_timeout", "max_seconds": max_seconds},
+            )
+            break
         rng = random.Random(base_seed + r * 997)
         try:
             pareto_front, convergence, plan = run_single_nsga2(
@@ -1444,22 +1535,8 @@ def optimize_unit_plan_research(
     selected_plan = getattr(selected_ind, "_plan", {})
 
     # ── Compare against greedy ──────────────────────────────────────
-    greedy_ms = float(greedy_obj.get("makespan_hours") or 1e12)
-    nsga2_ms = float(selected_obj.get("makespan_hours") or 1e12)
-    greedy_tard = float(greedy_obj.get("mean_tardiness_hours") or 0.0)
-    nsga2_tard = float(selected_obj.get("mean_tardiness_hours") or 0.0)
-    greedy_util = float(greedy_obj.get("avg_utilization_pct") or 0.0)
-    nsga2_util = float(selected_obj.get("avg_utilization_pct") or 0.0)
-    greedy_setups = float(greedy_obj.get("setup_count") or 0.0)
-    nsga2_setups = float(selected_obj.get("setup_count") or 0.0)
-
-    # "Improved" = at least one objective strictly better, none strictly worse
-    improved = (
-        (nsga2_ms < greedy_ms - 1e-6)
-        or (nsga2_tard < greedy_tard - 1e-6)
-        or (nsga2_util > greedy_util + 1e-6)
-        or (nsga2_setups < greedy_setups - 1e-6)
-    ) and selected_plan
+    # "Improved" = selected Pareto-dominates greedy (better on ≥1, worse on none).
+    improved = bool(plan_dominates_greedy(selected_obj, greedy_obj) and selected_plan)
 
     meta["improved"] = bool(improved)
     meta["selected"] = "nsga2" if improved else "greedy"

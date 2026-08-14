@@ -1,29 +1,42 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
-from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, date
 import calendar
-from datetime import date
 
 from DB.database import get_db
-from DB.models.scheduling import MachineStatus, ShiftHoursConfiguration, Status, MachineDowntime, EfficiencyFactor, PlannedScheduleItem
-from DB.models.configuration import Machine   # adjust path if needed
-
+from DB.models.scheduling import (
+    MachineStatus,
+    ShiftHoursConfiguration,
+    EfficiencyFactor,
+    PlannedScheduleItem,
+    Rescheduling,
+)
+from DB.models.configuration import Machine
 
 from DB.schemas.capacity_planning import (
     MachineUtilization,
-    EfficiencyCreate,
     EfficiencyUpdate,
-    EfficiencyResponse
+    EfficiencyResponse,
 )
 
 router = APIRouter(
     prefix="/machine-utilization",
-    tags=["Machine Utilization"]
+    tags=["Machine Utilization"],
 )
 
 
+# Match scheduler defaults (algorithm.DEFAULT_SHIFT_START/END): 08:30–17:00 = 8.5h
+DEFAULT_SHIFT_HOURS = 8.5
+
+
 def _configured_shift_hours(config: ShiftHoursConfiguration) -> float:
+    """
+    Hours available for one calendar day.
+    - Non-working day with 0 shifts → 0
+    - If rows exist in shift_timing_configuration → sum those windows
+    - Else → default GENERAL shift 8.5h (08:30–17:00), same as the scheduler
+    """
     if not config.working_day and config.number_of_shifts == 0:
         return 0.0
     if config.shift_timings:
@@ -33,17 +46,78 @@ def _configured_shift_hours(config: ShiftHoursConfiguration) -> float:
             end_dt = datetime.combine(config.date, timing.shift_end)
             total += (end_dt - start_dt).total_seconds() / 3600
         return max(total, 0.0)
-    return float(config.number_of_shifts * 8)
+    return float(DEFAULT_SHIFT_HOURS)
 
 
+def _clip_hours(seg_start: datetime, seg_end: datetime, win_start: datetime, win_end: datetime) -> float:
+    """Hours of [seg_start, seg_end] that fall inside [win_start, win_end]."""
+    if not seg_start or not seg_end or seg_end <= seg_start:
+        return 0.0
+    start = max(seg_start, win_start)
+    end = min(seg_end, win_end)
+    if end <= start:
+        return 0.0
+    return (end - start).total_seconds() / 3600.0
 
-# get machine utilization by month
+
+def _load_utilized_hours_by_machine(
+    db: Session,
+    start_dt: datetime,
+    end_dt: datetime,
+    machine_id: Optional[int] = None,
+) -> Tuple[Dict[int, float], str]:
+    """
+    Prefer dynamic schedule (rescheduling_items) so capacity tracks production-log
+    updates. Fall back to planned_schedule_items when dynamic has no rows yet.
+
+    Returns (machine_id -> utilized_hours, source_label).
+    """
+    dyn_q = db.query(Rescheduling).filter(
+        Rescheduling.machine_id.isnot(None),
+        Rescheduling.status.in_(("scheduled", "rescheduled")),
+        Rescheduling.start_time < end_dt,
+        Rescheduling.end_time > start_dt,
+    )
+    if machine_id is not None:
+        dyn_q = dyn_q.filter(Rescheduling.machine_id == machine_id)
+    dynamic_items = dyn_q.all()
+
+    by_machine: Dict[int, float] = {}
+    if dynamic_items:
+        for item in dynamic_items:
+            hours = _clip_hours(item.start_time, item.end_time, start_dt, end_dt)
+            if hours <= 0 or item.machine_id is None:
+                continue
+            by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
+        return by_machine, "dynamic"
+
+    plan_q = db.query(PlannedScheduleItem).filter(
+        PlannedScheduleItem.machine_id.isnot(None),
+        PlannedScheduleItem.planned_start_time.isnot(None),
+        PlannedScheduleItem.planned_end_time.isnot(None),
+        PlannedScheduleItem.planned_start_time < end_dt,
+        PlannedScheduleItem.planned_end_time > start_dt,
+    )
+    if machine_id is not None:
+        plan_q = plan_q.filter(PlannedScheduleItem.machine_id == machine_id)
+    planned_items = plan_q.all()
+
+    for item in planned_items:
+        hours = _clip_hours(
+            item.planned_start_time, item.planned_end_time, start_dt, end_dt
+        )
+        if hours <= 0 or item.machine_id is None:
+            continue
+        by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
+    return by_machine, "planned"
+
+
 @router.get("/machine-utilization", response_model=List[MachineUtilization])
 def get_machine_utilization(
     db: Session = Depends(get_db),
     month: Optional[int] = Query(None),
     year: Optional[int] = Query(None),
-    machine_id: Optional[int] = Query(None)
+    machine_id: Optional[int] = Query(None),
 ):
     if not month or not year:
         now = datetime.now()
@@ -57,52 +131,36 @@ def get_machine_utilization(
     _, days_in_month = calendar.monthrange(year, month)
     end_date = date(year, month, days_in_month)
 
-    # ------------------------------------
-    # SHIFT CONFIG → AVAILABLE HOURS BASE
-    # ------------------------------------
     shift_configs = (
         db.query(ShiftHoursConfiguration)
         .filter(
             ShiftHoursConfiguration.date >= start_date,
-            ShiftHoursConfiguration.date <= end_date
+            ShiftHoursConfiguration.date <= end_date,
         )
         .all()
     )
 
-    total_shift_hours = 0
-    for sc in shift_configs:
-        total_shift_hours += _configured_shift_hours(sc)
+    total_shift_hours = sum(_configured_shift_hours(sc) for sc in shift_configs)
 
-    # efficiency = 1.0
     settings = db.query(EfficiencyFactor).first()
     efficiency = settings.efficiency_factor if settings else 1.0
     base_available_hours = total_shift_hours * efficiency
 
-    # 🔧 convert date → datetime for status filtering
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date, datetime.max.time())
-    range_end = end_dt + timedelta(seconds=1)
 
-    # ----------------------------
-    # MACHINES
-    # ----------------------------
     machines_query = db.query(Machine)
-
     if machine_id:
         machines_query = machines_query.filter(Machine.id == machine_id)
-
     machines = machines_query.all()
 
-    # ----------------------------
-    # MACHINE STATUSES (DOWNTIME)
-    # ----------------------------
     statuses = (
         db.query(MachineStatus)
         .filter(
             MachineStatus.available_from != None,
             MachineStatus.available_from < end_dt,
             (MachineStatus.available_to == None)
-            | (MachineStatus.available_to > start_dt)
+            | (MachineStatus.available_to > start_dt),
         )
         .all()
     )
@@ -111,71 +169,31 @@ def get_machine_utilization(
     for s in statuses:
         status_map.setdefault(s.machine_id, []).append(s)
 
-    # ----------------------------
-    # GET PLANNED SCHEDULE ITEMS FOR UTILIZATION
-    # ----------------------------
-    planned_items = (
-        db.query(PlannedScheduleItem)
-        .filter(
-            PlannedScheduleItem.machine_id == machine_id if machine_id else True,
-            PlannedScheduleItem.planned_start_time >= start_dt,
-            PlannedScheduleItem.planned_end_time <= end_dt,
-            PlannedScheduleItem.planned_start_time.isnot(None),
-            PlannedScheduleItem.planned_end_time.isnot(None)
-        )
-        .all()
+    utilized_by_machine, _source = _load_utilized_hours_by_machine(
+        db, start_dt, end_dt, machine_id=machine_id
     )
 
-    # Group planned items by machine for efficient lookup
-    planned_items_by_machine = {}
-    for item in planned_items:
-        planned_items_by_machine.setdefault(item.machine_id, []).append(item)
-
-    # ----------------------------
-    # CALCULATION
-    # ----------------------------
     result = []
-
     for m in machines:
-        available_hours = base_available_hours
-
-        downtime_hours = 0
-
-        machine_statuses = status_map.get(m.id, [])
-
-        for st in machine_statuses:
-            # status_id = 2 means OFF
+        downtime_hours = 0.0
+        for st in status_map.get(m.id, []):
             if st.status_id != 2:
                 continue
-
             start = max(st.available_from, start_dt)
             end = st.available_to or end_dt
             end = min(end, end_dt)
-
             if end > start:
-                hours = (end - start).total_seconds() / 3600
-                downtime_hours += hours
+                downtime_hours += (end - start).total_seconds() / 3600
 
         downtime_hours *= efficiency
+        available_hours = max(0.0, base_available_hours - downtime_hours)
+        utilized_hours = utilized_by_machine.get(m.id, 0.0)
 
-        available_hours = max(0, base_available_hours - downtime_hours)
-
-        # Calculate utilized hours from planned schedule items
-        # Raw duration only — no efficiency factor applied to utilized hours
-        utilized_hours = 0
-        machine_planned_items = planned_items_by_machine.get(m.id, [])
-
-        for item in machine_planned_items:
-            if item.planned_start_time and item.planned_end_time:
-                duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
-                utilized_hours += duration
-
-        # utilization % relative to available hours (after downtime deduction)
-        utilization_percentage = 0
+        utilization_percentage = 0.0
         if available_hours > 0:
             utilization_percentage = (utilized_hours / available_hours) * 100
 
-        remaining_hours = max(0, available_hours - utilized_hours)
+        remaining_hours = max(0.0, available_hours - utilized_hours)
 
         result.append(
             MachineUtilization(
@@ -195,90 +213,51 @@ def get_machine_utilization(
     return result
 
 
-
-
-
-# get machine utilization by range (start_date, end_date)
 @router.get("/machine-utilization/range", response_model=List[MachineUtilization])
 def get_machine_utilization_by_range(
     db: Session = Depends(get_db),
     start_date: date = Query(...),
     end_date: date = Query(...),
-    machine_id: Optional[int] = Query(None)
+    machine_id: Optional[int] = Query(None),
 ):
-
     if start_date > end_date:
         raise HTTPException(400, "End date must be after start date")
 
-    # range_end = end_date + timedelta(days=1)
-
-    # 🔧 convert date → datetime (IMPORTANT FIX)
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date, datetime.max.time())
     range_end = end_dt + timedelta(seconds=1)
 
-    # ------------------------------------
-    # SHIFT CONFIG → AVAILABLE HOURS BASE
-    # ------------------------------------
     shift_configs = (
         db.query(ShiftHoursConfiguration)
         .filter(
             ShiftHoursConfiguration.date >= start_date,
-            ShiftHoursConfiguration.date <= end_date
+            ShiftHoursConfiguration.date <= end_date,
         )
         .all()
     )
 
-    total_shift_hours = 0
+    total_shift_hours = sum(_configured_shift_hours(sc) for sc in shift_configs)
 
-    for sc in shift_configs:
-        total_shift_hours += _configured_shift_hours(sc)
-
-    # efficiency = 1.0
     settings = db.query(EfficiencyFactor).first()
     efficiency = settings.efficiency_factor if settings else 1.0
     base_available_hours = total_shift_hours * efficiency
 
-    # ------------------------------------
-    # MACHINES
-    # ------------------------------------
     machines_query = db.query(Machine)
-
     if machine_id:
         machines_query = machines_query.filter(Machine.id == machine_id)
-
     machines = machines_query.all()
 
-    # ------------------------------------
-    # GET PLANNED SCHEDULE ITEMS FOR UTILIZATION
-    # ------------------------------------
-    planned_items = (
-        db.query(PlannedScheduleItem)
-        .filter(
-            PlannedScheduleItem.machine_id == machine_id if machine_id else True,
-            PlannedScheduleItem.planned_start_time >= start_dt,
-            PlannedScheduleItem.planned_end_time <= end_dt,
-            PlannedScheduleItem.planned_start_time.isnot(None),
-            PlannedScheduleItem.planned_end_time.isnot(None)
-        )
-        .all()
+    utilized_by_machine, _source = _load_utilized_hours_by_machine(
+        db, start_dt, end_dt, machine_id=machine_id
     )
 
-    # Group planned items by machine for efficient lookup
-    planned_items_by_machine = {}
-    for item in planned_items:
-        planned_items_by_machine.setdefault(item.machine_id, []).append(item)
-
-    # ------------------------------------
-    # MACHINE STATUS (DOWNTIME)
-    # ------------------------------------
     statuses = (
         db.query(MachineStatus)
         .filter(
             MachineStatus.available_from != None,
             MachineStatus.available_from < range_end,
             (MachineStatus.available_to == None)
-            | (MachineStatus.available_to > start_dt)
+            | (MachineStatus.available_to > start_dt),
         )
         .order_by(MachineStatus.available_from)
         .all()
@@ -288,55 +267,29 @@ def get_machine_utilization_by_range(
     for s in statuses:
         status_map.setdefault(s.machine_id, []).append(s)
 
-    # ------------------------------------
-    # CALCULATION
-    # ------------------------------------
     result = []
-
     for m in machines:
-        available_hours = base_available_hours
-        downtime_hours = 0
+        downtime_hours = 0.0
+        for st in status_map.get(m.id, []):
+            if st.status_id != 2:
+                continue
+            if st.available_to:
+                overlap_start = max(st.available_from, start_dt)
+                overlap_end = min(st.available_to, range_end)
+                if overlap_end > overlap_start:
+                    downtime_hours += (overlap_end - overlap_start).total_seconds() / 3600
+            else:
+                overlap_start = max(st.available_from, start_dt)
+                downtime_hours += (range_end - overlap_start).total_seconds() / 3600
 
-        machine_statuses = status_map.get(m.id, [])
+        available_hours = max(0.0, base_available_hours - (downtime_hours * efficiency))
+        utilized_hours = utilized_by_machine.get(m.id, 0.0)
 
-        for st in machine_statuses:
-            if st.status_id == 2:  # OFF
-
-                if st.available_to:
-                    overlap_start = max(st.available_from, start_dt)
-                    overlap_end = min(st.available_to, range_end)
-
-                    if overlap_end > overlap_start:
-                        hours = (overlap_end - overlap_start).total_seconds() / 3600
-                        downtime_hours += hours
-                else:
-                    overlap_start = max(st.available_from, start_dt)
-                    overlap_end = range_end
-                    hours = (overlap_end - overlap_start).total_seconds() / 3600
-                    downtime_hours += hours
-
-        # ------------------------------------
-        # FINAL HOURS
-        # ------------------------------------
-        adjusted_downtime = downtime_hours * efficiency
-        available_hours = max(0, base_available_hours - adjusted_downtime)
-
-        # Calculate utilized hours from planned schedule items
-        # Raw duration only — no efficiency factor applied to utilized hours
-        utilized_hours = 0
-        machine_planned_items = planned_items_by_machine.get(m.id, [])
-
-        for item in machine_planned_items:
-            if item.planned_start_time and item.planned_end_time:
-                duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
-                utilized_hours += duration
-
-        # utilization % relative to available hours (after downtime deduction)
-        utilization_percentage = 0
+        utilization_percentage = 0.0
         if available_hours > 0:
             utilization_percentage = (utilized_hours / available_hours) * 100
 
-        remaining_hours = max(0, available_hours - utilized_hours)
+        remaining_hours = max(0.0, available_hours - utilized_hours)
 
         result.append(
             MachineUtilization(
@@ -356,63 +309,23 @@ def get_machine_utilization_by_range(
     return result
 
 
-# ------------------------------------
-# EFFICIENCY ENDPOINTS
-# ------------------------------------
-
-
-# Create efficiency setting
-# @router.post("/efficiency", response_model=EfficiencyResponse)
-# def create_efficiency(settings: EfficiencyCreate, db: Session = Depends(get_db)):
-
-#     existing = db.query(EfficiencyFactor).first()
-#     if existing:
-#         raise HTTPException(400, "Efficiency already initialized")
-
-#     record = EfficiencyFactor(
-#         efficiency_factor=settings.efficiency_factor
-#     )
-
-#     db.add(record)
-#     db.commit()
-#     db.refresh(record)
-
-#     return record
-
-# ------------------------------------
-# EFFICIENCY ENDPOINTS
-# ------------------------------------
-
-
-
-# Get efficiency setting
 @router.get("/efficiency", response_model=EfficiencyResponse)
 def get_efficiency(db: Session = Depends(get_db)):
-
     record = db.query(EfficiencyFactor).first()
-
     if not record:
         record = EfficiencyFactor(efficiency_factor=1.0)
         db.add(record)
         db.commit()
         db.refresh(record)
-
     return record
 
 
-
-# Update efficiency setting
 @router.put("/efficiency", response_model=EfficiencyResponse)
 def update_efficiency(settings: EfficiencyUpdate, db: Session = Depends(get_db)):
-
     record = db.query(EfficiencyFactor).first()
-
     if not record:
         raise HTTPException(404, "Efficiency not initialized")
-
     record.efficiency_factor = settings.efficiency_factor
-
     db.commit()
     db.refresh(record)
-
     return record

@@ -14,8 +14,9 @@ Return keys used by the /generate-schedule endpoint:
 
 import logging
 
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, time, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import cast, Integer
 
 from sqlalchemy.orm import Session
@@ -70,6 +71,19 @@ OUT_SOURCE_PROVISION = timedelta(days=7)  # Maximum vendor turnaround: 1 week
 STALE_INPROGRESS_WORKING_DAYS = 1  # Flag op stale after N working days with no log
 logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LiveReconcileContext:
+    """
+    Scheduler #3 context passed into DynamicSchedulerEngine.dynamic_reschedule.
+
+    When None (the default), behavior is exactly Scheduler #2 — Rescheduler.
+    """
+    now: datetime
+    stale_not_started_op_ids: Set[int] = field(default_factory=set)
+    rewrite_inprogress_op_ids: Set[int] = field(default_factory=set)
+    activation_op_ids: Set[int] = field(default_factory=set)
 
 
 
@@ -230,7 +244,7 @@ class SchedulerEngine:
         Priority:
           1) Assigned shifts for machine-operator (if both provided)
           2) Assigned shifts for machine (if only machine provided)
-          3) If no assignments: ONLY GENERAL shift (ignore OT shifts)
+          3) If no assignments on this machine: GENERAL shift only (no OT/NEXT)
           4) Fallback to default GENERAL shift
         """
         cfg = (
@@ -254,8 +268,11 @@ class SchedulerEngine:
                 ends = [st.shift_end for st in assigned_timings]
                 return min(starts), max(ends)
             else:
-                # No assignments: use GENERAL and NEXT shifts (ignore OT shifts)
-                allowed_shifts = [st for st in cfg.shift_timings if st.shift_code in ["GENERAL", "NEXT"]]
+                # No operator assignment on this machine: GENERAL only (no OT/NEXT).
+                # OT/NEXT is allowed only when the machine has an assignment row.
+                allowed_shifts = [
+                    st for st in cfg.shift_timings if st.shift_code == "GENERAL"
+                ]
                 if allowed_shifts:
                     starts = [st.shift_start for st in allowed_shifts]
                     ends = [st.shift_end for st in allowed_shifts]
@@ -1421,15 +1438,15 @@ class SchedulerEngine:
             # version=1 so the Gantt has a live starting point identical
             # to the baseline plan.  dynamic_reschedule() will later
             # DELETE+INSERT rows with status='rescheduled' as work progresses.
-            if all_items:
-                self._seed_rescheduling_items(all_items, schedule_version=1)
-            
-            # ── Phase F: Run dynamic scheduler to update with actual end times ──── #
-            # This ensures rescheduling_items reflects actual completion times
-            # from production logs instead of just planned times
-            print("[SCHEDULE] Running dynamic scheduler to update with actual end times...")
-            dynamic_engine = DynamicSchedulerEngine(self.db)
-            dynamic_engine.dynamic_reschedule(dry_run=False)
+            from live_schedule_lock import live_schedule_lock
+            with live_schedule_lock(self.db, blocking=True):
+                if all_items:
+                    self._seed_rescheduling_items(all_items, schedule_version=1)
+
+                # ── Phase F: Run dynamic scheduler to update with actual end times ──── #
+                print("[SCHEDULE] Running dynamic scheduler to update with actual end times...")
+                dynamic_engine = DynamicSchedulerEngine(self.db)
+                dynamic_engine.dynamic_reschedule(dry_run=False)
 
             return {
                 'success':              True,
@@ -1782,6 +1799,80 @@ class DynamicSchedulerEngine(SchedulerEngine):
             for row in existing
         ]
 
+    def _actual_start(self, operation_id: int) -> Optional[datetime]:
+        """MIN(from_date + from_time) from production_logs — production reality."""
+        try:
+            rows = self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).all()
+            candidates = [
+                datetime.combine(r.from_date, r.from_time)
+                for r in rows if r.from_date and r.from_time
+            ]
+            return min(candidates) if candidates else None
+        except Exception as e:
+            print(f"[ERROR] _actual_start op={operation_id}: {e}")
+            return None
+
+    def _live_rows_equivalent(
+        self,
+        part_id: int,
+        proposed: List[Rescheduling],
+    ) -> bool:
+        """True when proposed live windows match current rows (ignore version/id)."""
+
+        def _key(row) -> Tuple:
+            start = row.start_time.replace(microsecond=0) if row.start_time else None
+            end = row.end_time.replace(microsecond=0) if row.end_time else None
+            return (
+                row.operation_id,
+                row.machine_id,
+                start,
+                end,
+                int(row.total_qty or 0),
+                int(row.completed_qty or 0),
+                int(row.remaining_qty or 0),
+            )
+
+        existing = (
+            self.db.query(Rescheduling)
+            .filter(
+                Rescheduling.part_id == part_id,
+                Rescheduling.status.in_(["scheduled", "rescheduled"]),
+            )
+            .all()
+        )
+        existing_keys = sorted(_key(r) for r in existing)
+        proposed_keys = sorted(_key(r) for r in proposed)
+        return existing_keys == proposed_keys
+
+    def _preblock_out_of_scope_live_rows(
+        self,
+        in_scope_part_ids: Set[int],
+        now: datetime,
+    ) -> None:
+        """
+        Treat live occupancy of parts we are NOT rewriting as fixed machine
+        blocks so impact-scoped runs do not steal those slots.
+        """
+        try:
+            q = (
+                self.db.query(Rescheduling)
+                .filter(
+                    Rescheduling.status.in_(["scheduled", "rescheduled"]),
+                    Rescheduling.end_time >= now,
+                    Rescheduling.machine_id.isnot(None),
+                )
+            )
+            if in_scope_part_ids:
+                q = q.filter(~Rescheduling.part_id.in_(list(in_scope_part_ids)))
+            for row in q.all():
+                existing = self.machine_end_time.get(row.machine_id)
+                if existing is None or row.end_time > existing:
+                    self.machine_end_time[row.machine_id] = row.end_time
+        except Exception as e:
+            print(f"[ERROR] preblock out-of-scope live rows: {e}")
+
     # ------------------------------------------------------------------ #
     #  Version helper                                                      #
     # ------------------------------------------------------------------ #
@@ -1953,6 +2044,8 @@ class DynamicSchedulerEngine(SchedulerEngine):
         triggered_by_part_id: Optional[int] = None,
         triggered_by_op_id:   Optional[int] = None,
          dry_run:              bool = False,
+        part_ids:             Optional[List[int]] = None,
+        live_context:         Optional[LiveReconcileContext] = None,
     ) -> Dict:
         """
         Re-plan rescheduling_items after a production log is submitted.
@@ -1982,12 +2075,24 @@ class DynamicSchedulerEngine(SchedulerEngine):
             'parts_rescheduled':   0,
             'operations_inserted': 0,
             'skipped_parts':       [],
+            'noop':                False,
         }
- 
+        self._live_context = live_context
+
         try:
             # ── 1. Load orders + parts ────────────────────────────────── #
             active_orders = self._load_active_orders()
             if not active_orders:
+                if live_context is not None:
+                    result.update({
+                        'success': True,
+                        'noop': True,
+                        'message': 'No active orders.',
+                        'reschedule_version': None,
+                        'parts_rescheduled': 0,
+                        'operations_inserted': 0,
+                    })
+                    return result
                 # Clear rescheduling_items when there are no active orders
                 self.db.query(Rescheduling).delete()
                 self.db.commit()
@@ -2007,8 +2112,16 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 order_parts_map[order['order_id']] = parts
                 all_part_ids.extend(p['part_id'] for p in parts)
  
-            # ── 2. Scope: specific part or all parts ──────────────────── #
-            if triggered_by_part_id:
+            # ── 2. Scope: specific part, impact set, or all parts ─────── #
+            if part_ids is not None:
+                want = set(part_ids)
+                scope = [
+                    (order, pd)
+                    for order in active_orders
+                    for pd in order_parts_map.get(order['order_id'], [])
+                    if pd['part_id'] in want
+                ]
+            elif triggered_by_part_id:
                 scope = [
                     (order, pd)
                     for order in active_orders
@@ -2023,6 +2136,17 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 ]
  
             if not scope:
+                # Live reconciliation must never wipe the live table on empty scope.
+                if live_context is not None:
+                    result.update({
+                        'success': True,
+                        'noop': True,
+                        'message': 'No parts in live impact set.',
+                        'reschedule_version': None,
+                        'parts_rescheduled': 0,
+                        'operations_inserted': 0,
+                    })
+                    return result
                 # Clear rescheduling_items when there are no parts in scope
                 self.db.query(Rescheduling).delete()
                 self.db.commit()
@@ -2068,6 +2192,18 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 for wc_list in machines_by_wc.values()
                 for m in wc_list
             }
+
+            if live_context is not None:
+                self._preblock_out_of_scope_live_rows(
+                    {pd['part_id'] for _, pd in scope},
+                    live_context.now,
+                )
+
+            if live_context is not None:
+                self._preblock_out_of_scope_live_rows(
+                    {pd['part_id'] for _, pd in scope},
+                    live_context.now,
+                )
  
             # ── 4. Pre-block machines occupied by inprogress ops ──────── #
             # Read latest actual end time from production logs for each inprogress operation
@@ -2301,6 +2437,8 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             continue
 
                         # Operator actively running — do not replan mid-job
+                        # unless Scheduler #3 asked to rewrite a stale unused
+                        # window after late/early activation.
                         active_run = (
                             self.db.query(ProductionLog)
                             .filter(
@@ -2310,7 +2448,11 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             )
                             .first()
                         )
-                        if active_run:
+                        rewrite_active = bool(
+                            live_context is not None
+                            and op_id in live_context.rewrite_inprogress_op_ids
+                        )
+                        if active_run and not rewrite_active:
                             preserved = self._preserve_existing_rescheduling_rows(
                                 op_id, version
                             )
@@ -2331,10 +2473,25 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             )
 
                         actual = self._actual_end(op_id)
+                        if rewrite_active and not actual:
+                            started = self._actual_start(op_id)
+                            actual = started
                         op_cursor = (
                             self.adjust_to_shift(actual) if actual
                             else cascade_cursor
                         )
+                        if (
+                            live_context is not None
+                            and not rewrite_active
+                            and op_id in live_context.stale_not_started_op_ids
+                        ):
+                            # Remaining window is already in the past.
+                            op_cursor = self.adjust_to_shift(
+                                max(op_cursor, live_context.now)
+                            )
+                        elif live_context is not None and rewrite_active:
+                            # Started op: anchor at actual_start, do not slide to now.
+                            op_cursor = self.adjust_to_shift(actual) if actual else op_cursor
 
                         if actual and operation.machine_id:
                             self.machine_end_time[operation.machine_id] = op_cursor
@@ -2378,7 +2535,8 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             order_remaining=remaining_qty,
                             # Op already ran (has logs / partial approve) — setup
                             # was charged on the first units; remaining is cycle only.
-                            setup_already_done=True,
+                            # First activation (0 approved) still needs setup.
+                            setup_already_done=not (rewrite_active and approved == 0),
                         )
                         self.machine_end_time[machine.id] = op_end
                         cascade_cursor = op_end
@@ -2420,8 +2578,49 @@ class DynamicSchedulerEngine(SchedulerEngine):
                         )
                         continue
 
+                    pending_cursor = cascade_cursor
+                    if live_context is not None:
+                        is_stale = op_id in live_context.stale_not_started_op_ids
+                        is_activation = op_id in live_context.activation_op_ids
+                        if not is_stale and not is_activation:
+                            preserved = self._preserve_existing_rescheduling_rows(
+                                op_id, version
+                            )
+                            if preserved:
+                                first_start = preserved[0].start_time
+                                last_end = preserved[-1].end_time
+                                # Still-valid live window: do not pull it to now.
+                                if (
+                                    last_end >= live_context.now
+                                    and first_start >= cascade_cursor
+                                ):
+                                    part_rescheduled_rows.extend(preserved)
+                                    cascade_cursor = last_end
+                                    if preserved[-1].machine_id:
+                                        existing_free = self.machine_end_time.get(
+                                            preserved[-1].machine_id
+                                        )
+                                        if (
+                                            existing_free is None
+                                            or last_end > existing_free
+                                        ):
+                                            self.machine_end_time[
+                                                preserved[-1].machine_id
+                                            ] = last_end
+                                    print(
+                                        f"[LIVE] Op {op_id} ({operation.operation_number}) "
+                                        f"VALID WINDOW — preserved {len(preserved)} row(s)."
+                                    )
+                                    continue
+                        if is_stale:
+                            pending_cursor = max(pending_cursor, live_context.now)
+                        if is_activation:
+                            started = self._actual_start(op_id)
+                            if started:
+                                pending_cursor = max(pending_cursor, started)
+
                     machine, cand_start = self._select_machine(
-                        operation, all_machines, machines_by_wc, cascade_cursor
+                        operation, all_machines, machines_by_wc, pending_cursor
                     )
                     if machine is None:
                         result['skipped_parts'].append(
@@ -2463,6 +2662,14 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 # even when all operations are completed and part_rescheduled_rows
                 # is empty. Without this, stale rows from previous runs would remain 
                 # in the table after the part is fully done, including completed operations.
+                if live_context is not None and self._live_rows_equivalent(
+                    part_id, part_rescheduled_rows
+                ):
+                    print(
+                        f"[LIVE] Part {part_id}: live windows unchanged — skip write."
+                    )
+                    continue
+
                 deleted = self.db.query(Rescheduling).filter(
                     Rescheduling.part_id == part_id,
                     Rescheduling.status.in_(['scheduled', 'rescheduled']),
@@ -2490,6 +2697,16 @@ class DynamicSchedulerEngine(SchedulerEngine):
             # ── 7. Bulk INSERT + commit ───────────────────────────────── #
             if all_new_rows:
                 self.db.add_all(all_new_rows)
+            if live_context is not None and not all_new_rows and not parts_done:
+                result.update({
+                    'success':             True,
+                    'noop':                True,
+                    'message':             'Live windows unchanged — no write.',
+                    'reschedule_version':  None,
+                    'parts_rescheduled':   0,
+                    'operations_inserted': 0,
+                })
+                return result
             if dry_run:
                 # Dry run — flush to make rows visible within this transaction
                 # but do NOT commit so caller can rollback cleanly
@@ -2544,6 +2761,8 @@ def dynamic_reschedule(
         Green → production_logs                     (actual output)
         Red   → rescheduling_items status=rescheduled (remaining live plan)
     """
+    from live_schedule_lock import live_schedule_lock
+
     logger.info(
         "Dynamic reschedule triggered",
         extra={
@@ -2553,10 +2772,27 @@ def dynamic_reschedule(
             "operation_id": triggered_by_op_id,
         },
     )
-    result = DynamicSchedulerEngine(db).dynamic_reschedule(
-        triggered_by_part_id=triggered_by_part_id,
-        triggered_by_op_id=triggered_by_op_id,
-    )
+    with live_schedule_lock(db, blocking=True) as acquired:
+        if not acquired:
+            logger.warning(
+                "Dynamic reschedule skipped — lock not acquired",
+                extra={
+                    "event": "dynamic_reschedule_lock_skipped",
+                    "part_id": triggered_by_part_id,
+                    "operation_id": triggered_by_op_id,
+                },
+            )
+            return {
+                "success": False,
+                "message": "Live schedule lock not acquired.",
+                "reschedule_version": None,
+                "parts_rescheduled": 0,
+                "operations_inserted": 0,
+            }
+        result = DynamicSchedulerEngine(db).dynamic_reschedule(
+            triggered_by_part_id=triggered_by_part_id,
+            triggered_by_op_id=triggered_by_op_id,
+        )
     if result.get("success"):
         logger.info(
             "Dynamic reschedule completed",

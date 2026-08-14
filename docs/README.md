@@ -9,6 +9,7 @@ Use this folder as the single reference. Older overlapping guides were removed t
 | If you need… | Open this |
 |--------------|-----------|
 | **Manufacturing workflow** (plain English + diagrams) | [SCHEDULING_WORKFLOW_MANUFACTURING_GUIDE.md](./SCHEDULING_WORKFLOW_MANUFACTURING_GUIDE.md) |
+| **Dynamic Scheduler / Scheduler #3** (how live reconciliation actually works) | [DYNAMIC_SCHEDULER_HOW_IT_WORKS.docx](./DYNAMIC_SCHEDULER_HOW_IT_WORKS.docx) |
 | **Logging design** (what events we log) | [LOGGING_DESIGN_PLAN_PPS.md](./LOGGING_DESIGN_PLAN_PPS.md) |
 | **How to test logging** | [LOGGING_TEST_CHECKLIST.md](./LOGGING_TEST_CHECKLIST.md) |
 | **Prometheus + Grafana (how to use)** | [PROMETHEUS_GRAFANA_USER_GUIDE.md](./PROMETHEUS_GRAFANA_USER_GUIDE.md) |

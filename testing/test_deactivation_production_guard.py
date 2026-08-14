@@ -5,6 +5,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from routers.machine_scheduling import (
+    _build_order_deactivation_detail,
+    _describe_operation_production_state,
+    _get_part_deactivation_snapshot,
     _get_part_production_blockers,
     _is_part_fully_completed_by_logs,
     _operation_production_is_complete,
@@ -283,3 +286,216 @@ class TestGetPartProductionBlockers:
         assert all(not b["operation_started"] for b in blockers)
         assert all(b["production_stage"] == "not_started" for b in blockers)
         assert all("Not started" in b["block_reason"] for b in blockers)
+
+
+class TestDescribeOperationProductionState:
+    def _state(self, logs, op_status=None):
+        from DB.models.scheduling import OperationStatus
+
+        op = SimpleNamespace(id=59, operation_number=10, operation_name="Milling")
+        os_query = MagicMock()
+        os_query.filter.return_value.first.return_value = op_status
+
+        def query_router(model):
+            if model is OperationStatus:
+                return os_query
+            return MagicMock()
+
+        db = MagicMock()
+        db.query.side_effect = query_router
+        return _describe_operation_production_state(db, part_id=1647, op=op, logs=logs)
+
+    def test_completed_operation(self):
+        logs = [
+            _log(
+                id=1,
+                status="completed",
+                remaining_quantity_to_be_produced=0,
+                operator_status="completed",
+            )
+        ]
+        state = self._state(logs)
+        assert state["status"] == "completed"
+        assert state["production_stage"] == "completed"
+        assert state["block_reason"] is None
+
+    def test_in_progress_operator(self):
+        logs = [_log(id=4, operator_status="inprogress", to_time=None)]
+        state = self._state(logs)
+        assert state["status"] == "in_progress"
+        assert state["production_stage"] == "in_progress"
+        assert "production log 4" in state["block_reason"]
+
+    def test_not_started(self):
+        state = self._state([])
+        assert state["status"] == "pending"
+        assert state["production_stage"] == "not_started"
+        assert state["operation_started"] is False
+
+
+class TestBuildOrderDeactivationDetail:
+    def _part(
+        self,
+        part_id,
+        part_number,
+        part_name,
+        status,
+        completed=0,
+        in_progress=0,
+        pending=0,
+        can_deactivate=None,
+        block_reason=None,
+        operations=None,
+    ):
+        total = completed + in_progress + pending
+        if can_deactivate is None:
+            can_deactivate = status == "not_started"
+        return {
+            "part_id": part_id,
+            "part_number": part_number,
+            "part_name": part_name,
+            "status": status,
+            "can_deactivate": can_deactivate,
+            "block_reason": block_reason,
+            "operations_total": total,
+            "operations_completed": completed,
+            "operations_in_progress": in_progress,
+            "operations_pending": pending,
+            "operations": operations or [],
+        }
+
+    def test_order_189_mixed_state(self):
+        parts = [
+            self._part(
+                1661, "MB-1001", "Machine Base", "completed",
+                completed=3, block_reason="Part production is completed — deactivation is not allowed",
+            ),
+            self._part(
+                1666, "BR-6205", "Bearing", "completed",
+                completed=2, block_reason="Part production is completed — deactivation is not allowed",
+            ),
+            self._part(
+                1701, "LGR-01", "Linear Guide Rail", "in_progress",
+                completed=2, in_progress=1,
+                block_reason="2 of 3 operations completed, 1 in progress",
+            ),
+            self._part(
+                1702, "SH-01", "Spindle Housing", "pending",
+                completed=1, pending=1,
+                block_reason="1 of 2 operations completed, 1 pending",
+            ),
+            self._part(
+                1703, "TP-01", "Timing Pulley", "not_started",
+                pending=3,
+            ),
+        ]
+        detail = _build_order_deactivation_detail(189, parts)
+
+        assert detail["block_reason"] == "mixed_production_state"
+        assert detail["message"] == (
+            "Cannot deactivate order 189 — 2 of 5 parts are completed, "
+            "1 part is in progress, 1 part is pending, 1 part has not started"
+        )
+        assert detail["totals"] == {
+            "parts": 5,
+            "completed": 2,
+            "in_progress": 1,
+            "pending": 1,
+            "not_started": 1,
+        }
+        assert "Completed: MB-1001, BR-6205" in detail["summary"]
+        assert "In progress: LGR-01 (2/3 ops done, 1 in progress)" in detail["summary"]
+        assert "Pending: SH-01 (1/2 ops done)" in detail["summary"]
+        assert "Not started: TP-01" in detail["summary"]
+        assert len(detail["parts"]) == 5
+        assert len(detail["blocking_parts"]) == 4
+        assert all(p["part_number"] != "TP-01" for p in detail["blocking_parts"])
+
+    def test_only_completed_parts(self):
+        parts = [
+            self._part(1, "A-1", "Part A", "completed", completed=2),
+            self._part(2, "B-1", "Part B", "completed", completed=1),
+        ]
+        detail = _build_order_deactivation_detail(10, parts)
+        assert detail["block_reason"] == "completed_part"
+        assert "2 of 2 parts are completed" in detail["message"]
+
+    def test_in_production_without_completed(self):
+        parts = [
+            self._part(1, "A-1", "Part A", "in_progress", completed=1, in_progress=1),
+            self._part(2, "B-1", "Part B", "not_started", pending=3),
+        ]
+        detail = _build_order_deactivation_detail(11, parts)
+        assert detail["block_reason"] == "in_production"
+        assert "1 part is in progress" in detail["message"]
+        assert "1 part has not started" in detail["message"]
+
+
+class TestGetPartDeactivationSnapshot:
+    def test_partial_and_in_progress_operations(self, monkeypatch):
+        from DB.models.oms import Operation
+        from DB.models.scheduling import OperationStatus, ProductionLog
+
+        ops = [
+            SimpleNamespace(id=101, operation_number=10, operation_name="Op1", part_id=1701),
+            SimpleNamespace(id=102, operation_number=20, operation_name="Op2", part_id=1701),
+            SimpleNamespace(id=103, operation_number=30, operation_name="Op3", part_id=1701),
+        ]
+        logs_by_op = {
+            101: [
+                _log(
+                    id=1,
+                    status="completed",
+                    remaining_quantity_to_be_produced=0,
+                    operator_status="completed",
+                )
+            ],
+            102: [
+                _log(
+                    id=2,
+                    status="completed",
+                    remaining_quantity_to_be_produced=0,
+                    operator_status="completed",
+                )
+            ],
+            103: [_log(id=3, operator_status="inprogress", to_time=None)],
+        }
+
+        op_query = MagicMock()
+        op_query.filter.return_value.order_by.return_value.all.return_value = ops
+        call_ops = {"n": 0}
+
+        def query_router(model):
+            mock_q = MagicMock()
+            if model is Operation:
+                return op_query
+            if model is ProductionLog:
+                op = ops[call_ops["n"]]
+                call_ops["n"] += 1
+                mock_q.filter.return_value.order_by.return_value.all.return_value = (
+                    logs_by_op.get(op.id, [])
+                )
+                return mock_q
+            if model is OperationStatus:
+                mock_q.filter.return_value.first.return_value = None
+                return mock_q
+            mock_q.filter.return_value.first.return_value = None
+            return mock_q
+
+        db = MagicMock()
+        db.query.side_effect = query_router
+        monkeypatch.setattr(
+            "routers.machine_scheduling._part_is_schedule_completed",
+            lambda *_args, **_kwargs: False,
+        )
+
+        part = SimpleNamespace(id=1701, part_number="LGR-01", part_name="Linear Guide Rail")
+        snapshot = _get_part_deactivation_snapshot(db, sale_order_id=189, part=part)
+
+        assert snapshot["status"] == "in_progress"
+        assert snapshot["can_deactivate"] is False
+        assert snapshot["operations_total"] == 3
+        assert snapshot["operations_completed"] == 2
+        assert snapshot["operations_in_progress"] == 1
+        assert snapshot["operations_pending"] == 0
+        assert snapshot["operations"][2]["status"] == "in_progress"

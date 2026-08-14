@@ -4,7 +4,7 @@ from threading import active_count
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Dict
 from sqlalchemy import func
 
 # from sqlalchemy import cast, Integer  
@@ -238,18 +238,20 @@ def _get_completed_part_deactivation_blockers(
     return blockers
 
 
-def _classify_operation_production_block(
+def _describe_operation_production_state(
     db: Session,
     part_id: int,
     op: Operation,
     logs: List[ProductionLog],
-    part_has_started: bool,
-) -> Optional[dict]:
-    """
-    Return blocker fields when this operation blocks part deactivation, else None.
-    """
+) -> dict:
+    """Classify an operation's production state for deactivation reporting."""
     if logs and _operation_production_is_complete(logs):
-        return None
+        return {
+            "status": "completed",
+            "production_stage": "completed",
+            "operation_started": True,
+            "block_reason": None,
+        }
 
     op_status = db.query(OperationStatus).filter(
         OperationStatus.operation_id == op.id,
@@ -263,16 +265,18 @@ def _classify_operation_production_block(
         )
         if active_log:
             return {
-                "operation_started": True,
+                "status": "in_progress",
                 "production_stage": "in_progress",
+                "operation_started": True,
                 "block_reason": (
                     "Started — operator is actively working on this operation "
                     f"(production log {active_log.id})"
                 ),
             }
         return {
-            "operation_started": True,
+            "status": "in_progress",
             "production_stage": "awaiting_review",
+            "operation_started": True,
             "block_reason": (
                 "Started — production log submitted, awaiting supervisor approval"
             ),
@@ -280,34 +284,56 @@ def _classify_operation_production_block(
 
     if op_status and op_status.status == "inprogress":
         return {
-            "operation_started": True,
+            "status": "in_progress",
             "production_stage": "job_card_active",
+            "operation_started": True,
             "block_reason": "Started — job card is activated",
         }
 
-    if logs and not _operation_production_is_complete(logs):
+    if logs:
         last_log = max(logs, key=lambda log: log.id)
         remaining = last_log.remaining_quantity_to_be_produced
         remaining_label = str(remaining) if remaining is not None else "open"
         return {
-            "operation_started": True,
+            "status": "in_progress",
             "production_stage": "incomplete",
+            "operation_started": True,
             "block_reason": (
                 "Started — production incomplete "
                 f"({remaining_label} unit(s) remaining on this operation)"
             ),
         }
 
-    if not logs and part_has_started:
-        return {
-            "operation_started": False,
-            "production_stage": "not_started",
-            "block_reason": (
-                "Not started — production has not begun on this operation yet"
-            ),
-        }
+    return {
+        "status": "pending",
+        "production_stage": "not_started",
+        "operation_started": False,
+        "block_reason": (
+            "Not started — production has not begun on this operation yet"
+        ),
+    }
 
-    return None
+
+def _classify_operation_production_block(
+    db: Session,
+    part_id: int,
+    op: Operation,
+    logs: List[ProductionLog],
+    part_has_started: bool,
+) -> Optional[dict]:
+    """
+    Return blocker fields when this operation blocks part deactivation, else None.
+    """
+    state = _describe_operation_production_state(db, part_id, op, logs)
+    if state["status"] == "completed":
+        return None
+    if state["status"] == "pending" and not part_has_started:
+        return None
+    return {
+        "operation_started": state["operation_started"],
+        "production_stage": state["production_stage"],
+        "block_reason": state["block_reason"],
+    }
 
 
 def _get_part_production_blockers(db: Session, part_id: int) -> List[dict]:
@@ -454,6 +480,183 @@ def _raise_completed_deactivation_blocked(
     )
 
 
+def _get_part_deactivation_snapshot(
+    db: Session, sale_order_id: int, part: Part
+) -> dict:
+    """
+    Full production picture of one part for order-deactivation responses.
+    Status is completed / in_progress / pending / not_started.
+    """
+    operations = (
+        db.query(Operation)
+        .filter(Operation.part_id == part.id)
+        .order_by(Operation.operation_number.asc(), Operation.id.asc())
+        .all()
+    )
+
+    op_rows: List[dict] = []
+    for op in operations:
+        logs = (
+            db.query(ProductionLog)
+            .filter(ProductionLog.operation_id == op.id)
+            .order_by(ProductionLog.created_at.asc())
+            .all()
+        )
+        state = _describe_operation_production_state(db, part.id, op, logs)
+        op_rows.append({
+            "operation_id": op.id,
+            "operation_number": str(op.operation_number),
+            "operation_name": op.operation_name,
+            "status": state["status"],
+            "production_stage": state["production_stage"],
+            "operation_started": state["operation_started"],
+            "block_reason": state["block_reason"],
+        })
+
+    completed_count = sum(1 for row in op_rows if row["status"] == "completed")
+    in_progress_count = sum(1 for row in op_rows if row["status"] == "in_progress")
+    pending_count = sum(1 for row in op_rows if row["status"] == "pending")
+    total = len(op_rows)
+    is_schedule_completed = _part_is_schedule_completed(db, sale_order_id, part.id)
+
+    if is_schedule_completed or (total > 0 and completed_count == total):
+        status = "completed"
+        can_deactivate = False
+        block_reason = "Part production is completed — deactivation is not allowed"
+    elif in_progress_count > 0:
+        status = "in_progress"
+        can_deactivate = False
+        block_reason = (
+            f"{completed_count} of {total} operations completed, "
+            f"{in_progress_count} in progress"
+        )
+        if pending_count:
+            block_reason += f", {pending_count} pending"
+    elif completed_count > 0:
+        status = "pending"
+        can_deactivate = False
+        block_reason = (
+            f"{completed_count} of {total} operations completed, "
+            f"{pending_count} pending"
+        )
+    else:
+        status = "not_started"
+        can_deactivate = True
+        block_reason = None
+
+    return {
+        "part_id": part.id,
+        "part_number": part.part_number,
+        "part_name": part.part_name,
+        "status": status,
+        "can_deactivate": can_deactivate,
+        "block_reason": block_reason,
+        "operations_total": total,
+        "operations_completed": completed_count,
+        "operations_in_progress": in_progress_count,
+        "operations_pending": pending_count,
+        "operations": op_rows,
+    }
+
+
+def _part_display_label(part: dict) -> str:
+    return part.get("part_number") or part.get("part_name") or str(part.get("part_id"))
+
+
+def _build_order_deactivation_detail(
+    sale_order_id: int, parts: List[dict]
+) -> dict:
+    """Build a 400 detail payload covering every part on the order."""
+    completed = [p for p in parts if p["status"] == "completed"]
+    in_progress = [p for p in parts if p["status"] == "in_progress"]
+    pending = [p for p in parts if p["status"] == "pending"]
+    not_started = [p for p in parts if p["status"] == "not_started"]
+    blocking = [p for p in parts if not p.get("can_deactivate")]
+
+    fragments: List[str] = []
+    if completed:
+        fragments.append(
+            f"{len(completed)} of {len(parts)} parts "
+            f"{'is' if len(completed) == 1 else 'are'} completed"
+        )
+    if in_progress:
+        fragments.append(
+            f"{len(in_progress)} "
+            f"{'part is' if len(in_progress) == 1 else 'parts are'} in progress"
+        )
+    if pending:
+        fragments.append(
+            f"{len(pending)} "
+            f"{'part is' if len(pending) == 1 else 'parts are'} pending"
+        )
+    if not_started:
+        fragments.append(
+            f"{len(not_started)} "
+            f"{'part has' if len(not_started) == 1 else 'parts have'} not started"
+        )
+
+    if completed and not in_progress and not pending:
+        block_reason = "completed_part"
+    elif not completed and (in_progress or pending):
+        block_reason = "in_production"
+    else:
+        block_reason = "mixed_production_state"
+
+    message = (
+        f"Cannot deactivate order {sale_order_id} — {', '.join(fragments)}"
+        if fragments
+        else f"Cannot deactivate order {sale_order_id}"
+    )
+
+    summary_bits: List[str] = []
+    if completed:
+        labels = ", ".join(_part_display_label(p) for p in completed)
+        summary_bits.append(f"Completed: {labels}")
+    if in_progress:
+        labels = ", ".join(
+            f"{_part_display_label(p)} "
+            f"({p['operations_completed']}/{p['operations_total']} ops done, "
+            f"{p['operations_in_progress']} in progress)"
+            for p in in_progress
+        )
+        summary_bits.append(f"In progress: {labels}")
+    if pending:
+        labels = ", ".join(
+            f"{_part_display_label(p)} "
+            f"({p['operations_completed']}/{p['operations_total']} ops done)"
+            for p in pending
+        )
+        summary_bits.append(f"Pending: {labels}")
+    if not_started:
+        labels = ", ".join(_part_display_label(p) for p in not_started)
+        summary_bits.append(f"Not started: {labels}")
+
+    return {
+        "message": message,
+        "block_reason": block_reason,
+        "summary": " | ".join(summary_bits),
+        "totals": {
+            "parts": len(parts),
+            "completed": len(completed),
+            "in_progress": len(in_progress),
+            "pending": len(pending),
+            "not_started": len(not_started),
+        },
+        "parts": parts,
+        "blocking_parts": blocking,
+    }
+
+
+def _raise_order_deactivation_blocked(
+    sale_order_id: int, parts: List[dict]
+) -> None:
+    """Raise a 400 that reports every part's production state on the order."""
+    raise HTTPException(
+        status_code=400,
+        detail=_build_order_deactivation_detail(sale_order_id, parts),
+    )
+
+
 # =========================================================
 # SET ORDER STATUS
 # =========================================================
@@ -463,11 +666,46 @@ def _raise_completed_deactivation_blocked(
 # PRIORITY HELPER FUNCTIONS (internal use)
 # =========================================================
 
+def _sanitize_non_active_order_part_priorities(db: Session) -> int:
+    """
+    Completed / inactive parts must not occupy live priority slots.
+    Force priority=0 on every non-active OrderPartPriority row.
+    Returns how many rows were corrected.
+    """
+    dirty = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.status != "active",
+            OrderPartPriority.priority != 0,
+        )
+        .all()
+    )
+    for row in dirty:
+        row.priority = 0
+    return len(dirty)
+
+
+def _normalize_order_part_priorities(db: Session) -> Dict[str, int]:
+    """
+    Keep the live priority queue clean:
+      1) completed/inactive rows always have priority=0
+      2) active rows are resequenced to contiguous 1..N
+    Call before schedule generation and after activation so completed
+    parts never keep / regain queue numbers.
+    """
+    cleared = _sanitize_non_active_order_part_priorities(db)
+    if cleared:
+        db.flush()
+    _resequence_active_order_part_priorities(db)
+    return {"cleared_non_active": cleared}
+
+
 def _assign_order_priority(sale_order_id: int, product_id: int, parts: list, db: Session):
     """Assign global priorities to IN-House parts of an order on activation.
     Only creates missing rows — never overwrites existing.
-    Appends after global max priority.
+    Appends after global max priority among active rows only.
     """
+    _sanitize_non_active_order_part_priorities(db)
     existing_priority_part_ids = {
         row.part_id for row in db.query(OrderPartPriority).filter(
             OrderPartPriority.order_id == sale_order_id
@@ -480,7 +718,8 @@ def _assign_order_priority(sale_order_id: int, product_id: int, parts: list, db:
     if not new_parts:
         return
     max_row = db.query(OrderPartPriority).filter(
-        OrderPartPriority.priority > 0
+        OrderPartPriority.priority > 0,
+        OrderPartPriority.status == "active",
     ).order_by(OrderPartPriority.priority.desc()).first()
     max_priority = max_row.priority if max_row else 0
     for i, p in enumerate(new_parts, start=1):
@@ -498,7 +737,9 @@ def _compact_order_part_priorities_by_part_order(db: Session) -> None:
     Renumber all active OrderPartPriority rows to 1, 2, 3, ... in Part No order.
     Preserves cross-order sequence (current priority), then sorts by Part.part_number
     so UI order (002, 003, 004, 005) matches priority order.
+    Never touches completed / inactive rows.
     """
+    _sanitize_non_active_order_part_priorities(db)
     active_rows = (
         db.query(OrderPartPriority)
         .join(Part, Part.id == OrderPartPriority.part_id)
@@ -517,7 +758,9 @@ def _resequence_active_order_part_priorities(db: Session) -> None:
     """
     Resequence all active OrderPartPriority rows to 1..N globally (no gaps).
     Use after deleting or deactivating a part so remaining parts get 1, 2, 3, ...
+    Never renumbers completed / inactive rows.
     """
+    _sanitize_non_active_order_part_priorities(db)
     active_rows = (
         db.query(OrderPartPriority)
         .filter(
@@ -533,46 +776,60 @@ def _resequence_active_order_part_priorities(db: Session) -> None:
 
 def _remove_order_priority(sale_order_id: int, db: Session):
     """
-    Remove order priority and adjust priorities for remaining orders.
+    Remove order priority and adjust priorities for remaining active orders.
     Handles both scenarios:
-    1. If first order is removed: shift all remaining orders down to start from priority 1
-    2. If intermediate order is removed: shift higher priority orders down to fill the gap
+    1. If first order is removed: shift all remaining active priorities down to start from 1
+    2. If intermediate order is removed: shift higher active priorities down to fill the gap
+    Completed / inactive rows stay at priority=0 and are never shifted.
     """
-    # Get all priority records for this order, ordered by priority
-    order_priorities = db.query(OrderPartPriority).filter(
-        OrderPartPriority.order_id == sale_order_id
-    ).order_by(OrderPartPriority.priority).all()
-    
+    _sanitize_non_active_order_part_priorities(db)
+
+    # Only active queue slots participate in gap-closing shifts
+    order_priorities = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.order_id == sale_order_id,
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority)
+        .all()
+    )
+
     if not order_priorities:
+        # Still drop any leftover rows for this order (completed/inactive)
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.order_id == sale_order_id
+        ).delete(synchronize_session=False)
+        db.commit()
         return
-    
-    # Get the minimum and maximum priorities for this order
+
     min_priority = order_priorities[0].priority
     max_priority = order_priorities[-1].priority
     parts_count = len(order_priorities)
-    
-    # Delete all priority records for this order
+
     db.query(OrderPartPriority).filter(
         OrderPartPriority.order_id == sale_order_id
     ).delete(synchronize_session=False)
-    
-    # If this was the first order (min_priority == 1), shift ALL remaining orders down
-    # Otherwise, shift only higher priority orders down
+
+    active_filter = (
+        OrderPartPriority.status == "active",
+        OrderPartPriority.priority > 0,
+    )
     if min_priority == 1:
-        # First order removed: shift all remaining orders down by parts_count
-        db.query(OrderPartPriority).update(
+        db.query(OrderPartPriority).filter(*active_filter).update(
             {OrderPartPriority.priority: OrderPartPriority.priority - parts_count},
-            synchronize_session=False
+            synchronize_session=False,
         )
     else:
-        # Intermediate order removed: shift only higher priority orders down
         db.query(OrderPartPriority).filter(
-            OrderPartPriority.priority > max_priority
+            *active_filter,
+            OrderPartPriority.priority > max_priority,
         ).update(
             {OrderPartPriority.priority: OrderPartPriority.priority - parts_count},
-            synchronize_session=False
+            synchronize_session=False,
         )
-    
+
     db.commit()
 
 
@@ -656,19 +913,12 @@ def set_order_status(
         raise HTTPException(400, "No parts found for this order's product")
 
     if status == "inactive":
-        part_ids = [part.id for part in parts]
-        completed_blockers = _get_completed_part_deactivation_blockers(
-            db, sale_order_id, part_ids
-        )
-        if completed_blockers:
-            _raise_completed_deactivation_blocked(
-                f"order {sale_order_id}",
-                completed_blockers,
-            )
-
-        production_blockers = _get_order_production_blockers(db, part_ids)
-        if production_blockers:
-            _raise_deactivation_blocked(production_blockers)
+        part_snapshots = [
+            _get_part_deactivation_snapshot(db, sale_order_id, part)
+            for part in parts
+        ]
+        if any(not snapshot["can_deactivate"] for snapshot in part_snapshots):
+            _raise_order_deactivation_blocked(sale_order_id, part_snapshots)
 
     now = datetime.now(timezone.utc)
 
@@ -806,9 +1056,11 @@ def set_order_status(
             [p for p in parts if p.id not in existing_priority_part_ids],
             key=lambda p: p.id
         )
-        # Always use global max priority so new order appends after all existing orders
+        # Always use global max priority among ACTIVE rows so completed leftovers
+        # (priority wrongly > 0) cannot inflate / pollute the live queue.
         max_row = db.query(OrderPartPriority).filter(
-            OrderPartPriority.priority > 0
+            OrderPartPriority.priority > 0,
+            OrderPartPriority.status == "active",
         ).order_by(OrderPartPriority.priority.desc()).first()
         max_priority = max_row.priority if max_row else 0
         for i, p in enumerate(new_parts, start=1):
@@ -819,6 +1071,8 @@ def set_order_status(
                 priority=max_priority + i,
                 status="active",
             ))
+        db.flush()
+        _normalize_order_part_priorities(db)
 
     db.flush()
     
@@ -1487,8 +1741,8 @@ def update_part_status(
 
     # ----------------------------
     # Sync status on OrderPartPriority row
-    # If deactivating: set priority=0, shift all higher priorities down by 1
-    # If activating:   status already set in the block above
+    # If deactivating: delete row and resequence remaining active (1..N)
+    # If activating: never revive a completed row into the live queue
     # ----------------------------
     priority_row = db.query(OrderPartPriority).filter(
         OrderPartPriority.order_id == sale_order_id,
@@ -1508,8 +1762,20 @@ def update_part_status(
                 db.flush()
                 # Resequence remaining active parts globally to 1, 2, 3, ...
                 _resequence_active_order_part_priorities(db)
-        else:
-            priority_row.status = "active"
+        elif status == "active":
+            # Do not flip completed → active (would put finished work back in queue).
+            # Fresh active rows are created in the block above when missing.
+            if priority_row.status == "completed":
+                priority_row.priority = 0
+            elif priority_row.status != "active":
+                priority_row.status = "active"
+                if not priority_row.priority or priority_row.priority <= 0:
+                    max_row = db.query(OrderPartPriority).filter(
+                        OrderPartPriority.priority > 0,
+                        OrderPartPriority.status == "active",
+                    ).order_by(OrderPartPriority.priority.desc()).first()
+                    priority_row.priority = (max_row.priority + 1) if max_row else 1
+                _normalize_order_part_priorities(db)
 
     # ----------------------------
     # CLEANUP: Remove operation status entries for deactivated parts
@@ -1909,8 +2175,9 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
         if existing is None or et > existing:
             before_end[pid] = et
 
-    # Lock the impacted range to avoid concurrent reorder races.
+    # Lock the impacted range to avoid concurrent reorder races (active only).
     db.query(OrderPartPriority).filter(
+        OrderPartPriority.status == "active",
         OrderPartPriority.priority >= lo,
         OrderPartPriority.priority <= hi
     ).with_for_update().all()
@@ -1918,6 +2185,7 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     if p1 > p2:
         # Move record1 up into p2; shift [p2, p1-1] downwards by +1
         db.query(OrderPartPriority).filter(
+            OrderPartPriority.status == "active",
             OrderPartPriority.priority >= p2,
             OrderPartPriority.priority < p1,
             OrderPartPriority.id != swap.id1  # don't touch record1 yet
@@ -1929,6 +2197,7 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     else:
         # Move record1 down into p2; shift [p1+1, p2] upwards by -1
         db.query(OrderPartPriority).filter(
+            OrderPartPriority.status == "active",
             OrderPartPriority.priority > p1,
             OrderPartPriority.priority <= p2,
             OrderPartPriority.id != swap.id1  # don't touch record1 yet
@@ -2251,6 +2520,7 @@ def simulate_priority_swap(
         # swaps only moved one side and left record2's order untouched.
         # Priorities are global, so the shift must span all orders.
         all_rows_in_range = db.query(OrderPartPriority).filter(
+            OrderPartPriority.status == "active",
             OrderPartPriority.priority >= lo,
             OrderPartPriority.priority <= hi,
         ).all()
@@ -3549,6 +3819,21 @@ def generate_schedule_endpoint(
         #             "inprogress_operations": blocked_ops,
         #         }
         # ── End guard ───────────────────────────────────────────────────── #
+        # Completed parts must stay at priority=0 and out of the live queue.
+        # Activation / older shift paths could leave leftover numbers on
+        # status='completed' rows — clear them before building the plan.
+        norm = _normalize_order_part_priorities(db)
+        db.commit()
+        if norm.get("cleared_non_active"):
+            logger.info(
+                "Cleared leftover priorities on non-active parts before schedule",
+                extra={
+                    "event": "order_part_priority_sanitized",
+                    "cleared_non_active": norm["cleared_non_active"],
+                    "trigger_source": "generate_schedule_endpoint",
+                },
+            )
+
         from algorithm import generate_machine_schedule
 
         result = generate_machine_schedule(db, start_date, end_date)
@@ -3654,6 +3939,10 @@ def generate_schedule_endpoint(
                     },
                 )
         except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             logger.exception(
                 "Unit-wise rebuild after generate-schedule failed",
                 extra={"event": "unit_wise_rebuild_failed"},
@@ -6644,6 +6933,24 @@ def activate_job_card(
             },
         )
         
+        try:
+            from live_reconciliation import _safe_reconcile_after_event
+            _safe_reconcile_after_event(
+                db,
+                trigger="activation",
+                operation_id=operation_id,
+                part_id=rescheduling_item.part_id,
+            )
+        except Exception:
+            logger.exception(
+                "Live reconciliation after activation failed",
+                extra={
+                    "event": "live_reconciliation_hook_failed",
+                    "trigger": "activation",
+                    "operation_id": operation_id,
+                },
+            )
+
         return {
             "message": "Job card activated successfully",
             "order_id": rescheduling_item.order_id,
@@ -6723,6 +7030,24 @@ def complete_job_card(
         except Exception as reschedule_error:
             print(f"[ERROR] Dynamic reschedule failed after completing operation {operation_id}: {reschedule_error}")
             # Don't fail the completion if reschedule fails, but log it
+
+        try:
+            from live_reconciliation import _safe_reconcile_after_event
+            _safe_reconcile_after_event(
+                db,
+                trigger="completion",
+                operation_id=operation_id,
+                part_id=op_status.part_id,
+            )
+        except Exception:
+            logger.exception(
+                "Live reconciliation after completion failed",
+                extra={
+                    "event": "live_reconciliation_hook_failed",
+                    "trigger": "completion",
+                    "operation_id": operation_id,
+                },
+            )
         
         return {
             "id": op_status.id,

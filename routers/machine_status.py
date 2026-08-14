@@ -285,6 +285,22 @@ async def update_machine_status(
                         ),
                     },
                 )
+            try:
+                from live_reconciliation import _safe_reconcile_after_event
+                _safe_reconcile_after_event(
+                    db,
+                    trigger="machine_status",
+                    machine_id=machine_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Live reconciliation after machine status change failed",
+                    extra={
+                        "event": "live_reconciliation_hook_failed",
+                        "trigger": "machine_status",
+                        "machine_id": machine_id,
+                    },
+                )
         
         # Return the updated status
         return MachineStatusOut(

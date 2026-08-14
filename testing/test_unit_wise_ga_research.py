@@ -29,6 +29,7 @@ from unit_wise_ga_research import (
     mutate_perm,
     normalize_objectives,
     order_crossover,
+    plan_dominates_greedy,
 )
 
 
@@ -170,6 +171,31 @@ class TestNsga2Internals:
         compute_crowding_distance(inds, list(range(len(inds))))
         # Boundary individuals should have infinite distance
         assert inds[0].crowding_distance == float("inf") or inds[-1].crowding_distance == float("inf")
+
+    def test_plan_dominates_greedy_accepts_strict_win(self):
+        greedy = {
+            "makespan_hours": 100,
+            "mean_tardiness_hours": 5,
+            "avg_utilization_pct": 40,
+            "setup_count": 4,
+        }
+        better = {**greedy, "makespan_hours": 90}
+        assert plan_dominates_greedy(better, greedy)
+
+    def test_plan_dominates_greedy_rejects_tradeoff(self):
+        greedy = {
+            "makespan_hours": 100,
+            "mean_tardiness_hours": 5,
+            "avg_utilization_pct": 40,
+            "setup_count": 4,
+        }
+        tradeoff = {
+            "makespan_hours": 90,
+            "mean_tardiness_hours": 6,
+            "avg_utilization_pct": 50,
+            "setup_count": 4,
+        }
+        assert not plan_dominates_greedy(tradeoff, greedy)
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Scheduling Microservice API",
+    title="PPS Microservice API",
     description="APIs for managing machine scheduling",
     version="2.0.0",
     docs_url="/docs",
@@ -112,6 +112,22 @@ async def startup_event():
     logger.info("CMF Backend API is ready")
     logger.info("Documentation available at /docs")
     logger.info("Prometheus metrics available at /metrics")
+
+    try:
+        from live_reconciliation import start_live_reconciliation_scheduler
+        start_live_reconciliation_scheduler()
+    except Exception:
+        logger.exception("Failed to start live reconciliation scheduler")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the in-process live reconciliation scheduler."""
+    try:
+        from live_reconciliation import shutdown_live_reconciliation_scheduler
+        shutdown_live_reconciliation_scheduler()
+    except Exception:
+        logger.exception("Failed to stop live reconciliation scheduler")
 
 
 @app.get("/health")

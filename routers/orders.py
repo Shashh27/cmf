@@ -56,15 +56,24 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     # Populate default part priorities (FIFO based on creation)
     parts = db.query(Part).filter(Part.product_id == db_order.product_id).order_by(Part.id.asc()).all()
     
-    # Get current max priority globally
-    max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
+    # Get current max priority among active live-queue rows only
+    max_priority = (
+        db.query(func.max(OrderPartPriority.priority))
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .scalar()
+        or 0
+    )
     
     for index, part in enumerate(parts):
         priority_entry = OrderPartPriority(
             order_id=db_order.id,
             product_id=db_order.product_id,
             part_id=part.id,
-            priority=max_priority + 1 + index
+            priority=max_priority + 1 + index,
+            status="active",
         )
         db.add(priority_entry)
     
@@ -332,43 +341,63 @@ def update_global_priority(update: OrderPartPriorityGlobalUpdate, db: Session = 
     record = db.query(OrderPartPriority).filter(OrderPartPriority.id == update.id).with_for_update().first()
     if not record:
         raise HTTPException(status_code=404, detail="Priority record not found")
-    
+    if record.status != "active" or not record.priority or record.priority <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot change priority of a completed or inactive part",
+        )
+
     old_priority = record.priority
     new_priority = update.priority
-    
+
     if old_priority == new_priority:
         return {"message": "No change needed"}
-    
+
     # Validation: Check if new_priority is within valid range (1 to Max Priority)
     from sqlalchemy import func
-    max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
-    
+    max_priority = (
+        db.query(func.max(OrderPartPriority.priority))
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .scalar()
+        or 0
+    )
+
     if new_priority < 1 or new_priority > max_priority:
         raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid priority: {new_priority}. Must be between 1 and {max_priority}."
+            status_code=400,
+            detail=f"Invalid priority: {new_priority}. Must be between 1 and {max_priority}.",
         )
-    
-    # Logic to shift priorities
+
+    # Logic to shift priorities — active queue only (never completed/inactive)
+    active_only = (
+        OrderPartPriority.status == "active",
+        OrderPartPriority.priority > 0,
+    )
     if new_priority > old_priority:
-        # Moving down (increasing priority value)
-        # Shift items in (old_priority + 1, new_priority) down by 1 (value - 1)
         db.query(OrderPartPriority).filter(
+            *active_only,
             OrderPartPriority.priority > old_priority,
-            OrderPartPriority.priority <= new_priority
-        ).update({OrderPartPriority.priority: OrderPartPriority.priority - 1}, synchronize_session=False)
+            OrderPartPriority.priority <= new_priority,
+        ).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority - 1},
+            synchronize_session=False,
+        )
     else:
-        # Moving up (decreasing priority value)
-        # Shift items in (new_priority, old_priority - 1) up by 1 (value + 1)
         db.query(OrderPartPriority).filter(
+            *active_only,
             OrderPartPriority.priority >= new_priority,
-            OrderPartPriority.priority < old_priority
-        ).update({OrderPartPriority.priority: OrderPartPriority.priority + 1}, synchronize_session=False)
-        
-    # Set the new priority for the target record
+            OrderPartPriority.priority < old_priority,
+        ).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority + 1},
+            synchronize_session=False,
+        )
+
     record.priority = new_priority
     db.commit()
-    
+
     return {"message": "Priority updated successfully"}
 
 @router.put("/part-priorities/swap")
@@ -455,17 +484,25 @@ def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session =
     if not order_ids:
         return {"message": "No changes"}
 
-    existing_ids = {row[0] for row in db.query(OrderPartPriority.order_id).distinct().all()}
+    # Live queue only — completed/inactive must stay at priority=0
+    active_rows = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .all()
+    )
+    existing_ids = {row.order_id for row in active_rows}
     if set(order_ids) != existing_ids:
-        raise HTTPException(status_code=400, detail="Order list does not match existing priorities")
-
-    records = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
+        raise HTTPException(
+            status_code=400,
+            detail="Order list does not match existing active priorities",
+        )
 
     grouped = {}
-    for record in records:
-        if record.order_id not in grouped:
-            grouped[record.order_id] = []
-        grouped[record.order_id].append(record)
+    for record in active_rows:
+        grouped.setdefault(record.order_id, []).append(record)
 
     new_priority = 1
     for order_id in order_ids:
@@ -474,6 +511,12 @@ def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session =
         for item in items:
             item.priority = new_priority
             new_priority += 1
+
+    # Belt-and-suspenders: keep completed/inactive at 0
+    db.query(OrderPartPriority).filter(
+        OrderPartPriority.status != "active",
+        OrderPartPriority.priority != 0,
+    ).update({OrderPartPriority.priority: 0}, synchronize_session=False)
 
     db.commit()
     return {"message": "Order-wise priorities updated successfully"}
@@ -503,15 +546,24 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
             # Add new priorities
             parts = db.query(Part).filter(Part.product_id == order_update.product_id).order_by(Part.id.asc()).all()
             
-            # Get current max priority globally
-            max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
+            # Get current max priority among active live-queue rows only
+            max_priority = (
+                db.query(func.max(OrderPartPriority.priority))
+                .filter(
+                    OrderPartPriority.status == "active",
+                    OrderPartPriority.priority > 0,
+                )
+                .scalar()
+                or 0
+            )
             
             for index, part in enumerate(parts):
                 priority_entry = OrderPartPriority(
                     order_id=order.id,
                     product_id=order_update.product_id,
                     part_id=part.id,
-                    priority=max_priority + 1 + index
+                    priority=max_priority + 1 + index,
+                    status="active",
                 )
                 db.add(priority_entry)
     if order_update.project_coordinator_id is not None:
@@ -582,11 +634,24 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     db.delete(order)
     db.commit()
 
-    # Re-sequence remaining priorities to fill gaps while maintaining relative order
-    remaining_priorities = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
+    # Re-sequence remaining ACTIVE priorities only — completed/inactive stay at 0
+    remaining_priorities = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority.asc())
+        .all()
+    )
     for index, record in enumerate(remaining_priorities):
         record.priority = index + 1
-    
+
+    db.query(OrderPartPriority).filter(
+        OrderPartPriority.status != "active",
+        OrderPartPriority.priority != 0,
+    ).update({OrderPartPriority.priority: 0}, synchronize_session=False)
+
     db.commit()
     
     return {"message": "Order deleted successfully"}

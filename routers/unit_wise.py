@@ -43,6 +43,16 @@ class UnitWiseRebuildRequest(BaseModel):
             "Must NOT be used in production API calls."
         ),
     )
+    quick: Optional[bool] = Field(
+        False,
+        description=(
+            "Shop-floor quick GA: smaller population/generations/runs "
+            "(16×20×1). Ignored for greedy."
+        ),
+    )
+    population: Optional[int] = Field(None, ge=4, le=200, description="NSGA-II population size")
+    generations: Optional[int] = Field(None, ge=1, le=500, description="NSGA-II generations")
+    runs: Optional[int] = Field(None, ge=1, le=10, description="Independent NSGA-II runs")
 
 
 def _require_enabled():
@@ -78,6 +88,15 @@ def rebuild_unit_wise_schedule(
     if optimizer not in ("greedy", "nsga2", "ga", "ga_research"):
         raise HTTPException(400, 'optimizer must be "greedy" or "nsga2"')
     policy = (body.policy or "balanced").lower().strip()
+    ga_overrides = {}
+    if body.quick:
+        ga_overrides.update({"population": 16, "generations": 20, "runs": 1})
+    if body.population is not None:
+        ga_overrides["population"] = int(body.population)
+    if body.generations is not None:
+        ga_overrides["generations"] = int(body.generations)
+    if body.runs is not None:
+        ga_overrides["runs"] = int(body.runs)
     try:
         result = rebuild_unit_schedule(
             db,
@@ -87,6 +106,7 @@ def rebuild_unit_wise_schedule(
             optimizer=optimizer,
             policy=policy,
             debug=bool(body.debug),
+            ga_overrides=ga_overrides or None,
         )
         logger.info(
             "Unit-wise rebuild API",

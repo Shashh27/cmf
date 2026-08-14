@@ -892,6 +892,23 @@ def update_production_log_status(
                     "to_status": db_log.status,
                 },
             )
+            try:
+                from live_reconciliation import _safe_reconcile_after_event
+                _safe_reconcile_after_event(
+                    db,
+                    trigger="production_review",
+                    operation_id=db_log.operation_id,
+                    part_id=part_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Live reconciliation after production review failed",
+                    extra={
+                        "event": "live_reconciliation_hook_failed",
+                        "trigger": "production_review",
+                        "operation_id": db_log.operation_id,
+                    },
+                )
 
             # Unit-wise greedy refresh (does not touch batch rescheduling_items)
             try:
@@ -914,6 +931,10 @@ def update_production_log_status(
                         },
                     )
             except Exception as uw_err:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 logger.exception(
                     "Unit-wise rebuild failed after review (batch dynamic OK)",
                     extra={
