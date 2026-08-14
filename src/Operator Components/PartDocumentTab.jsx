@@ -7,6 +7,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import ModelViewer3D from './ModelViewer3D';
 import OperationChecklist from './OperationChecklist';
 import { api } from '../api/client.js';
+import DocumentPreviewer from './Document Components/DocumentPreviewer';
 
 
 const { TabPane } = Tabs;
@@ -1196,31 +1197,31 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         title={previewDoc?.document_name || previewDoc?.name || "Document Preview"}
         open={isPreviewVisible}
         onCancel={() => { setIsPreviewVisible(false); setPreviewDoc(null); }}
-        destroyOnClose={true}  
+        destroyOnClose={true}
         footer={[
           <Button key="close" onClick={() => setIsPreviewVisible(false)}>Close</Button>
         ]}
-        width="80%"
-        style={{ top: 20 }}
-        bodyStyle={{ height: '70vh', padding: 0 }}
+        width="90%"
+        style={{ top: 16 }}
+        styles={{ body: { height: '80vh', padding: 0, overflow: 'hidden' } }}
       >
         {previewDoc && (previewDoc.document_type === '3D' || previewDoc.type === '3D' || previewDoc.tag === '3D') ? (
             <div style={{ width: '100%', height: '100%' }}>
               <ModelViewer3D
                 key={previewDoc.id || previewDoc.document_id}
                 documentId={previewDoc.id || previewDoc.document_id}
-                height="70vh"
+                height="80vh"
                 showControls={true}
                 showEdgeButton={true}
               />
             </div>
-          ) : previewDoc?.document_url && (
-              previewDoc.format?.toLowerCase() === 'pdf' ||
-              previewDoc.document_type?.toLowerCase() === 'pdf' ||
-              previewDoc.type?.toLowerCase() === 'pdf' ||
-              previewDoc.document_url?.toLowerCase().endsWith('.pdf')
-            ) ? (
-            <iframe src={`${previewDoc.document_url}#toolbar=0`} title="PDF Preview" width="100%" height="100%" style={{ border: 'none' }} />
+          ) : previewDoc?.document_url ? (
+            <DocumentPreviewer
+              url={previewDoc.document_url}
+              fileName={previewDoc.document_name || previewDoc.name}
+              meta={previewDoc}
+              height="100%"
+            />
           ) : (
             <Empty description="No preview available for this file type. Please download to view." />
          )}

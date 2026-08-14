@@ -1,22 +1,24 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import {
-  DatePicker,
+import { 
+  DatePicker, 
   Select, Empty, Spin, Tabs, Table, Tooltip,
   Button, Modal, Input
 } from 'antd';
 import { api } from '../api/client.js';
 
 import {
-  Activity, BarChart2,
+  Activity, BarChart2, 
   RefreshCw, Filter,
-  Award, Clock,
+  Award, Clock, 
   CheckCircle, Target, AlertTriangle
 } from 'lucide-react';
 import { Line } from '@ant-design/plots';
 import dayjs from 'dayjs';
+import axios from 'axios';
 
 const { Option } = Select;
 const { Search: SearchInput } = Input;
+const { RangePicker } = DatePicker;
 
 const formatPercent = (value) => (
   value === null || value === undefined ? '—' : `${Number(value).toFixed(1)}%`
@@ -24,9 +26,41 @@ const formatPercent = (value) => (
 const formatMinutes = (value) => (
   value === null || value === undefined ? '—' : `${value} min`
 );
+const formatDuration = (value) => {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'number') return `${value} min`;
+  const raw = String(value);
+  if (raw.includes(':')) {
+    const parts = raw.split(':').map(Number);
+    const h = parts[0] || 0;
+    const m = parts[1] || 0;
+    const s = parts[2] || 0;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(Math.floor(s)).padStart(2, '0')}`;
+  }
+  return raw;
+};
 const formatCount = (value) => (
   value === null || value === undefined ? '—' : value
 );
+const durationToSeconds = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return value;
+  const parts = String(value).split(':').map(Number);
+  if (parts.some((n) => Number.isNaN(n))) return null;
+  return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
+};
+
+const compareShiftValues = (aVal, bVal, field) => {
+  if (aVal == null && bVal == null) return 0;
+  if (aVal == null) return 1;
+  if (bVal == null) return -1;
+  if (field === 'date') return new Date(aVal) - new Date(bVal);
+  if (['productionTime', 'idleTime', 'offTime'].includes(field)) {
+    return (durationToSeconds(aVal) ?? -1) - (durationToSeconds(bVal) ?? -1);
+  }
+  if (typeof aVal === 'string') return aVal.localeCompare(String(bVal));
+  return Number(aVal) - Number(bVal);
+};
 const getOeeColor = (value) => {
   if (value === null || value === undefined) return '#94a3b8';
   if (value >= 85) return '#10b981';
@@ -184,7 +218,7 @@ const OEEMachineCard = ({ machine, onClick }) => {
 const OEEDashboard = () => {
   const [machines, setMachines] = useState([]);
   const [oeeData, setOeeData] = useState({
-    dateRange: dayjs(),
+    dateRange: [dayjs().startOf('day'), dayjs().endOf('day')],
     selectedShift: 'all',
   });
 
@@ -202,7 +236,10 @@ const OEEDashboard = () => {
     sortBy: 'oee',
     sortDirection: 'desc'
   });
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+  });
   const [allMachinesOEE, setAllMachinesOEE] = useState([]);
   const [isLoadingMachines, setIsLoadingMachines] = useState(false);
   const [selectedMachineData, setSelectedMachineData] = useState(null);
@@ -211,7 +248,7 @@ const OEEDashboard = () => {
   const [trendData, setTrendData] = useState([]);
   const [overallOEEData, setOverallOEEData] = useState(null);
   const [isLoadingOverallOEE, setIsLoadingOverallOEE] = useState(false);
-
+  
   useEffect(() => {
     fetchAllData();
   }, [oeeData.dateRange, oeeData.selectedShift]);
@@ -241,21 +278,31 @@ const OEEDashboard = () => {
       });
   }, [allMachinesOEE, selectedMachineIds, searchQuery, machineSortOrder, tierFilter]);
 
+  // Combined fetch function for hierarchical data
   const fetchAllData = async () => {
     setIsLoadingOverallOEE(true);
     setIsLoadingShiftSummary(true);
     setIsLoadingMachines(true);
+    
     try {
-      const selectedDate = dayjs(oeeData.dateRange).format('YYYY-MM-DD');
+      const [from, to] = oeeData.dateRange || [];
       const params = new URLSearchParams();
-      params.append('date', selectedDate);
+      if (from && to) {
+        params.append('start_date', dayjs(from).format('YYYY-MM-DD HH:mm:ss'));
+        params.append('end_date', dayjs(to).format('YYYY-MM-DD HH:mm:ss'));
+      }
+      // Shift filter applies to machine-wise analysis (and KPIs); shift summary still uses range
       params.append('shift', oeeData.selectedShift || 'all');
-
+      
+      // Call the single hierarchical endpoint
       const response = await api.get(`/production-analytics/overall-oee-analytics/?${params.toString()}`
       );
+      
       const data = response.data;
 
+      // 1. Set Overall KPI Data
       setOverallOEEData(data);
+
       setAllMachinesOEE(data.machine_breakdown || []);
       setMachines((data.machine_breakdown || []).map((m) => ({
         machine_id: m.machine_id,
@@ -274,12 +321,13 @@ const OEEDashboard = () => {
         totalParts: item.total_parts ?? null,
         goodParts: item.good_parts ?? null,
         badParts: item.bad_parts ?? null,
-        availability: item.oee_metrics?.availability ?? null,
-        performance: item.oee_metrics?.performance ?? null,
-        quality: item.oee_metrics?.quality ?? null,
-        oee: item.oee_metrics?.oee ?? null,
+        availability: item.availability ?? item.oee_metrics?.availability ?? null,
+        performance: item.performance ?? item.oee_metrics?.performance ?? null,
+        quality: item.quality ?? item.oee_metrics?.quality ?? null,
+        oee: item.oee ?? item.oee_metrics?.oee ?? null
       }));
       setShiftSummaryData(tableData);
+
     } catch (error) {
     } finally {
       setIsLoadingOverallOEE(false);
@@ -287,157 +335,294 @@ const OEEDashboard = () => {
       setIsLoadingMachines(false);
     }
   };
+  // Show trend modal and fetch data
+  // const showTrendModal = async (machineId) => {
+  //   setSelectedMachineForTrend(machineId);
+  //   const machine = allMachinesOEE.find(m => m.machine_id === machineId);
+  //   setSelectedMachineData(machine);
+  //   setTrendModalVisible(true);
+  //   setTrendModalLoading(true);
+    
+  //   try {
+  //     const [startDate, endDate] = oeeData.dateRange;
+  //     const formattedStartDate = dayjs(startDate).format('YYYY-MM-DD');
+  //     const formattedEndDate = dayjs(endDate).format('YYYY-MM-DD');
+      
+  //     const response = await axios.get(
+  //       `http://172.19.224.1:8002/production_monitoring/machine-oee-analysis/${machineId}?start_date=${formattedStartDate}&end_date=${formattedEndDate}`
+  //     );
+      
+  //     if (response.data && response.data.oee_trends) {
+  //       // Transform data for chart
+  //       const chartData = response.data.oee_trends.flatMap(trend => [
+  //         { date: trend.date, type: 'OEE', value: trend.oee },
+  //         { date: trend.date, type: 'Availability', value: trend.availability },
+  //         { date: trend.date, type: 'Performance', value: trend.performance },
+  //         { date: trend.date, type: 'Quality', value: trend.quality }
+  //       ]);
+        
+  //       setTrendData(chartData);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error fetching trend data:', error);
+  //   } finally {
+  //     setTrendModalLoading(false);
+  //   }
+  // };
 
   const showTrendModal = async (machineId) => {
-    setSelectedMachineForTrend(machineId);
-    const machine = allMachinesOEE.find(m => m.machine_id === machineId);
-    setSelectedMachineData(machine);
-    setTrendModalVisible(true);
-    setTrendModalLoading(true);
-    try {
-      const selectedDate = dayjs(oeeData.dateRange).format('YYYY-MM-DD');
-      const params = new URLSearchParams();
-      params.append('date', selectedDate);
-      params.append('shift', oeeData.selectedShift !== null && oeeData.selectedShift !== 'all' ? oeeData.selectedShift : 'all');
-      const response = await api.get(`/production-analytics/machine-oee-analysis/${machineId}?${params.toString()}`
-      );
-      if (response.data && response.data.oee_trends) {
-        const chartData = response.data.oee_trends.flatMap(trend => [
-          { date: trend.date, type: 'OEE', value: trend.oee },
-          { date: trend.date, type: 'Availability', value: trend.availability },
-          { date: trend.date, type: 'Performance', value: trend.performance },
-          { date: trend.date, type: 'Quality', value: trend.quality }
-        ]);
-        setTrendData(chartData);
-      }
-    } catch (error) {
-    } finally {
-      setTrendModalLoading(false);
+  setSelectedMachineForTrend(machineId);
+  const machine = allMachinesOEE.find(m => m.machine_id === machineId);
+  setSelectedMachineData(machine);
+  setTrendModalVisible(true);
+  setTrendModalLoading(true);
+  
+  try {
+    const rangeEnd = Array.isArray(oeeData.dateRange)
+      ? oeeData.dateRange[1]
+      : oeeData.dateRange;
+    const selectedDate = dayjs(rangeEnd || undefined).format('YYYY-MM-DD');
+    
+    const params = new URLSearchParams();
+    params.append('date', selectedDate);
+    
+    if (oeeData.selectedShift !== null && oeeData.selectedShift !== 'all') {
+      params.append('shift', oeeData.selectedShift);
+    } else {
+      params.append('shift', 'all');
+    }
+    
+    const response = await api.get(`/production-analytics/machine-oee-analysis/${machineId}?${params.toString()}`
+    );
+    
+    if (response.data && response.data.oee_trends) {
+      // Transform data for chart
+      const chartData = response.data.oee_trends.flatMap(trend => [
+        { date: trend.date, type: 'OEE', value: trend.oee },
+        { date: trend.date, type: 'Availability', value: trend.availability },
+        { date: trend.date, type: 'Performance', value: trend.performance },
+        { date: trend.date, type: 'Quality', value: trend.quality }
+      ]);
+      
+      setTrendData(chartData);
+    }
+  } catch (error) {
+  } finally {
+    setTrendModalLoading(false);
+  }
+};
+  
+  // Handle date range change
+  const handleDateChange = (dates) => {
+    if (dates && dates[0] && dates[1]) {
+      setOeeData({ ...oeeData, dateRange: dates });
     }
   };
-
-  const handleDateChange = (date) => {
-    if (date) setOeeData({ ...oeeData, dateRange: date });
+  
+  // Handle shift selection change
+  const handleShiftChange = (value) => {
+    setOeeData({ ...oeeData, selectedShift: value });
   };
-  const handleShiftChange = (value) => setOeeData({ ...oeeData, selectedShift: value });
+  
+  // Handle refresh
   const handleRefresh = () => {
-    setOeeData({ ...oeeData, dateRange: dayjs() });
-    fetchAllData();
+    setOeeData({
+      ...oeeData,
+      dateRange: [dayjs().startOf('day'), dayjs().endOf('day')],
+    });
   };
-  const handleTableChange = (pagination) => setPagination(pagination);
 
-  const sortedShiftSummaryData = [...shiftSummaryData].sort((a, b) => {
+  const handleTableChange = (nextPagination, _filters, sorter) => {
+    setPagination(nextPagination);
+    if (sorter && sorter.field) {
+      if (sorter.order) {
+        setShiftSummaryFilter((prev) => ({
+          ...prev,
+          sortBy: sorter.field,
+          sortDirection: sorter.order === 'ascend' ? 'asc' : 'desc',
+        }));
+      }
+    }
+  };
+  
+  // Sort shift summary data
+  const sortedShiftSummaryData = useMemo(() => {
     const sortField = shiftSummaryFilter.sortBy;
     const sortOrder = shiftSummaryFilter.sortDirection === 'asc' ? 1 : -1;
-    const aVal = a[sortField];
-    const bVal = b[sortField];
-    if (aVal == null && bVal == null) return 0;
-    if (aVal == null) return 1;
-    if (bVal == null) return -1;
-    if (sortField === 'date') return sortOrder * (new Date(aVal) - new Date(bVal));
-    if (typeof aVal === 'string') return sortOrder * aVal.localeCompare(bVal);
-    return sortOrder * (aVal - bVal);
-  });
+    return [...shiftSummaryData].sort((a, b) => (
+      sortOrder * compareShiftValues(a[sortField], b[sortField], sortField)
+    ));
+  }, [shiftSummaryData, shiftSummaryFilter.sortBy, shiftSummaryFilter.sortDirection]);
+  
+  // Filter shift summary data by search term
+  const filteredShiftSummaryData = useMemo(() => {
+    const searchTerm = (shiftSummaryFilter.search || '').toLowerCase();
+    if (!searchTerm) return sortedShiftSummaryData;
+    return sortedShiftSummaryData.filter((item) => (
+      (item.machine || '').toLowerCase().includes(searchTerm)
+      || (item.date || '').toLowerCase().includes(searchTerm)
+      || String(item.shift || '').includes(searchTerm)
+    ));
+  }, [sortedShiftSummaryData, shiftSummaryFilter.search]);
 
-  const filteredShiftSummaryData = sortedShiftSummaryData.filter(item => {
-    const searchTerm = shiftSummaryFilter.search.toLowerCase();
-    return (
-      item.machine.toLowerCase().includes(searchTerm) ||
-      item.date.toLowerCase().includes(searchTerm)
-    );
-  });
-
+  const makeSorter = (field) => (a, b) => compareShiftValues(a[field], b[field], field);
+  
+  // Table columns
   const columns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, fixed: 'left' },
     {
-      title: 'Shift', dataIndex: 'shift', key: 'shift', width: 80, fixed: 'left',
-      render: (value) => value || 'All'
+      title: 'Date',
+      dataIndex: 'date',
+      key: 'date',
+      width: 110,
+      fixed: 'left',
+      sorter: makeSorter('date'),
+      sortOrder: shiftSummaryFilter.sortBy === 'date'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
     },
-    { title: 'Machine', dataIndex: 'machine', key: 'machine', width: 150, fixed: 'left' },
     {
-      title: 'Production Time', dataIndex: 'productionTime', key: 'productionTime', width: 120,
+      title: 'Shift',
+      dataIndex: 'shift',
+      key: 'shift',
+      width: 90,
+      fixed: 'left',
+      sorter: makeSorter('shift'),
+      sortOrder: shiftSummaryFilter.sortBy === 'shift'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
       render: (value) => (
-        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
-          <div className="font-medium text-emerald-600">{formatMinutes(value)}</div>
-        </Tooltip>
-      )
+        <span style={{
+          display: 'inline-flex', padding: '2px 8px', borderRadius: 99,
+          background: '#eff6ff', color: '#1d4ed8', fontSize: 12, fontWeight: 700,
+        }}>
+          {value ? `Shift ${value}` : '—'}
+        </span>
+      ),
     },
     {
-      title: 'Idle Time', dataIndex: 'idleTime', key: 'idleTime', width: 120,
+      title: 'Machine',
+      dataIndex: 'machine',
+      key: 'machine',
+      width: 170,
+      fixed: 'left',
+      sorter: makeSorter('machine'),
+      sortOrder: shiftSummaryFilter.sortBy === 'machine'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => <span style={{ fontWeight: 700, color: '#0f172a' }}>{value || '—'}</span>,
+    },
+    {
+      title: 'Production Time',
+      dataIndex: 'productionTime',
+      key: 'productionTime',
+      width: 140,
+      sorter: makeSorter('productionTime'),
+      sortOrder: shiftSummaryFilter.sortBy === 'productionTime'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
       render: (value) => (
-        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
-          <div className="font-medium text-amber-600">{formatMinutes(value)}</div>
-        </Tooltip>
-      )
+        <span style={{ fontWeight: 600, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
+          {formatDuration(value)}
+        </span>
+      ),
     },
     {
-      title: 'Off Time', dataIndex: 'offTime', key: 'offTime', width: 120,
+      title: 'Idle Time',
+      dataIndex: 'idleTime',
+      key: 'idleTime',
+      width: 120,
+      sorter: makeSorter('idleTime'),
+      sortOrder: shiftSummaryFilter.sortBy === 'idleTime'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
       render: (value) => (
-        <Tooltip title={value == null ? 'No data' : `${value} minutes`}>
-          <div className="font-medium text-red-600">{formatMinutes(value)}</div>
-        </Tooltip>
-      )
+        <span style={{ fontWeight: 600, color: '#d97706', fontVariantNumeric: 'tabular-nums' }}>
+          {formatDuration(value)}
+        </span>
+      ),
     },
     {
-      title: 'Parts', dataIndex: 'parts', key: 'parts', width: 60,
+      title: 'Off Time',
+      dataIndex: 'offTime',
+      key: 'offTime',
+      width: 120,
+      sorter: makeSorter('offTime'),
+      sortOrder: shiftSummaryFilter.sortBy === 'offTime'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => (
+        <span style={{ fontWeight: 600, color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+          {formatDuration(value)}
+        </span>
+      ),
+    },
+    {
+      title: 'Parts',
+      dataIndex: 'totalParts',
+      key: 'totalParts',
+      width: 130,
+      sorter: makeSorter('totalParts'),
+      sortOrder: shiftSummaryFilter.sortBy === 'totalParts'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
       render: (_, record) => (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-500">Total:</span>
-            <span className="font-medium">{formatCount(record.totalParts)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-green-600">Good:</span>
-            <span className="font-medium text-green-600">{formatCount(record.goodParts)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-red-600">Bad:</span>
-            <span className="font-medium text-red-600">{formatCount(record.badParts)}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      title: 'Availability', dataIndex: 'availability', key: 'availability', width: 100,
-      render: (value) => (
-        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
-          <div className="font-medium text-blue-600">{formatPercent(value)}</div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'Performance', dataIndex: 'performance', key: 'performance', width: 100,
-      render: (value) => (
-        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
-          <div className="font-medium text-amber-600">{formatPercent(value)}</div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'Quality', dataIndex: 'quality', key: 'quality', width: 100,
-      render: (value) => (
-        <Tooltip title={value == null ? 'No data' : formatPercent(value)}>
-          <div className="font-medium text-purple-600">{formatPercent(value)}</div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'OEE', dataIndex: 'oee', key: 'oee', width: 120, fixed: 'right',
-      render: (value) => (
-        <div className="flex items-center gap-2">
-          <div className="font-medium" style={{ color: getOeeColor(value) }}>
-            {formatPercent(value)}
-          </div>
+        <div style={{ display: 'grid', gap: 2, fontSize: 12 }}>
+          <div><span style={{ color: '#64748b' }}>Total </span><b>{formatCount(record.totalParts)}</b></div>
+          <div><span style={{ color: '#16a34a' }}>Good </span><b style={{ color: '#16a34a' }}>{formatCount(record.goodParts)}</b></div>
+          <div><span style={{ color: '#dc2626' }}>Bad </span><b style={{ color: '#dc2626' }}>{formatCount(record.badParts)}</b></div>
         </div>
       ),
-      sorter: (a, b) => {
-        if (a.oee == null && b.oee == null) return 0;
-        if (a.oee == null) return 1;
-        if (b.oee == null) return -1;
-        return a.oee - b.oee;
-      },
-      defaultSortOrder: 'descend'
-    }
+    },
+    {
+      title: 'Availability',
+      dataIndex: 'availability',
+      key: 'availability',
+      width: 120,
+      sorter: makeSorter('availability'),
+      sortOrder: shiftSummaryFilter.sortBy === 'availability'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => <span style={{ fontWeight: 700, color: '#2563eb' }}>{formatPercent(value)}</span>,
+    },
+    {
+      title: 'Performance',
+      dataIndex: 'performance',
+      key: 'performance',
+      width: 120,
+      sorter: makeSorter('performance'),
+      sortOrder: shiftSummaryFilter.sortBy === 'performance'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => <span style={{ fontWeight: 700, color: '#d97706' }}>{formatPercent(value)}</span>,
+    },
+    {
+      title: 'Quality',
+      dataIndex: 'quality',
+      key: 'quality',
+      width: 110,
+      sorter: makeSorter('quality'),
+      sortOrder: shiftSummaryFilter.sortBy === 'quality'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => <span style={{ fontWeight: 700, color: '#7c3aed' }}>{formatPercent(value)}</span>,
+    },
+    {
+      title: 'OEE',
+      dataIndex: 'oee',
+      key: 'oee',
+      width: 120,
+      fixed: 'right',
+      sorter: makeSorter('oee'),
+      sortOrder: shiftSummaryFilter.sortBy === 'oee'
+        ? (shiftSummaryFilter.sortDirection === 'asc' ? 'ascend' : 'descend')
+        : null,
+      render: (value) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 800, color: getOeeColor(value) }}>{formatPercent(value)}</span>
+          <OeeStatusPill oee={value} />
+        </div>
+      ),
+    },
   ];
 
   const tabItems = [
@@ -526,42 +711,64 @@ const OEEDashboard = () => {
       ),
       children: (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '16px' }}>
-          <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
-            <div className="flex items-center gap-4">
-              <SearchInput
-                placeholder="Search by machine name or date..."
-                style={{ width: 250 }}
-                value={shiftSummaryFilter.search}
-                onChange={e => setShiftSummaryFilter({ ...shiftSummaryFilter, search: e.target.value })}
-                allowClear
-              />
-              <div className="flex items-center gap-2">
-                <span className="text-gray-500">Sort by:</span>
-                <Select
-                  style={{ width: 150 }}
-                  value={shiftSummaryFilter.sortBy}
-                  onChange={value => setShiftSummaryFilter({ ...shiftSummaryFilter, sortBy: value })}
-                >
-                  <Option value="date">Date</Option>
-                  <Option value="machine">Machine</Option>
-                  <Option value="productionTime">Production Time</Option>
-                  <Option value="idleTime">Idle Time</Option>
-                  <Option value="offTime">Off Time</Option>
-                  <Option value="oee">OEE</Option>
-                </Select>
-              </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <SearchInput
+              placeholder="Search machine, date, or shift…"
+              style={{ width: 280 }}
+              value={shiftSummaryFilter.search}
+              onChange={e => setShiftSummaryFilter({
+                ...shiftSummaryFilter,
+                search: e.target.value
+              })}
+              allowClear
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Sort by</span>
+              <Select
+                style={{ width: 160 }}
+                size="small"
+                value={shiftSummaryFilter.sortBy}
+                onChange={value => setShiftSummaryFilter({
+                  ...shiftSummaryFilter,
+                  sortBy: value
+                })}
+              >
+                <Option value="date">Date</Option>
+                <Option value="shift">Shift</Option>
+                <Option value="machine">Machine</Option>
+                <Option value="productionTime">Production Time</Option>
+                <Option value="idleTime">Idle Time</Option>
+                <Option value="offTime">Off Time</Option>
+                <Option value="totalParts">Total Parts</Option>
+                <Option value="availability">Availability</Option>
+                <Option value="performance">Performance</Option>
+                <Option value="quality">Quality</Option>
+                <Option value="oee">OEE</Option>
+              </Select>
+              <Select
+                style={{ width: 120 }}
+                size="small"
+                value={shiftSummaryFilter.sortDirection}
+                onChange={value => setShiftSummaryFilter({
+                  ...shiftSummaryFilter,
+                  sortDirection: value
+                })}
+              >
+                <Option value="desc">Descending</Option>
+                <Option value="asc">Ascending</Option>
+              </Select>
             </div>
           </div>
-
+          
           {isLoadingShiftSummary ? (
             <div className="flex justify-center items-center py-10">
               <Spin size="large" />
             </div>
-          ) : shiftSummaryData.length > 0 ? (
-            <Table
-              columns={columns}
-              dataSource={filteredShiftSummaryData}
-              scroll={{ x: 1500, y: 600 }}
+          ) : filteredShiftSummaryData.length > 0 ? (
+            <Table 
+              columns={columns} 
+              dataSource={filteredShiftSummaryData} 
+              scroll={{ x: 1500, y: 560 }}
               pagination={{
                 ...pagination,
                 showSizeChanger: true,
@@ -570,81 +777,82 @@ const OEEDashboard = () => {
               }}
               onChange={handleTableChange}
               size="middle"
-              variant="outlined"
-              className="custom-table"
+              rowKey={(record) => `${record.machineId}-${record.date}-${record.shift}-${record.key}`}
+              style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}
             />
           ) : (
-            <div style={{ padding: 48, textAlign: 'center' }}>
-              <Empty description="No machines configured" />
-            </div>
+            <Empty description={shiftSummaryData.length ? 'No rows match your search' : 'No shift summary rows for this date/shift'} />
           )}
         </div>
       )
     }
   ];
 
-  // ── KPI data derived from API ──────────────────────────────────────────────
-  const oee       = overallOEEData?.overall_oee          || 0;
-  const avail     = overallOEEData?.overall_availability  || 0;
-  const perf      = overallOEEData?.overall_performance   || 0;
-  const qual      = overallOEEData?.overall_quality       || 0;
+  const oee = overallOEEData?.overall_oee || 0;
+  const avail = overallOEEData?.overall_availability || 0;
+  const perf = overallOEEData?.overall_performance || 0;
+  const qual = overallOEEData?.overall_quality || 0;
 
   const kpiCards = [
-    { label: 'OEE',          value: oee.toFixed(1), icon: Award,    color: oee  >= 85 ? '#10b981' : oee  >= 60 ? '#f59e0b' : '#ef4444' },
-    { label: 'Availability', value: avail.toFixed(1), icon: Clock,    color: '#185FA5' },
-    { label: 'Performance',  value: perf.toFixed(1),  icon: Target,   color: '#BA7517' },
-    { label: 'Quality',      value: qual.toFixed(1),  icon: CheckCircle, color: '#534AB7' },
+    { label: 'OEE', value: oee.toFixed(1), icon: Award, color: oee >= 85 ? '#10b981' : oee >= 60 ? '#f59e0b' : '#ef4444' },
+    { label: 'Availability', value: avail.toFixed(1), icon: Clock, color: '#185FA5' },
+    { label: 'Performance', value: perf.toFixed(1), icon: Target, color: '#BA7517' },
+    { label: 'Quality', value: qual.toFixed(1), icon: CheckCircle, color: '#534AB7' },
   ];
 
   return (
     <div style={{ background: '#f1f5f9', minHeight: '100vh', fontFamily: 'Inter, system-ui, -apple-system, sans-serif', padding: '24px' }}>
 
-      {/* Top bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
-            Overall Equipment Effectiveness
-          </h1>
           <div style={{ fontSize: 13, color: '#64748b', marginTop: 2, fontWeight: 500 }}>
-            {dayjs(oeeData.dateRange).format('MMMM D, YYYY')} · {dayjs().format('HH:mm:ss')}
+            {Array.isArray(oeeData.dateRange) && oeeData.dateRange[0] && oeeData.dateRange[1]
+              ? `${dayjs(oeeData.dateRange[0]).format('MMM D, YYYY HH:mm')} → ${dayjs(oeeData.dateRange[1]).format('MMM D, YYYY HH:mm')}`
+              : dayjs().format('MMMM D, YYYY')}
+            {' · '}{dayjs().format('HH:mm:ss')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select
-            mode="multiple"
-            placeholder="Select Machines"
-            style={{ width: 200, minWidth: 200, maxWidth: 200 }}
-            size="small"
-            allowClear
-            maxTagCount="responsive"
-            maxTagPlaceholder={(omitted) => `+${omitted.length} selected`}
-            value={selectedMachineIds}
-            onChange={(values) => setSelectedMachineIds(values || [])}
-            options={[
-              { label: 'ALL', value: 'ALL' },
-              ...machines.map(m => ({ label: m.machine_name, value: m.machine_id }))
-            ]}
-          />
-          <DatePicker
+          {activeTab === '3' && (
+            <Select
+              mode="multiple"
+              placeholder="Select Machines"
+              style={{ width: 200, minWidth: 200, maxWidth: 200 }}
+              size="small"
+              allowClear
+              maxTagCount="responsive"
+              maxTagPlaceholder={(omitted) => `+${omitted.length} selected`}
+              value={selectedMachineIds}
+              onChange={(values) => setSelectedMachineIds(values || [])}
+              options={[
+                { label: 'ALL', value: 'ALL' },
+                ...machines.map(m => ({ label: m.machine_name, value: m.machine_id }))
+              ]}
+            />
+          )}
+          <RangePicker
             value={oeeData.dateRange}
             onChange={handleDateChange}
             allowClear={false}
-            format="YYYY-MM-DD"
+            showTime={{ format: 'HH:mm' }}
+            format="YYYY-MM-DD HH:mm"
             size="small"
+            style={{ minWidth: 320 }}
           />
-          <Select
-            placeholder="Shift"
-            style={{ width: 100 }}
-            value={oeeData.selectedShift}
-            onChange={handleShiftChange}
-            allowClear
-            size="small"
-          >
-            <Option value="all">All</Option>
-            <Option value={1}>Shift 1</Option>
-            <Option value={2}>Shift 2</Option>
-            <Option value={3}>Shift 3</Option>
-          </Select>
+          {activeTab === '3' && (
+            <Select
+              placeholder="Shift"
+              style={{ width: 100 }}
+              value={oeeData.selectedShift}
+              onChange={handleShiftChange}
+              allowClear
+              size="small"
+            >
+              <Option value="all">All</Option>
+              <Option value={1}>Shift 1</Option>
+              <Option value={2}>Shift 2</Option>
+            </Select>
+          )}
           <Button size="small" onClick={handleRefresh} icon={<RefreshCw size={13} style={{ verticalAlign: 'middle' }} />} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }} loading={isLoadingOverallOEE || isLoadingShiftSummary || isLoadingMachines}>
             Refresh
           </Button>
@@ -656,7 +864,6 @@ const OEEDashboard = () => {
         </div>
       </div>
 
-      {/* ── KPI cards ───────────────────────────────────────────────────────── */}
       {isLoadingOverallOEE ? (
         <div className="flex justify-center items-center h-28">
           <Spin size="large" />
@@ -692,10 +899,9 @@ const OEEDashboard = () => {
         </div>
       )}
 
-      {/* ── Tabs ────────────────────────────────────────────────────────────── */}
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
-
-      {/* ── Trend Modal ─────────────────────────────────────────────────────── */}
+      
+      {/* Trend Modal */}
       <Modal
         title={
           <div className="flex items-center">
@@ -707,7 +913,9 @@ const OEEDashboard = () => {
         onCancel={() => setTrendModalVisible(false)}
         width={900}
         footer={[
-          <Button key="close" onClick={() => setTrendModalVisible(false)}>Close</Button>
+          <Button key="close" onClick={() => setTrendModalVisible(false)}>
+            Close
+          </Button>
         ]}
       >
         {trendModalLoading ? (
@@ -716,14 +924,22 @@ const OEEDashboard = () => {
           </div>
         ) : trendData.length > 0 ? (
           <div style={{ height: 500 }}>
-            <Line
+            <Line 
               data={trendData}
               xField="date"
               yField="value"
               seriesField="type"
-              yAxis={{ min: 0, max: 100, title: { text: 'Percentage (%)' } }}
+              yAxis={{
+                min: 0,
+                max: 100,
+                title: {
+                  text: 'Percentage (%)'
+                }
+              }}
               color={['#1890ff', '#52c41a', '#faad14', '#722ed1']}
-              legend={{ position: 'top' }}
+              legend={{
+                position: 'top'
+              }}
               animation={false}
             />
           </div>
@@ -731,10 +947,8 @@ const OEEDashboard = () => {
           <Empty description="No trend data available for this machine" />
         )}
       </Modal>
-
     </div>
   );
 };
 
-export default OEEDashboard;
-
+export default OEEDashboard; 

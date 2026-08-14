@@ -1,33 +1,25 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
-import { CheckCircleOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Table, message, Spin, Empty } from 'antd';
 import dayjs from 'dayjs';
+import config from '../Config/config';
 import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 import { authFetch } from '../api/client.js';
+import {
+  ModernTableStyles,
+  getNotificationTableProps,
+  renderAckCell,
+  getOrderAckState,
+  normalizeUserRole,
+  getCurrentUserInfo,
+  useLatestCallback,
+} from './notificationTableUtils';
 
-const OrderNotifications = ({ dateRange, onCount }) => {
+const OrderNotifications = ({ dateRange, onCount, refreshKey = 0, query = '' }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [query, setQuery] = useState('');
-
-  const getCurrentUser = () => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        return {
-          username: user.username || user.user_name || user.name,
-          role: user.role || user.user_role
-        };
-      } catch (e) {
-        console.error('Error parsing user from localStorage', e);
-      }
-    }
-    return { username: null, role: null };
-  };
+  const onCountRef = useLatestCallback(onCount);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -36,21 +28,14 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
-      
-      
-      const url = `${base}?${params.toString()}`;
 
-      const response = await authFetch(url);
-      if (!response.ok) {
-        throw new Error('Failed to fetch notifications');
-      }
+      const response = await authFetch(`${base}?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch notifications');
       const data = await response.json();
-
       const currentUser = getStoredUser();
       const filteredData = filterOwnCreatedNotifications(data, currentUser);
-
       setNotifications(filteredData);
-      if (onCount) {
+      if (onCountRef.current) {
         const userRole = String(currentUser?.role || currentUser?.user_role || '').toLowerCase();
         const pending = Array.isArray(filteredData)
           ? filteredData.filter((n) => {
@@ -60,50 +45,35 @@ const OrderNotifications = ({ dateRange, onCount }) => {
               return !n.is_ack;
             }).length
           : 0;
-        onCount(pending);
+        onCountRef.current(pending);
       }
     } catch (error) {
       message.error(error.message);
     } finally {
       setLoading(false);
     }
-  }, [dateRange]);
+  }, [dateRange, onCountRef]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, refreshKey]);
 
   const handleAcknowledge = async (id) => {
     try {
-      const currentUser = getCurrentUser();
+      const currentUser = getCurrentUserInfo();
       if (!currentUser.username || !currentUser.role) {
         message.error('User information not found. Please log in again.');
         return;
       }
-
-      // Normalize role to match backend expectations
-      let normalizedRole = currentUser.role.toLowerCase();
-      if (normalizedRole.includes('manufacturing')) {
-        normalizedRole = 'mc';
-      } else if (normalizedRole.includes('project')) {
-        normalizedRole = 'pc';
-      } else if (normalizedRole.includes('admin')) {
-        normalizedRole = 'admin';
-      }
-
       const response = await authFetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          role: normalizedRole,
+          role: normalizeUserRole(currentUser.role),
           user_name: currentUser.username,
         }),
       });
-      if (!response.ok) {
-        throw new Error('Failed to acknowledge notification');
-      }
+      if (!response.ok) throw new Error('Failed to acknowledge notification');
       message.success('Notification acknowledged');
       fetchNotifications();
     } catch (error) {
@@ -111,161 +81,96 @@ const OrderNotifications = ({ dateRange, onCount }) => {
     }
   };
 
-  const columns = [
-    {
-      title: 'Sl No',
-      key: 'sl_no',
-      width: 90,
-      render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Order',
-      dataIndex: 'sale_order_number',
-      key: 'sale_order_number',
-      render: (text) => text || '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Product',
-      dataIndex: 'product_name',
-      key: 'product_name',
-      render: (text) => text || '-',
-      responsive: ['md', 'lg', 'xl'],
-    },
-    {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      render: (text) => dayjs(text).format('DD/MM/YYYY HH:mm'),
-      responsive: ['sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Status',
-      key: 'status',
-      render: (_, record) => {
-        const currentUser = getCurrentUser();
-        const userRole = (currentUser.role || '').toLowerCase();
-        
-        // Check if current user's role has acknowledged
-        let isAcknowledgedByCurrentRole = false;
-        if (userRole.includes('manufacturing') && record.mc_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        } else if (userRole.includes('project') && record.pc_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        } else if (userRole.includes('admin') && record.admin_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        }
+  const columns = useMemo(() => {
+    const currentUser = getCurrentUserInfo();
+    return [
+      {
+        title: 'Sl No',
+        key: 'sl_no',
+        width: 70,
+        sorter: false,
+        render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
+      },
+      {
+        title: 'Project Number',
+        dataIndex: 'sale_order_number',
+        key: 'sale_order_number',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Project Name',
+        dataIndex: 'project_name',
+        key: 'project_name',
+        sortValue: (r) => r.project_name || r.product_name,
+        render: (_, record) => record.project_name || record.product_name || '-',
+      },
+      {
+        title: 'Customer',
+        dataIndex: 'customer_name',
+        key: 'customer_name',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Created By',
+        dataIndex: 'created_by',
+        key: 'created_by',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Created At',
+        dataIndex: 'created_at',
+        key: 'created_at',
+        render: (text) => (text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-'),
+      },
+      {
+        title: 'Acknowledged',
+        key: 'acknowledged',
+        sorter: false,
+        render: (_, record) => {
+          const { isAck, ackBy } = getOrderAckState(record, currentUser.role);
+          return renderAckCell({
+            isAck,
+            ackBy,
+            onAcknowledge: () => handleAcknowledge(record.id),
+          });
+        },
+      },
+    ];
+  }, [currentPage, pageSize]);
 
-        return (
-          <Tag color={isAcknowledgedByCurrentRole ? 'green' : 'orange'}>
-            {isAcknowledgedByCurrentRole ? 'Acknowledged' : 'Pending'}
-          </Tag>
-        );
-      },
-      filters: [
-        { text: 'Acknowledged', value: true },
-        { text: 'Pending', value: false },
-      ],
-      onFilter: (value, record) => {
-        const currentUser = getCurrentUser();
-        const userRole = (currentUser.role || '').toLowerCase();
-        
-        if (userRole.includes('manufacturing')) {
-          return value ? record.mc_is_ack : !record.mc_is_ack;
-        } else if (userRole.includes('project')) {
-          return value ? record.pc_is_ack : !record.pc_is_ack;
-        } else if (userRole.includes('admin')) {
-          return value ? record.admin_is_ack : !record.admin_is_ack;
-        }
-        return false;
-      },
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Created By',
-      dataIndex: 'created_by',
-      key: 'created_by',
-      render: (text) => text || '-',
-      responsive: ['lg', 'xl'],
-    },
-    {
-      title: 'Acknowledged',
-      key: 'acknowledged',
-      render: (_, record) => {
-        const currentUser = getCurrentUser();
-        const userRole = (currentUser.role || '').toLowerCase();
-        
-        // Check if current user's role has already acknowledged using role-specific status
-        let isAcknowledgedByCurrentRole = false;
-        if (userRole.includes('manufacturing') && record.mc_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        } else if (userRole.includes('project') && record.pc_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        } else if (userRole.includes('admin') && record.admin_is_ack) {
-          isAcknowledgedByCurrentRole = true;
-        }
-
-        return (
-          <Button
-            type="primary"
-            onClick={() => handleAcknowledge(record.id)}
-            size="small"
-            disabled={isAcknowledgedByCurrentRole}
-          >
-            {isAcknowledgedByCurrentRole ? 'Acknowledged' : 'Acknowledge'}
-          </Button>
-        );
-      },
-      filters: [
-        { text: 'Acknowledged', value: true },
-        { text: 'Unacknowledged', value: false },
-      ],
-      onFilter: (value, record) => record.is_ack === value,
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-  ];
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return notifications;
+    return notifications.filter((n) =>
+      [n.sale_order_number, n.project_name, n.product_name, n.customer_name, n.created_by]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    );
+  }, [notifications, query]);
 
   return (
     <Spin spinning={loading}>
-      <style>{`
-        @media (max-width: 768px) {
-          .ant-table {
-            font-size: 12px;
-          }
-          .ant-table-thead > tr > th,
-          .ant-table-tbody > tr > td {
-            padding: 8px 6px;
-          }
-        }
-      `}</style>
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
-        <Input.Search
-          placeholder="Search orders"
-          allowClear
-          maxLength={20}
-          onSearch={(val) => setQuery(val)}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ maxWidth: 320 }}
-        />
-      </div>
+      <ModernTableStyles />
       <Table
-        columns={columns.map(col => ({ ...col, title: <span style={{ fontWeight: 'bold' }}>{col.title}</span> }))}
-        dataSource={notifications.filter(n => (n.sale_order_number || '').toLowerCase().includes(query.trim().toLowerCase()))}
-        rowKey="id"
-        pagination={{
-          current: currentPage,
-          pageSize,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          responsive: true,
-          onChange: (page, size) => {
-            setCurrentPage(page);
-            setPageSize(size);
-          }
-        }}
-        scroll={{ x: 1000 }}
-        locale={{ emptyText: <Empty description="No notifications found" /> }}
+        {...getNotificationTableProps({
+          columns,
+          dataSource: filtered,
+          rowKey: 'id',
+          loading: false,
+          pagination: {
+            current: currentPage,
+            pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onChange: (page, size) => {
+              setCurrentPage(page);
+              setPageSize(size);
+            },
+          },
+        })}
+        locale={{ emptyText: <Empty description="No project notifications found" /> }}
       />
     </Spin>
   );

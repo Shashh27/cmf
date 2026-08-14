@@ -20,6 +20,7 @@ const AppLayout = ({ children }) => {
   const isPcProductView =
     location.pathname.includes("/project_coordinator/oms/") &&
     (location.pathname.includes("/product/") || location.search.includes("productId"));
+  const isLiveMonitoringPage = location.pathname.includes("/product-monitoring/live-monitoring");
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" ? window.innerWidth < 768 : false
@@ -45,6 +46,8 @@ const AppLayout = ({ children }) => {
 
   const fullBleed =
     isPdmPage || isDashboardPage || isManufacturingDashboard || isPcProductView;
+  const lockViewport = fullBleed || isLiveMonitoringPage;
+  const showChrome = !fullBleed; // navbar for normal + live; hide for true full-bleed dashboards
   const contentMarginLeft = isMobile ? 0 : collapsed ? APP_SIDER_COLLAPSED : APP_SIDER_EXPANDED;
 
   return (
@@ -76,28 +79,30 @@ const AppLayout = ({ children }) => {
             min-width: 0;
           }
         `}</style>
-        {!fullBleed && <Navbar collapsed={collapsed} />}
+        {showChrome && <Navbar collapsed={collapsed} />}
         <Content
           style={{
-            margin: fullBleed
+            margin: isLiveMonitoringPage
+              ? "clamp(50px, 10vw, 60px) 0 0"
+              : fullBleed
               ? 0
               : "clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)",
             flex: 1,
             minHeight: 0,
             minWidth: 0,
             width: "100%",
-            height: fullBleed ? "100%" : "auto",
-            overflowY: fullBleed ? "hidden" : "auto",
+            height: lockViewport ? "100%" : "auto",
+            overflowY: lockViewport ? "hidden" : "auto",
             overflowX: "hidden",
             backgroundColor: "transparent",
             padding: 0,
-            display: fullBleed ? "flex" : "block",
+            display: lockViewport ? "flex" : "block",
             flexDirection: "column",
           }}
         >
           {children}
         </Content>
-        {!fullBleed && <Footer collapsed={collapsed} />}
+        {showChrome && !isLiveMonitoringPage && <Footer collapsed={collapsed} />}
       </Layout>
     </Layout>
   );

@@ -39,7 +39,7 @@ const getCurrentUserId = () => {
   return localStorage.getItem('user_id') || localStorage.getItem('supervisor_id');
 };
 
-const ProductionLogNotification = ({ onCount }) => {
+const ProductionLogNotification = ({ onCount, refreshKey = 0 }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
@@ -115,7 +115,7 @@ const ProductionLogNotification = ({ onCount }) => {
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, refreshKey]);
 
   useEffect(() => {
     const fetchOrders = async () => {

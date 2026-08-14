@@ -58,16 +58,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
   const prefix = getRolePrefix();
 
-  const renderNotificationMenuLabel = (to, text = 'Notification') => (
-    <Link to={to} onClick={() => setMobileDrawerOpen(false)}>
-      <Badge count={notificationCount} offset={[10, 0]}>
-        {text}
-      </Badge>
-    </Link>
-  );
-
-
-
   // Determine open keys based on path
 
   const getOpenKeys = () => {
@@ -119,12 +109,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       fetchSupervisorNotificationCount();
     } else if (prefix === '/project_coordinator') {
       fetchPCNotificationCount();
-    } else if (prefix === '/admin') {
-      fetchAdminNotificationCount();
-    } else if (prefix === '/manufacturing_coordinator') {
-      fetchMCNotificationCount();
     }
-
+    // Admin & MC: no sidebar count — unread indicator is on the header bell
   }, [prefix, isAuthenticated, bootstrapping]);
 
 
@@ -707,7 +693,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       key: `${prefix}/notification`,
 
-      label: renderNotificationMenuLabel(`${prefix}/notification`),
+      label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
 
       icon: <BellOutlined />,
 
@@ -1055,7 +1041,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
         key: `${prefix}/notification`,
 
-        label: renderNotificationMenuLabel(`${prefix}/notification`),
+        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
 
         icon: <BellOutlined />,
 

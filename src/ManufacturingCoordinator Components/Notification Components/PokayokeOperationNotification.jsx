@@ -5,7 +5,7 @@ import config from '../../Config/config';
 import dayjs from 'dayjs';
 import { authFetch } from '../../api/client.js';
 
-const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
+const PokayokeOperationNotification = ({ onUnacknowledgedCountChange, refreshKey = 0 }) => {
   const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
@@ -16,7 +16,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
 
   useEffect(() => {
     fetchPokayokeChecklistNotifications();
-  }, []);
+  }, [refreshKey]);
 
   // Report unacknowledged count to parent
   useEffect(() => {

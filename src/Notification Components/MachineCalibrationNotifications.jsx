@@ -1,16 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
-import { CheckCircleOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Table, message, Spin, Empty } from 'antd';
 import dayjs from 'dayjs';
+import config from '../Config/config';
 import { authFetch } from '../api/client.js';
+import {
+  ModernTableStyles,
+  getNotificationTableProps,
+  renderAckCell,
+  useLatestCallback,
+} from './notificationTableUtils';
 
-const MachineCalibrationNotifications = ({ dateRange, onCount }) => {
+const MachineCalibrationNotifications = ({ dateRange, onCount, refreshKey = 0, query = '' }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [query, setQuery] = useState('');
+  const onCountRef = useLatestCallback(onCount);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -19,35 +24,29 @@ const MachineCalibrationNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
-      
-      const url = `${base}?${params.toString()}`;
-
-      const response = await authFetch(url);
-      if (!response.ok) {
-        throw new Error('Failed to fetch notifications');
-      }
+      const response = await authFetch(`${base}?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch notifications');
       const data = await response.json();
       setNotifications(data);
-      if (onCount) onCount(Array.isArray(data) ? data.filter(n => !n.is_ack).length : 0);
+      onCountRef.current?.(Array.isArray(data) ? data.filter((n) => !n.is_ack).length : 0);
     } catch (error) {
       message.error(error.message);
     } finally {
       setLoading(false);
     }
-  }, [dateRange]);
+  }, [dateRange, onCountRef]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, refreshKey]);
 
   const handleAcknowledge = async (id) => {
     try {
-      const response = await authFetch(`${config.API_BASE_URL}/machine-calibration-notifications/${id}/ack`, {
-        method: 'PUT',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to acknowledge notification');
-      }
+      const response = await authFetch(
+        `${config.API_BASE_URL}/machine-calibration-notifications/${id}/ack`,
+        { method: 'PUT' },
+      );
+      if (!response.ok) throw new Error('Failed to acknowledge notification');
       message.success('Notification acknowledged');
       fetchNotifications();
     } catch (error) {
@@ -55,157 +54,103 @@ const MachineCalibrationNotifications = ({ dateRange, onCount }) => {
     }
   };
 
-  const columns = [
-    {
-      title: 'Sl No',
-      key: 'sl_no',
-      width: 90,
-      render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Machine',
-      dataIndex: 'machine_name',
-      key: 'machine_name',
-      render: (text) => text || '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Type',
-      dataIndex: 'type',
-      key: 'type',
-      render: (text) => text || '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Work Center',
-      dataIndex: 'work_center_name',
-      key: 'work_center_name',
-      render: (text) => text || '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Model',
-      dataIndex: 'model',
-      key: 'model',
-      render: (text) => text || '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Calibration Date',
-      dataIndex: 'calibration_date',
-      key: 'calibration_date',
-      render: (text) => text ? dayjs(text).format('DD/MM/YYYY') : '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Calibration Due Date',
-      dataIndex: 'calibration_due_date',
-      key: 'calibration_due_date',
-      render: (text) => text ? dayjs(text).format('DD/MM/YYYY') : '-',
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      render: (text) => dayjs(text).format('DD/MM/YYYY HH:mm'),
-      responsive: ['sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      render: (is_ack) => (
-        <Tag color={is_ack ? 'green' : 'orange'}>
-          {is_ack ? 'Acknowledged' : 'Pending'}
-        </Tag>
-      ),
-      filters: [
-        { text: 'Acknowledged', value: true },
-        { text: 'Pending', value: false },
-      ],
-      onFilter: (value, record) => record.is_ack === value,
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-    {
-      title: 'Created By',
-      dataIndex: 'created_by',
-      key: 'created_by',
-      render: (text) => text || '-',
-      responsive: ['md', 'lg', 'xl'],
-    },
-    {
-      title: 'Acknowledged',
-      key: 'acknowledged',
-      render: (_, record) => (
-        record.is_ack ? (
-          <div>
-            <CheckCircleOutlined style={{ color: 'green' }} /> By: {record.ack_by}
-          </div>
-        ) : (
-          <div>
-            <span style={{ color: 'red', marginRight: 8 }}>●</span>
-            <span>By:</span>
-            <Button
-              type="primary"
-              onClick={() => handleAcknowledge(record.id)}
-              size="small"
-              style={{ marginLeft: 8 }}
-            >
-              Acknowledge
-            </Button>
-          </div>
-        )
-      ),
-      filters: [
-        { text: 'Acknowledged', value: true },
-        { text: 'Unacknowledged', value: false },
-      ],
-      onFilter: (value, record) => record.is_ack === value,
-      responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
-    },
-  ];
+  const columns = useMemo(
+    () => [
+      {
+        title: 'Sl No',
+        key: 'sl_no',
+        sorter: false,
+        render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
+      },
+      {
+        title: 'Machine',
+        dataIndex: 'machine_name',
+        key: 'machine_name',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Type',
+        dataIndex: 'type',
+        key: 'type',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Work Center',
+        dataIndex: 'work_center_name',
+        key: 'work_center_name',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Model',
+        dataIndex: 'model',
+        key: 'model',
+        render: (text) => text || '-',
+      },
+      {
+        title: 'Calibration Date',
+        dataIndex: 'calibration_date',
+        key: 'calibration_date',
+        render: (text) => (text ? dayjs(text).format('DD/MM/YYYY') : '-'),
+      },
+      {
+        title: 'Calibration Due Date',
+        dataIndex: 'calibration_due_date',
+        key: 'calibration_due_date',
+        render: (text) => (text ? dayjs(text).format('DD/MM/YYYY') : '-'),
+      },
+      {
+        title: 'Created At',
+        dataIndex: 'created_at',
+        key: 'created_at',
+        render: (text) => (text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-'),
+      },
+      {
+        title: 'Acknowledged',
+        key: 'acknowledged',
+        sorter: false,
+        render: (_, record) =>
+          renderAckCell({
+            isAck: !!record.is_ack,
+            ackBy: record.ack_by,
+            onAcknowledge: () => handleAcknowledge(record.id),
+          }),
+      },
+    ],
+    [currentPage, pageSize],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return notifications;
+    return notifications.filter((n) =>
+      [n.machine_name, n.type, n.work_center_name, n.model]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    );
+  }, [notifications, query]);
 
   return (
     <Spin spinning={loading}>
-      <style>{`
-        @media (max-width: 768px) {
-          .ant-table {
-            font-size: 12px;
-          }
-          .ant-table-thead > tr > th,
-          .ant-table-tbody > tr > td {
-            padding: 8px 6px;
-          }
-        }
-      `}</style>
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
-        <Input.Search
-          placeholder="Search machines"
-          allowClear
-          maxLength={20}
-          onSearch={(val) => setQuery(val)}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ maxWidth: 320 }}
-        />
-      </div>
+      <ModernTableStyles />
       <Table
-        columns={columns.map(col => ({ ...col, title: <span style={{ fontWeight: 'bold' }}>{col.title}</span> }))}
-        dataSource={notifications.filter(n => (n.machine_name || '').toLowerCase().includes(query.trim().toLowerCase()))}
-        rowKey="id"
-        pagination={{
-          current: currentPage,
-          pageSize,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          responsive: true,
-          onChange: (page, size) => {
-            setCurrentPage(page);
-            setPageSize(size);
-          }
-        }}
-        scroll={{ x: 1000 }}
+        {...getNotificationTableProps({
+          columns,
+          dataSource: filtered,
+          rowKey: 'id',
+          loading: false,
+          pagination: {
+            current: currentPage,
+            pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onChange: (page, size) => {
+              setCurrentPage(page);
+              setPageSize(size);
+            },
+          },
+        })}
         locale={{ emptyText: <Empty description="No notifications found" /> }}
       />
     </Spin>
