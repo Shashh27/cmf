@@ -32,9 +32,11 @@ const InventoryData = () => {
   ];
 
   return (
-    <div style={{ padding: '16px' }}>
-      {/* <h2 style={{ fontSize: '24px', fontWeight: '600', marginBottom: '16px', color: '#000000e0' }}>Inventory Data</h2> */}
-      <Card>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
+      <Card
+        bordered={false}
+        style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}
+      >
         <Tabs 
           activeKey={activeTab} 
           onChange={setActiveTab} 

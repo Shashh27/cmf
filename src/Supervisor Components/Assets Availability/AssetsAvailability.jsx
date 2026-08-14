@@ -575,7 +575,7 @@ const AssetAvailability = () => {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
+      <div style={{ padding: '50px 24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box', textAlign: 'center' }}>
         <Spin size="large" />
         <p>Loading machine status data...</p>
       </div>
@@ -583,12 +583,12 @@ const AssetAvailability = () => {
   }
 
   return (
-    <div style={{ padding: '0px' }}>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh', boxSizing: 'border-box' }}>
       <Card 
         bordered={false} 
         style={{ 
-          borderRadius: '16px', 
-          boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+          borderRadius: '8px', 
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
           overflow: 'hidden'
         }}
       >
