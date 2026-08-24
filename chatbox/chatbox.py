@@ -5,11 +5,14 @@ Mounted at /api/v1/chatbox (not the LLM /api/chatbot).
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import os
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Set
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,10 +23,12 @@ from auth.roles import normalize_role
 from DB.database import SessionLocal, get_db
 from DB.models.access_control import AccessUser
 from DB.models.oms import Order
+from DB.minio_client import get_minio_client
 from DB.models.chatbox import (
     ChatConversation,
     ChatParticipant,
     ChatMessage,
+    ChatMessageAttachment,
     ChatMessageReadStatus,
 )
 from chatbox.ws_manager import chat_ws_manager
@@ -44,7 +49,19 @@ from DB.schemas.chatbox import (
     OrderStakeholdersResponse,
 )
 
+from routers.documents import (
+    get_content_type_from_detection,
+    get_file_extension,
+)
+
 router = APIRouter(prefix="/chatbox", tags=["chatbox"])
+
+CHAT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+CHAT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
+CHAT_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".xlsx", ".xls", ".csv"}
+CHAT_ALLOWED_EXTENSIONS = CHAT_IMAGE_EXTENSIONS | CHAT_VIDEO_EXTENSIONS | CHAT_FILE_EXTENSIONS
+
+MAX_CHAT_ATTACHMENT_BYTES = 50 * 1024 * 1024  # 50 MB
 
 ALLOWED_CHAT_ROLES = {
     "admin",
@@ -55,6 +72,85 @@ ALLOWED_CHAT_ROLES = {
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _message_query_options():
+    return [
+        joinedload(ChatMessage.sender),
+        joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
+        joinedload(ChatMessage.read_status),
+        joinedload(ChatMessage.attachments).joinedload(ChatMessageAttachment.uploader),
+    ]
+
+
+def _is_chat_file_allowed(filename: str) -> bool:
+    return get_file_extension(filename) in CHAT_ALLOWED_EXTENSIONS
+
+
+def _chat_file_category(filename: str) -> str:
+    ext = get_file_extension(filename)
+    if ext in CHAT_IMAGE_EXTENSIONS:
+        return "image"
+    if ext in CHAT_VIDEO_EXTENSIONS:
+        return "video"
+    return "file"
+
+
+def _message_type_for_category(category: str) -> str:
+    if category == "image":
+        return "image"
+    if category == "video":
+        return "video"
+    return "file"
+
+
+def _minio_object_name_from_url(file_url: str) -> Optional[str]:
+    try:
+        minio_client = get_minio_client()
+        return file_url.split(f"/{minio_client.bucket_name}/", 1)[1]
+    except Exception:
+        return None
+
+
+def _purge_minio_objects(object_names: List[str]) -> None:
+    if not object_names:
+        return
+    minio_client = get_minio_client()
+    for object_name in object_names:
+        try:
+            minio_client.delete_file(object_name)
+        except Exception as exc:
+            print(f"Warning: Failed to delete chat attachment from MinIO ({object_name}): {exc}")
+
+
+def _attachment_object_names(db: Session, message_ids: List[int]) -> List[str]:
+    if not message_ids:
+        return []
+    rows = (
+        db.query(ChatMessageAttachment.file_url)
+        .filter(ChatMessageAttachment.message_id.in_(message_ids))
+        .all()
+    )
+    object_names: List[str] = []
+    for (file_url,) in rows:
+        obj = _minio_object_name_from_url(file_url)
+        if obj:
+            object_names.append(obj)
+    return object_names
+
+
+def _serialize_attachment(att: ChatMessageAttachment) -> dict:
+    uploader = att.uploader
+    return {
+        "id": att.id,
+        "message_id": att.message_id,
+        "file_name": att.file_name,
+        "file_url": att.file_url,
+        "file_category": att.file_category,
+        "uploaded_by": att.uploaded_by,
+        "uploaded_by_name": uploader.user_name if uploader else None,
+        "uploaded_at": att.uploaded_at,
+    }
 
 
 def _require_chat_role(user: AccessUser) -> None:
@@ -159,6 +255,7 @@ def _serialize_message(msg: ChatMessage) -> dict:
         "created_at": msg.created_at,
         "updated_at": msg.updated_at,
         "read_by": [r.user_id for r in (msg.read_status or [])],
+        "attachments": [_serialize_attachment(a) for a in (msg.attachments or [])],
     }
 
 
@@ -301,8 +398,9 @@ def _assert_conversation_creator(conv: ChatConversation, user: AccessUser) -> No
         )
 
 
-def _hard_delete_message(db: Session, message_id: int) -> None:
+def _hard_delete_message(db: Session, message_id: int) -> List[str]:
     """Permanently remove one message (and read rows) from DB."""
+    object_names = _attachment_object_names(db, [message_id])
     db.query(ChatMessage).filter(ChatMessage.reply_to_id == message_id).update(
         {ChatMessage.reply_to_id: None},
         synchronize_session=False,
@@ -317,9 +415,10 @@ def _hard_delete_message(db: Session, message_id: int) -> None:
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Message not found")
+    return object_names
 
 
-def _hard_delete_conversation_messages(db: Session, conversation_id: int) -> int:
+def _hard_delete_conversation_messages(db: Session, conversation_id: int) -> tuple[int, List[str]]:
     """Permanently remove all messages for a conversation."""
     message_ids = [
         row[0]
@@ -328,8 +427,9 @@ def _hard_delete_conversation_messages(db: Session, conversation_id: int) -> int
         .all()
     ]
     if not message_ids:
-        return 0
+        return 0, []
 
+    object_names = _attachment_object_names(db, message_ids)
     db.query(ChatMessage).filter(
         ChatMessage.conversation_id == conversation_id,
         ChatMessage.reply_to_id.isnot(None),
@@ -337,21 +437,23 @@ def _hard_delete_conversation_messages(db: Session, conversation_id: int) -> int
     db.query(ChatMessageReadStatus).filter(
         ChatMessageReadStatus.message_id.in_(message_ids),
     ).delete(synchronize_session=False)
-    return (
+    deleted_count = (
         db.query(ChatMessage)
         .filter(ChatMessage.conversation_id == conversation_id)
         .delete(synchronize_session=False)
     )
+    return deleted_count, object_names
 
 
-def _hard_delete_conversation(db: Session, conv: ChatConversation) -> None:
+def _hard_delete_conversation(db: Session, conv: ChatConversation) -> List[str]:
     """Permanently remove conversation, participants, and all messages from DB."""
     conversation_id = conv.id
-    _hard_delete_conversation_messages(db, conversation_id)
+    _, object_names = _hard_delete_conversation_messages(db, conversation_id)
     db.query(ChatParticipant).filter(
         ChatParticipant.conversation_id == conversation_id
     ).delete(synchronize_session=False)
     db.delete(conv)
+    return object_names
 
 
 def _find_existing_individual(
@@ -650,11 +752,7 @@ def get_conversation(
 
     messages = (
         db.query(ChatMessage)
-        .options(
-            joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.read_status),
-        )
+        .options(*_message_query_options())
         .filter(ChatMessage.conversation_id == conversation_id)
         .order_by(ChatMessage.created_at.asc())
         .all()
@@ -696,8 +794,9 @@ def delete_conversation(
     _assert_conversation_creator(conv, current_user)
 
     order_id = conv.order_id
-    _hard_delete_conversation(db, conv)
+    object_names = _hard_delete_conversation(db, conv)
     db.commit()
+    _purge_minio_objects(object_names)
     _schedule_ws_event(
         order_id,
         {
@@ -724,9 +823,10 @@ def clear_conversation_messages(
     _assert_conversation_creator(conv, current_user)
 
     order_id = conv.order_id
-    deleted_count = _hard_delete_conversation_messages(db, conversation_id)
+    deleted_count, object_names = _hard_delete_conversation_messages(db, conversation_id)
     conv.updated_at = _utcnow()
     db.commit()
+    _purge_minio_objects(object_names)
     _schedule_ws_event(
         order_id,
         {
@@ -924,11 +1024,7 @@ def send_message(
 
     msg = (
         db.query(ChatMessage)
-        .options(
-            joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.read_status),
-        )
+        .options(*_message_query_options())
         .filter(ChatMessage.id == msg.id)
         .first()
     )
@@ -939,6 +1035,144 @@ def send_message(
             "type": "message_new",
             "order_id": conv.order_id,
             "conversation_id": body.conversation_id,
+            "message": serialized,
+        },
+        background_tasks,
+    )
+    return serialized
+
+
+@router.post(
+    "/messages/with-attachment",
+    response_model=ChatMessageSchema,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message_with_attachment(
+    background_tasks: BackgroundTasks,
+    conversation_id: int = Form(...),
+    file: UploadFile = File(...),
+    message_text: Optional[str] = Form(None),
+    reply_to_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
+    _require_chat_role(current_user)
+    conv = _load_conversation(db, conversation_id)
+    _assert_participant(db, conversation_id, current_user.id)
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="File name is required")
+    if not _is_chat_file_allowed(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "File type not allowed. Allowed: images, videos, PDF, Office docs, CSV, TXT"
+            ),
+        )
+
+    if reply_to_id is not None:
+        reply = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.id == reply_to_id,
+                ChatMessage.conversation_id == conversation_id,
+            )
+            .first()
+        )
+        if not reply:
+            raise HTTPException(
+                status_code=400,
+                detail="reply_to_id must reference a message in this conversation",
+            )
+
+    file_content = await file.read()
+    if not file_content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(file_content) > MAX_CHAT_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 50 MB limit")
+
+    file_category = _chat_file_category(file.filename)
+    message_type = _message_type_for_category(file_category)
+    caption = (message_text or "").strip()
+    display_text = caption or file.filename
+
+    minio_client = get_minio_client()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
+    safe_name = os.path.basename(file.filename)
+    object_name = (
+        f"chatbox/order_{conv.order_id}/conv_{conversation_id}/"
+        f"{timestamp}_{unique_id}_{safe_name}"
+    )
+    content_type = get_content_type_from_detection(file_content, file.filename)
+    file_stream = io.BytesIO(file_content)
+
+    try:
+        file_url = minio_client.upload_file(
+            file_data=file_stream,
+            object_name=object_name,
+            content_type=content_type,
+            metadata={
+                "order_id": str(conv.order_id),
+                "conversation_id": str(conversation_id),
+                "uploaded_by": str(current_user.id),
+                "original_filename": safe_name,
+                "file_category": file_category,
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file: {exc}",
+        ) from exc
+
+    msg = ChatMessage(
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        message_text=display_text,
+        message_type=message_type,
+        reply_to_id=reply_to_id,
+    )
+    db.add(msg)
+    db.flush()
+
+    db.add(
+        ChatMessageAttachment(
+            message_id=msg.id,
+            file_name=safe_name,
+            file_url=file_url,
+            file_category=file_category,
+            uploaded_by=current_user.id,
+        )
+    )
+    db.add(
+        ChatMessageReadStatus(
+            message_id=msg.id,
+            user_id=current_user.id,
+        )
+    )
+
+    db.query(ChatParticipant).filter(
+        ChatParticipant.conversation_id == conversation_id,
+        ChatParticipant.user_id == current_user.id,
+    ).update({"last_read_at": _utcnow()})
+
+    conv.updated_at = _utcnow()
+    db.commit()
+
+    msg = (
+        db.query(ChatMessage)
+        .options(*_message_query_options())
+        .filter(ChatMessage.id == msg.id)
+        .first()
+    )
+    serialized = _serialize_message(msg)
+    _schedule_ws_event(
+        conv.order_id,
+        {
+            "type": "message_new",
+            "order_id": conv.order_id,
+            "conversation_id": conversation_id,
             "message": serialized,
         },
         background_tasks,
@@ -962,11 +1196,7 @@ def get_messages(
 
     q = (
         db.query(ChatMessage)
-        .options(
-            joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.read_status),
-        )
+        .options(*_message_query_options())
         .filter(
             ChatMessage.conversation_id == conversation_id,
             ChatMessage.is_deleted.is_(False),
@@ -990,11 +1220,7 @@ def edit_message(
     _require_chat_role(current_user)
     msg = (
         db.query(ChatMessage)
-        .options(
-            joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.read_status),
-        )
+        .options(*_message_query_options())
         .filter(ChatMessage.id == message_id)
         .first()
     )
@@ -1016,11 +1242,7 @@ def edit_message(
     db.commit()
     msg = (
         db.query(ChatMessage)
-        .options(
-            joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.reply_to).joinedload(ChatMessage.sender),
-            joinedload(ChatMessage.read_status),
-        )
+        .options(*_message_query_options())
         .filter(ChatMessage.id == message_id)
         .first()
     )
@@ -1057,9 +1279,10 @@ def delete_message(
 
     order_id = conv.order_id
     conversation_id = msg.conversation_id
-    _hard_delete_message(db, message_id)
+    object_names = _hard_delete_message(db, message_id)
     conv.updated_at = _utcnow()
     db.commit()
+    _purge_minio_objects(object_names)
     _schedule_ws_event(
         order_id,
         {

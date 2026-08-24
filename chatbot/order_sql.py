@@ -20,6 +20,11 @@ ORDER_STOCK_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+SCHEDULE_QUERY_RE = re.compile(
+    r"\b(schedule|scheduled|scheduling|planned|plan|gantt)\b",
+    re.IGNORECASE,
+)
+
 SHOW_ORDER_RE = re.compile(
     r"^(?:show|get|find|display|list|give)\s+(?:me\s+)?(?:the\s+)?(?:order|so)\b|"
     r"^order\s+[A-Za-z0-9]",
@@ -107,6 +112,35 @@ def stock_for_order_sql(order_no: str) -> str:
     """.strip()
 
 
+def schedule_for_order_sql(order_no: str) -> str:
+    """Planned schedule / Gantt rows for a specific sale order."""
+    safe = order_no.replace("'", "''")
+    return f"""
+        SELECT psi.sale_order_number AS order_no,
+               p.part_name,
+               p.part_number,
+               op.operation_number,
+               op.operation_name,
+               m.type AS machine,
+               m.model AS machine_model,
+               wc.work_center_name,
+               psi.planned_start_time,
+               psi.planned_end_time,
+               psi.total_quantity,
+               psi.remaining_quantity,
+               psi.status AS schedule_status
+        FROM scheduling.planned_schedule_items psi
+        JOIN oms.parts p ON p.id = psi.part_id
+        JOIN oms.operations op ON op.id = psi.operation_id
+        LEFT JOIN configuration.machines m ON m.id = psi.machine_id
+        LEFT JOIN configuration.work_centers wc ON wc.id = m.work_center_id
+        WHERE UPPER(psi.sale_order_number) = UPPER('{safe}')
+           OR psi.sale_order_number ILIKE '%{safe}%'
+        ORDER BY psi.planned_start_time NULLS LAST, op.operation_number
+        LIMIT 100
+    """.strip()
+
+
 def try_order_query(question: str) -> Tuple[Optional[str], bool]:
     """Pick the right order query — stock, due date, or order details."""
     order_no = extract_order_number(question)
@@ -114,6 +148,9 @@ def try_order_query(question: str) -> Tuple[Optional[str], bool]:
         return None, False
 
     q = question or ""
+
+    if SCHEDULE_QUERY_RE.search(q):
+        return schedule_for_order_sql(order_no), True
 
     if DUE_DATE_QUERY_RE.search(q):
         return due_date_for_order_sql(order_no), True

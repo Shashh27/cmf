@@ -17,7 +17,7 @@ PART_ID_RE = re.compile(
 )
 
 FOLLOW_UP_RE = re.compile(
-    r"\b(this|that|the|same)\s+(order|part|product|machine|operation)\b",
+    r"\b(this|that|the|same|these|those)\s+(order|part|parts|product|machine|operation)\b",
     re.IGNORECASE,
 )
 
@@ -122,7 +122,22 @@ def resolve_follow_up_question(question: str, history: List[Dict]) -> str:
             flags=re.I,
         )
 
-    if re.search(r"\b(this|that|the|same)\s+part\b", resolved, re.I) and ctx.part_ref:
+    if re.search(r"\b(this|that|the|same|these|those)\s+parts?\b", resolved, re.I):
+        if ctx.order_ref:
+            resolved = re.sub(
+                r"\b(this|that|the|same|these|those)\s+parts?\b",
+                f"parts for order {ctx.order_ref}",
+                resolved,
+                flags=re.I,
+            )
+        elif ctx.part_ref:
+            resolved = re.sub(
+                r"\b(this|that|the|same|these|those)\s+parts?\b",
+                f"part {ctx.part_ref}",
+                resolved,
+                flags=re.I,
+            )
+    elif re.search(r"\b(this|that|the|same)\s+part\b", resolved, re.I) and ctx.part_ref:
         resolved = re.sub(
             r"\b(this|that|the|same)\s+part\b",
             f"part {ctx.part_ref}",

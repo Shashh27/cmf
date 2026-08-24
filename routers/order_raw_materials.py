@@ -1286,12 +1286,47 @@ def delete_order_parts_raw_material_linked(
 
 # ==================== Order Raw Material Hierarchy (Simplified) ====================
 
-def fetch_simplified_hierarchy(db: Session, product_id: int):
+def _load_hierarchy_shared_context(db: Session):
+    """Load lookup maps shared across multiple product hierarchies."""
+    all_raw_materials = db.query(RawMaterialModel).all()
+    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+
+    all_units = db.query(RawMaterialUnitModel).options(
+        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
+    ).all()
+    unit_map = {unit.id: unit for unit in all_units}
+
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    all_users = db.query(AccessUserModel).all()
+    user_map = {u.id: u.user_name for u in all_users}
+
+    return {
+        "raw_material_map": raw_material_map,
+        "raw_material_status_map": raw_material_status_map,
+        "unit_map": unit_map,
+        "part_type_map": part_type_map,
+        "user_map": user_map,
+    }
+
+
+def fetch_simplified_hierarchy(db: Session, product_id: int, shared_context=None):
     """
     Fetch simplified product hierarchy for raw materials.
     Returns only: parts, assemblies, documents, extracted_data, and raw material info.
     Excludes: operations, operation_documents, tools.
     """
+    if shared_context is None:
+        shared_context = _load_hierarchy_shared_context(db)
+
+    raw_material_map = shared_context["raw_material_map"]
+    raw_material_status_map = shared_context["raw_material_status_map"]
+    unit_map = shared_context["unit_map"]
+    part_type_map = shared_context["part_type_map"]
+    user_map = shared_context["user_map"]
+
     # Get product
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
@@ -1306,25 +1341,6 @@ def fetch_simplified_hierarchy(db: Session, product_id: int):
 
     # Get all parts for this product
     all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
-
-    # Get all raw materials for mapping
-    all_raw_materials = db.query(RawMaterialModel).all()
-    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
-    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
-    
-    # Get all raw material units for mapping
-    all_units = db.query(RawMaterialUnitModel).options(
-        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
-    ).all()
-    unit_map = {unit.id: unit for unit in all_units}
-    
-    # Get all part types for mapping
-    all_part_types = db.query(PartTypeModel).all()
-    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
-
-    # User map for part.user_id -> user_name
-    all_users = db.query(AccessUserModel).all()
-    user_map = {u.id: u.user_name for u in all_users}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -1531,36 +1547,8 @@ def fetch_simplified_hierarchy(db: Session, product_id: int):
     }
 
 
-@router.get("/order-raw-material-hierarchy/{order_id}")
-def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db)):
-    """
-    Get order with simplified product hierarchy for raw materials.
-    Returns only: extracted text, part information, and assigned raw materials.
-    Excludes: operations, operation documents, tools.
-    """
-    # Get order
-    order = (
-        db.query(OrderModel)
-        .options(
-            joinedload(OrderModel.customer),
-            joinedload(OrderModel.product),
-            joinedload(OrderModel.user),
-            joinedload(OrderModel.project_coordinator),
-            joinedload(OrderModel.admin),
-            joinedload(OrderModel.manufacturing_coordinator),
-        )
-        .filter(OrderModel.id == order_id)
-        .first()
-    )
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    # Get simplified hierarchy
-    hierarchy = fetch_simplified_hierarchy(db, order.product_id)
-
-    # Build order response
-    order_response = {
+def _build_order_hierarchy_response(order: OrderModel, hierarchy: dict):
+    return {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
         "project_name": order.project_name,
@@ -1586,10 +1574,82 @@ def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db
         "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
-        "product_hierarchy": hierarchy
+        "product_hierarchy": hierarchy,
     }
 
-    return order_response
+
+@router.get("/order-raw-material-hierarchies")
+def get_all_order_raw_material_hierarchies(
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
+    """
+    Get all scoped orders with simplified product hierarchies in one request.
+    Reuses hierarchy data when multiple orders share the same product.
+    """
+    order_query = (
+        db.query(OrderModel)
+        .options(
+            joinedload(OrderModel.customer),
+            joinedload(OrderModel.product),
+            joinedload(OrderModel.user),
+            joinedload(OrderModel.project_coordinator),
+            joinedload(OrderModel.admin),
+            joinedload(OrderModel.manufacturing_coordinator),
+        )
+        .order_by(OrderModel.id.asc())
+    )
+    order_query = apply_order_role_scope(order_query, OrderModel, current_user)
+    orders = order_query.all()
+
+    shared_context = _load_hierarchy_shared_context(db)
+    hierarchy_by_product_id = {}
+    results = []
+
+    for order in orders:
+        hierarchy = None
+        if order.product_id:
+            if order.product_id not in hierarchy_by_product_id:
+                try:
+                    hierarchy_by_product_id[order.product_id] = fetch_simplified_hierarchy(
+                        db, order.product_id, shared_context
+                    )
+                except HTTPException:
+                    hierarchy_by_product_id[order.product_id] = None
+            hierarchy = hierarchy_by_product_id[order.product_id]
+
+        results.append(_build_order_hierarchy_response(order, hierarchy))
+
+    return results
+
+
+@router.get("/order-raw-material-hierarchy/{order_id}")
+def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db)):
+    """
+    Get order with simplified product hierarchy for raw materials.
+    Returns only: extracted text, part information, and assigned raw materials.
+    Excludes: operations, operation documents, tools.
+    """
+    # Get order
+    order = (
+        db.query(OrderModel)
+        .options(
+            joinedload(OrderModel.customer),
+            joinedload(OrderModel.product),
+            joinedload(OrderModel.user),
+            joinedload(OrderModel.project_coordinator),
+            joinedload(OrderModel.admin),
+            joinedload(OrderModel.manufacturing_coordinator),
+        )
+        .filter(OrderModel.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    hierarchy = fetch_simplified_hierarchy(db, order.product_id)
+    return _build_order_hierarchy_response(order, hierarchy)
 
 
 # ==================== Auto-Extract Raw Materials ====================

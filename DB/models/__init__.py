@@ -16,6 +16,7 @@ from .chatbox import (
     ChatConversation,
     ChatParticipant,
     ChatMessage,
+    ChatMessageAttachment,
     ChatMessageReadStatus,
 )
 from .configuration import (
@@ -72,6 +73,7 @@ __all__ = [
     "ChatConversation",
     "ChatParticipant",
     "ChatMessage",
+    "ChatMessageAttachment",
     "ChatMessageReadStatus",
     "workcenter",
     "Machine",

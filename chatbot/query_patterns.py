@@ -1,6 +1,7 @@
 """Fast-path SQL patterns — zero LLM calls for common question shapes."""
 
 from chatbot.material_sql import all_material_stock_sql, material_stock_by_name_sql
+from chatbot.order_sql import schedule_for_order_sql
 from chatbot.part_sql import part_stock_by_term_sql
 from chatbot.tool_sql import (
     SCHEDULED_STOCK_AVAILABILITY_SQL,
@@ -191,6 +192,11 @@ QUICK_SQL_PATTERNS: List[Pattern] = [
             ORDER BY opp.priority, p.part_name, op.operation_number
             LIMIT 100
         """,
+    ),
+    (
+        r"(?:schedule|scheduled|scheduling|planned)\s+(?:for\s+)?(?:order|so)[\s\-#]*([A-Za-z0-9][\w\-/]*)|"
+        r"(?:order|so)[\s\-#]*([A-Za-z0-9][\w\-/]*).*(?:schedule|scheduled|planned)",
+        lambda m: schedule_for_order_sql(_text_group(m)),
     ),
     (
         r"(?:planned\s+schedule|schedule\s+plan).*?(?:order|so)[\s\-#]*([A-Za-z0-9][\w\-/]*)|"

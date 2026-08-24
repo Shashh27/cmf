@@ -25,6 +25,7 @@ oms.orders(id, sale_order_number, project_name, customer_id, product_id, quantit
 oms.products(id, product_name, product_version)
 oms.assemblies(id, assembly_name, assembly_number, product_id, parent_id, recycle_bin)
 oms.parts(id, part_name, part_number, type_id, raw_material_id, assembly_id, product_id, part_detail, qty, size, vendor_id, recycle_bin)
+oms.document_extracted_data(part_id, material, stock_size, planned_form_type, planned_raw_material_id, planned_length, planned_breadth, planned_height) — PDF extracted + planned RM
 oms.operations(id, operation_number, operation_name, setup_time, cycle_time, workcenter_id, part_id, machine_id, vendor_id)
 oms.order_part_priorities(id, order_id, product_id, part_id, priority)  -- NO status column
 oms.out_source_parts_status(part_id, order_id, start_date, to_date, status)
@@ -109,6 +110,17 @@ documents.common_folders, common_documents
 ═══ ACCESS ═══
 accesscontrol.access_users(id, user_name, gmail, role, center, "group")
 accesscontrol.operator_leaves(operator_id, from_date, to_date, reason, status)  -- NO leave_date/leave_type
+
+═══ CRITICAL: THREE INVENTORY DOMAINS (do not mix) ═══
+1. PARTS (BOM) → oms.parts — finished/semi-finished components (part_number, part_name)
+   Linked to raw material via oms.parts.raw_material_id → inventory.raw_materials
+2. RAW MATERIAL STOCK → inventory.raw_material_stock + raw_material_units — bar/pipe stock (EN8, FG260, etc.)
+3. TOOLS → inventory.tools_list — cutting tools, gauges, consumables (NOT raw materials)
+
+"Raw material for part X" → oms.parts + document_extracted_data (extracted material) + planned_raw_material_id + parts.raw_material_id (BOM)
+"Stock for part X" → part + its linked raw_material_stock rows
+"Raw material stock" / "EN8 stock" → inventory.raw_material_stock only
+"List tools" → inventory.tools_list only
 
 ═══ CRITICAL: PARTS FOR ORDER X ═══
 Use UNION ALL: order_part_priorities first; if none exist, fall back to parts via product_id.

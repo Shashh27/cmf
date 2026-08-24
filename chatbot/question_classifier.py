@@ -17,10 +17,12 @@ import requests
 from chatbot.groq_client import groq_chat, is_groq_enabled, parse_json_object
 from chatbot.intent_queries import IDENTIFIER_RE, INTENT_LIST_SQL, detect_fuzzy_intents
 from chatbot.material_sql import all_material_stock_sql, material_stock_by_name_sql
-from chatbot.order_sql import try_order_query
+from chatbot.order_sql import try_order_query, extract_order_number
 from chatbot.part_sql import (
+    is_part_material_query,
     is_part_stock_query,
     part_by_term_sql,
+    part_raw_material_sql,
     part_stock_by_term_sql,
     try_part_stock_query,
 )
@@ -229,6 +231,13 @@ def route_by_classification(
         return TOOLS_FOR_SCHEDULED_OPERATIONS_SQL, True
 
     if intent == "parts":
+        if is_part_material_query(question):
+            term = clf.search_term
+            if not term:
+                from chatbot.part_sql import extract_part_term
+                term = extract_part_term(question)
+            if term:
+                return part_raw_material_sql(term), True
         if clf.search_term:
             if is_part_stock_query(question):
                 return part_stock_by_term_sql(clf.search_term), True
@@ -244,6 +253,11 @@ def route_by_classification(
         return None, False
 
     if intent == "scheduling":
+        if clf.order_ref or extract_order_number(question):
+            term = clf.order_ref or extract_order_number(question)
+            if term:
+                from chatbot.order_sql import schedule_for_order_sql
+                return schedule_for_order_sql(term), True
         if is_scheduled_stock_check_query(question):
             return SCHEDULED_STOCK_AVAILABILITY_SQL, True
         if is_scheduled_tools_query(question):

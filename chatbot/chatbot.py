@@ -20,6 +20,7 @@ from DB.database import engine
 from DB.models.chatbot import ChatRequest, ChatResponse
 from DB.models.access_control import AccessUser
 from auth.deps import get_current_user
+from auth.roles import normalize_role
 from chatbot.schema_knowledge import OUT_OF_SCOPE_MESSAGE, build_system_prompt
 from chatbot.intent import get_intent_hints
 from chatbot.broad_search import is_clearly_off_topic, try_broad_search, extract_search_terms
@@ -46,7 +47,9 @@ from chatbot.part_sql import (
     part_by_term_sql,
     part_stock_by_term_sql,
     try_part_lookup_query,
+    try_part_material_query,
     try_part_stock_query,
+    try_these_parts_stock_query,
 )
 from chatbot.question_classifier import (
     classify_question,
@@ -62,7 +65,11 @@ from chatbot.result_validator import (
 )
 from chatbot.order_sql import try_order_query
 from chatbot.tool_sql import try_tool_query
-from chatbot.context_resolver import resolve_follow_up_question, try_machines_for_order_query
+from chatbot.context_resolver import (
+    extract_context_from_history,
+    resolve_follow_up_question,
+    try_machines_for_order_query,
+)
 from chatbot.groq_client import groq_follow_ups, is_groq_enabled
 
 
@@ -255,6 +262,8 @@ def get_context_preamble(question: str, data: List[Dict]) -> str:
     
     q = question.lower()
 
+    if re.search(r"\b(schedule|scheduled|planned|gantt)\b", q) and "order" in q:
+        return "Here is the planned schedule for your order:"
     if re.search(r"\b(stock|inventory|quantity|level|available)\b", q) and re.search(
         r"\b(schedule|scheduled|planned|operation)\b", q
     ):
@@ -482,18 +491,38 @@ def no_data_response(
 ) -> Dict:
     """Fast friendly reply when nothing matched — no LLM wait."""
     from chatbot.intent_queries import detect_fuzzy_intents
+    from chatbot.part_sql import extract_part_term, is_part_material_query
 
     ctx = ctx or UserContext()
-    intents = detect_fuzzy_intents(question)
-    if intents:
+    part_term = extract_part_term(question)
+    from chatbot.order_sql import extract_order_number, SCHEDULE_QUERY_RE
+    order_no = extract_order_number(question)
+    if order_no and SCHEDULE_QUERY_RE.search(question or ""):
         answer = (
-            f"No {intents[0]} records found in the database right now.\n\n"
-            "Try a different keyword or one of the suggested questions below."
+            f"No planned schedule found for order **{order_no}**.\n\n"
+            "The order may exist but not be scheduled yet. Try: *Show order {0}* or *Parts for order {0}*."
+            .format(order_no)
         )
-        suggestions = get_follow_up_suggestions(question, [], ctx)
+    elif order_no:
+        answer = (
+            f"No records found for order **{order_no}**.\n\n"
+            "Check the sale order number or try: *Show all orders*."
+        )
+    elif part_term or is_part_material_query(question):
+        answer = (
+            f"No raw material / part data found for **{part_term or 'that part'}**.\n\n"
+            "Check the part number (e.g. PRT-002) or try: *Show all raw material stock*."
+        )
     else:
-        answer = OUT_OF_SCOPE_MESSAGE
-        suggestions = get_role_suggestions(ctx)[:3]
+        intents = detect_fuzzy_intents(question)
+        if intents:
+            answer = (
+                f"No {intents[0]} records found in the database right now.\n\n"
+                "Try a different keyword or one of the suggested questions below."
+            )
+        else:
+            answer = OUT_OF_SCOPE_MESSAGE
+    suggestions = get_follow_up_suggestions(question, [], ctx)
 
     history.save(session_id, question, answer)
     return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
@@ -731,24 +760,6 @@ class ChatService:
             return guidance
 
         clf = None
-        if is_groq_enabled():
-            clf = classify_question(question)
-            if is_off_topic_classification(clf):
-                answer = clarification_message(question, clf)
-                suggestions = get_follow_up_suggestions(question, [], ctx)
-                self.history.save(session_id, question, answer)
-                return {"answer": answer, "sql": "", "data": [], "suggestions": suggestions}
-            if clf.confidence >= 0.7:
-                sql, matched = route_by_classification(question, clf)
-                if matched:
-                    data, err = execute_sql(sql)
-                    if not err and data:
-                        sql, data, _ = apply_result_validation(question, sql, data, clf)
-                        if data:
-                            return finish_response(
-                                question, sql, data, session_id,
-                                history=self.history, ctx=ctx,
-                            )
 
         sql, matched = try_user_scoped_query(question, ctx)
         fast_path = matched
@@ -764,6 +775,16 @@ class ChatService:
         if not matched:
             sql, matched = try_quick_pattern(question)
             fast_path = matched
+
+        if not matched:
+            sql, matched = try_part_material_query(question)
+            fast_path = matched
+
+        if not matched:
+            ctx_hist = extract_context_from_history(hist)
+            if ctx_hist.order_ref:
+                sql, matched = try_these_parts_stock_query(question, ctx_hist.order_ref)
+                fast_path = matched
 
         if not matched:
             sql, matched = try_part_stock_query(question)
@@ -964,7 +985,8 @@ def _ctx_from_request(request: Request, body: ChatRequest = None) -> UserContext
 
 
 def _require_chatbot_role(ctx: UserContext) -> None:
-    if not ctx.user_id or ctx.role_key() not in {"admin", "mc"}:
+    role = normalize_role(ctx.role)
+    if not ctx.user_id or role not in {"admin", "manufacturing_coordinator"}:
         raise HTTPException(
             status_code=403,
             detail="Chatbot access is limited to Admin and Manufacturing Coordinator users.",
@@ -1031,7 +1053,16 @@ async def chat_stream(
 
 
 @router.delete("/history/{session_id}")
-async def clear_history(session_id: str):
+async def clear_history(
+    session_id: str,
+    current_user: AccessUser = Depends(get_current_user),
+):
+    ctx = UserContext(
+        user_id=int(current_user.id),
+        user_name=getattr(current_user, "user_name", None),
+        role=getattr(current_user, "role", None),
+    )
+    _require_chatbot_role(ctx)
     get_svc().history.clear(session_id)
     return {"message": "History cleared"}
 
