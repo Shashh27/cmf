@@ -389,30 +389,7 @@ async def create_document(
             details={"document_name": db_document.document_name, "document_type": db_document.document_type}
         )
 
-        # Create MC notification if uploaded by PC for a part document
-        if part_id and user_role and 'project_coordinator' in user_role.lower():
-            # Get the part to find the order
-            part = db.query(Part).filter(Part.id == part_id).first()
-            if part and part.product_id:
-                # Get the order for this product
-                order = db.query(Order).filter(Order.product_id == part.product_id).first()
-                if order and order.manufacturing_coordinator_id:
-                    # Create MC notification for all PC uploads (first document and revisions)
-                    mc_notification = MCNotification(
-                        document_id=db_document.id,
-                        mc_user_id=order.manufacturing_coordinator_id,
-                        is_acknowledged=False,
-                        is_rejected=False
-                    )
-                    db.add(mc_notification)
-                    db.commit()
-                    print(f"MC notification created for document {db_document.id} for MC user {order.manufacturing_coordinator_id}")
-                else:
-                    print(f"MC notification NOT created: order={order.id if order else None}, mc_id={order.manufacturing_coordinator_id if order else None}")
-            else:
-                print(f"MC notification NOT created: part={part.id if part else None}, product_id={part.product_id if part else None}")
-        else:
-            print(f"MC notification NOT created: part_id={part_id}, user_role={user_role}")
+        # MC notification is created only when PC releases the document (acknowledge endpoint)
 
         # Extract data from PDF if applicable (2D files) - currently only for part documents
         if (
@@ -626,38 +603,7 @@ async def create_documents_bulk(
         for d in created_docs:
             db.refresh(d)
 
-        # Create MC notifications for PC uploads in bulk
-        user_name = None
-        user_role = None
-        if user_id:
-            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
-            user_name = user.user_name if user else None
-            user_role = user.role if user else None
-        
-        if part_id and user_role and 'project_coordinator' in user_role.lower():
-            # Get the part to find the order
-            part = db.query(Part).filter(Part.id == part_id).first()
-            if part and part.product_id:
-                # Get the order for this product
-                order = db.query(Order).filter(Order.product_id == part.product_id).first()
-                if order and order.manufacturing_coordinator_id:
-                    # Create MC notification for each document
-                    for doc in created_docs:
-                        mc_notification = MCNotification(
-                            document_id=doc.id,
-                            mc_user_id=order.manufacturing_coordinator_id,
-                            is_acknowledged=False,
-                            is_rejected=False
-                        )
-                        db.add(mc_notification)
-                    db.commit()
-                    print(f"MC notifications created for {len(created_docs)} documents for MC user {order.manufacturing_coordinator_id}")
-                else:
-                    print(f"MC notifications NOT created: order={order.id if order else None}, mc_id={order.manufacturing_coordinator_id if order else None}")
-            else:
-                print(f"MC notifications NOT created: part={part.id if part else None}, product_id={part.product_id if part else None}")
-        else:
-            print(f"MC notifications NOT created: part_id={part_id}, user_role={user_role}")
+        # MC notifications are created only when PC releases each document (acknowledge endpoint)
 
         if extraction_jobs and background_tasks:
             background_tasks.add_task(_extract_pdf_background, extraction_jobs)
@@ -873,9 +819,42 @@ def get_documents_by_part(
     # Get MC notification data for these documents
     document_ids = [doc.id for doc in documents]
     mc_notifications = {}
+    mc_users = {}
     if document_ids:
         notifications = db.query(MCNotification).filter(MCNotification.document_id.in_(document_ids)).all()
         mc_notifications = {notif.document_id: notif for notif in notifications}
+        mc_user_ids = list({notif.mc_user_id for notif in notifications if notif.mc_user_id})
+        if mc_user_ids:
+            mc_users = {
+                u.id: u
+                for u in db.query(AccessUser).filter(AccessUser.id.in_(mc_user_ids)).all()
+            }
+
+    # Backfill MC notifications for already-released docs that never got one
+    backfilled = False
+    for doc in documents:
+        if doc.is_acknowledged and doc.part_id and doc.id not in mc_notifications:
+            part = db.query(Part).filter(Part.id == doc.part_id).first()
+            if part and part.product_id:
+                order = db.query(Order).filter(Order.product_id == part.product_id).first()
+                if order and order.manufacturing_coordinator_id:
+                    notif = MCNotification(
+                        document_id=doc.id,
+                        mc_user_id=order.manufacturing_coordinator_id,
+                        is_acknowledged=False,
+                        is_rejected=False,
+                    )
+                    db.add(notif)
+                    mc_notifications[doc.id] = notif
+                    backfilled = True
+    if backfilled:
+        db.commit()
+        mc_user_ids = list({n.mc_user_id for n in mc_notifications.values() if n.mc_user_id})
+        if mc_user_ids:
+            mc_users = {
+                u.id: u
+                for u in db.query(AccessUser).filter(AccessUser.id.in_(mc_user_ids)).all()
+            }
     
     for doc in documents:
         if doc.user and hasattr(doc.user, 'user_name'):
@@ -888,16 +867,25 @@ def get_documents_by_part(
         else:
             doc.user_role = None
         
-        # Add MC notification remarks if available
+        # Add MC notification details if available
         if doc.id in mc_notifications:
             notif = mc_notifications[doc.id]
+            mc_user = mc_users.get(notif.mc_user_id)
             doc.mc_ack_remarks = notif.ack_remarks
             doc.mc_reject_remarks = notif.reject_remarks
-            doc.mc_is_rejected = notif.is_rejected
+            doc.mc_is_rejected = bool(notif.is_rejected)
+            doc.mc_is_acknowledged = bool(notif.is_acknowledged)
+            doc.mc_user_name = mc_user.user_name if mc_user else None
+            doc.mc_ack_at = notif.ack_at
+            doc.mc_reject_at = notif.reject_at
         else:
             doc.mc_ack_remarks = None
             doc.mc_reject_remarks = None
             doc.mc_is_rejected = False
+            doc.mc_is_acknowledged = False
+            doc.mc_user_name = None
+            doc.mc_ack_at = None
+            doc.mc_reject_at = None
     
     return documents
 
@@ -1129,7 +1117,7 @@ async def replace_document_file(
 
 @router.put("/{document_id}/acknowledge", response_model=Document)
 def acknowledge_document(document_id: int, is_acknowledged: bool, db: Session = Depends(get_db)):
-    """Update document acknowledgment status"""
+    """PC release: mark document released and create MC notification for acknowledgment."""
     db_document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
     if not db_document:
         raise HTTPException(
@@ -1139,6 +1127,24 @@ def acknowledge_document(document_id: int, is_acknowledged: bool, db: Session = 
 
     try:
         db_document.is_acknowledged = is_acknowledged
+
+        # On release, create MC notification so MC can acknowledge (not on upload)
+        if is_acknowledged and db_document.part_id:
+            existing = db.query(MCNotification).filter(
+                MCNotification.document_id == document_id
+            ).first()
+            if not existing:
+                part = db.query(Part).filter(Part.id == db_document.part_id).first()
+                if part and part.product_id:
+                    order = db.query(Order).filter(Order.product_id == part.product_id).first()
+                    if order and order.manufacturing_coordinator_id:
+                        db.add(MCNotification(
+                            document_id=db_document.id,
+                            mc_user_id=order.manufacturing_coordinator_id,
+                            is_acknowledged=False,
+                            is_rejected=False,
+                        ))
+
         db.commit()
         db.refresh(db_document)
         return db_document

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from DB.database import get_db
 from DB.models.configuration import Customer
@@ -16,18 +16,35 @@ def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
     db.add(db_customer)
     db.commit()
     db.refresh(db_customer)
+    # Reload with user relationship for user_name
+    db_customer = (
+        db.query(Customer)
+        .options(joinedload(Customer.user))
+        .filter(Customer.id == db_customer.id)
+        .first()
+    )
     return db_customer
 
 @router.get("/", response_model=List[CustomerResponse])
 def get_customers(db: Session = Depends(get_db)):
     """Get all customers"""
-    customers = db.query(Customer).order_by(Customer.id.asc()).all()
+    customers = (
+        db.query(Customer)
+        .options(joinedload(Customer.user))
+        .order_by(Customer.id.asc())
+        .all()
+    )
     return customers
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(customer_id: int, db: Session = Depends(get_db)):
     """Get a specific customer by ID"""
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = (
+        db.query(Customer)
+        .options(joinedload(Customer.user))
+        .filter(Customer.id == customer_id)
+        .first()
+    )
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return customer
@@ -45,6 +62,12 @@ def update_customer(customer_id: int, customer_update: CustomerUpdate, db: Sessi
     
     db.commit()
     db.refresh(customer)
+    customer = (
+        db.query(Customer)
+        .options(joinedload(Customer.user))
+        .filter(Customer.id == customer_id)
+        .first()
+    )
     return customer
 
 @router.delete("/{customer_id}")

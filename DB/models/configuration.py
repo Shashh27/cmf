@@ -90,6 +90,9 @@ class Customer(Base):
     orders = relationship("Order", back_populates="customer")
     user = relationship("AccessUser")
 
+    @property
+    def user_name(self):
+        return self.user.user_name if self.user else None
 
 
 

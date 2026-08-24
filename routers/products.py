@@ -1011,13 +1011,44 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
     from DB.models.oms import Document as DocumentModel
     from DB.models.notifications import MCNotification as MCNotificationModel
     from DB.models.access_control import AccessUser
+    from sqlalchemy import or_
     part_document_ack_map = {}
-    if part_ids:
-        # Get all documents for these parts with user information
+    part_latest_version_map = {}
+    assembly_latest_version_map = {}
+    assembly_ids = [a.id for a in all_assemblies]
+
+    def _parse_doc_version(v):
+        try:
+            return float(str(v or "0").lstrip("vV"))
+        except (TypeError, ValueError):
+            return 0.0
+
+    if part_ids or assembly_ids:
+        doc_filters = []
+        if part_ids:
+            doc_filters.append(DocumentModel.part_id.in_(part_ids))
+        if assembly_ids:
+            doc_filters.append(DocumentModel.assembly_id.in_(assembly_ids))
+
+        # Get all documents for these parts/assemblies with user information
         documents = db.query(DocumentModel).outerjoin(AccessUser, DocumentModel.user_id == AccessUser.id).filter(
-            DocumentModel.part_id.in_(part_ids)
+            or_(*doc_filters)
         ).all()
         
+        # Latest document version per part / assembly
+        for doc in documents:
+            ver = doc.document_version
+            if not ver:
+                continue
+            if doc.part_id is not None:
+                prev = part_latest_version_map.get(doc.part_id)
+                if prev is None or _parse_doc_version(ver) >= _parse_doc_version(prev):
+                    part_latest_version_map[doc.part_id] = ver
+            if doc.assembly_id is not None:
+                prev = assembly_latest_version_map.get(doc.assembly_id)
+                if prev is None or _parse_doc_version(ver) >= _parse_doc_version(prev):
+                    assembly_latest_version_map[doc.assembly_id] = ver
+
         # Get MC notifications for these documents to check rejection status
         document_ids = [d.id for d in documents]
         mc_notifications = {}
@@ -1027,7 +1058,53 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             ).all()
             mc_notifications = {notif.document_id: notif for notif in notifications}
         
-        # For each part, check if it has any unacknowledged documents
+        def _is_pc_upload(doc):
+            role = (doc.user.role if doc.user else None) or ''
+            return 'project_coordinator' in role.lower()
+
+        def _latest_docs_by_lineage(part_docs):
+            groups = {}
+            for doc in part_docs:
+                root = doc.parent_id or doc.id
+                prev = groups.get(root)
+                if prev is None or (doc.id or 0) > (prev.id or 0):
+                    groups[root] = doc
+            return list(groups.values())
+
+        def _doc_row_status(latest_docs):
+            """uploaded=white, released=yellow, all accepted=green, any rejected=red."""
+            if not latest_docs:
+                return 'none'
+            any_rejected = False
+            any_released = False
+            all_accepted = True
+            has_pc = any(_is_pc_upload(d) for d in latest_docs)
+            for doc in latest_docs:
+                mc_notif = mc_notifications.get(doc.id)
+                is_pc = _is_pc_upload(doc)
+                rejected = bool(mc_notif and mc_notif.is_rejected)
+                accepted = bool(mc_notif and mc_notif.is_acknowledged and not rejected)
+                released = bool(getattr(doc, 'is_acknowledged', False)) or bool(mc_notif)
+                if rejected:
+                    any_rejected = True
+                if is_pc or mc_notif:
+                    if released:
+                        any_released = True
+                    if not accepted:
+                        all_accepted = False
+                elif not has_pc:
+                    # Admin/MC-only files: no PC release step
+                    if not accepted:
+                        all_accepted = False
+            if any_rejected:
+                return 'rejected'
+            if has_pc and all_accepted and any_released:
+                return 'accepted'
+            if any_released:
+                return 'released'
+            return 'uploaded'
+
+        # For each part, check document ack / row color status
         for part_id in part_ids:
             part_docs = [d for d in documents if d.part_id == part_id]
             if part_docs:
@@ -1037,12 +1114,15 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                 for doc in part_docs:
                     mc_notif = mc_notifications.get(doc.id)
                     # Only require acknowledgment for documents uploaded by PC
-                    uploader_role = doc.user.role if doc.user else None
-                    is_pc_upload = uploader_role and 'project_coordinator' in uploader_role.lower()
+                    is_pc_upload = _is_pc_upload(doc)
                     
                     if is_pc_upload:
-                        # Document is considered "handled" if acknowledged OR rejected by MC
-                        is_handled = doc.is_acknowledged or (mc_notif and mc_notif.is_rejected)
+                        # Fully handled only when MC has acknowledged or rejected
+                        # (PC release alone must not hide the pending state)
+                        is_handled = bool(
+                            mc_notif
+                            and (mc_notif.is_acknowledged or mc_notif.is_rejected)
+                        )
                         if is_handled:
                             acknowledged_count += 1
                         else:
@@ -1050,19 +1130,26 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
                     else:
                         # Admin/MC uploads don't require acknowledgment
                         acknowledged_count += 1
+
+                latest_docs = _latest_docs_by_lineage(part_docs)
+                row_status = _doc_row_status(latest_docs)
                 
                 part_document_ack_map[part_id] = {
                     'has_documents': True,
                     'has_unacknowledged': has_unacknowledged,
                     'total_documents': len(part_docs),
-                    'acknowledged_count': acknowledged_count
+                    'acknowledged_count': acknowledged_count,
+                    'row_status': row_status,
+                    'latest_version': part_latest_version_map.get(part_id),
                 }
             else:
                 part_document_ack_map[part_id] = {
                     'has_documents': False,
                     'has_unacknowledged': False,
                     'total_documents': 0,
-                    'acknowledged_count': 0
+                    'acknowledged_count': 0,
+                    'row_status': 'none',
+                    'latest_version': None,
                 }
 
     # Get all raw materials for mapping (name only)
@@ -1118,7 +1205,8 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'has_documents': False,
             'has_unacknowledged': False,
             'total_documents': 0,
-            'acknowledged_count': 0
+            'acknowledged_count': 0,
+            'row_status': 'none',
         })
 
         return {
@@ -1145,7 +1233,9 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'created_at': part.created_at,
             'updated_at': part.updated_at,
             'has_unacknowledged_documents': doc_ack_status['has_unacknowledged'],
+            'document_row_status': doc_ack_status.get('row_status', 'none'),
             'document_info': doc_ack_status,
+            'latest_document_version': part_latest_version_map.get(part.id),
         }
 
     def build_assembly_lightweight(assembly_id: int) -> dict:
@@ -1177,6 +1267,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'child_assemblies': [ca for ca in child_assemblies if ca],
             'created_at': assembly.created_at,
             'updated_at': assembly.updated_at,
+            'latest_document_version': assembly_latest_version_map.get(assembly.id),
         }
 
     # Build root level assemblies (no parent)
