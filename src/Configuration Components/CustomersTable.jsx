@@ -79,7 +79,8 @@ const CustomersTable = ({ userId }) => {
       customer.branch?.toLowerCase().includes(searchLower) ||
       customer.email?.toLowerCase().includes(searchLower) ||
       customer.contact_number?.toLowerCase().includes(searchLower) ||
-      customer.contact_person?.toLowerCase().includes(searchLower)
+      customer.contact_person?.toLowerCase().includes(searchLower) ||
+      customer.user_name?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -128,6 +129,13 @@ const CustomersTable = ({ userId }) => {
       dataIndex: 'contact_person',
       key: 'contact_person',
       align: 'center',
+    },
+    {
+      title: 'CREATED BY',
+      dataIndex: 'user_name',
+      key: 'user_name',
+      align: 'center',
+      render: (text) => text || '-',
     },
     {
       title: 'ACTIONS',

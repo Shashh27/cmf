@@ -167,10 +167,14 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
 
   const handleReject = async () => {
     if (!selectedNotification) return;
+    if (!rejectRemarks.trim()) {
+      message.warning("Rejection remarks are required");
+      return;
+    }
 
     try {
       await api.put(`/admin-document-notifications/${selectedNotification.id}/reject`, {
-        remarks: rejectRemarks
+        remarks: rejectRemarks.trim()
       });
       message.success("Document rejected successfully");
       setRejectModalOpen(false);
@@ -499,7 +503,7 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
         }}
         okText="Reject"
         cancelText="Cancel"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: !rejectRemarks.trim() }}
       >
         <Space orientation="vertical" style={{ width: '100%' }} size="small">
           <Text>Do you want to reject this document?</Text>
@@ -512,6 +516,7 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
             placeholder="Please provide technical reasons for rejection..."
             value={rejectRemarks}
             onChange={(e) => setRejectRemarks(e.target.value)}
+            status={!rejectRemarks.trim() ? 'error' : ''}
           />
         </Space>
       </Modal>

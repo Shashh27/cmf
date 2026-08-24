@@ -612,13 +612,25 @@ const OrderTracking = () => {
             <Select
               showSearch
               allowClear
-              placeholder="Search..."
+              placeholder="Search orders..."
               className="ot-panel-search"
+              searchValue={searchOrder}
               onSearch={setSearchOrder}
-              onChange={setSelectedOrderId}
+              onChange={(value) => {
+                setSelectedOrderId(value ?? null);
+                setSearchOrder('');
+              }}
+              onClear={() => {
+                setSelectedOrderId(null);
+                setSearchOrder('');
+              }}
+              onOpenChange={(open) => {
+                if (!open) setSearchOrder('');
+              }}
               value={selectedOrderId}
               filterOption={false}
               loading={initialLoading}
+              notFoundContent={searchOrder ? 'No matching orders' : 'No orders'}
             >
               {filteredOrders.map((order) => (
                 <Select.Option key={order.id} value={order.id}>
@@ -666,12 +678,24 @@ const OrderTracking = () => {
             <Select
               showSearch
               allowClear
-              placeholder="Search..."
+              placeholder="Search parts..."
               className="ot-panel-search"
+              searchValue={searchPart}
               onSearch={setSearchPart}
-              onChange={setSelectedPartId}
+              onChange={(value) => {
+                setSelectedPartId(value ?? null);
+                setSearchPart('');
+              }}
+              onClear={() => {
+                setSelectedPartId(null);
+                setSearchPart('');
+              }}
+              onOpenChange={(open) => {
+                if (!open) setSearchPart('');
+              }}
               value={selectedPartId}
               filterOption={false}
+              notFoundContent={searchPart ? 'No matching parts' : 'No parts'}
             >
               {filteredParts.map((part) => (
                 <Select.Option key={part.part_id} value={part.part_id}>

@@ -130,13 +130,15 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
     return () => { ro.disconnect(); window.removeEventListener('resize', update); };
   }, []);
 
+  const scroll = scrollX === false ? { y: scrollY } : { y: scrollY, x: scrollX };
+
   return (
     <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
       <Table
         columns={columns}
         dataSource={dataSource}
         pagination={false}
-        scroll={{ y: scrollY, x: scrollX }}
+        scroll={scroll}
         size="small"
         {...props}
         className={`${props.className || ''} custom-fit-table`}
@@ -219,12 +221,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   useEffect(() => {
     const next = { ...selectedVersions };
     let changed = false;
-    latestPartDocs.forEach(doc => {
-      const r = doc.parent_id || doc.id;
-      if (!next[r] || !groupedPartDocs[r]?.find(d => d.id === next[r].id)) { next[r] = doc; changed = true; }
+    Object.entries(groupedPartDocs).forEach(([r, group]) => {
+      const current = next[r];
+      const fresh = current?.id ? group.find((d) => d.id === current.id) : null;
+      const target = fresh || [...group].sort((a, b) => b.id - a.id)[0];
+      if (!target) return;
+      if (
+        !current ||
+        current.id !== target.id ||
+        current.updated_at !== target.updated_at ||
+        current.is_acknowledged !== target.is_acknowledged ||
+        current.mc_is_acknowledged !== target.mc_is_acknowledged ||
+        current.mc_is_rejected !== target.mc_is_rejected
+      ) {
+        next[r] = target;
+        changed = true;
+      }
     });
     if (changed) setSelectedVersions(next);
-  }, [latestPartDocs, groupedPartDocs]);
+  }, [documents, groupedPartDocs]);
 
   useEffect(() => {
     if (!selectedItem) { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
@@ -276,6 +291,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       return docs; // ← return fresh docs to caller
     } catch (e) { console.error(e); return []; }
     finally { setLoading(false); }
+  };
+
+  const notifyBomDocsChanged = () => {
+    const productId = selectedItem?.product_id;
+    if (!productId) return;
+    window.dispatchEvent(new CustomEvent('pc-bom-docs-changed', { detail: { productId } }));
   };
 
   const downloadWithAuth = async (path, filename) => {
@@ -502,6 +523,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         resetAll();
         setIsUploadModalOpen(false);
         await fetchDocuments();
+        notifyBomDocsChanged();
       } catch (e) {
         console.error(e);
         message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to upload documents');
@@ -544,6 +566,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       resetAll();
       setIsUploadModalOpen(false);
       await fetchDocuments();
+      notifyBomDocsChanged();
     } catch (e) {
       console.error(e);
       message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to upload document');
@@ -563,6 +586,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       await api.delete(`/documents/${id}`);
       message.success('Document deleted successfully');
       await fetchDocuments();
+      notifyBomDocsChanged();
     } catch (e) {
       console.error(e);
       message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to delete document');
@@ -588,21 +612,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const handleAcknowledgeDocument = async (docId, currentStatus) => {
     try {
-      await api.put(`/documents/${docId}/acknowledge`, null, {
+      const response = await api.put(`/documents/${docId}/acknowledge`, null, {
         params: { is_acknowledged: !currentStatus }
       });
-      message.success('Document acknowledged successfully');
+      const releasedDoc = response.data;
+      message.success('Document released successfully');
       setDocuments(prevDocs =>
-        prevDocs.map(doc => doc.id === docId ? { ...doc, is_acknowledged: true } : doc)
+        prevDocs.map(doc => doc.id === docId ? { ...doc, ...releasedDoc } : doc)
       );
       setSelectedVersions(prevVersions => {
         const updated = { ...prevVersions };
         for (const key in updated) {
-          if (updated[key]?.id === docId) updated[key] = { ...updated[key], is_acknowledged: true };
+          if (updated[key]?.id === docId) {
+            updated[key] = { ...updated[key], ...releasedDoc };
+          }
         }
         return updated;
       });
       await fetchDocuments();
+      notifyBomDocsChanged();
     } catch (e) {
       console.error(e);
       message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to update acknowledgment status');
@@ -631,7 +659,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     message.success(type === 'operation'
       ? `Operation "${newItem.operation_name}" created successfully!`
       : `Document "${newItem.document_name}" created successfully!`);
-    await fetchDocuments(); setImportOperations([]);
+    await fetchDocuments();
+    if (type === 'document') notifyBomDocsChanged();
+    setImportOperations([]);
   };
 
   // ── operations table columns ─────────────────────────────────────────────
@@ -688,31 +718,66 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     return doc.document_name || '';
   };
 
+  const formatDateTime = (date) => {
+    if (!date) return '—';
+    const d = new Date(date);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${dd}/${mm}/${yyyy}, ${time}`;
+  };
+
+  const formatDate = (date) => {
+    if (!date) return '—';
+    const d = new Date(date);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  };
+
+  const StackedCell = ({ primary, secondary, primaryClass = 'text-slate-700', secondaryClass = 'text-[10px] text-slate-400' }) => (
+    <div className="flex flex-col leading-tight py-0.5">
+      <span className={`text-xs font-medium ${primaryClass}`}>{primary}</span>
+      {secondary && secondary !== '—' && (
+        <span className={secondaryClass}>{secondary}</span>
+      )}
+    </div>
+  );
+
+  const isNonPcUpload = (doc) => {
+    const role = (doc?.user_role || '').toLowerCase();
+    return role.includes('manufacturing_coordinator') || role.includes('admin');
+  };
+
   // ── eBOM table columns ───────────────────────────────────────────────────
   const eBomColumns = [
     {
-      title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
+      title: <span className="text-xs font-semibold whitespace-nowrap">DOCUMENT NAME</span>,
+      key: 'name',
+      width: '22%',
+      ellipsis: true,
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        const displayName = getDocumentDisplayName(cur);
+        const displayName = getDocumentDisplayName(cur) || cur.document_name;
+        const docType = cur.document_type || '2D';
         return (
-          <div className="flex items-center gap-3 py-1">
-            <div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div>
-            <Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text>
+          <div className="flex items-center gap-2 py-1 min-w-0">
+            <div className="p-1.5 bg-blue-50 rounded shrink-0"><FilePdfOutlined className="text-blue-500" /></div>
+            <div className="flex flex-col leading-tight min-w-0">
+              <Tooltip title={displayName}>
+                <Text strong className="text-xs truncate block min-w-0">{displayName}</Text>
+              </Tooltip>
+              <span className="text-[10px] text-blue-600 uppercase font-medium">{docType}</span>
+            </div>
           </div>
         );
       }
     },
+   
     {
-      title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
-      render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
-        return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>;
-      }
-    },
-    
-    {
-      title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
+      title: <span className="text-xs font-semibold whitespace-nowrap">REVISION</span>, key: 'ver', width: '9%',
       render: (_, r) => {
         const rootId = r.parent_id || r.id;
         const group = groupedPartDocs[rootId] || [];
@@ -726,21 +791,23 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               const v = group.find(d => d.id === value);
               const ver = v?.document_version || '1.0';
               return (
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-blue-600">{fmtV(ver)}</span>
-                  <span className="text-[10px] text-gray-400">{new Date(v?.created_at || Date.now()).toLocaleDateString()}</span>
+                <div className="flex flex-col leading-tight py-0.5">
+                  <span className="font-bold text-blue-600 text-xs">{fmtV(ver)}</span>
+                  <span className="text-[10px] text-slate-400">{formatDate(v?.created_at)}</span>
                 </div>
               );
             }}
           >
             {[...group].sort((a, b) => b.id - a.id).map(ver => (
               <Select.Option key={ver.id} value={ver.id}>
-                <div className="flex justify-between items-center w-full py-1">
+                <div className="flex flex-col leading-tight py-1">
                   <div className="flex items-center gap-2">
-                    <Badge status={ver.id === r.id ? 'success' : 'default'} />
-                    <span className={`font-bold ${ver.id === cur.id ? 'text-blue-600' : 'text-gray-600'}`}>{fmtV(ver.document_version || '1.0')}</span>
+                    <Badge status={ver.id === cur.id ? 'success' : 'default'} />
+                    <span className={`font-bold text-xs ${ver.id === cur.id ? 'text-blue-600' : 'text-gray-600'}`}>
+                      {fmtV(ver.document_version || '1.0')}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-gray-400 bg-gray-50 px-1 rounded">{new Date(ver.created_at || Date.now()).toLocaleDateString()}</span>
+                  <span className="text-[10px] text-slate-400 pl-4">{formatDate(ver.created_at)}</span>
                 </div>
               </Select.Option>
             ))}
@@ -749,35 +816,94 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       }
     },
     {
-      title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
+      title: <span className="text-xs font-semibold whitespace-nowrap">UPLOADED BY</span>, key: 'uploaded_by', width: '14%', align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
+        return (
+          <StackedCell
+            primary={cur.user_name || 'Unknown'}
+            secondary={formatDateTime(cur.created_at)}
+          />
+        );
       }
     },
     {
-      title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
+      title: <span className="text-xs font-semibold whitespace-nowrap">RELEASE</span>, key: 'acknowledged', width: '12%', align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
+        if (isNonPcUpload(cur)) {
+          return (
+            <Tooltip title="Only PC-uploaded documents can be released">
+              <span className="text-xs text-slate-400">N/A</span>
+            </Tooltip>
+          );
+        }
         if (cur.is_acknowledged) {
-          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
+          return (
+            <StackedCell
+              primary="Released"
+              secondary={formatDateTime(cur.updated_at)}
+              primaryClass="text-green-600"
+            />
+          );
         }
         return (
           <Popconfirm
-            title="Acknowledge Document"
-            description="Are you sure you want to acknowledge this document?"
+            title="Release Document"
+            description="Are you sure you want to release this document?"
             onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
             okText="Yes" cancelText="No"
           >
             <Button size="small" type="primary" icon={<CheckCircleOutlined />} className="text-xs">
-              Acknowledge
+              Release
             </Button>
           </Popconfirm>
         );
       }
     },
     {
-      title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 200, align: 'center',
+      title: <span className="text-xs font-semibold whitespace-nowrap">STATUS</span>, key: 'mc_status', width: '12%', align: 'center',
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        if (cur.mc_is_rejected) {
+          return (
+            <StackedCell
+              primary="Rejected"
+              secondary={formatDateTime(cur.mc_reject_at)}
+              primaryClass="text-red-600"
+            />
+          );
+        }
+        if (cur.mc_is_acknowledged) {
+          return (
+            <StackedCell
+              primary="Accepted"
+              secondary={formatDateTime(cur.mc_ack_at)}
+              primaryClass="text-green-600"
+            />
+          );
+        }
+        return <span className="text-xs text-slate-400">—</span>;
+      }
+    },
+    {
+      title: <span className="text-xs font-semibold whitespace-nowrap">REMARKS</span>, key: 'mc_remarks', width: '16%', ellipsis: true,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const remarks = cur.mc_is_rejected ? cur.mc_reject_remarks : cur.mc_ack_remarks;
+        if (!remarks) return <span className="text-xs text-slate-400">—</span>;
+        return (
+          <Text
+            className={`text-xs ${cur.mc_is_rejected ? 'text-red-500' : 'text-slate-600'}`}
+            ellipsis={{ tooltip: remarks }}
+          >
+            {remarks}
+          </Text>
+        );
+      }
+    },
+    {
+      title: <span className="text-xs font-semibold whitespace-nowrap text-center block">ACTIONS</span>, key: 'actions', width: '13%', align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return (
@@ -797,10 +923,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
                 onClick={() => handleDownload(cur.id)} />
             </Tooltip>
+            <Tooltip title="Delete">
             <Popconfirm title="Delete Document" description="Delete this version? This cannot be undone."
               onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
               <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
             </Popconfirm>
+            </Tooltip>
           </div>
         );
       }
@@ -870,8 +998,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               rowKey="id"
               size="small"
               pagination={false}
-              className="docs-ebom-table"
-              scrollX={600}
+              className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"
+              scrollX={false}
               columns={eBomColumns}
             />
           </div>
@@ -1107,6 +1235,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2563eb!important;color:#fff!important;border:none!important;}
         .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th{padding:8px 10px!important;}
         .docs-ops-table .ant-table-thead>tr>th{font-weight:600;color:#334155!important;}
+        .docs-ebom-table .ant-table-tbody>tr>td,.docs-ebom-table .ant-table-thead>tr>th{padding:4px 4px!important;}
+        .docs-ebom-table .ant-table-thead>tr>th{white-space:nowrap!important;font-weight:600;color:#334155!important;}
+        .docs-ebom-table .ant-table{table-layout:fixed!important;width:100%!important;}
+        .docs-ebom-table .ant-table-content,.docs-ebom-table .ant-table-body{overflow-x:hidden!important;}
+        .docs-ebom-table .ant-table-cell{padding-inline:4px!important;}
+        .docs-ebom-table .ant-table-thead>tr>th::before{display:none!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;}
         @media(max-width:640px){

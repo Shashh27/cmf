@@ -760,12 +760,12 @@ const Recyclebin = ({ orderId }) => {
 
   const projectColumns = [
     {
-      title: "Order Number",
+      title: "Project Number",
       dataIndex: "sale_order_number",
       key: "sale_order_number",
     },
     {
-      title: "Order Name",
+      title: "Project Name",
       dataIndex: "product_name",
       key: "product_name",
     },
@@ -804,7 +804,7 @@ const Recyclebin = ({ orderId }) => {
         }}
       >
         <div className="flex justify-between items-center mb-4">
-          <Title level={4} className="m-0">Orders</Title>
+          <Title level={4} className="m-0">Projects</Title>
           {isMobile && (
             <Button
               type="text"
@@ -814,7 +814,7 @@ const Recyclebin = ({ orderId }) => {
           )}
         </div>
         <Text type="secondary" className="block mb-4">
-          Select an order to view its BOM with deleted items
+          Select a project to view its BOM with deleted items
         </Text>
         <Table
           columns={projectColumns}
@@ -838,7 +838,7 @@ const Recyclebin = ({ orderId }) => {
         />
       </Sider>
       <Drawer
-        title="Orders"
+        title="Projects"
         placement="left"
         onClose={() => setSidebarVisible(false)}
         open={sidebarVisible}
@@ -846,9 +846,9 @@ const Recyclebin = ({ orderId }) => {
         styles={{ body: { padding: 0 } }}
       >
         <div style={{ padding: '16px' }}>
-          <Title level={4} className="m-0 mb-4">Orders</Title>
+          <Title level={4} className="m-0 mb-4">Projects</Title>
           <Text type="secondary" className="block mb-4">
-            Select an order to view its BOM with deleted items
+            Select a project to view its BOM with deleted items
           </Text>
           <Table
             columns={projectColumns}

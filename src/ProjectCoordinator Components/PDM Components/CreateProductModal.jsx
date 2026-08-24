@@ -711,11 +711,13 @@ const CreateProductModal = ({
 
         const partDetail = values.part_detail || null;
 
+        const resolvedTypeId = values.type_id || 1;
+
         // Only include raw material fields if raw material is selected
         const payloadBase = {
           part_number: values.part_number,
           part_name: values.part_name,
-          type_id: values.type_id,
+          type_id: resolvedTypeId,
           part_detail: partDetail,
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
           product_id: editingItem?.product_id || selectedProduct?.id,
@@ -736,16 +738,15 @@ const CreateProductModal = ({
           payloadBase.raw_material_stock_id = null;
         }
         
-        // Always include size and qty for in-house parts, and for outsource parts that have them
-        payloadBase.size = values.size || null;
+        payloadBase.size = null;
         payloadBase.qty = values.qty || 1;
         
         // Include required quantity only if stock is selected
         payloadBase.raw_material_required_quantity = values.raw_material_required_quantity || null;
 
         // Add vendor_id for outsource and standard parts
-        const isOutSource = partTypes.find(t => t.id === values.type_id)?.type_name?.toLowerCase().includes('out');
-        const isStandard = partTypes.find(t => t.id === values.type_id)?.type_name?.toLowerCase().includes('standard');
+        const isOutSource = partTypes.find(t => t.id === resolvedTypeId)?.type_name?.toLowerCase().includes('out');
+        const isStandard = partTypes.find(t => t.id === resolvedTypeId)?.type_name?.toLowerCase().includes('standard');
 
         if (isOutSource || isStandard) {
           payloadBase.vendor_id = values.vendor_id || null;
@@ -1119,31 +1120,9 @@ const CreateProductModal = ({
 
             </div>
 
-            {/* Size, Quantity, and Part Type - 3 columns */}
+            {/* Quantity and Part Type */}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-              <Form.Item
-
-                name="size"
-
-                label={<span className="text-xs sm:text-sm">Size</span>}
-
-                rules={[{ required: false, message: 'Please enter size!' }]}
-
-              >
-
-                <Input 
-
-                  placeholder="Enter size" 
-
-                  size="large"
-
-                  autoComplete="off"
-
-                />
-
-              </Form.Item>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
               <Form.Item
 
@@ -1211,6 +1190,10 @@ const CreateProductModal = ({
 
                 </Select>
 
+              </Form.Item>
+
+              <Form.Item name="size" hidden>
+                <Input />
               </Form.Item>
 
             </div>

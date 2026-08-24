@@ -30,7 +30,7 @@ function getBomWidth(viewportWidth) {
 const ProjectCoordinatorProductView = () => {
   const { productId } = useParams();
   const location = useLocation();
-  const { projectName, projectNumber } = location.state || {};
+  const { projectName, projectNumber, initialPartId } = location.state || {};
   const [selectedItem, setSelectedItem] = useState(null);
   const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -40,6 +40,16 @@ const ProjectCoordinatorProductView = () => {
   const [productHierarchies, setProductHierarchies] = useState({});
   const [activeTab, setActiveTab] = useState("bom");
   const [bomCollapsed, setBomCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (initialPartId != null) {
+      setActiveTab("bom");
+      setBomCollapsed(false);
+      if (typeof window !== "undefined" && window.innerWidth < 992) {
+        setMobileDrawerOpen(true);
+      }
+    }
+  }, [initialPartId]);
 
   const path = location.pathname;
   const useBomDrawer = viewportWidth < 992;
@@ -83,9 +93,10 @@ const ProjectCoordinatorProductView = () => {
   };
 
   const bomSidebar = (
-    <div className="flex flex-col h-full overflow-hidden" style={{ minWidth: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
       <BillOfMaterials
         singleProductId={productId ? parseInt(productId, 10) : null}
+        initialPartId={initialPartId != null ? Number(initialPartId) : null}
         onItemSelected={handleItemSelected}
         onHierarchyLoaded={handleHierarchyLoaded}
         projectName={projectName}
@@ -94,46 +105,12 @@ const ProjectCoordinatorProductView = () => {
     </div>
   );
 
-  const headerBar = (
-    <div
-      style={{
-        padding: "0 8px 8px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 8,
-        flexShrink: 0,
-      }}
-    >
-      <div className="flex items-center gap-3 flex-wrap min-w-0">
-        <Link
-          to="/project_coordinator/oms/orders"
-          className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-colors border border-blue-200"
-        >
-          <ArrowLeftOutlined />
-          {viewportWidth < 900 ? "Back" : "Back to Orders"}
-        </Link>
-        {(projectName || projectNumber) && (
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold text-slate-700 truncate" title={projectName}>
-              {projectName}
-            </span>
-            {projectNumber && (
-              <span className="text-sm text-slate-500 shrink-0">({projectNumber})</span>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
   if (!productId && !isModuleView) {
     return (
       <div className="p-4">
         <div className="flex items-center gap-3 mb-2">
           <Link to="/project_coordinator/oms/orders" className="text-blue-600 hover:underline">
-            ← Back to Orders
+            ← Back to Projects
           </Link>
           {(projectName || projectNumber) && (
             <div className="flex items-center gap-2">
@@ -170,16 +147,19 @@ const ProjectCoordinatorProductView = () => {
           width: 100%;
           overflow: hidden;
           display: flex !important;
+          height: 100%;
         }
         .pc-pdm-bom-sider.ant-layout-sider {
           flex: 0 0 auto !important;
           max-width: none !important;
           min-width: 0 !important;
+          height: 100% !important;
         }
         .pc-pdm-bom-sider .ant-layout-sider-children {
           display: flex;
           flex-direction: column;
           height: 100%;
+          min-height: 0;
           min-width: 0;
           overflow: hidden;
         }
@@ -198,189 +178,203 @@ const ProjectCoordinatorProductView = () => {
         @media (min-width: 768px) and (max-width: 991px) {
           .pc-pdm-bom-toggle { left: 96px; }
         }
-        .pc-pdm-tabs {
-          height: 100%;
+        .pc-pdm-top-bar {
+          flex-shrink: 0;
           display: flex;
           flex-direction: column;
-          min-height: 0;
+          align-items: stretch;
+          gap: 0;
+          padding: 8px 12px 0;
+          border-bottom: 1px solid #f0f0f0;
+          background: #fff;
+        }
+        .pc-pdm-top-bar-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          min-width: 0;
+          padding-bottom: 8px;
+        }
+        .pc-pdm-top-bar .ant-tabs {
+          width: 100%;
           min-width: 0;
         }
-        .pc-pdm-tabs .ant-tabs-content-holder {
-          flex: 1;
-          min-height: 0;
-          min-width: 0;
-        }
-        .pc-pdm-tabs .ant-tabs-content,
-        .pc-pdm-tabs .ant-tabs-tabpane {
-          height: 100%;
-        }
-        .pc-pdm-tabs .ant-tabs-nav {
-          margin-bottom: 8px !important;
-          flex-shrink: 0;
+        .pc-pdm-top-bar .ant-tabs-nav {
+          margin-bottom: 0 !important;
         }
       `}</style>
 
-      <div className="pc-pdm-shell">
-        <Tabs
-          className="pc-pdm-tabs"
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          size={viewportWidth < 1100 ? "small" : "middle"}
-          items={[
-            {
-              key: "bom",
-              label: "PDM",
-              children: (
-                <div className="pc-pdm-shell">
-                  {headerBar}
-                  <Layout className="pc-pdm-main">
-                    {useBomDrawer && (
-                      <Button
-                        type="default"
-                        icon={<MenuOutlined />}
-                        onClick={() => setMobileDrawerOpen(true)}
-                        className="pc-pdm-bom-toggle"
-                      >
-                        BOM
-                      </Button>
-                    )}
+      <div className="pc-pdm-shell" style={{ height: "100vh", maxHeight: "100vh", flex: 1, minHeight: 0 }}>
+        <div className="pc-pdm-top-bar">
+          <div className="pc-pdm-top-bar-row">
+            <Link
+              to="/project_coordinator/oms/orders"
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-colors border border-blue-200"
+            >
+              <ArrowLeftOutlined />
+              {viewportWidth < 900 ? "Back" : "Back to Projects"}
+            </Link>
+            {(projectName || projectNumber) && (
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-semibold text-slate-700 truncate" title={projectName}>
+                  {projectName}
+                </span>
+                {projectNumber && (
+                  <span className="text-sm text-slate-500 shrink-0">({projectNumber})</span>
+                )}
+              </div>
+            )}
+          </div>
+          <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            size={viewportWidth < 1100 ? "small" : "middle"}
+            items={[
+              { key: "bom", label: "PDM" },
+              { key: "order", label: viewportWidth < 1100 ? "Tracking" : "Project Tracking" },
+              { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
+            ]}
+          />
+        </div>
 
-                    {!useBomDrawer && (
-                      <Sider
-                        className="pc-pdm-bom-sider"
-                        width={bomWidth}
-                        collapsedWidth={BOM_SIDER_COLLAPSED}
-                        collapsed={bomCollapsed}
-                        collapsible
-                        trigger={null}
-                        theme="light"
-                        style={{
-                          borderRight: "1px solid #f0f0f0",
-                          overflow: "hidden",
-                          height: "100%",
-                          transition: "all 0.2s",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: bomCollapsed ? "center" : "space-between",
-                            padding: bomCollapsed ? "8px 0" : "6px 10px",
-                            borderBottom: "1px solid #f0f0f0",
-                            flexShrink: 0,
-                            background: "#fafafa",
-                          }}
-                        >
-                          {!bomCollapsed && (
-                            <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>BOM panel</span>
-                          )}
-                          <Tooltip
-                            title={bomCollapsed ? "Expand Bill of Materials" : "Minimise Bill of Materials"}
-                            placement="right"
-                          >
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={bomCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-                              onClick={() => setBomCollapsed((c) => !c)}
-                            />
-                          </Tooltip>
-                        </div>
-                        <div
-                          style={{
-                            flex: 1,
-                            minHeight: 0,
-                            minWidth: 0,
-                            overflow: "hidden",
-                            display: bomCollapsed ? "none" : "flex",
-                            flexDirection: "column",
-                          }}
-                        >
-                          {bomSidebar}
-                        </div>
-                      </Sider>
-                    )}
+        {activeTab === "bom" ? (
+          <Layout className="pc-pdm-main">
+            {useBomDrawer && (
+              <Button
+                type="default"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileDrawerOpen(true)}
+                className="pc-pdm-bom-toggle"
+              >
+                BOM
+              </Button>
+            )}
 
-                    <Drawer
-                      title="Bill of Materials"
-                      placement="left"
-                      onClose={() => setMobileDrawerOpen(false)}
-                      open={useBomDrawer && mobileDrawerOpen}
-                      size={Math.min(420, Math.round(viewportWidth * 0.92))}
-                      styles={{ body: { padding: 0, height: "100%", overflow: "hidden" } }}
-                      destroyOnClose={false}
-                    >
-                      {bomSidebar}
-                    </Drawer>
-
-                    <Content
-                      className="pc-pdm-detail"
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        overflow: "hidden",
-                        backgroundColor: "#f8fafc",
-                        height: "100%",
-                        margin: 0,
-                        padding: useBomDrawer ? "48px 8px 8px" : 0,
-                        minWidth: 0,
-                      }}
-                    >
-                      {selectedItem?.itemType === "part" && (
-                        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                          <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
-                            <DocumentsPanel
-                              selectedItem={selectedItem}
-                              onDocumentsLoaded={setPartDocuments}
-                            />
-                          </ProductDetails>
-                        </div>
-                      )}
-                      {selectedItem?.itemType === "assembly" && (
-                        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                          <AssemblyDocumentsPanel selectedItem={selectedItem} />
-                        </div>
-                      )}
-                      {selectedItem &&
-                        selectedItem.itemType !== "part" &&
-                        selectedItem.itemType !== "assembly" &&
-                        selectedItem.itemType !== "product" && (
-                          <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                            <DocumentsPanel
-                              selectedItem={selectedItem}
-                              onDocumentsLoaded={setPartDocuments}
-                            />
-                          </div>
-                        )}
-                    </Content>
-                  </Layout>
+            {!useBomDrawer && (
+              <Sider
+                className="pc-pdm-bom-sider"
+                width={bomWidth}
+                collapsedWidth={BOM_SIDER_COLLAPSED}
+                collapsed={bomCollapsed}
+                collapsible
+                trigger={null}
+                theme="light"
+                style={{
+                  borderRight: "1px solid #f0f0f0",
+                  overflow: "hidden",
+                  height: "100%",
+                  transition: "all 0.2s",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: bomCollapsed ? "center" : "space-between",
+                    padding: bomCollapsed ? "8px 0" : "6px 10px",
+                    borderBottom: "1px solid #f0f0f0",
+                    flexShrink: 0,
+                    background: "#fafafa",
+                  }}
+                >
+                  {!bomCollapsed && (
+                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>BOM panel</span>
+                  )}
+                  <Tooltip
+                    title={bomCollapsed ? "Expand Bill of Materials" : "Minimise Bill of Materials"}
+                    placement="right"
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={bomCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                      onClick={() => setBomCollapsed((c) => !c)}
+                    />
+                  </Tooltip>
                 </div>
-              ),
-            },
-            {
-              key: "order",
-              label: viewportWidth < 1100 ? "Tracking" : "Order Tracking",
-              children: (
-                <div className="pc-pdm-shell" style={{ overflow: "auto" }}>
-                  {headerBar}
-                  <div style={{ flex: 1, minHeight: 0, padding: "0 8px 8px" }}>
-                    <OrderTracking productId={productId} />
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    display: bomCollapsed ? "none" : "flex",
+                    flexDirection: "column",
+                    position: "relative",
+                  }}
+                >
+                  {bomSidebar}
+                </div>
+              </Sider>
+            )}
+
+            <Drawer
+              title="Bill of Materials"
+              placement="left"
+              onClose={() => setMobileDrawerOpen(false)}
+              open={useBomDrawer && mobileDrawerOpen}
+              size={Math.min(420, Math.round(viewportWidth * 0.92))}
+              styles={{ body: { padding: 0, height: "100%", overflow: "hidden" } }}
+              destroyOnClose={false}
+            >
+              {bomSidebar}
+            </Drawer>
+
+            <Content
+              className="pc-pdm-detail"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                backgroundColor: "#f8fafc",
+                height: "100%",
+                margin: 0,
+                padding: useBomDrawer ? "48px 8px 8px" : 0,
+                minWidth: 0,
+              }}
+            >
+              {selectedItem?.itemType === "part" && (
+                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                    <DocumentsPanel
+                      selectedItem={selectedItem}
+                      onDocumentsLoaded={setPartDocuments}
+                    />
+                  </ProductDetails>
+                </div>
+              )}
+              {selectedItem?.itemType === "assembly" && (
+                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                  <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                </div>
+              )}
+              {selectedItem &&
+                selectedItem.itemType !== "part" &&
+                selectedItem.itemType !== "assembly" &&
+                selectedItem.itemType !== "product" && (
+                  <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                    <DocumentsPanel
+                      selectedItem={selectedItem}
+                      onDocumentsLoaded={setPartDocuments}
+                    />
                   </div>
-                </div>
-              ),
-            },
-            {
-              key: "recycle-bin",
-              label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin",
-              children: (
-                <div className="pc-pdm-shell">
-                  <Recyclebin />
-                </div>
-              ),
-            },
-          ]}
-        />
+                )}
+            </Content>
+          </Layout>
+        ) : activeTab === "order" ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 8px 8px" }}>
+            <OrderTracking productId={productId} />
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+            <Recyclebin
+              productId={productId ? parseInt(productId, 10) : null}
+              projectName={projectName}
+              projectNumber={projectNumber}
+            />
+          </div>
+        )}
       </div>
     </>
   );

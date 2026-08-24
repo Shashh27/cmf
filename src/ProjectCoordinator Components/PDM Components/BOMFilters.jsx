@@ -7,7 +7,8 @@ import {
   CodepenOutlined, 
   SafetyCertificateOutlined,
   LinkOutlined,
-  DisconnectOutlined
+  DisconnectOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 
 const { Option } = Select;
@@ -15,6 +16,7 @@ const { Option } = Select;
 const BOMFilters = ({ stats, activeFilter, onFilterChange }) => {
   const options = [
     { key: 'all', label: 'All Parts', count: stats.total, icon: <AppstoreOutlined />, color: 'blue' },
+    { key: 'active', label: 'Active Parts', count: stats.active, icon: <ThunderboltOutlined />, color: 'green' },
     { key: 'inhouse', label: 'In-house', count: stats.inhouse, icon: <CodeSandboxOutlined />, color: 'emerald' },
     { key: 'outsource', label: 'Outsource', count: stats.outsource, icon: <CodepenOutlined />, color: 'amber' },
     { key: 'standard', label: 'Standard', count: stats.standard, icon: <SafetyCertificateOutlined />, color: 'indigo' },

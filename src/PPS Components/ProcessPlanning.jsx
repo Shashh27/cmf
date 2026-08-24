@@ -916,7 +916,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       {orderDetails && (
         <Card style={{ marginTop: 16 }}>
           <Typography.Title level={5} style={{ margin: 0, marginBottom: 8 }}>
-            Order Details
+            Project Details
           </Typography.Title>
           <Card className={`pp-summary-card ${isOrderActiveDerived ? "active" : ""}`} style={{ marginTop: 16 }}>
             <div

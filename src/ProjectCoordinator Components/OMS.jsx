@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined, UserOutlined, CalendarOutlined,
-  SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined, InfoCircleOutlined } from "@ant-design/icons";
+  SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined, InfoCircleOutlined, CloseCircleOutlined,
+} from "@ant-design/icons";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { api } from '../api/client.js';
 import OrderModal from "./OMS Components/OrderModal";
@@ -137,14 +138,14 @@ const OMS = () => {
     setOrderModalOpen(false);
     setEditingOrder(null);
     if (order) {
-      messageApi.success(`Order "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
+      messageApi.success(`Project "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
     }
   };
 
   const handleDeleteOrder = (order) => {
     Modal.confirm({
-      title: "Delete Order",
-      content: `Are you sure you want to delete order "${order.sale_order_number}"?`,
+      title: "Delete Project",
+      content: `Are you sure you want to delete project "${order.sale_order_number}"?`,
       okText: "Delete",
       okType: "danger",
       cancelText: "Cancel",
@@ -155,16 +156,16 @@ const OMS = () => {
           const result = response.data || {};
           fetchOrders();
           if (result.product_also_deleted) {
-            messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
+            messageApi.success(`Project "${order.sale_order_number}" and its associated product deleted successfully!`);
           } else {
-            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            messageApi.success(`Project "${order.sale_order_number}" deleted successfully!`);
           }
         } catch (error) {
-          console.error("Error deleting order:", error);
+          console.error("Error deleting project:", error);
           const detail =
             error?.response?.data?.detail ||
             error?.response?.data?.message ||
-            "Failed to delete order";
+            "Failed to delete project";
           messageApi.error(detail);
         }
       },
@@ -261,6 +262,12 @@ const OMS = () => {
       if (selectedKpiFilter === 'Pending' && order.status !== 'Pending') return false;
       if (selectedKpiFilter === 'In Progress' && order.status !== 'In Progress') return false;
       if (selectedKpiFilter === 'Completed' && order.status !== 'Completed') return false;
+      if (selectedKpiFilter === 'Rejected' && order.approval_status !== 'Rejected') return false;
+      if (selectedKpiFilter === 'Pending Approval' && order.approval_status !== 'Pending Approval') return false;
+      if (
+        selectedKpiFilter === 'Approved' &&
+        !['Approved', 'Auto-Approved', 'Created by Admin'].includes(order.approval_status)
+      ) return false;
     }
 
     // 1. Product ID Filter (from URL)
@@ -510,7 +517,7 @@ const OMS = () => {
       render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
     },
     {
-      title: <span className="font-semibold text-gray-700">Approval Remarks</span>,
+      title: <span className="font-semibold text-gray-700">Remarks</span>,
       dataIndex: "approval_remarks",
       key: "approval_remarks",
       width: 150,
@@ -539,7 +546,7 @@ const OMS = () => {
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
-          <Tooltip title="Edit Order">
+          <Tooltip title="Edit Project">
             <Button
               type="text"
               size="small"
@@ -548,7 +555,7 @@ const OMS = () => {
               onClick={() => handleEditOrder(record)}
             />
           </Tooltip>
-          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected order" : "Documents"}>
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected project" : "Documents"}>
             <Button
               type="text"
               size="small"
@@ -561,7 +568,7 @@ const OMS = () => {
               }}
             />
           </Tooltip>
-          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected order" : "Delete Order"}>
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected project" : "Delete Project"}>
             <Button
               type="text"
               size="small"
@@ -581,6 +588,11 @@ const OMS = () => {
   const pendingCount = orders.filter(o => o.status === 'Pending').length;
   const inProgressCount = orders.filter(o => o.status === 'In Progress').length;
   const completedCount = orders.filter(o => o.status === 'Completed').length;
+  const rejectedCount = orders.filter(o => o.approval_status === 'Rejected').length;
+  const approvalPendingCount = orders.filter(o => o.approval_status === 'Pending Approval').length;
+  const approvedCount = orders.filter(o =>
+    ['Approved', 'Auto-Approved', 'Created by Admin'].includes(o.approval_status)
+  ).length;
 
   const ordersForPdf = filteredOrders.map(order => ({
     ...order,
@@ -677,7 +689,7 @@ const OMS = () => {
       {contextHolder}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-4 lg:mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-3 mb-4 lg:mb-6">
         <div 
           className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
             selectedKpiFilter === null 
@@ -688,7 +700,7 @@ const OMS = () => {
         >
           <div className="flex items-center justify-between gap-1">
             <div>
-              <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Orders</div>
+              <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Projects</div>
               <div className="text-lg sm:text-xl font-bold text-blue-700 leading-tight">{totalOrders}</div>
             </div>
             <ShoppingOutlined className="text-blue-600 text-lg sm:text-xl" />
@@ -742,6 +754,54 @@ const OMS = () => {
             <CheckCircleOutlined className="text-green-500 text-lg sm:text-xl" />
           </div>
         </div>
+        <div
+          className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+            selectedKpiFilter === 'Approved'
+              ? 'bg-gradient-to-br from-emerald-50 to-emerald-100 border-emerald-100 ring-2 ring-emerald-400'
+              : 'bg-gradient-to-br from-emerald-50 to-emerald-100 border-emerald-100'
+          }`}
+          onClick={() => setSelectedKpiFilter('Approved')}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <div>
+              <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Approved Projects</div>
+              <div className="text-lg sm:text-xl font-bold text-emerald-600 leading-tight">{approvedCount}</div>
+            </div>
+            <CheckCircleOutlined className="text-emerald-500 text-lg sm:text-xl" />
+          </div>
+        </div>
+        <div
+          className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+            selectedKpiFilter === 'Pending Approval'
+              ? 'bg-gradient-to-br from-amber-50 to-amber-100 border-amber-100 ring-2 ring-amber-400'
+              : 'bg-gradient-to-br from-amber-50 to-amber-100 border-amber-100'
+          }`}
+          onClick={() => setSelectedKpiFilter('Pending Approval')}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <div>
+              <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Approval Pending</div>
+              <div className="text-lg sm:text-xl font-bold text-amber-600 leading-tight">{approvalPendingCount}</div>
+            </div>
+            <ClockCircleOutlined className="text-amber-500 text-lg sm:text-xl" />
+          </div>
+        </div>
+        <div
+          className={`rounded-lg p-2 sm:p-3 border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+            selectedKpiFilter === 'Rejected'
+              ? 'bg-gradient-to-br from-red-50 to-red-100 border-red-100 ring-2 ring-red-400'
+              : 'bg-gradient-to-br from-red-50 to-red-100 border-red-100'
+          }`}
+          onClick={() => setSelectedKpiFilter('Rejected')}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <div>
+              <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Rejected Projects</div>
+              <div className="text-lg sm:text-xl font-bold text-red-600 leading-tight">{rejectedCount}</div>
+            </div>
+            <CloseCircleOutlined className="text-red-500 text-lg sm:text-xl" />
+          </div>
+        </div>
       </div>
 
       {/* Header */}
@@ -780,7 +840,7 @@ const OMS = () => {
                 style={{ backgroundColor: '#2563eb' }}
                 className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
               >
-                <span className="hidden sm:inline">New Order</span>
+                <span className="hidden sm:inline">New Project</span>
                 <span className="sm:hidden">New</span>
               </Button>
             </div>

@@ -285,8 +285,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       // Filter documents: PC uploads require acknowledgment, admin/MC uploads visible to all
       const filteredDocs = docs.filter(doc => {
         const uploaderRole = doc.user_role;
-        // If uploaded by PC, require acknowledgment and not rejected
-        if (uploaderRole === 'project_coordinator') return doc.is_acknowledged && !doc.mc_is_rejected;
+        // If uploaded by PC, require MC acknowledgment (not just PC release)
+        if ((uploaderRole || '').toLowerCase().includes('project_coordinator')) {
+          return doc.mc_is_acknowledged && !doc.mc_is_rejected;
+        }
         // Admin/MC uploads are visible to everyone without acknowledgment
         return true;
       });
@@ -657,6 +659,14 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     return doc.document_name || '';
   };
 
+  const formatDateTime = (date) => {
+    if (!date) return '—';
+    return new Date(date).toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+  };
+
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
@@ -707,19 +717,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         );
       }
     },
-    { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
+    { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 130,
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
       }
     },
-    { title: <span className="text-xs font-semibold">DATE</span>, key: 'date', width: 120,
+    { title: <span className="text-xs font-semibold">UPLOADED AT</span>, key: 'uploaded_time', width: 160,
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        return cur.created_at ? <span className="text-xs text-slate-700 font-medium">{new Date(cur.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-xs text-slate-400">—</span>;
+        return <span className="text-xs text-slate-600">{formatDateTime(cur.created_at)}</span>;
       }
     },
-    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
+    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 130, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         
@@ -730,7 +740,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               <Tag color="red" icon={<CloseCircleOutlined />} className="m-0 text-xs">Rejected</Tag>
             </Tooltip>
           );
-        } else if (cur.is_acknowledged) {
+        } else if (cur.mc_is_acknowledged) {
           return (
             <Tooltip title={cur.mc_ack_remarks || 'Acknowledged by MC'}>
               <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>
@@ -739,6 +749,13 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         } else {
           return <span className="text-xs text-gray-400">-</span>;
         }
+      }
+    },
+    { title: <span className="text-xs font-semibold">ACKNOWLEDGED AT</span>, key: 'ack_time', width: 160,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const statusTime = cur.mc_is_rejected ? cur.mc_reject_at : cur.mc_ack_at;
+        return <span className="text-xs text-slate-600">{formatDateTime(statusTime)}</span>;
       }
     },
     { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 220, align: 'center', fixed: 'right',

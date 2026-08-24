@@ -6,7 +6,7 @@ import { api } from '../api/client.js';
 const { Title, Text } = Typography;
 const { Sider, Content } = Layout;
 
-const Recyclebin = ({ orderId }) => {
+const Recyclebin = ({ orderId, productId = null, projectName = null, projectNumber = null }) => {
   const { message: antMessage, modal } = App.useApp();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -138,6 +138,21 @@ const Recyclebin = ({ orderId }) => {
     }
   };
 
+  const sameProduct = (itemProductId, targetId) =>
+    itemProductId != null && targetId != null && Number(itemProductId) === Number(targetId);
+
+  const countDeletedAssemblies = (assemblies = []) => {
+    let count = 0;
+    const walk = (items) => {
+      items.forEach((assembly) => {
+        if (assembly.recycle_bin) count += 1;
+        if (assembly.child_assemblies?.length) walk(assembly.child_assemblies);
+      });
+    };
+    walk(assemblies);
+    return count;
+  };
+
   const fetchProjects = async () => {
     setLoading(true);
     try {
@@ -146,63 +161,151 @@ const Recyclebin = ({ orderId }) => {
         url += `?order_id=${orderId}`;
       }
       
-      const response = await api.get(url);
-      const allParts = response.data.parts || [];
-      const allAssemblies = response.data.assemblies || [];
+      const [response, ordersRes] = await Promise.all([
+        api.get(url),
+        api.get(`/orders/`).catch(() => ({ data: [] })),
+      ]);
+      let fetchedParts = response.data.parts || [];
+      let fetchedAssemblies = response.data.assemblies || [];
       const orderInfo = response.data.order_info;
+
+      // Scope to the current PDM product (same idea as admin orderId filter)
+      const scopedProductId = productId != null ? Number(productId) : null;
+      if (scopedProductId != null) {
+        fetchedParts = fetchedParts.filter((p) => sameProduct(p.product_id, scopedProductId));
+        fetchedAssemblies = fetchedAssemblies.filter((a) => sameProduct(a.product_id, scopedProductId));
+      }
       
-      setAllParts(allParts);
-      setAllAssemblies(allAssemblies);
-      setFlatAssemblies(flattenAssemblies(allAssemblies));
+      setAllParts(fetchedParts);
+      setAllAssemblies(fetchedAssemblies);
+      setFlatAssemblies(flattenAssemblies(fetchedAssemblies));
+
+      // Map product_id -> sale_order_number from orders + recycled parts
+      // (assemblies API payload does not include sale_order_number)
+      const saleOrderByProduct = {};
+      const projectNameByProduct = {};
+      const ordersList = Array.isArray(ordersRes?.data) ? ordersRes.data : (ordersRes?.data?.orders || []);
+      ordersList.forEach((order) => {
+        if (order?.product_id == null) return;
+        const pid = Number(order.product_id);
+        if (order.sale_order_number) saleOrderByProduct[pid] = order.sale_order_number;
+        if (order.project_name || order.product_name) {
+          projectNameByProduct[pid] = order.project_name || order.product_name;
+        }
+      });
+      fetchedParts.forEach((part) => {
+        if (part.product_id != null && part.sale_order_number) {
+          saleOrderByProduct[Number(part.product_id)] = part.sale_order_number;
+        }
+      });
+
+      const resolveSaleOrder = (pid) =>
+        projectNumber ||
+        saleOrderByProduct[Number(pid)] ||
+        orderInfo?.sale_order_number ||
+        '';
+      const resolveProductName = (pid, fallback = '') =>
+        projectName ||
+        projectNameByProduct[Number(pid)] ||
+        fallback ||
+        orderInfo?.product_name ||
+        '';
       
-      if (orderInfo && allParts.length === 0 && allAssemblies.length === 0) {
-        setProjects([{
-          product_id: orderInfo.product_id,
-          product_name: orderInfo.product_name,
-          sale_order_number: orderInfo.sale_order_number,
-          project_name: orderInfo.product_name,
+      if (orderInfo && fetchedParts.length === 0 && fetchedAssemblies.length === 0) {
+        const emptyProject = {
+          product_id: scopedProductId || orderInfo.product_id,
+          product_name: projectName || orderInfo.product_name,
+          sale_order_number: projectNumber || orderInfo.sale_order_number || resolveSaleOrder(orderInfo.product_id),
+          project_name: projectName || orderInfo.product_name,
           parts: [],
           assemblies: []
-        }]);
-        return { allParts, allAssemblies, orderInfo };
+        };
+        setProjects([emptyProject]);
+        setSelectedProject(emptyProject);
+        setBomData({
+          product: { id: emptyProject.product_id, product_name: emptyProject.product_name },
+          parts: [],
+          assemblies: []
+        });
+        setFilteredBomData({
+          product: { id: emptyProject.product_id, product_name: emptyProject.product_name },
+          parts: [],
+          assemblies: []
+        });
+        return { allParts: fetchedParts, allAssemblies: fetchedAssemblies, orderInfo };
       }
       
       const projectMap = {};
-      allParts.forEach(part => {
-        if (part.product_id) {
-          if (!projectMap[part.product_id]) {
-            projectMap[part.product_id] = {
-              product_id: part.product_id,
-              product_name: orderInfo?.product_name || part.product_name,
-              sale_order_number: orderInfo?.sale_order_number || part.sale_order_number,
-              project_name: orderInfo?.product_name || part.project_name,
+      fetchedParts.forEach(part => {
+        if (part.product_id != null) {
+          const pid = Number(part.product_id);
+          if (!projectMap[pid]) {
+            projectMap[pid] = {
+              product_id: pid,
+              product_name: part.product_name || resolveProductName(pid),
+              sale_order_number: part.sale_order_number || resolveSaleOrder(pid),
+              project_name: part.project_name || part.product_name || resolveProductName(pid),
               parts: [],
               assemblies: []
             };
           }
-          projectMap[part.product_id].parts.push(part);
+          projectMap[pid].parts.push(part);
+          if (part.sale_order_number) {
+            projectMap[pid].sale_order_number = part.sale_order_number;
+          }
+          if (part.product_name && !projectMap[pid].product_name) {
+            projectMap[pid].product_name = part.product_name;
+          }
         }
       });
       
-      allAssemblies.forEach(assembly => {
-        if (assembly.product_id) {
-          if (!projectMap[assembly.product_id]) {
-            projectMap[assembly.product_id] = {
-              product_id: assembly.product_id,
-              product_name: orderInfo?.product_name || assembly.product_name,
-              sale_order_number: orderInfo?.sale_order_number || assembly.sale_order_number,
-              project_name: orderInfo?.product_name || assembly.project_name,
+      fetchedAssemblies.forEach(assembly => {
+        if (assembly.product_id != null) {
+          const pid = Number(assembly.product_id);
+          if (!projectMap[pid]) {
+            projectMap[pid] = {
+              product_id: pid,
+              product_name: assembly.product_name || resolveProductName(pid),
+              sale_order_number: resolveSaleOrder(pid),
+              project_name: assembly.product_name || resolveProductName(pid),
               parts: [],
               assemblies: []
             };
           }
-          projectMap[assembly.product_id].assemblies.push(assembly);
+          projectMap[pid].assemblies.push(assembly);
+          if (assembly.product_name && !projectMap[pid].product_name) {
+            projectMap[pid].product_name = assembly.product_name;
+          }
+          if (!projectMap[pid].sale_order_number) {
+            projectMap[pid].sale_order_number = resolveSaleOrder(pid);
+          }
         }
       });
       
-      setProjects(Object.values(projectMap));
+      const projectList = Object.values(projectMap);
+      setProjects(projectList);
+
+      if (scopedProductId != null) {
+        const match =
+          projectList.find((p) => sameProduct(p.product_id, scopedProductId)) ||
+          (projectList.length === 0
+            ? {
+                product_id: scopedProductId,
+                product_name: resolveProductName(scopedProductId),
+                sale_order_number: resolveSaleOrder(scopedProductId),
+                project_name: resolveProductName(scopedProductId),
+                parts: [],
+                assemblies: [],
+              }
+            : null);
+        if (match) {
+          if (projectList.length === 0) setProjects([match]);
+          setSelectedProject(match);
+          await fetchProductBOM(match.product_id, fetchedParts, fetchedAssemblies, match);
+        }
+      }
       
-      return { allParts, allAssemblies, orderInfo };
+      return { allParts: fetchedParts, allAssemblies: fetchedAssemblies, orderInfo };
     } catch (error) {
       console.error("Error fetching projects:", error);
       antMessage.error("Failed to load projects");
@@ -211,19 +314,25 @@ const Recyclebin = ({ orderId }) => {
     }
   };
 
-  const fetchProductBOM = async (productId, partsData = null, assembliesData = null) => {
+  const fetchProductBOM = async (targetProductId, partsData = null, assembliesData = null, projectOverride = null) => {
     setLoading(true);
     try {
       const sourceParts = partsData || allParts;
       const sourceAssemblies = assembliesData || allAssemblies;
-      const productParts = sourceParts.filter(part => part.product_id === productId);
-      const productAssemblies = sourceAssemblies.filter(assembly => assembly.product_id === productId);
+      const productParts = sourceParts.filter(part => sameProduct(part.product_id, targetProductId));
+      const productAssemblies = sourceAssemblies.filter(assembly => sameProduct(assembly.product_id, targetProductId));
       const directParts = productParts.filter(part => !part.assembly_id);
 
+      const projectMeta = projectOverride || selectedProject;
       const bomData = {
         product: {
-          id: productId,
-          product_name: selectedProject?.product_name || productParts[0]?.product_name || productAssemblies[0]?.product_name || ''
+          id: Number(targetProductId),
+          product_name:
+            projectMeta?.product_name ||
+            projectName ||
+            productParts[0]?.product_name ||
+            productAssemblies[0]?.product_name ||
+            ''
         },
         parts: directParts,
         assemblies: productAssemblies
@@ -247,7 +356,9 @@ const Recyclebin = ({ orderId }) => {
 
   const handleProjectClick = (project) => {
     setSelectedProject(project);
-    fetchProductBOM(project.product_id);
+    setCheckedKeys([]);
+    setSelectedItems([]);
+    fetchProductBOM(project.product_id, null, null, project);
   };
 
   const handleRestore = async (item, type) => {
@@ -275,7 +386,7 @@ const Recyclebin = ({ orderId }) => {
           setSelectedItems([]);
           const data = await fetchProjects();
           if (selectedProject) {
-            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies, selectedProject);
           }
         } catch (error) {
           console.error("Error restoring:", error);
@@ -329,7 +440,7 @@ const Recyclebin = ({ orderId }) => {
           setSelectedItems([]);
           const data = await fetchProjects();
           if (selectedProject) {
-            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies, selectedProject);
           }
         } catch (error) {
           console.error("Error permanently deleting:", error);
@@ -401,7 +512,7 @@ const Recyclebin = ({ orderId }) => {
 
           const data = await fetchProjects();
           if (selectedProject) {
-            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies, selectedProject);
           }
         } catch (error) {
           console.error("Error in bulk restore:", error);
@@ -471,7 +582,7 @@ const Recyclebin = ({ orderId }) => {
 
           const data = await fetchProjects();
           if (selectedProject) {
-            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies, selectedProject);
           }
         } catch (error) {
           console.error("Error in bulk delete:", error);
@@ -674,7 +785,8 @@ const Recyclebin = ({ orderId }) => {
     window.addEventListener('resize', handleResize);
     
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, orderId]);
 
   useEffect(() => {
     if (bomData) {
@@ -760,12 +872,12 @@ const Recyclebin = ({ orderId }) => {
 
   const projectColumns = [
     {
-      title: "Order Number",
+      title: "Project Number",
       dataIndex: "sale_order_number",
       key: "sale_order_number",
     },
     {
-      title: "Order Name",
+      title: "Project Name",
       dataIndex: "product_name",
       key: "product_name",
     },
@@ -779,7 +891,7 @@ const Recyclebin = ({ orderId }) => {
       title: "Deleted Assemblies",
       dataIndex: "assemblies",
       key: "assemblies",
-      render: (assemblies) => assemblies.length,
+      render: (assemblies) => countDeletedAssemblies(assemblies),
     },
   ];
 
@@ -804,7 +916,7 @@ const Recyclebin = ({ orderId }) => {
         }}
       >
         <div className="flex justify-between items-center mb-4">
-          <Title level={4} className="m-0">Orders</Title>
+          <Title level={4} className="m-0">Projects</Title>
           {isMobile && (
             <Button
               type="text"
@@ -814,7 +926,7 @@ const Recyclebin = ({ orderId }) => {
           )}
         </div>
         <Text type="secondary" className="block mb-4">
-          Select an order to view its BOM with deleted items
+          Select a project to view its BOM with deleted items
         </Text>
         <Table
           columns={projectColumns}
@@ -832,13 +944,13 @@ const Recyclebin = ({ orderId }) => {
             },
             style: {
               cursor: 'pointer',
-              background: selectedProject?.product_id === record.product_id ? '#e6f7ff' : 'transparent',
+              background: sameProduct(selectedProject?.product_id, record.product_id) ? '#e6f7ff' : 'transparent',
             },
           })}
         />
       </Sider>
       <Drawer
-        title="Orders"
+        title="Projects"
         placement="left"
         onClose={() => setSidebarVisible(false)}
         open={sidebarVisible}
@@ -846,9 +958,9 @@ const Recyclebin = ({ orderId }) => {
         styles={{ body: { padding: 0 } }}
       >
         <div style={{ padding: '16px' }}>
-          <Title level={4} className="m-0 mb-4">Orders</Title>
+          <Title level={4} className="m-0 mb-4">Projects</Title>
           <Text type="secondary" className="block mb-4">
-            Select an order to view its BOM with deleted items
+            Select a project to view its BOM with deleted items
           </Text>
           <Table
             columns={projectColumns}
@@ -864,7 +976,7 @@ const Recyclebin = ({ orderId }) => {
               },
               style: {
                 cursor: 'pointer',
-                background: selectedProject?.product_id === record.product_id ? '#e6f7ff' : 'transparent',
+                background: sameProduct(selectedProject?.product_id, record.product_id) ? '#e6f7ff' : 'transparent',
               },
             })}
           />

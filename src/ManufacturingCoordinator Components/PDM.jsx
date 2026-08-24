@@ -178,7 +178,7 @@ const PDM = () => {
               )}
               <MCDocumentNotifications orderId={initialOrderId} />
               <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
-                {viewportWidth < 900 ? "Back" : "Back to Orders"}
+                {viewportWidth < 900 ? "Back" : "Back to Projects"}
               </Button>
             </div>
           </div>

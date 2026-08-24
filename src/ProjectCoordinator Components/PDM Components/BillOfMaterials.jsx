@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, DownloadOutlined } from "@ant-design/icons";
-import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
+import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, DownloadOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
+import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography, Dropdown } from "antd";
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { api } from '../../api/client.js';
 
@@ -23,6 +23,7 @@ import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import { getLatestRevision } from "./operationUtils";
 import BOMFilters from "./BOMFilters";
+import { Zap } from "lucide-react";
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
 // Wraps every case-insensitive match of `query` inside `text` with a light-blue
@@ -62,6 +63,7 @@ const BillOfMaterials = ({
   disableProductCreate = false, 
   initialProductId = null, 
   singleProductId = null,
+  initialPartId = null,
   projectName,
   projectNumber
 }) => {
@@ -92,6 +94,7 @@ const BillOfMaterials = ({
   const [activeFilter, setActiveFilter] = useState('all');
   const hasFetchedData = useRef(false);
   const singleProductFetched = useRef(false);
+  const initialPartApplied = useRef(false);
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
@@ -113,6 +116,8 @@ const BillOfMaterials = ({
     if (normalized === "part") return <FileTextOutlined className="text-gray-500" />;
     return <FileTextOutlined className="text-gray-500" />;
   };
+
+  const isPartActive = (part) => (part?.schedule_status || '').toLowerCase() === 'active';
 
   const getTypeColor = (type) => {
     const normalized = (type || "").toString().toLowerCase();
@@ -167,6 +172,62 @@ const BillOfMaterials = ({
     }
   }, [singleProductId]);
 
+  // Select + expand a part when navigated from Order Tracking (initialPartId)
+  useEffect(() => {
+    initialPartApplied.current = false;
+  }, [initialPartId]);
+
+  useEffect(() => {
+    if (initialPartId == null || initialPartApplied.current) return;
+    const productId = singleProductId ?? initialProductId;
+    if (productId == null) return;
+    const hierarchy = hierarchicalData[productId];
+    if (!hierarchy) return;
+
+    const findPartWithPath = (assemblies, pathIds = []) => {
+      for (const assembly of assemblies || []) {
+        const nextPath = [...pathIds, assembly.id];
+        const part = (assembly.parts || []).find((p) => Number(p.id) === Number(initialPartId));
+        if (part) return { part, pathIds: nextPath };
+        const nested = findPartWithPath(assembly.child_assemblies || [], nextPath);
+        if (nested) return nested;
+      }
+      return null;
+    };
+
+    const directPart = (hierarchy.parts || []).find((p) => Number(p.id) === Number(initialPartId));
+    const found = directPart
+      ? { part: directPart, pathIds: [] }
+      : findPartWithPath(hierarchy.assemblies || []);
+
+    if (!found?.part) return;
+
+    initialPartApplied.current = true;
+    const expandKeys = { [getExpandKey('product', productId)]: true };
+    found.pathIds.forEach((id) => {
+      expandKeys[getExpandKey('assembly', id)] = true;
+    });
+    setExpandedItems((prev) => ({ ...prev, ...expandKeys }));
+    setActiveItemId(found.part.id);
+    setActiveItemType('part');
+
+    const itemWithMeta = {
+      ...found.part,
+      itemType: 'part',
+      productId,
+    };
+    if (onItemSelected) onItemSelected(itemWithMeta);
+
+    const scrollToPart = () => {
+      const el = document.querySelector(`[data-bom-part-id="${found.part.id}"]`);
+      if (el?.scrollIntoView) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    };
+    // Wait for expand + paint so the part row exists in the DOM
+    setTimeout(scrollToPart, 150);
+  }, [initialPartId, singleProductId, initialProductId, hierarchicalData, onItemSelected]);
+
   const flattenBOMForExport = (data) => {
     const parts = [];
     const assemblies = [];
@@ -205,6 +266,7 @@ const BillOfMaterials = ({
     return { parts, assemblies };
   };
 
+  const fetchProductHierarchyRef = useRef(null);
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
     try {
@@ -225,6 +287,18 @@ const BillOfMaterials = ({
       message.error("Error fetching product hierarchy");
     }
   };
+  fetchProductHierarchyRef.current = fetchProductHierarchy;
+
+  useEffect(() => {
+    const onDocsChanged = (e) => {
+      const pid = e.detail?.productId;
+      if (pid && fetchProductHierarchyRef.current) {
+        fetchProductHierarchyRef.current(pid, true);
+      }
+    };
+    window.addEventListener('pc-bom-docs-changed', onDocsChanged);
+    return () => window.removeEventListener('pc-bom-docs-changed', onDocsChanged);
+  }, []);
 
   const toggleExpand = (key) => {
     setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }));
@@ -609,111 +683,165 @@ const BillOfMaterials = ({
   const ActionButtons = ({ item, type, tagName, tagColor }) => {
     const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
     const bomExport = productHierarchy?.bomExport;
-    const isInRecycleBin = (type === 'part' && item.recycle_bin === true) || (type === 'assembly' && item.recycle_bin === true);
+    const isInRecycleBin = (type === 'part' || type === 'assembly') && item.recycle_bin === true;
 
-    const buttons = {
-      part: [
-        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit", disabled: isInRecycleBin },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete", disabled: isInRecycleBin }
-      ],
-      assembly: [
-        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly", disabled: isInRecycleBin },
-        { icon: ToolOutlined, onClick: () => {
+    const getAddMenuItems = () => {
+      if (type === 'part' || isInRecycleBin) return [];
+
+      if (type === 'assembly') {
+        const isSubAssembly = item.parent_id !== null;
+        if (isSubAssembly) {
+          return [
+            { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => {
+              const product = products.find(p => p.id === item.product_id);
+              if (product) handleCreatePart(product, item);
+            }},
+          ];
+        }
+        return [
+          { key: 'add-sub-assembly', label: 'Add Sub-Assembly', icon: <PartitionOutlined />, onClick: () => handleCreateSubAssembly(item) },
+          { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => {
             const product = products.find(p => p.id === item.product_id);
             if (product) handleCreatePart(product, item);
-          }, title: "Add Part", disabled: isInRecycleBin },
-        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit", disabled: isInRecycleBin },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete", disabled: isInRecycleBin }
-      ],
-      product: [
-        { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
-        { icon: ToolOutlined, onClick: () => handleCreatePart(item), title: "Add Part" },
-        { icon: EditOutlined, onClick: () => handleEditProduct(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'product'), danger: true, title: "Delete" }
-      ]
+          }},
+        ];
+      }
+
+      if (type === 'product') {
+        return [
+          { key: 'add-assembly', label: 'Add Assembly', icon: <PartitionOutlined />, onClick: () => handleCreateAssembly(item) },
+          { key: 'add-part', label: 'Add Part', icon: <ToolOutlined />, onClick: () => handleCreatePart(item) },
+        ];
+      }
+
+      return [];
     };
+
+    const getActionMenuItems = () => {
+      if (type === 'part') {
+        return [
+          { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditPart(item), disabled: isInRecycleBin },
+          { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'part'), disabled: isInRecycleBin, danger: true },
+        ];
+      }
+
+      if (type === 'assembly') {
+        return [
+          { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditAssembly(item), disabled: isInRecycleBin },
+          { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'assembly'), disabled: isInRecycleBin, danger: true },
+        ];
+      }
+
+      if (type === 'product') {
+        return [
+          { key: 'edit', label: 'Edit Product', icon: <EditOutlined />, onClick: () => handleEditProduct(item) },
+          { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, onClick: () => handleDelete(item, 'product'), danger: true },
+        ];
+      }
+
+      return [];
+    };
+
+    const addMenuItems = getAddMenuItems();
+    const actionMenuItems = getActionMenuItems();
+    const showActive = type === 'part' && !isInRecycleBin && isPartActive(item);
+
     return (
-      <div className="flex items-center" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-        <div className="flex-shrink-0 flex gap-1 justify-start lg:w-[180px]">
-          {tagName && (
-            <span className="hidden lg:inline-block">
-              <Tag color={tagColor} className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
+          {isInRecycleBin ? (
+            <Tooltip title="RECYCLE BIN">
+              <UndoOutlined style={{ color: '#dc2626', fontSize: 14 }} />
+            </Tooltip>
+          ) : tagName ? (
+            <Tooltip title={tagName.toUpperCase()}>
+              <Tag
+                color={tagColor}
+                style={{
+                  fontSize: 9,
+                  padding: '0 3px',
+                  margin: 0,
+                  lineHeight: '14px',
+                  whiteSpace: 'nowrap',
+                  maxWidth: 64,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
                 {tagName.toUpperCase()}
               </Tag>
-            </span>
+            </Tooltip>
+          ) : null}
+          {showActive && (
+            <Tooltip title="Active">
+              <Zap size={14} color="#16a34a" fill="#16a34a" strokeWidth={2} style={{ flexShrink: 0 }} />
+            </Tooltip>
           )}
-          {isInRecycleBin && (
-            <span className="hidden lg:inline-block">
-              <Tag color="red" className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
-                RECYCLE BIN
-              </Tag>
-            </span>
-          )}
-          {type === 'part' ? (
-            <>
-              {buttons.part.map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
-                <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-                  <Button
-                    type="text"
-                    size="small"
-                    danger={danger}
-                    disabled={disabled}
-                    onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
-                    icon={<Icon style={{ fontSize: '14px' }} />}
-                    style={{ padding: 4, minWidth: 24, height: 24 }}
-                  />
-                </Tooltip>
-              ))}
-              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
-            </>
-          ) : (
-            buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
-              <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-                <Button
-                  type="text"
-                  size="small"
-                  danger={danger}
-                  disabled={disabled}
-                  onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
-                  icon={<Icon style={{ fontSize: '14px' }} />}
-                  style={{ padding: 4, minWidth: 24, height: 24 }}
-                />
+        </div>
+        <div className="flex items-center shrink-0">
+          {type === 'product' && <ProductBOMPdfDownload product={item} bomExport={bomExport} />}
+          {(type === 'part' || type === 'assembly') && (() => {
+            const raw =
+              getLatestRevision(item.documents)
+              || item.latest_document_version
+              || item.document_version
+              || null;
+            const revision = raw
+              ? (/^\d+$/.test(String(raw).replace(/^v/i, ''))
+                  ? String(raw).replace(/^v/i, '').padStart(2, '0')
+                  : String(raw).replace(/^v/i, ''))
+              : null;
+            return (
+              <Tooltip title={revision ? `Latest document version: ${revision}` : 'No document version'}>
+                <Tag
+                  className="m-0 text-[10px] shrink-0"
+                  color={revision ? 'blue' : 'default'}
+                  style={{ cursor: 'default', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {revision || '—'}
+                </Tag>
               </Tooltip>
-            ))
+            );
+          })()}
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {addMenuItems.length > 0 && (
+            <Dropdown
+              key={`add-dropdown-${type}-${item.id}`}
+              menu={{ items: addMenuItems }}
+              trigger={['click']}
+              disabled={isInRecycleBin}
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{ padding: 4, minWidth: 24, height: 24 }}
+              />
+            </Dropdown>
           )}
-          {type === 'product' && (
-            <ProductBOMPdfDownload product={item} bomExport={bomExport} />
+          {actionMenuItems.length > 0 && (
+            <Dropdown
+              key={`action-dropdown-${type}-${item.id}`}
+              menu={{ items: actionMenuItems }}
+              trigger={['click']}
+              disabled={isInRecycleBin}
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<MoreOutlined />}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{ padding: 4, minWidth: 24, height: 24 }}
+              />
+            </Dropdown>
           )}
         </div>
       </div>
     );
-  };
-
-  const getRawMaterialStatusTag = (status, stockStatus, stockDetails, partDetail, rawMaterialId) => {
-    // If part is WITHOUT_RAW_MATERIAL, don't show raw material status
-    if (partDetail === 'WITHOUT_RAW_MATERIAL' || !rawMaterialId) {
-      return <Tag className="m-0 text-[10px] shrink-0" color="default">N/A</Tag>;
-    }
-    
-    // Show stock status if available, otherwise fall back to material status
-    const statusToShow = stockStatus || status || "N/A";
-    const s = statusToShow.toString().toLowerCase();
-    
-    if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
-    if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
-    
-    // If we have stock details, show stock-specific status
-    if (stockDetails) {
-      if (stockDetails.status === 'available') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
-      } else if (stockDetails.status === 'reserved') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
-      } else if (stockDetails.status === 'used') {
-        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
-      }
-    }
-    
-    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
   };
 
   const bomStats = useMemo(() => {
@@ -721,7 +849,7 @@ const BillOfMaterials = ({
       ? products.filter(p => Number(p.id) === Number(singleProductId))
       : products;
       
-    const stats = { total: 0, inhouse: 0, outsource: 0, standard: 0, linked: 0, unlinked: 0 };
+    const stats = { total: 0, inhouse: 0, outsource: 0, standard: 0, linked: 0, unlinked: 0, active: 0 };
     
     const countParts = (parts) => {
       if (!parts) return;
@@ -739,6 +867,8 @@ const BillOfMaterials = ({
         const isLinked = p.raw_material_id != null && p.part_detail !== 'WITHOUT_RAW_MATERIAL';
         if (isLinked) stats.linked++;
         else stats.unlinked++;
+
+        if (isPartActive(p)) stats.active++;
       });
     };
     
@@ -780,6 +910,7 @@ const BillOfMaterials = ({
       case 'standard': return isStandard;
       case 'linked': return isLinked;
       case 'unlinked': return !isLinked;
+      case 'active': return isPartActive(part);
       default: return true;
     }
   };
@@ -822,19 +953,22 @@ const BillOfMaterials = ({
     if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     const isInRecycleBin = part.recycle_bin === true;
-    const hasUnacknowledgedDocs = part.has_unacknowledged_documents === true;
-    const revision = getLatestRevision(part.documents);
-    const partNumDisplay = revision ? `${part.part_number} (${revision})` : part.part_number;
+    const docRowStatus = part.document_row_status || 'none';
 
     return (
       <DraggablePartRow
         key={`part-${part.id}`}
         partId={part.id}
         disabled={isInRecycleBin}
+        data-bom-part-id={part.id}
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
           isInRecycleBin
             ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
-            : hasUnacknowledgedDocs
+            : docRowStatus === 'rejected'
+            ? 'bg-red-50 border-red-500 text-red-900'
+            : docRowStatus === 'accepted'
+            ? 'bg-green-50 border-green-500 text-green-900'
+            : docRowStatus === 'released'
             ? 'bg-amber-50 border-amber-500 text-amber-900'
             : isSelected
             ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
@@ -850,7 +984,11 @@ const BillOfMaterials = ({
               <Text className={`text-sm font-medium truncate leading-tight ${
                 isInRecycleBin
                   ? 'text-gray-400'
-                  : hasUnacknowledgedDocs
+                  : docRowStatus === 'rejected'
+                  ? 'text-red-900'
+                  : docRowStatus === 'accepted'
+                  ? 'text-green-900'
+                  : docRowStatus === 'released'
                   ? 'text-amber-900'
                   : isSelected
                   ? 'text-indigo-800'
@@ -862,13 +1000,17 @@ const BillOfMaterials = ({
                 <Text className={`text-xs truncate ${
                   isInRecycleBin
                     ? 'text-gray-400'
-                    : hasUnacknowledgedDocs
+                    : docRowStatus === 'rejected'
+                    ? 'text-red-700'
+                    : docRowStatus === 'accepted'
+                    ? 'text-green-700'
+                    : docRowStatus === 'released'
                     ? 'text-amber-700'
                     : isSelected
                     ? 'text-indigo-500'
                     : 'text-slate-400'
                 }`}>
-                  {searchTerm ? highlightText(partNumDisplay, searchTerm) : partNumDisplay}
+                  {searchTerm ? highlightText(part.part_number, searchTerm) : part.part_number}
                 </Text>
               )}
             </div>
@@ -897,8 +1039,6 @@ const BillOfMaterials = ({
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
     const isInRecycleBin = assembly.recycle_bin === true;
-    const revision = getLatestRevision(assembly.documents);
-    const assemblyNumDisplay = revision ? `${assembly.assembly_number} (${revision})` : assembly.assembly_number;
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
@@ -944,7 +1084,7 @@ const BillOfMaterials = ({
                     ? 'text-gray-400'
                     : 'text-slate-400'
                 }`}>
-                  {assemblyNumDisplay}
+                  {assembly.assembly_number}
                 </Text>
               </div>
           </div>
@@ -1129,7 +1269,10 @@ const BillOfMaterials = ({
           .bom-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
         `}
       </style>
-      <div className="flex flex-col h-full bg-slate-50/50">
+      <div
+        className="flex flex-col overflow-hidden bg-slate-50/50"
+        style={{ height: "100%", minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}
+      >
         <div className="p-2 sm:p-3 border-b border-slate-200 bg-white shrink-0">
           <div className="flex justify-between items-center gap-2 mb-2 sm:mb-3">
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
@@ -1227,55 +1370,67 @@ const BillOfMaterials = ({
         </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
-          {activeDragPart && (
-            <div className="text-xs text-slate-600 bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-2">
-              {activeDropLabel ? (
-                <>Moving <strong>{activeDragPart.part_name}</strong> → drop under <strong>{activeDropLabel}</strong></>
-              ) : (
-                <>Dragging <strong>{activeDragPart.part_name}</strong> — hover a Product / Assembly row to drop</>
-              )}
-            </div>
-          )}
-          <DndContext
-            sensors={dndSensors}
-            collisionDetection={bomCollisionDetection}
-            onDragStart={handleBomDragStart}
-            onDragOver={handleBomDragOver}
-            onDragEnd={handleBomDragEnd}
-            onDragCancel={handleBomDragCancel}
-          >
-            {searchTerm ? (
-              filteredBOMItems.length > 0 ? (
-                <div>
-                  {filteredBOMItems.map(item => {
-                    if (item.itemType === 'part') return renderPartInTree(item, item.level || 0, item.productId);
-                    if (item.itemType === 'assembly') return renderAssemblyTree(item, item.level || 0, item.productId);
-                    return null;
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-                  <Empty description="No matches found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                </div>
-              )
-            ) : (
-              filteredProducts.length > 0
-                ? filteredProducts.map(product => renderProductTree(product))
-                : (
+        <div
+          className="bom-scroll"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            overflowY: "auto",
+            overflowX: "hidden",
+            padding: 8,
+            height: "calc(100vh - 240px)",
+            maxHeight: "calc(100vh - 240px)",
+          }}
+        >
+            {activeDragPart && (
+              <div className="text-xs text-slate-600 bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-2">
+                {activeDropLabel ? (
+                  <>Moving <strong>{activeDragPart.part_name}</strong> → drop under <strong>{activeDropLabel}</strong></>
+                ) : (
+                  <>Dragging <strong>{activeDragPart.part_name}</strong> — hover a Product / Assembly row to drop</>
+                )}
+              </div>
+            )}
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={bomCollisionDetection}
+              onDragStart={handleBomDragStart}
+              onDragOver={handleBomDragOver}
+              onDragEnd={handleBomDragEnd}
+              onDragCancel={handleBomDragCancel}
+            >
+              {searchTerm ? (
+                filteredBOMItems.length > 0 ? (
+                  <div>
+                    {filteredBOMItems.map(item => {
+                      if (item.itemType === 'part') return renderPartInTree(item, item.level || 0, item.productId);
+                      if (item.itemType === 'assembly') return renderAssemblyTree(item, item.level || 0, item.productId);
+                      return null;
+                    })}
+                  </div>
+                ) : (
                   <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-                    <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    <Empty description="No matches found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                   </div>
                 )
-            )}
-            <DragOverlay dropAnimation={null} modifiers={[dragOverlayOffset]}>
-              {activeDragPart ? (
-                <div className="px-2 py-1 max-w-[200px] truncate text-xs font-semibold text-indigo-800 bg-white border border-indigo-500 shadow-lg rounded">
-                  {activeDragPart.part_name}
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+              ) : (
+                filteredProducts.length > 0
+                  ? filteredProducts.map(product => renderProductTree(product))
+                  : (
+                    <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+                      <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    </div>
+                  )
+              )}
+              <DragOverlay dropAnimation={null} modifiers={[dragOverlayOffset]}>
+                {activeDragPart ? (
+                  <div className="px-2 py-1 max-w-[200px] truncate text-xs font-semibold text-indigo-800 bg-white border border-indigo-500 shadow-lg rounded">
+                    {activeDragPart.part_name}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
         </div>
       </div>
 
