@@ -13,6 +13,7 @@ import Layout from "./components/Layout";
 import Login from "./Pages/Login";
 
 import ChatPanel from "./chatbot/Chatbot";
+import { isChatbotAllowedRole } from "./auth/chatbotAccess.js";
 
 
 
@@ -130,19 +131,7 @@ import QMSInspector from "./Quality Management Components/QMSInspector";
 
 
 
-/** Floating chatbot only after login — hidden on /login and when not authenticated. */
-/** Only shown for Admin and Manufacturing Coordinator roles. */
-function isChatbotAllowedRole(user) {
-  const role = String(user?.role || user?.user_role || '')
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .trim();
-  if (!role) return false;
-  if (role === 'admin') return true;
-  if (role === 'mc' || role.includes('manufacturing coordinator')) return true;
-  return false;
-}
-
+/** Floating chatbot only after login — Admin and MC only. */
 function AuthenticatedChatPanel() {
   const location = useLocation();
   const { isAuthenticated, user, bootstrapping } = useAuth();

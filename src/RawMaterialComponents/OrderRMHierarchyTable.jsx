@@ -173,6 +173,50 @@ const arePlannedDimensionsValid = (formType, dimensions = {}) => {
   return false;
 };
 
+const collectPartDetailsFromHierarchy = (hierarchy) => {
+  const parts = [];
+  const walkAssembly = (assembly) => {
+    assembly.parts?.forEach((partDetail) => parts.push(partDetail));
+    assembly.subassemblies?.forEach(walkAssembly);
+  };
+  hierarchy?.direct_parts?.forEach((partDetail) => parts.push(partDetail));
+  hierarchy?.assemblies?.forEach(walkAssembly);
+  return parts;
+};
+
+const collectLinkedStockFromOrders = (ordersWithHierarchy) => {
+  const linkedStockInfo = {};
+  const procuredInfo = {};
+
+  const processPart = (partDetail) => {
+    const part = partDetail?.part;
+    if (!part?.id) return;
+
+    if (part.raw_material_unit_id) {
+      linkedStockInfo[part.id] = {
+        stockId: part.raw_material_stock_id,
+        unitId: part.raw_material_unit_id,
+        sourceType: part.raw_material_unit_details?.source_type || part.raw_material_stock_details?.source_type,
+        orderStatus: part.raw_material_stock_details?.order_status,
+      };
+    }
+
+    if (
+      part.raw_material_unit_details?.source_type === 'order'
+      || part.raw_material_stock_details?.source_type === 'order'
+    ) {
+      procuredInfo[part.id] = true;
+    }
+  };
+
+  ordersWithHierarchy.forEach((order) => {
+    if (!order.hierarchy) return;
+    collectPartDetailsFromHierarchy(order.hierarchy).forEach(processPart);
+  });
+
+  return { linkedStockInfo, procuredInfo };
+};
+
 const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const [loading, setLoading] = useState(false);
   const [ordersData, setOrdersData] = useState([]);
@@ -193,6 +237,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const rawMaterialsList = rawMaterials || [];
   const [linkedStockMap, setLinkedStockMap] = useState({});
   const [procuredMap, setProcuredMap] = useState({});
+  const [partLinkDisplayOverrides, setPartLinkDisplayOverrides] = useState({});
   // ── Column header filters ──────────────────────────────────────────────────
   const [colOrder, setColOrder] = useState([]);
   const [colRM, setColRM] = useState([]);
@@ -207,19 +252,26 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
 
   // Refresh when parent signals this tab became active after a mutation
   useEffect(() => {
-    if (refreshTrigger > 0) fetchAllOrdersHierarchy();
+    if (refreshTrigger > 0) fetchAllOrdersHierarchy({ silent: true });
   }, [refreshTrigger]);
 
   // Refresh when stock is unlinked/deleted from any tab (procurement, etc.)
   useEffect(() => {
-    const handleRMChanged = () => fetchAllOrdersHierarchy();
+    const handleRMChanged = (event) => {
+      const orderId = event?.detail?.orderId;
+      if (orderId) refreshSingleOrderHierarchy(orderId);
+      else fetchAllOrdersHierarchy({ silent: true });
+    };
     window.addEventListener('rawMaterialChanged', handleRMChanged);
     return () => window.removeEventListener('rawMaterialChanged', handleRMChanged);
   }, []);
 
-  const updateLinkedStockStatus = (partId, linkedStock) => {
+  const updateLinkedStockStatus = (partId, linkedStock, displayOverride = null) => {
     if (linkedStock) {
       setLinkedStockMap(prev => ({ ...prev, [partId]: linkedStock }));
+      if (displayOverride) {
+        setPartLinkDisplayOverrides(prev => ({ ...prev, [partId]: displayOverride }));
+      }
     } else {
       setLinkedStockMap(prev => {
         const { [partId]: _, ...rest } = prev;
@@ -229,103 +281,67 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         const { [partId]: _, ...rest } = prev;
         return rest;
       });
+      setPartLinkDisplayOverrides(prev => ({
+        ...prev,
+        [partId]: {
+          linkedMaterial: 'Not Assigned',
+          linkedStock: 'N/A',
+          stockSource: 'N/A',
+        },
+      }));
     }
   };
 
-  const fetchAllOrdersHierarchy = async () => {
+  const refreshSingleOrderHierarchy = async (orderId) => {
+    if (!orderId) return;
     try {
-      setLoading(true);
+      const response = await api.get(`/rawmaterials/order-raw-material-hierarchy/${orderId}`);
+      const orderData = response.data;
+      const hierarchy = orderData.product_hierarchy ?? null;
+
+      setOrdersData(prev => prev.map((order) => (
+        order.id === orderId
+          ? { ...order, ...orderData, hierarchy }
+          : order
+      )));
+
+      const { linkedStockInfo, procuredInfo } = collectLinkedStockFromOrders([{ hierarchy }]);
+      setLinkedStockMap(prev => ({ ...prev, ...linkedStockInfo }));
+      setProcuredMap(prev => ({ ...prev, ...procuredInfo }));
+
+      const syncedPartIds = collectPartDetailsFromHierarchy(hierarchy)
+        .map((partDetail) => partDetail.part?.id)
+        .filter(Boolean);
+      setPartLinkDisplayOverrides(prev => {
+        const next = { ...prev };
+        syncedPartIds.forEach((partId) => { delete next[partId]; });
+        return next;
+      });
+    } catch {
+      // Keep instant overrides if background sync fails.
+    }
+  };
+
+  const fetchAllOrdersHierarchy = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoading(true);
       setError(null);
-      const ordersResponse = await api.get(`/orders/`);
-      const orders = ordersResponse.data || [];
-      const ordersWithHierarchy = await Promise.all(orders.map(async (order) => {
-        try {
-          const hierarchyResponse = await api.get(`/rawmaterials/order-raw-material-hierarchy/${order.id}`);
-          return { ...order, hierarchy: hierarchyResponse.data.product_hierarchy };
-        } catch { return { ...order, hierarchy: null }; }
+      const response = await api.get(`/rawmaterials/order-raw-material-hierarchies`);
+      const ordersWithHierarchy = (response.data || []).map((order) => ({
+        ...order,
+        hierarchy: order.product_hierarchy ?? null,
       }));
       setOrdersData(ordersWithHierarchy);
-      
-      // Extract linked stock information from hierarchy
-      const linkedStockInfo = {};
-      const procuredInfo = {};
-      ordersWithHierarchy.forEach(order => {
-        if (order.hierarchy) {
-          // Check direct_parts
-          if (order.hierarchy.direct_parts) {
-            order.hierarchy.direct_parts.forEach(directPart => {
-              if (directPart.part?.id) {
-                if (directPart.part.raw_material_unit_id) {
-                  linkedStockInfo[directPart.part.id] = {
-                    stockId: directPart.part.raw_material_stock_id,
-                    unitId: directPart.part.raw_material_unit_id,
-                    sourceType: directPart.part.raw_material_unit_details?.source_type || directPart.part.raw_material_stock_details?.source_type,
-                    orderStatus: directPart.part.raw_material_stock_details?.order_status
-                  };
-                }
-                // Check if material is procured (source_type is 'order')
-                if (directPart.part.raw_material_unit_details?.source_type === 'order' || 
-                    directPart.part.raw_material_stock_details?.source_type === 'order') {
-                  procuredInfo[directPart.part.id] = true;
-                }
-              }
-            });
-          }
-          
-          // Check parts in assemblies
-          if (order.hierarchy.assemblies) {
-            order.hierarchy.assemblies.forEach(assembly => {
-              if (assembly.parts) {
-                assembly.parts.forEach(partDetail => {
-                  if (partDetail.part?.id) {
-                    if (partDetail.part.raw_material_unit_id) {
-                      linkedStockInfo[partDetail.part.id] = {
-                        stockId: partDetail.part.raw_material_stock_id,
-                        unitId: partDetail.part.raw_material_unit_id,
-                        sourceType: partDetail.part.raw_material_unit_details?.source_type || partDetail.part.raw_material_stock_details?.source_type,
-                        orderStatus: partDetail.part.raw_material_stock_details?.order_status
-                      };
-                    }
-                    // Check if material is procured (source_type is 'order')
-                    if (partDetail.part.raw_material_unit_details?.source_type === 'order' || 
-                        partDetail.part.raw_material_stock_details?.source_type === 'order') {
-                      procuredInfo[partDetail.part.id] = true;
-                    }
-                  }
-                });
-              }
-              // Check subassemblies
-              if (assembly.subassemblies) {
-                assembly.subassemblies.forEach(subassembly => {
-                  if (subassembly.parts) {
-                    subassembly.parts.forEach(partDetail => {
-                      if (partDetail.part?.id) {
-                        if (partDetail.part.raw_material_unit_id) {
-                          linkedStockInfo[partDetail.part.id] = {
-                            stockId: partDetail.part.raw_material_stock_id,
-                            unitId: partDetail.part.raw_material_unit_id,
-                            sourceType: partDetail.part.raw_material_unit_details?.source_type || partDetail.part.raw_material_stock_details?.source_type,
-                            orderStatus: partDetail.part.raw_material_stock_details?.order_status
-                          };
-                        }
-                        // Check if material is procured (source_type is 'order')
-                        if (partDetail.part.raw_material_unit_details?.source_type === 'order' || 
-                            partDetail.part.raw_material_stock_details?.source_type === 'order') {
-                          procuredInfo[partDetail.part.id] = true;
-                        }
-                      }
-                    });
-                  }
-                });
-              }
-            });
-          }
-        }
-      });
+
+      const { linkedStockInfo, procuredInfo } = collectLinkedStockFromOrders(ordersWithHierarchy);
       setLinkedStockMap(linkedStockInfo);
       setProcuredMap(procuredInfo);
-    } catch { setError('Failed to fetch orders'); } finally { setLoading(false); }
+      setPartLinkDisplayOverrides({});
+    } catch { setError('Failed to fetch orders'); } finally { if (!silent) setLoading(false); }
   };
+
+  const refreshOrdersHierarchy = () => fetchAllOrdersHierarchy({ silent: true });
+  const refreshOrderHierarchy = (orderId) => refreshSingleOrderHierarchy(orderId);
 
   const getLatestExtractedData = (arr) => {
     if (!arr?.length) return null;
@@ -845,7 +861,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       message.success(isUpdate ? 'Planned raw material updated successfully' : 'Planned raw material saved successfully');
 
       if (isManualFirstSave) {
-        await fetchAllOrdersHierarchy();
+        await refreshOrdersHierarchy();
       }
 
       const selectedMaterialName = getSelectedMaterialLabel(row, true);
@@ -1074,16 +1090,22 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
               inner_diameter: latest?.planned_inner_diameter,
               outer_diameter: latest?.planned_outer_diameter
             },
-            linkedMaterial: part.part.raw_material_name || 'Not Assigned',
-            linkedStock: part.part.raw_material_stock_dimensions || 'N/A',
-            stockSource: part.part.raw_material_unit_details?.source_type || 'N/A',
+            linkedMaterial: partLinkDisplayOverrides[part.part.id]?.linkedMaterial
+              ?? part.part.raw_material_name
+              ?? 'Not Assigned',
+            linkedStock: partLinkDisplayOverrides[part.part.id]?.linkedStock
+              ?? part.part.raw_material_stock_dimensions
+              ?? 'N/A',
+            stockSource: partLinkDisplayOverrides[part.part.id]?.stockSource
+              ?? part.part.raw_material_unit_details?.source_type
+              ?? 'N/A',
           });
           partIndex++;
         });
       });
     });
     return rows;
-  }, [ordersData, rawMaterials]);
+  }, [ordersData, rawMaterials, partLinkDisplayOverrides]);
 
   const extractedDataIdsKey = useMemo(() => {
     const ids = tableData
@@ -1226,7 +1248,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   const thStyle = { border, padding: '2px 4px', textAlign: 'center', fontWeight: 600, fontSize: isMobile ? 10 : 12, background: '#f0f0f0' };
   const tdStyle = { border, padding: '2px 4px', fontSize: isMobile ? 9 : 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' };
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /><div style={{ marginTop: 12 }}>Loading...</div></div>;
+  if (loading && ordersData.length === 0) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /><div style={{ marginTop: 12 }}>Loading...</div></div>;
   if (error) return <Alert message="Error" description={error} type="error" showIcon style={{ margin: 16 }} />;
 
   return (
@@ -1515,7 +1537,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                       linkedStock={linkedStockMap[row.partId] || null}
                       isProcured={procuredMap[row.partId] || false}
                       updateLinkedStock={updateLinkedStockStatus}
-                      onRefresh={fetchAllOrdersHierarchy}
+                      onRefresh={refreshOrderHierarchy}
                       onRefreshRecommendations={() => refreshMaterialRecommendations(row)}
                     />
                   </td>

@@ -36,6 +36,21 @@ export async function sendMessage(payload) {
   return data;
 }
 
+export async function uploadMessageAttachment({
+  conversationId,
+  file,
+  replyToId = null,
+  messageText = '',
+}) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('conversation_id', String(conversationId));
+  if (replyToId != null) form.append('reply_to_id', String(replyToId));
+  if (messageText.trim()) form.append('message_text', messageText.trim());
+  const { data } = await api.post(`${BASE}/messages/with-attachment`, form);
+  return data;
+}
+
 export async function markAllRead(conversationId) {
   const { data } = await api.post(
     `${BASE}/conversations/${conversationId}/mark-all-read`

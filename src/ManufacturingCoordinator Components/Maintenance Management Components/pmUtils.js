@@ -141,6 +141,23 @@ export function getCurrentUserId() {
   }
 }
 
+/** Display name for acknowledgements (falls back to id). */
+export function getCurrentUserLabel() {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    return (
+      user.user_name
+      || user.name
+      || user.username
+      || (user.id != null ? `User ${user.id}` : null)
+      || (user.user_id != null ? `User ${user.user_id}` : null)
+      || 'user'
+    );
+  } catch {
+    return 'user';
+  }
+}
+
 export function formatDateTime(dateString) {
   if (!dateString) return '-';
   const date = new Date(dateString);
@@ -353,4 +370,36 @@ export function isPastSubmissionDeadline(ymd, now = new Date()) {
   if (ymd < today) return true;
   if (ymd > today) return false;
   return now.getHours() >= PM_SHIFT_END_HOUR;
+}
+
+const ymdFromAny = (v) => {
+  if (!v) return null;
+  const s = String(v);
+  if (s.length >= 10) return s.slice(0, 10);
+  return null;
+};
+
+/** Map GET /pm/machine-availability → { [machineId]: record } */
+export function indexMachineAvailability(list) {
+  const map = {};
+  (Array.isArray(list) ? list : []).forEach((r) => {
+    if (r?.machine_id != null) map[r.machine_id] = r;
+  });
+  return map;
+}
+
+/**
+ * OFF (status 2) days in available_from..available_to are breakdown — not missed.
+ * Extending available_to expands the window.
+ */
+export function isMachineBreakdownOnDay(availabilityById, machineId, ymd, todayYmd) {
+  if (machineId == null || !ymd) return false;
+  const rec = availabilityById?.[machineId];
+  if (!rec?.is_breakdown) return false;
+  const from = ymdFromAny(rec.available_from);
+  const to = ymdFromAny(rec.available_to);
+  if (from && ymd < from) return false;
+  if (to && ymd > to) return false;
+  if (!to && todayYmd && ymd > todayYmd) return false;
+  return true;
 }

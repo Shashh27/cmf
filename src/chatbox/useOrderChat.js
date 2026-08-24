@@ -7,6 +7,7 @@ import {
   fetchMessages,
   createConversation,
   sendMessage,
+  uploadMessageAttachment,
   markAllRead,
   deleteMessage,
   editMessage,
@@ -19,6 +20,7 @@ import {
   sumUnread,
   upsertMessage,
   bumpConversationUnread,
+  getPendingFileCategory,
 } from './chatUtils';
 
 /**
@@ -35,6 +37,8 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
   const [mobileView, setMobileView] = useState('list');
   const [wsConnected, setWsConnected] = useState(false);
@@ -49,6 +53,38 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
   const handleWsPayloadRef = useRef(null);
   const loadConversationsRef = useRef(null);
   const markAllReadInFlightRef = useRef(new Set());
+
+  const revokePreviewUrl = useCallback((url) => {
+    if (url) URL.revokeObjectURL(url);
+  }, []);
+
+  const clearPendingFiles = useCallback(() => {
+    setPendingFiles((prev) => {
+      prev.forEach((item) => revokePreviewUrl(item.previewUrl));
+      return [];
+    });
+  }, [revokePreviewUrl]);
+
+  const removePendingFile = useCallback(
+    (id) => {
+      setPendingFiles((prev) => {
+        const item = prev.find((p) => p.id === id);
+        revokePreviewUrl(item?.previewUrl);
+        return prev.filter((p) => p.id !== id);
+      });
+    },
+    [revokePreviewUrl]
+  );
+
+  useEffect(
+    () => () => {
+      setPendingFiles((prev) => {
+        prev.forEach((item) => revokePreviewUrl(item.previewUrl));
+        return [];
+      });
+    },
+    [revokePreviewUrl]
+  );
 
   useEffect(() => {
     orderIdRef.current = orderId;
@@ -357,6 +393,7 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
   }, [panelOpen, activeConvId, loadMessages]);
 
   const handleSelectConv = (id) => {
+    clearPendingFiles();
     setReplyTo(null);
     setDraft('');
     setActiveConvId(id);
@@ -364,14 +401,61 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
   };
 
   const handleBackToList = () => {
+    clearPendingFiles();
     setActiveConvId(null);
     setMessages([]);
     setMobileView('list');
   };
 
+  const handleSelectFiles = (fileList) => {
+    if (!fileList?.length || !activeConvId) return;
+    const nextItems = Array.from(fileList).map((file) => {
+      const category = getPendingFileCategory(file);
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        file,
+        name: file.name,
+        category,
+        previewUrl: URL.createObjectURL(file),
+      };
+    });
+    setPendingFiles((prev) => [...prev, ...nextItems]);
+  };
+
   const handleSend = async () => {
+    if (!activeConvId || sending || uploading) return;
+
+    if (pendingFiles.length > 0) {
+      setUploading(true);
+      const savedReplyTo = replyTo;
+      const caption = draft.trim();
+      try {
+        const uploadedMessages = [];
+        for (let i = 0; i < pendingFiles.length; i += 1) {
+          const item = pendingFiles[i];
+          const msg = await uploadMessageAttachment({
+            conversationId: activeConvId,
+            file: item.file,
+            replyToId: i === 0 ? savedReplyTo?.id ?? null : null,
+            messageText: i === 0 ? caption : '',
+          });
+          uploadedMessages.push(msg);
+        }
+        setMessages((prev) => mergeMessages(prev, uploadedMessages));
+        setDraft('');
+        setReplyTo(null);
+        clearPendingFiles();
+        scrollToBottom();
+      } catch (err) {
+        messageApi?.error?.(err?.response?.data?.detail || 'Failed to upload file');
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
     const text = draft.trim();
-    if (!text || !activeConvId || sending) return;
+    if (!text) return;
     setSending(true);
     try {
       const msg = await sendMessage({
@@ -434,6 +518,7 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
         setMessages([]);
         setDraft('');
         setReplyTo(null);
+        clearPendingFiles();
         setMobileView('list');
       }
       messageApi?.success?.('Conversation permanently deleted');
@@ -452,6 +537,7 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
       if (activeConvIdRef.current === conversationId) {
         setMessages([]);
         setReplyTo(null);
+        clearPendingFiles();
       }
       setConversations((prev) =>
         prev.map((c) =>
@@ -541,6 +627,8 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
     draft,
     setDraft,
     sending,
+    uploading,
+    pendingFiles,
     replyTo,
     setReplyTo,
     mobileView,
@@ -551,6 +639,9 @@ export function useOrderChat({ orderId, panelOpen, currentUserId, messageApi }) 
     handleSelectConv,
     handleBackToList,
     handleSend,
+    handleSelectFiles,
+    clearPendingFiles,
+    removePendingFile,
     handleDeleteMessage,
     handleEditMessage,
     handleDeleteConversation,

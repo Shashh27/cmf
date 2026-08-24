@@ -11,6 +11,7 @@ import { Send, Trash2, X, Maximize2, Minimize2, Lightbulb, Square } from 'lucide
 import { CHATBOT_CONFIG } from '../Config/chatbot';
 import { authFetch, getAccessToken } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { isChatbotAllowedRole } from '../auth/chatbotAccess.js';
 import { getAnswerSummary } from './chatbotUtils';
 import './chatbot.css';
 
@@ -216,19 +217,7 @@ export default function ChatPanel() {
   const loadSuggestions = useCallback(async () => {
     // Wait for JWT — identity comes from Bearer token only (no user_id query params).
     // Chatbot is Admin / MC only; never call suggestions for other roles.
-    if (bootstrapping || !isAuthenticated) {
-      setPromptsLoading(false);
-      return;
-    }
-    const role = String(user?.role || user?.user_role || '')
-      .toLowerCase()
-      .replace(/_/g, ' ')
-      .trim();
-    const allowed =
-      role === 'admin' ||
-      role === 'mc' ||
-      role.includes('manufacturing coordinator');
-    if (!allowed) {
+    if (bootstrapping || !isAuthenticated || !isChatbotAllowedRole(user)) {
       setPromptsLoading(false);
       return;
     }
@@ -404,6 +393,10 @@ export default function ChatPanel() {
     } catch { /* ignore */ }
     store.clear();
   }, [sessionId, store]);
+
+  if (bootstrapping || !isAuthenticated || !isChatbotAllowedRole(user)) {
+    return null;
+  }
 
   if (!open) {
     return (

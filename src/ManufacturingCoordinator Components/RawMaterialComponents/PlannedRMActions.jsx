@@ -71,8 +71,22 @@ const getUnitUsedLength = (unit) => {
   return (unit.total_length - unit.remaining_length).toFixed(2);
 };
 
+const formatStockDimensions = (stock) => {
+  if (!stock) return 'N/A';
+  if (stock.form_type === 'Round' || stock.diameter) {
+    return `Ø${stock.diameter} × ${stock.length}mm`;
+  }
+  if (stock.form_type === 'Square' || stock.breadth) {
+    return `${stock.breadth} × ${stock.height} × ${stock.length}mm`;
+  }
+  if (stock.form_type === 'Pipe' || stock.outer_diameter) {
+    return `Ø${stock.outer_diameter}/${stock.inner_diameter} × ${stock.length}mm`;
+  }
+  return 'N/A';
+};
+
 const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSaved, materialExists, linkedStock, isProcured, updateLinkedStock, onRefresh, onRefreshRecommendations }) => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [generalStock, setGeneralStock] = useState([]);
   const [loadingStock, setLoadingStock] = useState(false);
   const [linkModalVisible, setLinkModalVisible] = useState(false);
@@ -90,7 +104,9 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
   const rowData = useMemo(() => ({ ...row }), [row]);
 
   // Dispatch global event so PartsWithRawMaterialStatusTab (and any other listener) auto-refreshes
-  const dispatchRMChanged = () => window.dispatchEvent(new Event('rawMaterialChanged'));
+  const dispatchRMChanged = (orderId) => {
+    window.dispatchEvent(new CustomEvent('rawMaterialChanged', { detail: { orderId } }));
+  };
 
   // Get planned length from planningData
   const plannedLength = planningData?.[row.key]?.dimensions?.length || null;
@@ -168,7 +184,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
 
   const handleUnlinkStock = async (stockId = null, unitId = null) => {
     // Show confirmation dialog
-    Modal.confirm({
+    modal.confirm({
       title: 'Confirm Unlink Stock',
       content: (
         <div>
@@ -192,8 +208,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           setSelectedUnit(null);
           if (updateLinkedStock) updateLinkedStock(rowData.partId, null);
           fetchGeneralStock();
-          dispatchRMChanged();
-          if (onRefresh) onRefresh();
+          dispatchRMChanged(rowData.orderId);
           if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
           message.error(getApiErrorMessage(error, 'Failed to unlink stock'));
@@ -231,7 +246,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
     }
 
     // Show confirmation dialog
-    Modal.confirm({
+    modal.confirm({
       title: 'Confirm Link Stock',
       content: (
         <div>
@@ -256,10 +271,21 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
           message.success('Stock linked successfully');
           setSelectedStock(null);
           setSelectedUnit(null);
-          if (updateLinkedStock) updateLinkedStock(rowData.partId, { stockId: targetStockId, unitId: targetUnitId });
+          const stock = generalStock.find((item) => item.id === targetStockId);
+          const displayOverride = {
+            linkedMaterial: stock?.material_name || rowData.resolvedMaterialName || rowData.rmName || 'Not Assigned',
+            linkedStock: formatStockDimensions(stock),
+            stockSource: 'general',
+          };
+          if (updateLinkedStock) {
+            updateLinkedStock(rowData.partId, {
+              stockId: targetStockId,
+              unitId: targetUnitId,
+              sourceType: 'general',
+            }, displayOverride);
+          }
           fetchGeneralStock();
-          dispatchRMChanged();
-          if (onRefresh) onRefresh();
+          dispatchRMChanged(rowData.orderId);
           if (onRefreshRecommendations) onRefreshRecommendations();
         } catch (error) {
           message.error(getApiErrorMessage(error, 'Failed to link stock'));
@@ -355,8 +381,7 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
       message.success('Order material created successfully. Please go to Procurement tab to complete the procurement.');
       setProcureModalVisible(false);
       setSelectedProcessType(null);
-      dispatchRMChanged();
-      if (onRefresh) onRefresh();
+      dispatchRMChanged(rowData.orderId);
     } catch (error) {
       message.error(getApiErrorMessage(error, 'Failed to create order material'));
     } finally {
@@ -649,24 +674,53 @@ const PlannedRMActions = ({ row, recommendations, isMobile, planningData, isSave
                               </td>
                               <td style={{ padding: '6px', border: '1px solid #e0e0e0' }}>
                                 <Space size="small">
-                                  <Button
-                                    size="small"
-                                    type="primary"
-                                    onClick={() => handleLinkStock(stock.id, unit.id)}
-                                    disabled={unit.status === 'exhausted' || (plannedLength != null && (unit.remaining_length ?? 0) < plannedLength) || (isAlreadyLinkedToGeneralStock && (!linkedStock || linkedStock.unitId !== unit.id))}
-                                    style={{ fontSize: 9, padding: '1px 4px' }}
-                                  >
-                                    Assign
-                                  </Button>
-                                  <Button
-                                    size="small"
-                                    danger
-                                    onClick={() => handleUnlinkStock(stock.id, unit.id)}
-                                    disabled={!linkedStock || linkedStock.unitId !== unit.id}
-                                    style={{ fontSize: 9, padding: '1px 4px' }}
-                                  >
-                                    Unassign
-                                  </Button>
+                                  {(() => {
+                                    const isThisUnitAssigned = linkedStock?.unitId === unit.id && isAlreadyLinkedToGeneralStock;
+                                    return (
+                                      <>
+                                        {isThisUnitAssigned ? (
+                                          <span
+                                            style={{
+                                              display: 'inline-block',
+                                              fontSize: 9,
+                                              padding: '1px 8px',
+                                              color: '#52c41a',
+                                              border: '1px solid #b7eb8f',
+                                              backgroundColor: '#f6ffed',
+                                              borderRadius: 4,
+                                              fontWeight: 600,
+                                              lineHeight: '20px',
+                                            }}
+                                          >
+                                            Assigned
+                                          </span>
+                                        ) : (
+                                          <Button
+                                            size="small"
+                                            type="primary"
+                                            onClick={() => handleLinkStock(stock.id, unit.id)}
+                                            disabled={
+                                              unit.status === 'exhausted'
+                                              || (plannedLength != null && (unit.remaining_length ?? 0) < plannedLength)
+                                              || (isAlreadyLinkedToGeneralStock && linkedStock?.unitId !== unit.id)
+                                            }
+                                            style={{ fontSize: 9, padding: '1px 4px' }}
+                                          >
+                                            Assign
+                                          </Button>
+                                        )}
+                                        <Button
+                                          size="small"
+                                          danger
+                                          onClick={() => handleUnlinkStock(stock.id, unit.id)}
+                                          disabled={!linkedStock || linkedStock.unitId !== unit.id}
+                                          style={{ fontSize: 9, padding: '1px 4px' }}
+                                        >
+                                          Unassign
+                                        </Button>
+                                      </>
+                                    );
+                                  })()}
                                 </Space>
                               </td>
                             </tr>

@@ -5,13 +5,14 @@ import {
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, CalendarOutlined, RightOutlined, SearchOutlined,
   CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, UnorderedListOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import {
   PM_T, btnSharp, pmFetch, getCurrentUserId, formatDate, formatDateTime,
   machineLabel, frequencySummary, STATUS_COLORS, isDateInRange,
   disableFutureDates, normalizeDateRange,
   FREQUENCY_TYPES, INTERVAL_UNITS, validateAssignFrequency, isRejectedResponse,
-  isPastSubmissionDeadline,
+  isPastSubmissionDeadline, indexMachineAvailability, isMachineBreakdownOnDay,
 } from './pmUtils';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
@@ -626,6 +627,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const [statusSearch, setStatusSearch] = useState('');
   const [statusPage, setStatusPage] = useState(1);
   const [statusPageSize, setStatusPageSize] = useState(10);
+  const [availabilityById, setAvailabilityById] = useState({});
   const [statusViewportW, setStatusViewportW] = useState(
     typeof window !== 'undefined' ? window.innerWidth : 1200,
   );
@@ -790,6 +792,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       let status = 'pending';
       if (latest && latest.response_value != null && String(latest.response_value).trim() !== '') {
         status = isRejectedResponse(latest.response_value, expected) ? 'rejected' : 'completed';
+      } else if (isMachineBreakdownOnDay(availabilityById, mid, dateKey, dayjs().format('YYYY-MM-DD'))) {
+        status = 'breakdown';
       } else if (isPastSubmissionDeadline(dateKey)) {
         status = 'missed';
       } else {
@@ -801,6 +805,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         machine_id: mid,
         machine_label: machineLabel(m) || `Machine ${mid}`,
         checklist_name: item.checklistName || '—',
+        code: item.checkpointCode || ci?.item_code || '',
         checkpoint: item.checkpointName || ci?.item_text || 'Checkpoint',
         frequency: frequencySummary(ai) || frequencySummary(ci) || '—',
         is_compulsory: !!ai?.is_compulsory,
@@ -818,7 +823,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       if (cCmp !== 0) return cCmp;
       return (a.checkpoint || '').localeCompare(b.checkpoint || '');
     });
-  }, [selectedDayItems, selectedDate, machines]);
+  }, [selectedDayItems, selectedDate, machines, availabilityById]);
 
   const dayStatusBadge = useMemo(() => {
     let missed = 0;
@@ -843,7 +848,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     const q = statusSearch.trim().toLowerCase();
     if (q) {
       list = list.filter((r) =>
-        (r.checkpoint || '').toLowerCase().includes(q)
+        (r.code || '').toLowerCase().includes(q)
+        || (r.checkpoint || '').toLowerCase().includes(q)
         || (r.machine_label || '').toLowerCase().includes(q)
         || (r.checklist_name || '').toLowerCase().includes(q)
         || (r.operator_name || '').toLowerCase().includes(q));
@@ -858,11 +864,13 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       pending: 0,
       missed: 0,
       rejected: 0,
+      breakdown: 0,
     };
     statusBaseRows.forEach((r) => {
       if (r.status === 'completed') summary.completed += 1;
       else if (r.status === 'rejected') summary.rejected += 1;
       else if (r.status === 'missed') summary.missed += 1;
+      else if (r.status === 'breakdown') summary.breakdown += 1;
       else summary.pending += 1;
     });
     return summary;
@@ -958,9 +966,10 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const loadAllAssignments = async () => {
     setLoading(true);
     try {
-      const [data, submissionData] = await Promise.all([
+      const [data, submissionData, avail] = await Promise.all([
         pmFetch('/assignments'),
         pmFetch('/submissions'),
+        pmFetch('/machine-availability').catch(() => []),
       ]);
       const enriched = (Array.isArray(data) ? data : []).map((detail) => ({
         ...detail,
@@ -969,6 +978,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       }));
       setAssignments(enriched);
       setSubmissions(submissionData || []);
+      setAvailabilityById(indexMachineAvailability(avail));
     } catch (e) {
       message.error(e.message);
     } finally {
@@ -1651,13 +1661,14 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               {checkpointStatusSummary.pending} pending
               {' · '}
               {checkpointStatusSummary.missed} missed
+              {checkpointStatusSummary.breakdown ? ` · ${checkpointStatusSummary.breakdown} breakdown` : ''}
             </div>
           </div>
         )}
       >
         <div style={{
           display: 'grid',
-          gridTemplateColumns: statusIsNarrow ? '1fr 1fr' : 'repeat(5, minmax(0, 1fr))',
+          gridTemplateColumns: statusIsNarrow ? '1fr 1fr' : 'repeat(auto-fit, minmax(110px, 1fr))',
           gap: 8,
           marginBottom: 12,
         }}
@@ -1694,6 +1705,14 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               color: '#6366f1',
               bg: '#eef2ff',
               icon: <ClockCircleOutlined />,
+            },
+            {
+              key: 'breakdown',
+              label: 'Breakdown',
+              value: checkpointStatusSummary.breakdown,
+              color: '#64748b',
+              bg: '#f1f5f9',
+              icon: <StopOutlined />,
             },
             {
               key: 'rejected',
@@ -1774,7 +1793,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <Input
             allowClear
             prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-            placeholder="Search checkpoint / operator"
+            placeholder="Search code / checkpoint / operator"
             value={statusSearch}
             onChange={(e) => setStatusSearch(e.target.value)}
           />
@@ -1799,10 +1818,14 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-                    <Text strong style={{ fontSize: 13, wordBreak: 'break-word' }}>{r.checkpoint}</Text>
+                    <Text strong style={{ fontSize: 13, wordBreak: 'break-word' }}>
+                      {r.code ? <span style={{ color: '#1e3a5f', marginRight: 6 }}>{r.code}</span> : null}
+                      {r.checkpoint}
+                    </Text>
                     {r.status === 'completed' && <Tag color="success">Completed</Tag>}
                     {r.status === 'rejected' && <Tag color="error">Rejected</Tag>}
                     {r.status === 'missed' && <Tag color="processing">Missed</Tag>}
+                    {r.status === 'breakdown' && <Tag color="default">Breakdown</Tag>}
                     {r.status === 'pending' && <Tag color="warning">Pending</Tag>}
                   </div>
                   <div style={{ fontSize: 12, color: '#475569', display: 'grid', gap: 4 }}>
@@ -1892,8 +1915,18 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 title: 'Checklist',
                 dataIndex: 'checklist_name',
                 key: 'checklist',
-                width: '14%',
+                width: '12%',
                 ellipsis: true,
+              },
+              {
+                title: 'Code',
+                dataIndex: 'code',
+                key: 'code',
+                width: 88,
+                ellipsis: true,
+                render: (v) => (
+                  <span style={{ fontWeight: 700, color: '#1e3a5f' }}>{v || '—'}</span>
+                ),
               },
               {
                 title: 'Checkpoint',
@@ -1910,6 +1943,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                   if (s === 'completed') return <Tag color="success">Completed</Tag>;
                   if (s === 'rejected') return <Tag color="error">Rejected</Tag>;
                   if (s === 'missed') return <Tag color="processing">Missed</Tag>;
+                  if (s === 'breakdown') return <Tag>Breakdown</Tag>;
                   return <Tag color="warning">Pending</Tag>;
                 },
               },

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Typography, Divider, Tooltip, Card, Select, InputNumber, Row, Col, DatePicker,
 } from 'antd';
@@ -9,7 +9,7 @@ import {
   PM_T, btnSharp, nativeSelectStyle, pmFetch, fetchAllChecklistsWithItems, fetchChecklistDetails,
   getCurrentUserId, formatDateTime, emptyCheckpoint, buildCheckpointPayload, validateCheckpoint,
   itemTypeShort, FREQ_TAG_COLORS, PM_FIELD_LIMITS, checklistNameRules, descriptionRules,
-  checkpointTextRules, expectedValueRules, remarksRules, clampInt, clampText, isDateInRange,
+  checkpointTextRules, checkpointCodeRules, expectedValueRules, remarksRules, clampInt, clampText, isDateInRange,
   disableFutureDates, normalizeDateRange,
 } from './pmUtils';
 import PmDownloadButton from './PmDownloadButton';
@@ -17,27 +17,56 @@ import { buildChecklistsReportConfig } from './pmReportDownload';
 
 const { Title, Text } = Typography;
 
+const highlightText = (text, q) => {
+  if (!q || text == null || text === '') return text || '—';
+  const str = String(text);
+  const lower = str.toLowerCase();
+  const qi = lower.indexOf(q.toLowerCase());
+  if (qi < 0) return str;
+  return (
+    <>
+      {str.slice(0, qi)}
+      <mark style={{ background: '#FEF08A', padding: '0 1px', borderRadius: 2 }}>{str.slice(qi, qi + q.length)}</mark>
+      {str.slice(qi + q.length)}
+    </>
+  );
+};
+
+const checkpointMatchesSearch = (item, q) => {
+  if (!q) return false;
+  const hay = [
+    item.item_code,
+    item.item_text,
+    item.remarks,
+    item.expected_value,
+  ].map((v) => String(v || '').toLowerCase()).join(' ');
+  return hay.includes(q);
+};
+
 /* ── Inline checkpoint row for create modal (frequency set at assign) ── */
 const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
   <>
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '30px 1.6fr 80px 100px 1.2fr 30px',
+      gridTemplateColumns: '30px 78px 1.5fr 80px 100px 1.1fr 30px',
       background: '#fafafa', padding: '8px 6px', borderBottom: '1px solid #d9d9d9',
       fontSize: 11, fontWeight: 600, gap: 6,
     }}>
-      <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
+      <div>#</div><div>Code *</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
       <div>Remarks / Method</div><div />
     </div>
     {items.map((item, index) => (
       <div key={item.id} style={{
         display: 'grid',
-        gridTemplateColumns: '30px 1.6fr 80px 100px 1.2fr 30px',
+        gridTemplateColumns: '30px 78px 1.5fr 80px 100px 1.1fr 30px',
         padding: 6, gap: 6, alignItems: 'center',
         borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
         background: index % 2 === 0 ? '#fff' : '#fafafa',
       }}>
         <div style={{ fontSize: 11, color: '#8c8c8c' }}>{index + 1}</div>
+        <Input size="small" value={item.item_code || ''} placeholder="CL-01" maxLength={PM_FIELD_LIMITS.checkpointCode}
+          onChange={(e) => onChange(item.id, { item_code: clampText(e.target.value.toUpperCase(), PM_FIELD_LIMITS.checkpointCode) })}
+          style={{ fontSize: 11, borderRadius: 0, fontWeight: 700 }} />
         <Input size="small" value={item.item_text} placeholder="Checkpoint" maxLength={PM_FIELD_LIMITS.checkpointText}
           onChange={(e) => onChange(item.id, { item_text: clampText(e.target.value, PM_FIELD_LIMITS.checkpointText) })} style={{ fontSize: 11, borderRadius: 0 }} />
         <select value={item.item_type} onChange={(e) => onChange(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
@@ -58,7 +87,7 @@ const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
 );
 
 /* ── Expanded row grid (read-only) ── */
-const ExpandedCheckpoints = ({ items, compact = false }) => {
+const ExpandedCheckpoints = ({ items, compact = false, highlightQuery = '' }) => {
   if (!items?.length) {
     return (
       <div style={{ textAlign: 'center', padding: compact ? 12 : 20, color: '#999', fontSize: compact ? 11 : 12 }}>
@@ -67,9 +96,10 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
     );
   }
 
+  const q = (highlightQuery || '').trim().toLowerCase();
   const gridCols = compact
-    ? '28px 1fr 58px 68px 1fr'
-    : '50px 1fr 80px 100px 1fr';
+    ? '28px 56px 1fr 58px 68px 1fr'
+    : '50px 80px 1fr 80px 100px 1fr';
   const cellFont = compact ? 11 : 12;
   const tagStyle = compact
     ? { fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 4px' }
@@ -91,42 +121,51 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
           fontWeight: 600,
           gap: compact ? 6 : 12,
         }}>
-          <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div>
+          <div>#</div><div>Code</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div>
         </div>
-        {items.map((item, index) => (
-          <div key={item.id} style={{
-            display: 'grid',
-            gridTemplateColumns: gridCols,
-            padding: compact ? '3px 8px' : '6px 12px',
-            gap: compact ? 6 : 12,
-            alignItems: 'center',
-            minHeight: compact ? 28 : undefined,
-            borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
-            background: index % 2 === 0 ? '#fff' : '#fafafa',
-          }}>
-            <div style={{ fontSize: cellFont, color: '#8c8c8c' }}>{index + 1}</div>
-            <div style={{
-              fontSize: cellFont,
-              fontWeight: 600,
-              lineHeight: compact ? '16px' : undefined,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+        {items.map((item, index) => {
+          const matched = q ? checkpointMatchesSearch(item, q) : false;
+          return (
+            <div key={item.id} style={{
+              display: 'grid',
+              gridTemplateColumns: gridCols,
+              padding: compact ? '3px 8px' : '6px 12px',
+              gap: compact ? 6 : 12,
+              alignItems: 'center',
+              minHeight: compact ? 28 : undefined,
+              borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+              background: matched ? '#FEF9C3' : (index % 2 === 0 ? '#fff' : '#fafafa'),
+              boxShadow: matched ? 'inset 3px 0 0 #EAB308' : undefined,
             }}>
-              {item.item_text}
+              <div style={{ fontSize: cellFont, color: '#8c8c8c' }}>{index + 1}</div>
+              <div style={{ fontSize: cellFont, fontWeight: 700, color: '#1e3a5f' }}>
+                {q ? highlightText(item.item_code || '—', q) : (item.item_code || '—')}
+              </div>
+              <div style={{
+                fontSize: cellFont,
+                fontWeight: 600,
+                lineHeight: compact ? '16px' : undefined,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {q ? highlightText(item.item_text, q) : item.item_text}
+              </div>
+              <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
+              <div style={{ fontSize: cellFont }}>
+                {q ? highlightText(item.expected_value || '-', q) : (item.expected_value || '-')}
+              </div>
+              <div style={{
+                fontSize: cellFont,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {q ? highlightText(item.remarks || '-', q) : (item.remarks || '-')}
+              </div>
             </div>
-            <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
-            <div style={{ fontSize: cellFont }}>{item.expected_value || '-'}</div>
-            <div style={{
-              fontSize: cellFont,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {item.remarks || '-'}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -139,6 +178,13 @@ const PokaYokeChecklists = () => {
   const [dateRange, setDateRange] = useState(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const expandedRowKeysRef = useRef(expandedRowKeys);
+  const paginationRef = useRef(pagination);
+  const prevSearchRef = useRef('');
+  const savedExpandedRef = useRef(null);
+  const savedPaginationRef = useRef(null);
+  expandedRowKeysRef.current = expandedRowKeys;
+  paginationRef.current = pagination;
 
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
@@ -172,6 +218,9 @@ const PokaYokeChecklists = () => {
   const handleRefresh = async () => {
     setExpandedRowKeys([]);
     setPagination((p) => ({ ...p, current: 1 }));
+    savedExpandedRef.current = null;
+    savedPaginationRef.current = null;
+    prevSearchRef.current = '';
     await fetchChecklists();
     message.success('Checklists refreshed');
   };
@@ -185,7 +234,7 @@ const PokaYokeChecklists = () => {
   };
 
   const handleCreateChecklist = async (values) => {
-    const validItems = initialItems.filter((i) => i.item_text && i.item_type);
+    const validItems = initialItems.filter((i) => i.item_code && i.item_text && i.item_type);
     if (!validItems.length) return message.error('At least one checkpoint is required');
     for (const cp of validItems) {
       const err = validateCheckpoint(cp);
@@ -225,7 +274,7 @@ const PokaYokeChecklists = () => {
         });
       }
 
-      const validCheckpoints = editCheckpoints.filter((i) => i.item_text && i.item_type);
+      const validCheckpoints = editCheckpoints.filter((i) => i.item_code && i.item_text && i.item_type);
       if (!validCheckpoints.length) return message.error('At least one checkpoint is required');
 
       for (const item of validCheckpoints) {
@@ -241,6 +290,7 @@ const PokaYokeChecklists = () => {
         }
         const original = item._original || {};
         const fieldsChanged =
+          item.item_code !== original.item_code ||
           item.item_text !== original.item_text ||
           item.item_type !== original.item_type ||
           item.expected_value !== original.expected_value ||
@@ -252,6 +302,7 @@ const PokaYokeChecklists = () => {
 
         updatedCount++;
         const payload = {};
+        if (item.item_code !== original.item_code) payload.item_code = String(item.item_code || '').trim().toUpperCase();
         if (item.item_text !== original.item_text) payload.item_text = item.item_text;
         if (item.item_type !== original.item_type) payload.item_type = item.item_type;
         if (item.expected_value !== original.expected_value) payload.expected_value = item.expected_value || null;
@@ -354,14 +405,47 @@ const PokaYokeChecklists = () => {
     }
   };
 
-  const filteredChecklists = checklists.filter((item) =>
-    item.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    (item.description || '').toLowerCase().includes(searchText.toLowerCase())
-  );
+  const filteredChecklists = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return checklists;
+    return checklists.filter((item) =>
+      (item.name || '').toLowerCase().includes(q)
+      || (item.description || '').toLowerCase().includes(q)
+      || (item.items || []).some((cp) => checkpointMatchesSearch(cp, q))
+    );
+  }, [checklists, searchText]);
 
-  const dateFilteredChecklists = filteredChecklists.filter((item) =>
+  const dateFilteredChecklists = useMemo(() => filteredChecklists.filter((item) =>
     isDateInRange(item.created_at, normalizeDateRange(dateRange))
-  );
+  ), [filteredChecklists, dateRange]);
+
+  // Search by checkpoint/code → auto-open matches; clear search → restore prior expand + page
+  useEffect(() => {
+    const q = searchText.trim().toLowerCase();
+    const prevQ = (prevSearchRef.current || '').trim().toLowerCase();
+    prevSearchRef.current = searchText;
+
+    if (!q) {
+      if (prevQ) {
+        setExpandedRowKeys(savedExpandedRef.current ?? []);
+        setPagination(savedPaginationRef.current ?? { current: 1, pageSize: 10 });
+        savedExpandedRef.current = null;
+        savedPaginationRef.current = null;
+      }
+      return;
+    }
+
+    if (!prevQ) {
+      savedExpandedRef.current = [...expandedRowKeysRef.current];
+      savedPaginationRef.current = { ...paginationRef.current };
+    }
+
+    const keys = dateFilteredChecklists
+      .filter((c) => (c.items || []).some((cp) => checkpointMatchesSearch(cp, q)))
+      .map((c) => c.id);
+    setExpandedRowKeys(keys);
+    setPagination((p) => ({ ...p, current: 1 }));
+  }, [searchText, dateFilteredChecklists]);
 
   const columns = [
     { title: 'SL NO', key: 'sl', width: 55, align: 'center', className: 'table-header-styled',
@@ -395,11 +479,14 @@ const PokaYokeChecklists = () => {
 
   const renderEditCheckpointRow = (item, index) => {
     const isEditing = editingCheckpointId === item.id;
-    const gridCols = '30px 1.6fr 70px 90px 1fr 100px';
+    const gridCols = '30px 72px 1.4fr 70px 90px 1fr 100px';
     if (isEditing) {
       return (
         <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
           <div style={{ fontSize: 10, color: '#8c8c8c' }}>{index + 1}</div>
+          <Input size="small" value={item.item_code || ''} maxLength={PM_FIELD_LIMITS.checkpointCode}
+            onChange={(e) => patchEditItem(item.id, { item_code: clampText(e.target.value.toUpperCase(), PM_FIELD_LIMITS.checkpointCode) })}
+            style={{ borderRadius: 0, fontWeight: 700 }} />
           <Input size="small" value={item.item_text} maxLength={PM_FIELD_LIMITS.checkpointText}
             onChange={(e) => patchEditItem(item.id, { item_text: clampText(e.target.value, PM_FIELD_LIMITS.checkpointText) })} style={{ borderRadius: 0 }} />
           <select value={item.item_type} onChange={(e) => patchEditItem(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
@@ -424,6 +511,7 @@ const PokaYokeChecklists = () => {
     return (
       <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: index % 2 === 0 ? '#fff' : '#fafafa' }}>
         <div style={{ fontSize: 10, color: '#8c8c8c' }}>{index + 1}</div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#1e3a5f' }}>{item.item_code || '—'}</div>
         <div style={{ fontSize: 10, fontWeight: 600 }}>{item.item_text}</div>
         <Tag style={{ fontSize: 9, borderRadius: 0 }}>{itemTypeShort(item.item_type)}</Tag>
         <div style={{ fontSize: 10 }}>{item.expected_value || '-'}</div>
@@ -451,7 +539,7 @@ const PokaYokeChecklists = () => {
     <div style={{ padding: 0, background: PM_T.bg, width: '100%', overflowX: 'auto' }}>
       <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
         <Space wrap>
-          <Input.Search placeholder="Search by name or description..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
+          <Input.Search placeholder="Search name, code, or checkpoint..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
             onChange={(e) => setSearchText(e.target.value)} />
           <DatePicker.RangePicker
             allowClear
@@ -511,7 +599,9 @@ const PokaYokeChecklists = () => {
               ? [...expandedRowKeys, record.id]
               : expandedRowKeys.filter((k) => k !== record.id));
           },
-          expandedRowRender: (record) => <ExpandedCheckpoints items={record.items} />,
+          expandedRowRender: (record) => (
+            <ExpandedCheckpoints items={record.items} highlightQuery={searchText} />
+          ),
           rowExpandable: () => true,
         }}
         style={{ background: PM_T.surface }}
@@ -609,8 +699,8 @@ const PokaYokeChecklists = () => {
             <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
           </div>
           <div style={{ border: '1px solid #d9d9d9', maxHeight: 420, overflowY: 'auto', marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '30px 1.6fr 70px 90px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
-              <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div><div>Actions</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '30px 72px 1.4fr 70px 90px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
+              <div>#</div><div>Code</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div><div>Actions</div>
             </div>
             {editCheckpoints.map((item, i) => renderEditCheckpointRow(item, i))}
           </div>
@@ -633,6 +723,14 @@ const PokaYokeChecklists = () => {
         )}
         <Form form={itemForm} layout="vertical" onFinish={handleAddItem}
           initialValues={{ item_type: 'Boolean' }}>
+          <Form.Item name="item_code" label="Code" rules={checkpointCodeRules}>
+            <Input
+              maxLength={PM_FIELD_LIMITS.checkpointCode}
+              placeholder="e.g. CL-01, CO-010, HY-03"
+              style={{ borderRadius: 0, fontWeight: 700 }}
+              onChange={(e) => itemForm.setFieldsValue({ item_code: e.target.value.toUpperCase() })}
+            />
+          </Form.Item>
           <Form.Item name="item_text" label="Checkpoint" rules={checkpointTextRules}>
             <Input maxLength={PM_FIELD_LIMITS.checkpointText} style={{ borderRadius: 0 }} />
           </Form.Item>

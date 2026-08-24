@@ -7,7 +7,7 @@ import ProductDetails from "./PDM Components/ProductDetails";
 import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
-import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import Recyclebin from "./Recyclebin";
 import PCOrderChatPanel, { OrderChatButton, useOrderChat } from "./chatbox/OrderChatPanel";
 import { useAuth } from "../auth/AuthContext.jsx";
@@ -168,7 +168,7 @@ const PDM = () => {
               size={viewportWidth < 1100 ? "small" : "middle"}
               items={[
                 { key: "pdm", label: "PDM" },
-                { key: "pps", label: "PPS" },
+                { key: "order-tracking", label: viewportWidth < 1100 ? "Tracking" : "Order Tracking" },
                 { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
               ]}
             />
@@ -314,9 +314,9 @@ const PDM = () => {
               )}
             </Content>
           </Layout>
-        ) : activeTopTab === "pps" ? (
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-            <ProcessPlanning initialOrderId={initialOrderId} />
+        ) : activeTopTab === "order-tracking" ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 8px 8px" }}>
+            <OrderTracking productId={Number.isFinite(productIdNum) ? productIdNum : null} />
           </div>
         ) : activeTopTab === "recycle-bin" ? (
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>

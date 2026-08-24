@@ -53,6 +53,7 @@ export const INTERVAL_UNITS = ['Day', 'Week', 'Month', 'Year'];
 export const PM_FIELD_LIMITS = {
   checklistName: 50,
   description: 50,
+  checkpointCode: 32,
   checkpointText: 50,
   expectedValue: 50,
   remarks: 100,
@@ -80,6 +81,11 @@ export const descriptionRules = [
 export const checkpointTextRules = [
   { required: true, whitespace: true, message: 'Checkpoint text is required' },
   { max: PM_FIELD_LIMITS.checkpointText, message: MAX_MSG },
+];
+
+export const checkpointCodeRules = [
+  { required: true, whitespace: true, message: 'Checkpoint code is required' },
+  { max: PM_FIELD_LIMITS.checkpointCode, message: MAX_MSG },
 ];
 
 export const expectedValueRules = [
@@ -132,6 +138,23 @@ export function getCurrentUserId() {
     return user.id || user.user_id || 1;
   } catch {
     return 1;
+  }
+}
+
+/** Display name for acknowledgements (falls back to id). */
+export function getCurrentUserLabel() {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    return (
+      user.user_name
+      || user.name
+      || user.username
+      || (user.id != null ? `User ${user.id}` : null)
+      || (user.user_id != null ? `User ${user.user_id}` : null)
+      || 'user'
+    );
+  } catch {
+    return 'user';
   }
 }
 
@@ -232,6 +255,7 @@ export async function fetchAllChecklistsWithItems() {
 
 export function buildCheckpointPayload(item, index) {
   return {
+    item_code: String(item.item_code || '').trim().toUpperCase(),
     item_text: item.item_text,
     sequence_number: index + 1,
     item_type: item.item_type,
@@ -243,6 +267,7 @@ export function buildCheckpointPayload(item, index) {
 export function emptyCheckpoint(seq = 1) {
   return {
     id: `tmp-${Date.now()}-${Math.random()}`,
+    item_code: '',
     item_text: '',
     sequence_number: seq,
     item_type: 'Boolean',
@@ -252,6 +277,11 @@ export function emptyCheckpoint(seq = 1) {
 }
 
 export function validateCheckpoint(item) {
+  const code = String(item.item_code || '').trim();
+  if (!code) return 'Checkpoint code is required';
+  if (code.length > PM_FIELD_LIMITS.checkpointCode) {
+    return `Checkpoint code must be at most ${PM_FIELD_LIMITS.checkpointCode} characters`;
+  }
   if (!item.item_text?.trim()) return 'Checkpoint text is required';
   if (item.item_text.trim().length > PM_FIELD_LIMITS.checkpointText) {
     return 'Maximum character limit exceeded';
@@ -299,4 +329,31 @@ export function machineLabel(machine) {
   if (!machine) return '-';
   if (machine.make && machine.model) return `${machine.make} - ${machine.model}`;
   return machine.make || machine.type || `Machine ${machine.id}`;
+}
+
+const ymdFromAny = (v) => {
+  if (!v) return null;
+  const s = String(v);
+  if (s.length >= 10) return s.slice(0, 10);
+  return null;
+};
+
+export function indexMachineAvailability(list) {
+  const map = {};
+  (Array.isArray(list) ? list : []).forEach((r) => {
+    if (r?.machine_id != null) map[r.machine_id] = r;
+  });
+  return map;
+}
+
+export function isMachineBreakdownOnDay(availabilityById, machineId, ymd, todayYmd) {
+  if (machineId == null || !ymd) return false;
+  const rec = availabilityById?.[machineId];
+  if (!rec?.is_breakdown) return false;
+  const from = ymdFromAny(rec.available_from);
+  const to = ymdFromAny(rec.available_to);
+  if (from && ymd < from) return false;
+  if (to && ymd > to) return false;
+  if (!to && todayYmd && ymd > todayYmd) return false;
+  return true;
 }
