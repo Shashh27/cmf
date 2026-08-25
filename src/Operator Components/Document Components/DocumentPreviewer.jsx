@@ -4,7 +4,6 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined,
   ExpandOutlined,
-  ExportOutlined,
   LeftOutlined,
   RightOutlined,
 } from '@ant-design/icons';
@@ -58,7 +57,6 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
  * - centered fit on open
  * - mouse-wheel zoom toward cursor
  * - click-drag pan
- * - open in new tab
  */
 const DocumentPreviewer = ({ url, fileName, meta = {}, height = '100%' }) => {
   const viewportRef = useRef(null);
@@ -269,10 +267,6 @@ const DocumentPreviewer = ({ url, fileName, meta = {}, height = '100%' }) => {
     [zoomAtPoint],
   );
 
-  const handleOpenNewTab = () => {
-    if (url) window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   const scalePercent = (() => {
     if (!naturalSize) return 100;
     const fitScale = getFitTransform().scale || 1;
@@ -304,11 +298,8 @@ const DocumentPreviewer = ({ url, fileName, meta = {}, height = '100%' }) => {
         }}
       >
         <Empty
-          description={`Preview not available${fileName ? ` for ${fileName}` : ''}. Open in a new tab instead.`}
+          description={`Preview not available${fileName ? ` for ${fileName}` : ''}.`}
         />
-        <Button type="primary" icon={<ExportOutlined />} onClick={handleOpenNewTab}>
-          Open in new tab
-        </Button>
       </div>
     );
   }
@@ -396,11 +387,6 @@ const DocumentPreviewer = ({ url, fileName, meta = {}, height = '100%' }) => {
             </>
           )}
         </Space>
-        <Tooltip title="Open original file in a new browser tab">
-          <Button size="small" icon={<ExportOutlined />} onClick={handleOpenNewTab}>
-            Open in new tab
-          </Button>
-        </Tooltip>
       </div>
 
       <div

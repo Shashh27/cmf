@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip, Alert, Row, Col, Divider } from 'antd';
-import { FileTextOutlined, EyeOutlined, CheckCircleOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip, Alert, Row, Col, Divider, Upload, Popconfirm } from 'antd';
+import { FileTextOutlined, EyeOutlined, CheckCircleOutlined, PlusCircleOutlined, ReloadOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
@@ -42,6 +42,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const [justActivated, setJustActivated] = useState(false);
   const [sessionActivationTime, setSessionActivationTime] = useState(null);
+  const [liveOpDocs, setLiveOpDocs] = useState([]);
+  const [opDocsReady, setOpDocsReady] = useState(false);
+  const [uploadFileList, setUploadFileList] = useState([]);
+  const [uploading, setUploading] = useState(false);
 
   // Preview Modal State
 
@@ -99,6 +103,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setJustActivated(false);
     setSessionActivationTime(null);
     setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', operatorStatus: null });
+    setLiveOpDocs([]);
+    setOpDocsReady(false);
+    setUploadFileList([]);
   }, [selectedJob?.schedule_id]);
 
   useEffect(() => {
@@ -276,6 +283,96 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       console.error('Error fetching part data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getSelectedOperationId = () =>
+    selectedOperation?.id || selectedJob?.operation_id || null;
+
+  const fetchOpDocuments = async (opId) => {
+    if (!opId) {
+      setLiveOpDocs([]);
+      setOpDocsReady(false);
+      return;
+    }
+    try {
+      const res = await api.get(`/operation-documents/operation/${opId}`);
+      setLiveOpDocs(Array.isArray(res.data) ? res.data : []);
+      setOpDocsReady(true);
+    } catch (error) {
+      console.error('Error fetching operation documents:', error);
+      setOpDocsReady(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOpDocuments(getSelectedOperationId());
+  }, [selectedOperation?.id, selectedJob?.operation_id]);
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      return u?.id ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOperatorUpload = async () => {
+    const opId = getSelectedOperationId();
+    if (!selectedJob || !opId) {
+      message.warning('Select a job card first');
+      return;
+    }
+    if (!uploadFileList.length) {
+      message.warning('Please select files to upload');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('operation_id', String(opId));
+    uploadFileList.forEach((item) => {
+      const file = item.originFileObj || item;
+      if (file) fd.append('files', file);
+    });
+    fd.append('document_type', 'Technical');
+    fd.append('document_version', '00');
+    const uid = getCurrentUserId();
+    if (uid != null) fd.append('user_id', String(uid));
+    setUploading(true);
+    try {
+      await api.post('/operation-documents/upload/', fd);
+      message.success('Files uploaded for this job card');
+      setUploadFileList([]);
+      await fetchOpDocuments(opId);
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.response?.data?.message || 'Upload failed';
+      message.error(detail);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const canDeleteOwnDoc = (doc) => {
+    const uid = getCurrentUserId();
+    if (uid == null || doc?.user_id == null) return false;
+    return Number(doc.user_id) === Number(uid);
+  };
+
+  const handleDeleteOwnDocument = async (doc) => {
+    const docId = doc?.id || doc?.document_id;
+    if (!docId) {
+      message.error('Cannot delete this file');
+      return;
+    }
+    try {
+      await api.delete(`/operation-documents/${docId}`);
+      message.success('File deleted');
+      await fetchOpDocuments(getSelectedOperationId());
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.response?.data?.message || 'Failed to delete';
+      message.error(detail);
     }
   };
 
@@ -600,7 +697,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   });
 
 
-  const operationDocuments = selectedOperation?.documents || selectedOperation?.operation_documents || [];
+  const hierarchyOpDocs = selectedOperation?.documents || selectedOperation?.operation_documents || [];
+  const operationDocuments = opDocsReady ? liveOpDocs : hierarchyOpDocs;
   const partDocuments = partData?.documents || partData?.part_documents || [];
   const rawMaterials = partData?.part?.raw_material_name ? [{
     raw_material_name: partData.part.raw_material_name,
@@ -939,30 +1037,57 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     return latestDocs;
   };
 
-  const renderDocuments = (docs, filter) => {
+  const renderDocuments = (docs, filter, { allowOwnerDelete } = {}) => {
     // Filter to show only latest versions for operators
     const latestDocs = getLatestVersionDocuments(docs);
     const filtered = filter === 'all' ? latestDocs : latestDocs.filter(d => (d.document_type || d.type || '').toLowerCase().includes(filter));
     if (filtered.length === 0) return <Empty description="No documents found." />;
-    return filtered.map((doc, i) => (
-      <Card key={i} size="small" style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Space>
-            <FileTextOutlined style={{ color: '#1677FF' }} />
-            <div>
-              <Text strong>{doc.document_name || doc.name}</Text>
-              <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
-                Version: {doc.document_version || '00'}
-              </div>
-            </div>
-          </Space>
-          <Space>
-            <Tag color="blue">{doc.document_type || doc.tag || doc.type}</Tag>
-            <Button icon={<EyeOutlined />} size="small" type="text" onClick={() => handlePreview(doc)} />
-          </Space>
-        </div>
-      </Card>
-    ));
+    return (
+      <Table
+        dataSource={filtered}
+        rowKey={(doc) => doc.id || doc.document_id || doc.document_name}
+        size="small"
+        pagination={false}
+        columns={[
+          {
+            title: 'File',
+            key: 'name',
+            render: (_, doc) => (
+              <Space>
+                <FileTextOutlined style={{ color: '#1677FF' }} />
+                <Text strong>{doc.document_name || doc.name}</Text>
+              </Space>
+            ),
+          },
+          {
+            title: 'Type',
+            key: 'type',
+            width: 120,
+            render: (_, doc) => <Tag color="blue">{doc.document_type || doc.tag || doc.type || '-'}</Tag>,
+          },
+          {
+            title: 'Action',
+            key: 'action',
+            width: 140,
+            render: (_, doc) => (
+              <Space>
+                <Button icon={<EyeOutlined />} size="small" type="text" onClick={() => handlePreview(doc)} />
+                {allowOwnerDelete && canDeleteOwnDoc(doc) && (
+                  <Popconfirm
+                    title="Delete this file?"
+                    okText="Delete"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => handleDeleteOwnDocument(doc)}
+                  >
+                    <Button icon={<DeleteOutlined />} size="small" type="text" danger />
+                  </Popconfirm>
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+    );
   };
 
 
@@ -997,19 +1122,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             )}
           </TabPane>
 
-          {/* ── Tab 2: Operation Documents (docs only, no Tools sub-tab) ── */}
-          <TabPane tab="Operation Documents" key="op_documents">
-            {selectedOperation ? (
-              <div>
-                <Title level={5}>{selectedOperation.operation_name} - Documents</Title>
-                {renderDocuments(operationDocuments, 'all')}
-              </div>
-            ) : (
-              <Empty description="Select an operation to view its documents." />
-            )}
-          </TabPane>
-
-          {/* ── Tab 3: Tools (moved from sub-tab to top-level) ── */}
+          {/* ── Tab 2: Tools (moved from sub-tab to top-level) ── */}
           <TabPane tab="Tools" key="tools">
             {selectedOperation ? (
               <div>
@@ -1062,6 +1175,39 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               size="small"
               pagination={false}
             />
+          </TabPane>
+
+          <TabPane tab="Upload Setup Photos" key="op_documents">
+            {selectedJob && selectedOperation ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <Title level={5} style={{ margin: 0 }}>{selectedOperation.operation_name} - Setup Photos</Title>
+                  <Space wrap>
+                    <Upload
+                      multiple
+                      fileList={uploadFileList}
+                      beforeUpload={() => false}
+                      onChange={({ fileList }) => setUploadFileList(fileList)}
+                      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp4,.mov,.avi,.mkv,.webm"
+                    >
+                      <Button icon={<UploadOutlined />}>Select files</Button>
+                    </Upload>
+                    <Button
+                      type="primary"
+                      icon={<UploadOutlined />}
+                      loading={uploading}
+                      onClick={handleOperatorUpload}
+                      disabled={!uploadFileList.length}
+                    >
+                      Upload
+                    </Button>
+                  </Space>
+                </div>
+                {renderDocuments(operationDocuments, 'all', { allowOwnerDelete: true })}
+              </div>
+            ) : (
+              <Empty description="Select a job card to upload setup photos." />
+            )}
           </TabPane>
 
         </Tabs>
