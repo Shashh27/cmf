@@ -18,6 +18,8 @@ from sqlalchemy import (
 
     Float,
 
+    UniqueConstraint,
+
     func,
 
     text
@@ -179,7 +181,10 @@ class Part(Base):
 
     __tablename__ = "parts"
 
-    __table_args__ = {'schema': 'oms'}
+    __table_args__ = (
+        UniqueConstraint("product_id", "part_number", name="uq_parts_product_part_number"),
+        {"schema": "oms"},
+    )
 
 
 
@@ -187,7 +192,8 @@ class Part(Base):
 
     part_name = Column(String, nullable=False)
 
-    part_number = Column(String, unique=True, nullable=False)
+    # Unique per product (see uq_parts_product_part_number), not globally
+    part_number = Column(String, nullable=False)
 
 
 

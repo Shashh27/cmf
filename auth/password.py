@@ -20,16 +20,16 @@ def hash_password(plain_password: str) -> str:
 def verify_and_needs_rehash(plain_password: str, stored_password: str) -> tuple[bool, bool]:
     """
     Returns (ok, needs_rehash).
-    Fernet-encrypted passwords are kept as-is (no rehashing).
-    Bcrypt passwords may need rehashing if bcrypt parameters are outdated.
+    Fernet-encrypted passwords are kept as-is.
+    Bcrypt and plaintext are upgraded to Fernet after a successful login.
     """
     if not stored_password or not plain_password:
         return False, False
 
     if is_bcrypt_hash(stored_password):
         ok = pwd_context.verify(plain_password, stored_password)
-        needs = ok and pwd_context.needs_update(stored_password)
-        return ok, needs
+        # Always upgrade bcrypt → Fernet after a successful login.
+        return ok, ok
 
     # Fernet-encrypted passwords - verify but don't rehash
     if is_encrypted(stored_password):
