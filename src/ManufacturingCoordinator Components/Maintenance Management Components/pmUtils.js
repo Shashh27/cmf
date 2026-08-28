@@ -403,3 +403,117 @@ export function isMachineBreakdownOnDay(availabilityById, machineId, ymd, todayY
   if (!to && todayYmd && ymd > todayYmd) return false;
   return true;
 }
+
+export function resolveAssignmentItemFrequency(ai) {
+  const ci = ai?.checklist_item;
+  if (ai?.frequency_type) {
+    return {
+      frequency_type: ai.frequency_type,
+      interval_value: ai.interval_value,
+      interval_unit: ai.interval_unit,
+      trigger_hours: ai.trigger_hours,
+    };
+  }
+  return ci || null;
+}
+
+export function isConditionOnDemand(freq) {
+  return (
+    freq?.frequency_type === 'Condition Based'
+    && (freq.interval_value == null || freq.interval_value === '' || !freq.interval_unit)
+  );
+}
+
+export function isTimeDaily(freq) {
+  return (
+    freq?.frequency_type === 'Time Based'
+    && freq.interval_value === 1
+    && freq.interval_unit === 'Day'
+  );
+}
+
+export function getRecurrenceAnchor(freq, assignedDay) {
+  if (!freq || !assignedDay) return assignedDay;
+  if (isTimeDaily(freq)) return assignedDay;
+  if (freq.frequency_type !== 'Time Based') return assignedDay;
+
+  const iv = freq.interval_value || 1;
+  const iu = freq.interval_unit;
+  if (iu === 'Week') return dayjs(assignedDay).add(iv, 'week').format('YYYY-MM-DD');
+  if (iu === 'Month') return dayjs(assignedDay).add(iv, 'month').format('YYYY-MM-DD');
+  if (iu === 'Year') return dayjs(assignedDay).add(iv, 'year').format('YYYY-MM-DD');
+  return assignedDay;
+}
+
+export function isScheduledDueOnDate(freq, anchorDateKey, dateKey) {
+  if (!freq || !anchorDateKey || !dateKey) return false;
+  if (isTimeDaily(freq) || isConditionOnDemand(freq)) return false;
+
+  const due = dayjs(anchorDateKey);
+  const target = dayjs(dateKey);
+  if (target.isBefore(due, 'day')) return false;
+
+  if (freq.frequency_type === 'Usage Based') {
+    return target.isSame(due, 'day');
+  }
+
+  const iv = freq.interval_value || 1;
+  const iu = freq.interval_unit || 'Day';
+
+  if (iu === 'Day') {
+    const days = target.diff(due, 'day');
+    return days >= 0 && days % iv === 0;
+  }
+  if (iu === 'Week') {
+    if (target.day() !== due.day()) return false;
+    const weeks = target.diff(due.startOf('week'), 'week');
+    const dueWeeks = due.diff(due.startOf('week'), 'week');
+    return weeks >= dueWeeks && (weeks - dueWeeks) % iv === 0;
+  }
+  if (iu === 'Month') {
+    if (target.date() !== due.date()) return false;
+    const months = target.diff(due, 'month');
+    return months >= 0 && months % iv === 0;
+  }
+  if (iu === 'Year') {
+    if (target.month() !== due.month() || target.date() !== due.date()) return false;
+    const years = target.diff(due, 'year');
+    return years >= 0 && years % iv === 0;
+  }
+  return target.isSame(due, 'day');
+}
+
+export function isAssignmentItemDueOnDate(ai, assignment, dateKey) {
+  if (!ai || !assignment || !dateKey) return false;
+  if (ai.is_required === false) return false;
+
+  const assignedDay = dayjs(assignment.assigned_at).format('YYYY-MM-DD');
+  if (dateKey < assignedDay) return false;
+
+  const freq = resolveAssignmentItemFrequency(ai);
+  if (!freq?.frequency_type) return false;
+  if (isConditionOnDemand(freq)) return false;
+  if (isTimeDaily(freq)) return true;
+
+  const anchor = getRecurrenceAnchor(freq, assignedDay);
+  return isScheduledDueOnDate(freq, anchor, dateKey);
+}
+
+export function countDueAssignmentItemsForMachineOnDate(assignments, machineId, dateKey) {
+  let count = 0;
+  (assignments || []).forEach((assignment) => {
+    if (assignment.machine_id !== machineId) return;
+    (assignment.assignment_items || []).forEach((ai) => {
+      if (isAssignmentItemDueOnDate(ai, assignment, dateKey)) count += 1;
+    });
+  });
+  return count;
+}
+
+export function resolveDayTone(submittedCount, rejectedCount, expectedCount) {
+  if (!expectedCount) return null;
+  if (!submittedCount) return null;
+  const incomplete = submittedCount < expectedCount;
+  if (incomplete || rejectedCount > 0) return 'orange';
+  return 'green';
+}

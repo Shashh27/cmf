@@ -65,7 +65,6 @@ function SceneCameraRig({ machines, zones, controlsRef, layoutKey, frameRef, sel
   const lastFocusedIdRef = useRef(null)
 
   const frameScene = useCallback(() => {
-    if (!machines.length) return
     camera.aspect = size.width / Math.max(size.height, 1)
     applyOverviewCamera(camera, controlsRef.current, machines, zones)
     framedKeyRef.current = layoutKey
@@ -75,9 +74,9 @@ function SceneCameraRig({ machines, zones, controlsRef, layoutKey, frameRef, sel
   }, [camera, controlsRef, layoutKey, machines, size.height, size.width, zones])
 
   useLayoutEffect(() => {
-    if (!machines.length || framedKeyRef.current === layoutKey) return
+    if (framedKeyRef.current === layoutKey) return
     frameScene()
-  }, [frameScene, layoutKey, machines.length])
+  }, [frameScene, layoutKey])
 
   useEffect(() => {
     frameRef.current = frameScene
@@ -219,6 +218,7 @@ function WorkCenterChip({ workCenterKey, count, workCenters, isActive, onClick }
     <button
       type="button"
       onClick={onClick}
+      className="shop-floor-wc-chip"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -297,14 +297,57 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
   )
 }
 
-function buildWorkCenters(apiMachines) {
-  const names = [...new Set(
-    apiMachines.map(m => (m.work_center_name || 'Unassigned').trim())
-  )].sort((a, b) => a.localeCompare(b))
+const EXACT_BLUEPRINT_MACHINES = [
+  // Even 6-unit grid — ROW_BACK=-14, ROW_FRONT=-8 / grind z=3,9
+  // Walkway clear: x=-4 .. 0 (center x=-2)
 
+  // --- Turning centre (left of walkway) ---
+  { id: 'tekcel', make: 'Tekcel', model: '', workCenter: 'Turning centre', x: -25, z: -14, isVertical: true },
+  { id: 'stc25', make: 'STC 25', model: '', workCenter: 'Turning centre', x: -19, z: -14 },
+  { id: 'pinacho225', make: 'Pinacho 225', model: '', workCenter: 'Turning centre', x: -13, z: -14 },
+  { id: 'mazak', make: 'Mazak SQT 10M', model: '', workCenter: 'Turning centre', x: -19, z: -8 },
+  { id: 'stallion', make: 'Stallion 200', model: '', workCenter: 'Turning centre', x: -13, z: -8 },
+  { id: 'tc46mc', make: 'TC-46-MC', model: '', workCenter: 'Turning centre', x: -7, z: -8 },
+
+  // --- Milling centre (right of walkway) ---
+  { id: 'bfw', make: 'BFW BMV-50', model: '', workCenter: 'Milling centre', x: 9, z: -14 },
+  { id: 'mitsubishi', make: 'Mitsubishi MV5C', model: '', workCenter: 'Milling centre', x: 15, z: -14 },
+  { id: 'mikron', make: 'Mikron WF41C', model: '', workCenter: 'Milling centre', x: 21, z: -14 },
+  { id: 'dmu1', make: 'DMU 60', model: '', workCenter: 'Milling centre', x: 27, z: -14 },
+  { id: 'dmu2', make: 'DMU 80H', model: '', workCenter: 'Milling centre', x: 33, z: -14 },
+  { id: 'dmu125u', make: 'DMU 125U Deckel MAHO', model: '', workCenter: 'Milling centre', x: 3, z: -8 },
+  { id: 'ams850', make: 'AMS 850 ACE Micromatic', model: '', workCenter: 'Milling centre', x: 9, z: -8 },
+  { id: 'wh10cnc', make: 'WH10CNC Varns 800RF TOS', model: '', workCenter: 'Milling centre', x: 15, z: -8 },
+
+  // --- EDM Room ---
+  { id: 'ona_qxsf', make: 'EDM Room ONA-QX3F', model: '', workCenter: 'EDM Room', x: 6, z: -24 },
+
+  // --- Grinding Room ---
+  { id: 'schaublin1', make: 'Schublin 125 I', model: '', workCenter: 'Grinding Room', x: -31, z: 3 },
+  { id: 'schaublin2', make: 'Schublin 125 II', model: '', workCenter: 'Grinding Room', x: -25, z: 3 },
+  { id: 'voumand', make: 'Voumard', model: '', workCenter: 'Grinding Room', x: -19, z: 3 },
+  { id: 'magerle', make: 'Magerle', model: '', workCenter: 'Grinding Room', x: -13, z: 3 },
+  { id: 'horder', make: 'Herder-S-devlieg', model: '', workCenter: 'Grinding Room', x: -31, z: 9, isVertical: true },
+  { id: 'kellenberger', make: 'Kellenberger', model: '', workCenter: 'Grinding Room', x: -19, z: 9 },
+  { id: 'studer', make: 'Studer RHU 650', model: '', workCenter: 'Grinding Room', x: -13, z: 9 },
+
+  // --- Thread Grinding Room ---
+  { id: 'thread_grinding', make: 'Thread Grinding Room', model: '', workCenter: 'Thread Grinding Room', x: -7, z: 6 },
+]
+
+const BLUEPRINT_WORK_CENTER_ZONES = [
+  { workCenter: 'Turning centre', position: { x: -16, y: 0.02, z: -11 }, width: 24, depth: 12, color: '#3b82f6' },
+  { workCenter: 'Milling centre', position: { x: 18, y: 0.02, z: -11 }, width: 36, depth: 12, color: '#10b981' },
+  { workCenter: 'EDM Room', position: { x: 6, y: 0.02, z: -24 }, width: 12, depth: 6, color: '#8b5cf6' },
+  { workCenter: 'Grinding Room', position: { x: -22, y: 0.02, z: 6 }, width: 24, depth: 12, color: '#0f766e' },
+  { workCenter: 'Thread Grinding Room', position: { x: -7, y: 0.02, z: 6 }, width: 8, depth: 12, color: '#b91c1c' },
+]
+
+function buildWorkCenters(apiMachines) {
+  const names = ['Turning centre', 'Milling centre', 'EDM Room', 'Grinding Room', 'Thread Grinding Room']
   const workCenters = {}
   names.forEach((name, i) => {
-    workCenters[name] = { label: name, color: workCenterColorAt(i) }
+    workCenters[name] = { label: name, color: BLUEPRINT_WORK_CENTER_ZONES[i]?.color || workCenterColorAt(i) }
   })
   return workCenters
 }
@@ -312,108 +355,49 @@ function buildWorkCenters(apiMachines) {
 function buildLayout(apiMachines, filterWorkCenter = 'ALL', workCenterColorMap = null) {
   const workCenters = workCenterColorMap || buildWorkCenters(apiMachines)
 
-  const wcNames = (filterWorkCenter === 'ALL'
-    ? [...new Set(apiMachines.map(m => (m.work_center_name || 'Unassigned').trim()))]
-    : [filterWorkCenter]
-  ).sort((a, b) => a.localeCompare(b))
-
-  const groups = wcNames
-    .map(name => ({
-      name,
-      items: apiMachines.filter(m => (m.work_center_name || 'Unassigned').trim() === name),
-    }))
-    .filter(g => g.items.length > 0)
-
-  const baysPerRow = filterWorkCenter === 'ALL'
-    ? Math.min(3, Math.max(1, groups.length))
-    : 1
-
-  const bays = groups.map(g => {
-    const count = g.items.length
-    const cols = Math.min(WC_COLUMNS, count)
-    const rows = Math.ceil(count / WC_COLUMNS)
-    const width = (cols - 1) * COL_SPACING + MACHINE_PAD + BAY_PADDING * 2
-    const depth = (rows - 1) * ROW_SPACING + MACHINE_PAD + BAY_PADDING * 2
-    return { ...g, cols, rows, width, depth }
-  })
-
-  const rowCount = Math.ceil(bays.length / baysPerRow) || 1
-  const rowLayouts = []
-  for (let r = 0; r < rowCount; r++) {
-    const slice = bays.slice(r * baysPerRow, (r + 1) * baysPerRow)
-    rowLayouts.push({
-      width: slice.reduce((sum, b, i) => sum + b.width + (i > 0 ? BAY_GAP_X : 0), 0),
-      depth: Math.max(...slice.map(b => b.depth)),
-      bays: slice,
+  const apiMap = new Map()
+  if (Array.isArray(apiMachines)) {
+    apiMachines.forEach(m => {
+      const name = (m.machine_make || m.machine_name || '').toLowerCase()
+      if (name) apiMap.set(name, m)
     })
   }
 
-  const totalDepth = rowLayouts.reduce(
-    (sum, row, i) => sum + row.depth + (i > 0 ? BAY_GAP_Z : 0),
-    0
-  )
+  const machines = EXACT_BLUEPRINT_MACHINES.map(bm => {
+    const live = Array.from(apiMap.entries()).find(([k]) => k.includes(bm.make.toLowerCase()) || bm.make.toLowerCase().includes(k))?.[1]
+    const rawStatus = live?.status || live?.machine_status?.status || 'OFF'
 
-  const zones = []
-  const machines = []
-  let zCursor = -totalDepth / 2
-
-  rowLayouts.forEach(rowLayout => {
-    let xCursor = -rowLayout.width / 2
-
-    rowLayout.bays.forEach(bay => {
-      const zoneCenterX = xCursor + bay.width / 2
-      const zoneCenterZ = zCursor + rowLayout.depth / 2
-
-      zones.push({
-        workCenter: bay.name,
-        position: { x: zoneCenterX, y: 0.02, z: zoneCenterZ },
-        width: bay.width,
-        depth: bay.depth,
-        color: workCenters[bay.name]?.color || '#64748b',
-      })
-
-      const gridW = (bay.cols - 1) * COL_SPACING
-      const gridD = (bay.rows - 1) * ROW_SPACING
-      const startX = zoneCenterX - gridW / 2
-      const startZ = zoneCenterZ - gridD / 2
-
-      bay.items
-        .sort((a, b) => (a.make || '').localeCompare(b.make || ''))
-        .forEach((machine, index) => {
-          const row = Math.floor(index / WC_COLUMNS)
-          const col = index % WC_COLUMNS
-          const x = startX + col * COL_SPACING
-          const z = startZ + row * ROW_SPACING
-
-          machines.push({
-            id: machine.machine_id.toString(),
-            type: (machine.machine_type || '').trim().toUpperCase(),
-            workCenter: bay.name,
-            position: { x, y: 0, z },
-            status: machine.status || 'OFF',
-            make: machine.make,
-            model: machine.model,
-            cncController: machine.cnc_controller,
-            yearOfInstallation: machine.year_of_installation,
-            mhr: machine.mhr,
-            remarks: machine.remarks,
-            lastUpdated: machine.last_updated,
-            saleOrderNumber: machine.sale_order_number,
-            partNumber: machine.part_number,
-            operationName: machine.operation_name,
-            operationNumber: machine.operation_number,
-            completedQty: machine.completed_qty,
-            targetQty: machine.target_qty,
-          })
-        })
-
-      xCursor += bay.width + BAY_GAP_X
-    })
-
-    zCursor += rowLayout.depth + BAY_GAP_Z
+    return {
+      id: bm.id,
+      type: bm.workCenter.toUpperCase(),
+      workCenter: bm.workCenter,
+      position: { x: bm.x, y: 0, z: bm.z },
+      status: rawStatus,
+      make: bm.make,
+      model: bm.model,
+      cncController: live?.cnc_controller || 'N/A',
+      yearOfInstallation: live?.year_of_installation || 'N/A',
+      mhr: live?.mhr || 'N/A',
+      remarks: live?.remarks || '',
+      lastUpdated: live?.last_updated || null,
+      saleOrderNumber: live?.sale_order_number || null,
+      partNumber: live?.part_number || null,
+      operationName: live?.operation_name || null,
+      operationNumber: live?.operation_number || null,
+      completedQty: live?.completed_qty || 0,
+      targetQty: live?.target_qty || 0,
+    }
   })
 
-  return { machines, workCenters, zones }
+  let filteredMachines = machines
+  let zones = BLUEPRINT_WORK_CENTER_ZONES
+
+  if (filterWorkCenter !== 'ALL') {
+    filteredMachines = machines.filter(m => m.workCenter.toLowerCase() === filterWorkCenter.toLowerCase())
+    zones = BLUEPRINT_WORK_CENTER_ZONES.filter(z => z.workCenter.toLowerCase() === filterWorkCenter.toLowerCase())
+  }
+
+  return { machines: filteredMachines, workCenters, zones }
 }
 
 export default function ShopFloor() {
@@ -464,11 +448,11 @@ export default function ShopFloor() {
 
   const cameraPreset = useMemo(
     () => computeCameraPreset(
-      visibleMachines,
+      layoutMachines,
       workCenterZones,
-      typeof window !== 'undefined' ? window.innerWidth / Math.max(window.innerHeight, 1) : 1,
+      typeof window !== 'undefined' ? (window.innerWidth - 240) / Math.max(window.innerHeight, 1) : 1,
     ),
-    [cameraLayoutKey, visibleMachines, workCenterZones],
+    [cameraLayoutKey, layoutMachines, workCenterZones],
   )
 
   useEffect(() => {
@@ -564,7 +548,25 @@ export default function ShopFloor() {
           ))}
         </div>
         <div className="shop-floor-header-actions">
-          <Button size="small" onClick={() => navigate('/admin/shop-floor')} type="primary">
+          <Button
+            size="small"
+            onClick={() => {
+              const stored = localStorage.getItem('user');
+              let role = 'admin';
+              if (stored) {
+                try {
+                  const u = JSON.parse(stored);
+                  role = (u.role || u.user_role || 'admin').toLowerCase();
+                } catch {}
+              }
+              if (role === 'mc' || role.includes('coordinator')) {
+                navigate('/manufacturing_coordinator/shop-floor');
+              } else {
+                navigate('/admin/shop-floor');
+              }
+            }}
+            type="primary"
+          >
             Shop Floor
           </Button>
           <span className="shop-floor-clock">
@@ -600,7 +602,7 @@ export default function ShopFloor() {
             statusFilter={statusFilter}
           />
           <SceneCameraRig
-            machines={visibleMachines}
+            machines={layoutMachines}
             zones={workCenterZones}
             controlsRef={controlsRef}
             layoutKey={cameraLayoutKey}

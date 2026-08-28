@@ -151,7 +151,10 @@ const Navbar = ({ collapsed }) => {
     const path = location.pathname;
     if (path.includes('/production_logs')) return 'Production Logs';
     if (path.includes('/dashboard')) return 'Dashboard';
-    if (path.includes('/oms/orders')) return 'Projects';
+    if (path.includes('/oms/orders')) {
+      if (path.startsWith('/admin') || path.startsWith('/manufacturing_coordinator')) return 'Orders';
+      return 'Projects';
+    }
     if (path.includes('/oms/product/')) return 'Product Data Management';
     if (path.includes('/order-tracking')) return 'Project Tracking';
     if (path.includes('/production-logs')) return 'Production Logs History';

@@ -1,4 +1,4 @@
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useMemo, memo } from 'react'
 import { Html, useGLTF, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -11,11 +11,71 @@ const STATUS_CONFIG = {
 }
 
 
+function ProceduralCNC3D({ statusColor = '#3b82f6' }) {
+  return (
+    <group position={[0, 0, 0]}>
+      {/* Main Lower Machine Body Base */}
+      <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[2.4, 1.0, 2.0]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.4} metalness={0.6} />
+      </mesh>
+
+      {/* Main Upper Machine Housing */}
+      <mesh position={[0, 1.5, -0.1]} castShadow receiveShadow>
+        <boxGeometry args={[2.3, 1.1, 1.7]} />
+        <meshStandardMaterial color="#e2e8f0" roughness={0.3} metalness={0.4} />
+      </mesh>
+
+      {/* Colored Machine Accent Stripe */}
+      <mesh position={[0, 1.02, 0.86]}>
+        <boxGeometry args={[2.32, 0.08, 0.04]} />
+        <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={0.4} />
+      </mesh>
+
+      {/* Front Glass Door Window */}
+      <mesh position={[-0.2, 1.45, 0.77]}>
+        <boxGeometry args={[1.2, 0.85, 0.05]} />
+        <meshPhysicalMaterial
+          color="#38bdf8"
+          transmission={0.6}
+          opacity={0.7}
+          transparent
+          roughness={0.1}
+          ior={1.5}
+        />
+      </mesh>
+
+      {/* Internal Spindle / Chuck (Visible through glass) */}
+      <mesh position={[-0.2, 1.45, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.2, 0.2, 0.4, 16]} />
+        <meshStandardMaterial color="#94a3b8" metalness={0.9} roughness={0.2} />
+      </mesh>
+
+      {/* CNC Control Panel Screen & Arm */}
+      <group position={[0.85, 1.5, 0.85]} rotation={[0, -0.3, 0]}>
+        {/* Support Arm */}
+        <mesh position={[0, 0, -0.2]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.5, 8]} />
+          <meshStandardMaterial color="#64748b" metalness={0.7} />
+        </mesh>
+        {/* Monitor Screen Frame */}
+        <mesh position={[0, 0.1, 0]}>
+          <boxGeometry args={[0.55, 0.45, 0.08]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.5} />
+        </mesh>
+        {/* Glowing Screen Display */}
+        <mesh position={[0, 0.12, 0.045]}>
+          <planeGeometry args={[0.45, 0.32]} />
+          <meshBasicMaterial color="#0284c7" />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
 function MachineModel({ type, statusColor }) {
   const { scene } = useGLTF('/assets/shopfloor/cnc1.glb')
-  
-  // Clone the scene for each machine instance
-  const clonedScene = scene.clone()
+  const clonedScene = useMemo(() => scene.clone(true), [scene])
   
   return (
     <group position={[0, 0, 0]} scale={[1, 1, 1]}>
@@ -180,10 +240,82 @@ function WorkCenterFlag({ workCenter, color }) {
   )
 }
 
+/* Floating Flag style badge used for 3D machines, matching the WorkCenterFlag style */
+function MachineFlag({ name, color }) {
+  const flagH = 26
+  const pointW = 8
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      userSelect: 'none',
+      pointerEvents: 'none',
+    }}>
+      <div style={{
+        width: 2,
+        height: 10,
+        background: 'linear-gradient(180deg, #e2e8f0, #475569)',
+        borderRadius: 1,
+      }} />
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        filter: 'drop-shadow(0 4px 8px rgba(15,23,42,0.25))',
+      }}>
+        <div style={{
+          width: 0,
+          height: 0,
+          borderTop: `${flagH / 2}px solid transparent`,
+          borderBottom: `${flagH / 2}px solid transparent`,
+          borderRight: `${pointW}px solid ${color}`,
+        }} />
+        <div style={{
+          background: color,
+          color: '#ffffff',
+          height: flagH,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 12px',
+          fontFamily: "'Inter',system-ui,sans-serif",
+          borderTop: '1.5px solid rgba(255,255,255,0.35)',
+          borderBottom: '1.5px solid rgba(0,0,0,0.12)',
+        }}>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+            lineHeight: 1.1,
+            textShadow: '0 1px 2px rgba(0,0,0,0.25)',
+          }}>
+            {name}
+          </span>
+        </div>
+        <div style={{
+          width: 0,
+          height: 0,
+          borderTop: `${flagH / 2}px solid transparent`,
+          borderBottom: `${flagH / 2}px solid transparent`,
+          borderLeft: `${pointW}px solid ${color}`,
+        }} />
+      </div>
+    </div>
+  )
+}
 function WorkCenterZone({ workCenter, position, width, depth, color }) {
+
+  const borderGeometry = useMemo(
+    () => new THREE.EdgesGeometry(new THREE.PlaneGeometry(width, depth)),
+    [width, depth],
+  )
+
   return (
     <group position={[position.x, position.y, position.z]}>
-      {/* floor pad for this work center */}
+      {/* Soft floor pad + outline only (no raised walls / pillars) */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[width, depth]} />
         <meshStandardMaterial
@@ -195,13 +327,10 @@ function WorkCenterZone({ workCenter, position, width, depth, color }) {
           depthWrite={false}
         />
       </mesh>
-      {/* border outline */}
-      <lineSegments rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-        <edgesGeometry args={[new THREE.PlaneGeometry(width, depth)]} />
-        <lineBasicMaterial color={color} transparent opacity={0.55} />
+      <lineSegments rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} geometry={borderGeometry}>
+        <lineBasicMaterial color={color} transparent opacity={0.40} linewidth={1} />
       </lineSegments>
 
-      {/* work center flag — high, always faces camera, separate from machine status */}
       <Billboard position={[0, 6.2, 0]} follow>
         <Html
           center
@@ -218,15 +347,16 @@ function WorkCenterZone({ workCenter, position, width, depth, color }) {
   )
 }
 
-function Machine({ id, type, workCenter, position, status, make, model, isSelected, onClick, workCenters }) {
+const Machine = memo(function Machine({ id, type, workCenter, position, status, make, model, isSelected, visible, onClick, workCenters }) {
   const [hovered, setHovered] = useState(false)
   const s = STATUS_CONFIG[status] || STATUS_CONFIG.OFF
 
   // Convert position object to array to avoid read-only errors
-  const posArray = [position.x, position.y, position.z]
+  const posArray = useMemo(() => [position.x, position.y, position.z], [position.x, position.y, position.z])
 
   return (
     <group
+      visible={visible}
       position={posArray}
       onClick={e => { e.stopPropagation(); onClick() }}
       onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer' }}
@@ -267,18 +397,40 @@ function Machine({ id, type, workCenter, position, status, make, model, isSelect
         </>
       )}
       <group position={[0,0.08,0]} scale={[1,1,1]}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<ProceduralCNC3D statusColor={s.color} />}>
           <MachineModel type={type} statusColor={s.color}/>
         </Suspense>
       </group>
       <AndonTower status={status} x={1.4} z={-1.4}/>
       <MachineStateIcon status={status} isSelected={isSelected} />
+
+      {/* Machine flag — always visible, floating above the machine model */}
+      <Billboard position={[0, 4.4, 0]} follow>
+        <Html
+          center
+          transform
+          distanceFactor={6.5}
+          zIndexRange={[400, 300]}
+          occlude={false}
+          style={{ pointerEvents: 'none' }}
+        >
+          <MachineFlag 
+            name={make} 
+            color={workCenters[workCenter]?.color || '#64748b'} 
+          />
+        </Html>
+      </Billboard>
     </group>
   )
+})
+
+function matchesMachineStatus(machine, filter) {
+  if (filter === 'ALL') return true
+  if (filter === 'IDLE') return machine.status === 'IDLE' || machine.status === 'ON'
+  return machine.status === filter
 }
 
-
-export default function MachineGrid({ machines, selected, onSelect, workCenters, workCenterZones = [] }) {
+export default function MachineGrid({ machines, selected, onSelect, workCenters, workCenterZones = [], statusFilter = 'ALL' }) {
   return (
     <group>
       {workCenterZones.map(zone => (
@@ -287,7 +439,8 @@ export default function MachineGrid({ machines, selected, onSelect, workCenters,
       {machines.map(m => (
         <Machine 
           key={m.id} 
-          {...m} 
+          {...m}
+          visible={matchesMachineStatus(m, statusFilter)}
           isSelected={selected === m.id} 
           onClick={() => onSelect(m.id)}
           workCenters={workCenters}

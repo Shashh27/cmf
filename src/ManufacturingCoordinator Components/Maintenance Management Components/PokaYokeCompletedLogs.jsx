@@ -10,6 +10,7 @@ import {
 import {
   pmFetch, machineLabel, itemTypeShort,
   indexMachineAvailability, isMachineBreakdownOnDay,
+  countDueAssignmentItemsForMachineOnDate, resolveDayTone,
 } from './pmUtils';
 import cmtisLogo from '../../assets/cmtis.png';
 
@@ -41,14 +42,6 @@ const DAY_TONE = {
   orange: { color: '#F5B800', label: 'Partial / mixed' },
   red: { color: '#ef4444', label: 'Not submitted' },
   breakdown: { color: '#64748b', label: 'Machine breakdown' },
-};
-
-/** @returns {'green'|'orange'|'red'} */
-const resolveDayTone = (submittedCount, rejectedCount, expectedCount) => {
-  if (!submittedCount) return 'red';
-  const incomplete = expectedCount > 0 && submittedCount < expectedCount;
-  if (incomplete || rejectedCount > 0) return 'orange';
-  return 'green';
 };
 
 /** Red "not submitted" only after the workday window (9–5) has ended. */
@@ -412,7 +405,7 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
           machine_id: machineId,
           machine_label: machineNameFor(machineId, machineLbl),
           checklist_ids: new Set(),
-          expectedCount: 0,
+          dueByDay: {},
           dayStatus: {},
           itemsByDay: {},
           _dayItems: {},
@@ -427,16 +420,6 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
       const row = ensureRow(a.machine_id);
       if (!row) return;
       if (a.checklist_id != null) row.checklist_ids.add(a.checklist_id);
-      const n = (a.assignment_items || []).length;
-      row.expectedCount += n;
-    });
-
-    Object.values(map).forEach((row) => {
-      if (row.expectedCount > 0) return;
-      row.checklist_ids.forEach((cid) => {
-        const cl = checklists.find((c) => c.id === cid);
-        row.expectedCount += (cl?.items || []).length;
-      });
     });
 
     submissions.forEach((s) => {
@@ -460,18 +443,32 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
     });
 
     Object.values(map).forEach((row) => {
-      Object.entries(row._dayItems).forEach(([ymd, itemMap]) => {
+      colKeySet.forEach((ymd) => {
+        const dueCount = countDueAssignmentItemsForMachineOnDate(
+          assignments,
+          row.machine_id,
+          ymd,
+        );
+        row.dueByDay[ymd] = dueCount;
+
+        const itemMap = row._dayItems[ymd];
         let rejectedCount = 0;
-        itemMap.forEach((rej) => { if (rej) rejectedCount += 1; });
-        const submittedCount = itemMap.size;
-        const tone = resolveDayTone(submittedCount, rejectedCount, row.expectedCount);
+        let submittedCount = 0;
+        if (itemMap) {
+          itemMap.forEach((rej) => { if (rej) rejectedCount += 1; });
+          submittedCount = itemMap.size;
+        }
+
+        if (dueCount === 0 && submittedCount === 0) return;
+
+        const tone = resolveDayTone(submittedCount, rejectedCount, dueCount);
         row.dayStatus[ymd] = {
           tone,
           ok: tone === 'green',
           rejected: rejectedCount > 0,
           count: submittedCount,
           rejectedCount,
-          expectedCount: row.expectedCount,
+          expectedCount: dueCount,
         };
       });
       delete row._dayItems;
@@ -480,7 +477,7 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
 
     // FIFO by machine id
     return Object.values(map).sort((a, b) => (a.machine_id ?? 0) - (b.machine_id ?? 0));
-  }, [assignments, submissions, checklists, columns, machineNameFor]);
+  }, [assignments, submissions, columns, machineNameFor]);
 
   /* ── Detail modal data ── */
   const detailItems = useMemo(() => {
@@ -623,8 +620,9 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
 
   const renderCell = (row, col) => {
     const status = row.dayStatus[col.key];
+    const dueCount = row.dueByDay?.[col.key] ?? status?.expectedCount ?? 0;
     const down = isMachineBreakdownOnDay(availabilityById, row.machine_id, col.key, toYMD(now));
-    const missed = !down && isPastSubmissionDeadline(col.key);
+    const missed = !down && dueCount > 0 && isPastSubmissionDeadline(col.key);
     const tone = status?.tone || (down ? 'breakdown' : (missed ? 'red' : null));
     const iconSize = isDay ? 15 : (isNarrow ? 12 : 13);
     let content = null;
@@ -639,14 +637,16 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
     }
 
     const title = !tone
-      ? (col.key > toYMD(now) ? 'Future date' : 'Shift open until 5 PM — not marked yet')
+      ? (dueCount === 0
+        ? 'No checkpoints due this day'
+        : (col.key > toYMD(now) ? 'Future date' : 'Shift open until 5 PM — not marked yet'))
       : tone === 'green'
-        ? `Fully completed (${status.count}/${status.expectedCount || status.count}) — click for details`
+        ? `Fully completed (${status.count}/${status.expectedCount || status.count} due that day) — click for details`
         : tone === 'orange'
-          ? `Partial / mixed (${status.count}/${status.expectedCount || '?'} · ${status.rejectedCount} reject) — click for details`
+          ? `Partial / mixed (${status.count}/${status.expectedCount || '?'} due · ${status.rejectedCount} reject) — click for details`
           : tone === 'breakdown'
             ? 'Machine breakdown — checkpoints not required'
-            : 'Not submitted';
+            : `Not submitted (${dueCount} due that day)`;
 
     return (
       <td
@@ -687,11 +687,11 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
     return '';
   };
 
-  const pdfCellMark = (status, dayKey, machineId) => {
+  const pdfCellMark = (status, dayKey, machineId, dueCount = 0) => {
     if (status?.tone === 'green') return PDF_MARK_CHECK;
     if (status?.tone === 'orange') return PDF_MARK_PARTIAL;
     if (isMachineBreakdownOnDay(availabilityById, machineId, dayKey, toYMD(now))) return PDF_MARK_BREAKDOWN;
-    const tone = status?.tone || (isPastSubmissionDeadline(dayKey) ? 'red' : null);
+    const tone = status?.tone || (dueCount > 0 && isPastSubmissionDeadline(dayKey) ? 'red' : null);
     if (tone === 'red') return PDF_MARK_CROSS;
     return '';
   };
@@ -730,7 +730,12 @@ const PokaYokeCompletedLogs = ({ machines = [] }) => {
       const bodyRows = rows.map((row, i) => [
         `${i + 1}.`,
         row.machine_label,
-        ...columns.map((col) => pdfCellMark(row.dayStatus[col.key], col.key, row.machine_id)),
+        ...columns.map((col) => pdfCellMark(
+          row.dayStatus[col.key],
+          col.key,
+          row.machine_id,
+          row.dueByDay?.[col.key] ?? 0,
+        )),
       ]);
 
       autoTable(doc, {

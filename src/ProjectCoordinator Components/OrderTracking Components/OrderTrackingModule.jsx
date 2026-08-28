@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import {
   getOpQtyTotals,
-} from '../../Utils/productionLogDisplay';
+} from '../../utils/productionLogDisplay';
 import { api } from '../../api/client.js';
 import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 

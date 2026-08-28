@@ -518,7 +518,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       label: 'OMS',
       icon: <ShoppingCartOutlined />,
       children: [
-        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Projects</Link> },
+        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
         { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
       ],
     },
@@ -725,7 +725,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: 'OMS',
         icon: <ShoppingCartOutlined />,
         children: [
-          { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Projects</Link> },
+          { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
           { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
         ],
       },
