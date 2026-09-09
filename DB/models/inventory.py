@@ -650,9 +650,14 @@ class StockQualityDocument(Base):
 
     stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=False)
 
+    # Optional: NULL = stock-level doc; set = unit-level doc for that unit
+    unit_id = Column(Integer, ForeignKey("inventory.raw_material_units.id"), nullable=True, index=True)
+
     document_name = Column(String(255), nullable=False)
 
     document_url = Column(String(500), nullable=False)
+
+    remarks = Column(String(1000), nullable=True)
 
     version = Column(Float, nullable=False, default=1.0)
 
@@ -669,6 +674,10 @@ class StockQualityDocument(Base):
     # Relationship with stock
 
     stock = relationship("RawMaterialStock", backref="quality_documents")
+
+    # Relationship with unit (optional)
+
+    unit = relationship("RawMaterialUnit", backref="quality_documents")
 
 
 

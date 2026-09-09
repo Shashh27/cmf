@@ -12,6 +12,12 @@ from DB.database import get_db, SessionLocal
 from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel, Part, Order
 from DB.models.access_control import AccessUser
 from DB.models.notifications import MCNotification
+from DB.models.inventory import (
+    StockQualityDocument as StockQualityDocumentModel,
+    RawMaterialStock as RawMaterialStockModel,
+    RawMaterialUnit as RawMaterialUnitModel,
+    RawMaterialUsage as RawMaterialUsageModel,
+)
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
@@ -19,6 +25,7 @@ from .rawmaterial_extract import extract_pdf_data
 from services.notification_service import NotificationService
 from DB.models.oms import Assembly as AssemblyModel
 from auth.deps import get_current_user
+from sqlalchemy import or_
 
 
 router = APIRouter(
@@ -46,6 +53,223 @@ def _check_assembly_recycle_bin_recursive(assembly_id: int, db: Session) -> Opti
     
     return None
 
+
+def _normalize_role(role: Optional[str]) -> str:
+    return (role or "").strip().lower().replace(" ", "_")
+
+
+def _is_qa_role(role: Optional[str]) -> bool:
+    """Quality Assurance uploads are auto-acknowledged (no PC release step)."""
+    return _normalize_role(role) in ("quality_assurance", "qa")
+
+
+QUALITY_DOCUMENT_TYPE = "Quality Document"
+
+
+def _linked_stock_and_unit_ids_for_part(db: Session, part_id: int) -> tuple[set[int], set[int]]:
+    """
+    Resolve stocks/units linked to a part (order or general source).
+    - Part.raw_material_unit_id → that unit + its stock
+    - inventory.raw_material_usage rows for this part (Used For / unit consumption)
+    - Stock.part_id CSV containing this part → those stocks (any source_type)
+    """
+    stock_ids: set[int] = set()
+    unit_ids: set[int] = set()
+
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if part and part.raw_material_unit_id:
+        unit_ids.add(int(part.raw_material_unit_id))
+
+    # Units this part actually consumes (inventory "Used For" column)
+    usage_unit_ids = [
+        row[0]
+        for row in db.query(RawMaterialUsageModel.raw_material_unit_id)
+        .filter(RawMaterialUsageModel.part_id == part_id)
+        .distinct()
+        .all()
+        if row[0] is not None
+    ]
+    unit_ids.update(int(uid) for uid in usage_unit_ids)
+
+    if unit_ids:
+        units = db.query(RawMaterialUnitModel).filter(
+            RawMaterialUnitModel.id.in_(list(unit_ids))
+        ).all()
+        for unit in units:
+            if unit.stock_id:
+                stock_ids.add(int(unit.stock_id))
+
+    # Stocks that list this part in part_id (order / general)
+    like_pat = f"%,{part_id},%"
+    linked_stocks = db.query(RawMaterialStockModel.id).filter(
+        text("(',' || REPLACE(COALESCE(part_id, ''), ' ', '') || ',') LIKE :pat")
+    ).params(pat=like_pat).all()
+    for (sid,) in linked_stocks:
+        stock_ids.add(int(sid))
+
+    # If stock is linked via part_id but unit_ids still empty, pick units on those
+    # stocks that are assigned to this part (parts.raw_material_unit_id).
+    if stock_ids and not unit_ids:
+        assigned = (
+            db.query(Part.raw_material_unit_id)
+            .filter(
+                Part.id == part_id,
+                Part.raw_material_unit_id.isnot(None),
+            )
+            .all()
+        )
+        unit_ids.update(int(r[0]) for r in assigned if r[0] is not None)
+
+    # Also: any unit on linked stocks whose usages include this part
+    if stock_ids:
+        extra_units = (
+            db.query(RawMaterialUnitModel.id)
+            .join(
+                RawMaterialUsageModel,
+                RawMaterialUsageModel.raw_material_unit_id == RawMaterialUnitModel.id,
+            )
+            .filter(
+                RawMaterialUnitModel.stock_id.in_(list(stock_ids)),
+                RawMaterialUsageModel.part_id == part_id,
+            )
+            .distinct()
+            .all()
+        )
+        unit_ids.update(int(r[0]) for r in extra_units if r[0] is not None)
+
+    return stock_ids, unit_ids
+
+
+def _map_quality_doc_to_part_document(
+    qd: StockQualityDocumentModel,
+    part_id: int,
+    user: Optional[AccessUser] = None,
+) -> Document:
+    """Map inventory quality doc into the part Document response shape (negative id avoids OMS collision)."""
+    uploader = user or (qd.user if getattr(qd, "user", None) is not None else None)
+    version = qd.version
+    if version is None:
+        version_str = "1.0"
+    elif float(version).is_integer():
+        version_str = str(int(version))
+    else:
+        version_str = str(version)
+
+    return Document(
+        id=-int(qd.id),
+        document_name=qd.document_name,
+        document_url=qd.document_url,
+        document_type=QUALITY_DOCUMENT_TYPE,
+        document_version=version_str,
+        part_id=part_id,
+        assembly_id=None,
+        parent_id=(-int(qd.parent_id) if qd.parent_id else None),
+        user_id=qd.user_id,
+        user_name=uploader.user_name if uploader else None,
+        user_role=uploader.role if uploader else None,
+        is_acknowledged=True,
+        created_at=qd.created_at,
+        updated_at=qd.updated_at,
+        mc_ack_remarks=None,
+        mc_reject_remarks=None,
+        mc_is_rejected=False,
+        mc_is_acknowledged=False,
+        mc_user_name=None,
+        mc_ack_at=None,
+        mc_reject_at=None,
+    )
+
+
+def _quality_documents_for_part(db: Session, part_id: int) -> List[Document]:
+    """Stock-level + linked-unit quality docs for a part, as Document responses."""
+    stock_ids, unit_ids = _linked_stock_and_unit_ids_for_part(db, part_id)
+    if not stock_ids and not unit_ids:
+        return []
+
+    quality_by_id: dict[int, StockQualityDocumentModel] = {}
+
+    # Unit-level docs for units this part uses (Unit Docs badge)
+    if unit_ids:
+        for qd in (
+            db.query(StockQualityDocumentModel)
+            .filter(StockQualityDocumentModel.unit_id.in_(list(unit_ids)))
+            .all()
+        ):
+            quality_by_id[qd.id] = qd
+
+    # Stock-level docs (unit_id IS NULL) for linked stocks (stock Docs badge)
+    if stock_ids:
+        for qd in (
+            db.query(StockQualityDocumentModel)
+            .filter(
+                StockQualityDocumentModel.stock_id.in_(list(stock_ids)),
+                StockQualityDocumentModel.unit_id.is_(None),
+            )
+            .all()
+        ):
+            quality_by_id[qd.id] = qd
+
+    quality_docs = sorted(quality_by_id.values(), key=lambda d: d.id)
+
+    user_ids = list({qd.user_id for qd in quality_docs if qd.user_id})
+    users = {
+        u.id: u
+        for u in db.query(AccessUser).filter(AccessUser.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    return [
+        _map_quality_doc_to_part_document(qd, part_id, user=users.get(qd.user_id))
+        for qd in quality_docs
+    ]
+
+
+def _resolve_file_document(db: Session, document_id: int):
+    """
+    Resolve OMS part document or stock quality document (negative id from part listing).
+    Returns (document_name, document_url) or raises 404.
+    """
+    if document_id < 0:
+        qd = db.query(StockQualityDocumentModel).filter(
+            StockQualityDocumentModel.id == -document_id
+        ).first()
+        if not qd:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document with id {document_id} not found",
+            )
+        return qd.document_name, qd.document_url
+
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found",
+        )
+    return document.document_name, document.document_url
+
+
+def _create_mc_notification_for_document(db: Session, db_document: DocumentModel) -> None:
+    """Create MC notification when a document is released / auto-acknowledged."""
+    if not db_document.part_id:
+        return
+    existing = db.query(MCNotification).filter(
+        MCNotification.document_id == db_document.id
+    ).first()
+    if existing:
+        return
+    part = db.query(Part).filter(Part.id == db_document.part_id).first()
+    if not part or not part.product_id:
+        return
+    order = db.query(Order).filter(Order.product_id == part.product_id).first()
+    if not order or not order.manufacturing_coordinator_id:
+        return
+    db.add(MCNotification(
+        document_id=db_document.id,
+        mc_user_id=order.manufacturing_coordinator_id,
+        is_acknowledged=False,
+        is_rejected=False,
+    ))
+
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.csv', '.xlsx', '.doc', '.xls', '.txt', '.stl', '.step', '.stp', '.png', '.jpg', '.jpeg', '.gif', '.svg'}
 
@@ -58,6 +282,28 @@ def get_file_extension(filename: str) -> str:
 def is_allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
     return get_file_extension(filename) in ALLOWED_EXTENSIONS
+
+
+def _download_filename(document_name: str, file_extension: str) -> str:
+    """Build a download/preview filename without duplicating the extension."""
+    name = (document_name or "document").strip() or "document"
+    ext = (file_extension or "").strip().lower()
+    if ext and not name.lower().endswith(ext):
+        name = f"{name}{ext}"
+    return name
+
+
+def _content_disposition(disposition: str, filename: str) -> str:
+    """
+    Build a single valid Content-Disposition value.
+    Unquoted spaces/commas in filename trigger ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION.
+    Keep one simple quoted token (no extra comma-separated params) for browser safety.
+    """
+    raw = (filename or "file").replace("\r", " ").replace("\n", " ").strip() or "file"
+    # Sanitize to a single safe token so header parsers never split on spaces/commas
+    safe = "".join(c if (c.isascii() and (c.isalnum() or c in "._-")) else "_" for c in raw)
+    safe = safe.strip("._") or "file"
+    return f'{disposition}; filename="{safe}"'
 
 
 def detect_file_type_from_content(file_content: bytes, filename: str | None = None) -> str:
@@ -353,8 +599,9 @@ async def create_document(
             }
         )
 
-        # Create database record (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)
+        # Create database record (user_id = uploader). QA uploads are auto-acknowledged.
         processed_parent_id = None if parent_id in (0, None) else parent_id
+        auto_ack = _is_qa_role(getattr(current_user, "role", None))
         db_document = DocumentModel(
             document_name=document_name,
             document_url=document_url,
@@ -364,10 +611,13 @@ async def create_document(
             assembly_id=assembly_id,
             parent_id=processed_parent_id,
             user_id=user_id,
-            is_acknowledged=False
+            is_acknowledged=auto_ack,
         )
 
         db.add(db_document)
+        db.flush()
+        if auto_ack:
+            _create_mc_notification_for_document(db, db_document)
         db.commit()
         db.refresh(db_document)
 
@@ -389,7 +639,7 @@ async def create_document(
             details={"document_name": db_document.document_name, "document_type": db_document.document_type}
         )
 
-        # MC notification is created only when PC releases the document (acknowledge endpoint)
+        # MC notification: on QA auto-ack above; for PC only when they release (acknowledge endpoint)
 
         # Extract data from PDF if applicable (2D files) - currently only for part documents
         if (
@@ -499,6 +749,7 @@ async def create_documents_bulk(
 
     created_docs: List[DocumentModel] = []
     extraction_jobs = []
+    auto_ack = _is_qa_role(getattr(current_user, "role", None))
 
     try:
         for idx, file in enumerate(files):
@@ -578,11 +829,13 @@ async def create_documents_bulk(
                 assembly_id=assembly_id,
                 parent_id=effective_parent,
                 user_id=user_id,
-                is_acknowledged=False
+                is_acknowledged=auto_ack,
             )
             db.add(db_document)
             # Ensure db_document.id is available for extracted-data insert
             db.flush()
+            if auto_ack:
+                _create_mc_notification_for_document(db, db_document)
             created_docs.append(db_document)
 
             # Extract data from PDF if applicable (2D files) - currently only for part documents
@@ -652,19 +905,13 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
     """Preview document file from MinIO (inline display)"""
     from fastapi.responses import StreamingResponse
 
-    # Get document from database
-    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with id {document_id} not found"
-        )
+    document_name, document_url = _resolve_file_document(db, document_id)
 
     try:
         # Extract object name and extension from URL
         # URL format: http://172.18.7.91:9000/cmf/documents/part_1/...
         minio_client = get_minio_client()
-        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        object_name = document_url.split(f"/{minio_client.bucket_name}/")[1]
         file_extension = get_file_extension(object_name)
 
         # Download from MinIO
@@ -672,17 +919,19 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
 
         # Determine content type using content detection first
         detected_content_type = get_content_type_from_detection(file_data, object_name)
-        filename = f"{document.document_name}{file_extension}"
+        filename = _download_filename(document_name, file_extension)
 
         # Return file as streaming response for inline preview
         return StreamingResponse(
             io.BytesIO(file_data),
             media_type=detected_content_type,
             headers={
-                "Content-Disposition": f"inline; filename={filename}"
+                "Content-Disposition": _content_disposition("inline", filename)
             }
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -694,16 +943,11 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
 async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
     from fastapi.responses import StreamingResponse
 
-    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with id {document_id} not found"
-        )
+    document_name, document_url = _resolve_file_document(db, document_id)
 
     try:
         minio_client = get_minio_client()
-        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        object_name = document_url.split(f"/{minio_client.bucket_name}/")[1]
         file_extension = get_file_extension(object_name)
 
         file_data = minio_client.download_file(object_name)
@@ -730,13 +974,13 @@ async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
                 detail=clean_error
             )
 
-        filename = f"{document.document_name}.glb"
+        filename = f"{document_name}.glb"
 
         return StreamingResponse(
             io.BytesIO(glb_data),
             media_type="model/gltf-binary",
             headers={
-                "Content-Disposition": f"inline; filename={filename}"
+                "Content-Disposition": _content_disposition("inline", filename)
             }
         )
 
@@ -755,19 +999,13 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
     """Download document file from MinIO"""
     from fastapi.responses import StreamingResponse
 
-    # Get document from database
-    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with id {document_id} not found"
-        )
+    document_name, document_url = _resolve_file_document(db, document_id)
 
     try:
         # Extract object name and extension from URL
         # URL format: http://172.18.7.91:9000/cmf/documents/part_1/...
         minio_client = get_minio_client()
-        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        object_name = document_url.split(f"/{minio_client.bucket_name}/")[1]
         file_extension = get_file_extension(object_name)
 
         # Download from MinIO
@@ -775,17 +1013,19 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
 
         # Determine content type using content detection first
         detected_content_type = get_content_type_from_detection(file_data, object_name)
-        filename = f"{document.document_name}{file_extension}"
+        filename = _download_filename(document_name, file_extension)
 
         # Return file as streaming response
         return StreamingResponse(
             io.BytesIO(file_data),
             media_type=detected_content_type,
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": _content_disposition("attachment", filename)
             }
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -887,7 +1127,9 @@ def get_documents_by_part(
             doc.mc_ack_at = None
             doc.mc_reject_at = None
     
-    return documents
+    # Include linked stock/unit quality documents (order or general) as document_type "Quality Document"
+    quality_docs = _quality_documents_for_part(db, part_id)
+    return list(documents) + quality_docs
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Document])
@@ -1130,20 +1372,7 @@ def acknowledge_document(document_id: int, is_acknowledged: bool, db: Session = 
 
         # On release, create MC notification so MC can acknowledge (not on upload)
         if is_acknowledged and db_document.part_id:
-            existing = db.query(MCNotification).filter(
-                MCNotification.document_id == document_id
-            ).first()
-            if not existing:
-                part = db.query(Part).filter(Part.id == db_document.part_id).first()
-                if part and part.product_id:
-                    order = db.query(Order).filter(Order.product_id == part.product_id).first()
-                    if order and order.manufacturing_coordinator_id:
-                        db.add(MCNotification(
-                            document_id=db_document.id,
-                            mc_user_id=order.manufacturing_coordinator_id,
-                            is_acknowledged=False,
-                            is_rejected=False,
-                        ))
+            _create_mc_notification_for_document(db, db_document)
 
         db.commit()
         db.refresh(db_document)
@@ -1157,13 +1386,25 @@ def acknowledge_document(document_id: int, is_acknowledged: bool, db: Session = 
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_document(document_id: int, db: Session = Depends(get_db)):
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Delete a document (removes from database and MinIO)"""
     db_document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
     if not db_document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
+        )
+
+    # Quality Assurance may only delete documents they uploaded
+    role = (getattr(current_user, "role", None) or "").strip().lower().replace(" ", "_")
+    if role in ("quality_assurance", "qa") and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete documents you uploaded."
         )
 
     # Check if document has child documents (revisions) - prevent deletion of parent

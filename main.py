@@ -134,6 +134,8 @@ from notification_routers import (
 
     admin_document_notifications_router,
 
+    qa_rm_notifications_router,
+
 )
 
 
@@ -355,6 +357,7 @@ api_router.include_router(tool_issues_notification_router)
 api_router.include_router(pc_notifications_router)
 api_router.include_router(mc_notifications_router)
 api_router.include_router(admin_document_notifications_router)
+api_router.include_router(qa_rm_notifications_router)
 
 # Include unified router with single prefix
 app.include_router(api_router, prefix="/api/v1")

@@ -28,6 +28,7 @@ from services.raw_material_calculations import RawMaterialCalculationService
 from services.stock_auto_update import StockAutoUpdateService
 from services.auto_extract_service import AutoExtractService
 from services.raw_material_history_service import RawMaterialHistoryService
+from services.qa_rm_notification_service import create_qa_rm_received_notifications
 from services.purchase_request_service import generate_purchase_request_docx
 
 # Import models for hierarchy fetching
@@ -407,6 +408,12 @@ def receive_order_material(stock_id: int, final_cost: Optional[float] = None, db
         except Exception as e:
             # Log error but don't fail the operation
             print(f"Error logging order status change history: {e}")
+
+        try:
+            create_qa_rm_received_notifications(db, [stock])
+            db.commit()
+        except Exception as e:
+            print(f"Error creating QA RM received notification: {e}")
         
         return {
             "message": "Order material received successfully",
@@ -772,6 +779,9 @@ def update_order_parts_raw_material_linked(
     try:
         from services.raw_material_calculations import RawMaterialCalculationService
         
+        # Capture status before mutation so we only notify on transition → received
+        old_order_status = stock.order_status
+
         # Update stock fields
         update_data = stock_update.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -896,6 +906,18 @@ def update_order_parts_raw_material_linked(
         
         # 🔥 Update stock status based on unit statuses (this will respect order_status logic)
         StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        # Notify QA when order RM becomes received
+        if (
+            'order_status' in update_data
+            and update_data.get('order_status') == 'received'
+            and old_order_status != 'received'
+        ):
+            try:
+                create_qa_rm_received_notifications(db, [stock])
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notification: {e}")
         
         return _stock_with_details(stock, db)
         
@@ -936,9 +958,11 @@ def update_order_parts_status_group(
         )
     
     try:
+        received_stocks = []
         for stock in stocks:
             # Handle order_status change
             if 'order_status' in update_data:
+                old_order_status = stock.order_status
                 new_order_status = update_data['order_status']
                 stock.order_status = new_order_status
                 
@@ -951,6 +975,8 @@ def update_order_parts_status_group(
                     ).all()
                     for unit in units:
                         unit.status = 'available'
+                    if old_order_status != 'received':
+                        received_stocks.append(stock)
                 elif new_order_status in ['enquiry', 'purchase_request', 'purchase_order']:
                     stock.status = 'not_available'
                     # Update all units for this stock to 'not_available'
@@ -1108,6 +1134,13 @@ def update_order_parts_status_group(
         # 🔥 Update stock status based on unit statuses for all stocks in the group
         for stock in stocks:
             StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        if received_stocks:
+            try:
+                create_qa_rm_received_notifications(db, received_stocks)
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notifications: {e}")
         
         # Return updated stocks
         result = [_stock_with_details(stock, db) for stock in stocks]
@@ -1890,6 +1923,7 @@ def update_group(
     
     try:
         # Update all stocks in the group
+        received_stocks = []
         for stock in stocks:
             update_fields = update_data.copy()
             
@@ -1908,6 +1942,7 @@ def update_group(
             
             # Handle order_status update
             if 'order_status' in update_fields:
+                old_order_status = stock.order_status
                 stock.order_status = update_fields['order_status']
                 
                 # Update stock and units status based on order_status
@@ -1918,6 +1953,8 @@ def update_group(
                     ).all()
                     for unit in units:
                         unit.status = 'available'
+                    if old_order_status != 'received':
+                        received_stocks.append(stock)
                 elif update_fields['order_status'] in ['enquiry', 'purchase_request', 'purchase_order']:
                     stock.status = 'not_available'
                     units = db.query(RawMaterialUnitModel).filter(
@@ -1949,6 +1986,13 @@ def update_group(
         # Update stock status based on unit statuses
         for stock in stocks:
             StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        if received_stocks:
+            try:
+                create_qa_rm_received_notifications(db, received_stocks)
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notifications: {e}")
         
         # Return updated stocks with details
         result = [_stock_with_details(stock, db) for stock in stocks]

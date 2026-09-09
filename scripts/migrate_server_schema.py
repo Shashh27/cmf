@@ -287,6 +287,30 @@ ADD_COLUMNS = [
     ALTER TABLE configuration.pm_checklist_items
         ADD COLUMN IF NOT EXISTS item_code VARCHAR(32)
     """,
+    # Stock quality documents: optional unit-level attachment
+    """
+    ALTER TABLE inventory.stock_quality_documents
+        ADD COLUMN IF NOT EXISTS unit_id INTEGER
+    """,
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'stock_quality_documents_unit_id_fkey'
+        ) THEN
+            ALTER TABLE inventory.stock_quality_documents
+                ADD CONSTRAINT stock_quality_documents_unit_id_fkey
+                FOREIGN KEY (unit_id)
+                REFERENCES inventory.raw_material_units(id)
+                ON DELETE SET NULL;
+        END IF;
+    END $$;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_stock_quality_documents_unit_id
+        ON inventory.stock_quality_documents (unit_id)
+    """,
 ]
 
 # --------------------------------------------------------------------------
