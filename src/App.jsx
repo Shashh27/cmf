@@ -27,6 +27,8 @@ import AdminPartsPriority from "./OMS Components/PartsPriority";
 
 import ManufacturingCoordinatorPartsPriority from "./ManufacturingCoordinator Components/OMS Components/PartsPriority";
 
+import QualityAssurance from "./Pages/QualityAssurance";
+
 
 
 import RawMaterials from "./Pages/RawMaterials";
@@ -533,6 +535,14 @@ function App() {
           <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
           <Route path="/operator/qms-inspector" element={<QMSInspector />} />
 
+          {/* Quality Assurance Routes */}
+          <Route path="/quality_assurance" element={<Navigate to="/quality_assurance/oms/orders" replace />} />
+          <Route path="/quality_assurance/dashboard" element={<Navigate to="/quality_assurance/oms/orders" replace />} />
+          <Route path="/quality_assurance/oms/orders" element={<QualityAssurance />} />
+          <Route path="/quality_assurance/pdm" element={<Navigate to="/quality_assurance/oms/orders" replace />} />
+          <Route path="/quality_assurance/pdm/:productId" element={<QualityAssurance />} />
+          <Route path="/quality_assurance/rawmaterials" element={<QualityAssurance />} />
+          <Route path="/quality_assurance/notifications" element={<QualityAssurance />} />
           </Route>
 
 

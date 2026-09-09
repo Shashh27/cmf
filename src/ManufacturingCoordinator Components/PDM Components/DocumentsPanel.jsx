@@ -4,7 +4,7 @@ import {
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
   HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  CheckSquareOutlined, UnorderedListOutlined, PlusCircleOutlined
+  UnorderedListOutlined
 } from "@ant-design/icons";
 import { api } from '../../api/client.js';
 import { Tabs, Button, Badge, Table, Select, Empty, Spin, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form, App } from "antd";
@@ -12,9 +12,9 @@ import { normalizeVersion, fetchInto } from "./operationUtils.js";
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
+import OperationChecklistsModal from "./OperationChecklistsModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
 import ModelViewer3D from "./ModelViewer3D";
-import OperationChecklistsModal from "./OperationChecklistsModal";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -54,7 +54,7 @@ const SortableRow = (props) => {
 const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
   if (loading) return <div className="p-4 flex justify-center"><Spin size="small"><span className="text-xs text-gray-600">Loading documents...</span></Spin></div>;
   if (!docs || !docs.length) return (
-    <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
+    <div className="p-6 text-center border border-dashed border-gray-300 bg-gray-50">
       <FileTextOutlined className="text-2xl text-gray-300 mb-2" />
       <p className="text-sm text-gray-500">No documents attached to this operation</p>
     </div>
@@ -90,11 +90,11 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
         expandedRowRender: r => {
           const versions = [...(grouped[r.parent_id || r.id] || [])].sort((a, b) => a.id - b.id);
           return (
-            <div className="bg-gray-50 p-3 rounded">
+            <div className="bg-gray-50 p-3">
               <p className="text-xs font-medium text-gray-600 mb-2">Revision History:</p>
               <div className="flex flex-col gap-2">
                 {versions.map(ver => (
-                  <div key={ver.id} className="flex justify-between items-center bg-white px-3 py-2 rounded border border-gray-200 shadow-sm">
+                  <div key={ver.id} className="flex justify-between items-center bg-white px-3 py-2 border border-gray-200 shadow-sm">
                     <div className="flex items-center gap-3 min-w-0">
                       <Tag color="blue" variant="filled" className="text-[10px] m-0 px-2">{ver.document_version || 'N/A'}</Tag>
                       <span className="text-xs text-gray-700 truncate">{ver.document_name}</span>
@@ -121,36 +121,55 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
 };
 
 // ── FitTable ────────────────────────────────────────────────────────────────
-const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
+const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrollIgnored, ...props }) => {
   const ref = useRef(null);
-  const [scrollY, setScrollY] = useState(400);
+  const [scrollY, setScrollY] = useState(200);
 
   useEffect(() => {
-    // Use the container's own height so the table always gets an internal scroll area
-    // even when this panel sits inside another fixed-height/overflow-hidden layout (PDM).
+    // Measure container and table header so body scroll height fits and last rows stay visible.
     const update = () => {
       if (!ref.current) return;
-      const h = ref.current.clientHeight || 0;
-      // Reduced header space calculation to allow more room for operations
-      // (Header is typically ~30-40px with reduced padding, plus minimal breathing room)
-      setScrollY(Math.max(h - 40, 200));
+      const containerH = ref.current.clientHeight || 0;
+      const headerEl =
+        ref.current.querySelector('.ant-table-header') ||
+        ref.current.querySelector('.ant-table-thead');
+      const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 40;
+      // Extra space so last rows (incl. quality docs) are fully visible when scrolled to end
+      const bottomPad = 48;
+      setScrollY(Math.max(Math.floor(containerH - headerH - bottomPad), 120));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
     update();
+    const t1 = window.setTimeout(update, 80);
+    const t2 = window.setTimeout(update, 250);
     window.addEventListener('resize', update);
-    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
-  }, []);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [dataSource?.length, columns?.length]);
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
-      <Table columns={columns} dataSource={dataSource} pagination={false} scroll={{ y: scrollY, x: scrollX }} size="small" {...props} className={`${props.className || ''} custom-fit-table`} />
+    <div className="flex-1 min-h-0 overflow-hidden w-full relative h-full" ref={ref}>
+      <Table
+        columns={columns}
+        dataSource={dataSource}
+        pagination={false}
+        size="small"
+        {...props}
+        rowKey={(r) => String(r?.id)}
+        scroll={{ y: scrollY, x: scrollX }}
+        className={`${props.className || ''} custom-fit-table`}
+      />
     </div>
   );
 };
 
 // ── DocumentsPanel ──────────────────────────────────────────────────────────
-const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab }) => {
+const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab, denseMode = false }) => {
   const { message } = App.useApp();
   const [documents, setDocuments]   = useState([]);
   const [operations, setOperations] = useState([]);
@@ -174,8 +193,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const [showImportModal, setShowImportModal]       = useState(false);
   const [importOperations, setImportOperations]       = useState([]);
   const [showReportModal, setShowReportModal] = useState(false);
-
-  // Checklists state
   const [showChecklistsModal, setShowChecklistsModal] = useState(false);
   const [selectedOperationForChecklists, setSelectedOperationForChecklists] = useState(null);
 
@@ -216,19 +233,35 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const parseV = (v) => parseFloat(String(v).replace(/^v/i, ''));
 
   const groupedPartDocs = useMemo(() =>
-    documents.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, []),
+    documents.reduce((acc, d) => {
+      const r = String(d.parent_id ?? d.id);
+      (acc[r] = acc[r] || []).push(d);
+      return acc;
+    }, {}),
   [documents]);
 
-  const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => b.id - a.id)[0]),
-  [groupedPartDocs]);
+  const latestPartDocs = useMemo(() => {
+    const latest = Object.values(groupedPartDocs).map(
+      (g) => [...g].sort((a, b) => Number(b.id) - Number(a.id))[0]
+    );
+    // Show linked stock/unit quality docs first so they are not lost at the bottom
+    return latest.sort((a, b) => {
+      const aq = a?.document_type === 'Quality Document' || Number(a?.id) < 0 ? 0 : 1;
+      const bq = b?.document_type === 'Quality Document' || Number(b?.id) < 0 ? 0 : 1;
+      if (aq !== bq) return aq - bq;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [groupedPartDocs]);
 
   useEffect(() => {
     const next = { ...selectedVersions };
     let changed = false;
     latestPartDocs.forEach(doc => {
-      const r = doc.parent_id || doc.id;
-      if (!next[r] || !groupedPartDocs[r]?.find(d => d.id === next[r].id)) { next[r] = doc; changed = true; }
+      const r = String(doc.parent_id ?? doc.id);
+      if (!next[r] || !groupedPartDocs[r]?.find(d => d.id === next[r].id)) {
+        next[r] = doc;
+        changed = true;
+      }
     });
     if (changed) setSelectedVersions(next);
   }, [latestPartDocs, groupedPartDocs]);
@@ -272,9 +305,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     if (!selectedItem || selectedItem.itemType !== 'part') { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     setLoading(true);
     try {
-      // Get current user role
-      const currentUserRole = getCurrentUserRole();
-      
+      // Do not filter by user_id: admin, project coordinator, and manufacturing coordinator all see the same operations & documents for the part
       const [dR, oR] = await Promise.all([
         api.get(`/documents/part/${selectedItem.id}`),
         api.get(`/operations/part/${selectedItem.id}`),
@@ -282,14 +313,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       const docs = dR.data;
       const ops = oR.data;
       
-      // Filter documents: PC uploads require acknowledgment, admin/MC uploads visible to all
+      // Get current user role
+      const currentUserRole = getCurrentUserRole();
+      
+      // Filter documents: PC uploads require MC acknowledgment for MC role
       const filteredDocs = docs.filter(doc => {
-        const uploaderRole = doc.user_role;
-        // If uploaded by PC, require MC acknowledgment (not just PC release)
-        if ((uploaderRole || '').toLowerCase().includes('project_coordinator')) {
+        const uploaderRole = (doc.user_role || '').toLowerCase();
+        // If uploaded by PC, require MC acknowledgment and not rejected
+        if (uploaderRole.includes('project_coordinator')) {
           return doc.mc_is_acknowledged && !doc.mc_is_rejected;
         }
-        // Admin/MC uploads are visible to everyone without acknowledgment
+        // Admin/MC/QA uploads are visible without MC acknowledgment
         return true;
       });
       
@@ -311,6 +345,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const handleDownload = (id) => {
     downloadWithAuth(`/documents/${id}/download`, `document-${id}`);
   };
+
+  const isQualityDocument = (doc) =>
+    doc?.document_type === 'Quality Document' || (doc?.id != null && Number(doc.id) < 0);
 
   const handlePreview = (doc) => {
     setPreviewDoc({ doc, source: 'part' });
@@ -541,7 +578,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
-
   const openPartActionModal = (type) => {
     if (!selectedItem || selectedItem.itemType !== 'part') { message.warning("Please select a part to add operations/documents"); return; }
     setPartActionType(type); setShowPartActionModal(true);
@@ -551,7 +587,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     message.success(type === 'operation' ? `Operation "${newItem.operation_name}" created successfully!` : `Document "${newItem.document_name}" created successfully!`);
     await fetchDocuments(); setImportOperations([]);
   };
-
 
   const onOperationDragEnd = async ({ active, over }) => {
     if (active.id !== over?.id) {
@@ -659,25 +694,39 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     return doc.document_name || '';
   };
 
-  const formatDateTime = (date) => {
-    if (!date) return '—';
-    return new Date(date).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-    });
-  };
-
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
+      render: (_, r) => {
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const displayName = getDocumentDisplayName(cur);
+        return (
+          <div className="flex items-center gap-3 py-1">
+            <div className={`p-2 ${isQualityDocument(cur) ? 'bg-purple-50' : 'bg-blue-50'}`}>
+              <FilePdfOutlined className={isQualityDocument(cur) ? 'text-purple-500' : 'text-blue-500'} />
+            </div>
+            <Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text>
+          </div>
+        );
+      }
     },
-    { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
+    { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 140,
+      render: (_, r) => {
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const isQuality = isQualityDocument(cur);
+        return (
+          <Tag
+            color={isQuality ? 'purple' : 'blue'}
+            className={`m-0 text-xs px-1 leading-4 uppercase border-none ${isQuality ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}
+          >
+            {cur.document_type || '2D'}
+          </Tag>
+        );
+      }
     },
     { title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
-        const rootId = r.parent_id || r.id;
+        const rootId = String(r.parent_id ?? r.id);
         const group  = groupedPartDocs[rootId] || [];
         const cur    = selectedVersions[rootId] || r;
         const versionWidth = 88;
@@ -717,21 +766,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         );
       }
     },
-    { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 130,
+    { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
       }
     },
-    { title: <span className="text-xs font-semibold">UPLOADED AT</span>, key: 'uploaded_time', width: 160,
+    { title: <span className="text-xs font-semibold">DATE</span>, key: 'date', width: 120,
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
-        return <span className="text-xs text-slate-600">{formatDateTime(cur.created_at)}</span>;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        return cur.created_at ? <span className="text-xs text-slate-700 font-medium">{new Date(cur.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-xs text-slate-400">—</span>;
       }
     },
-    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 130, align: 'center',
+    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         
         // Check if MC has handled this document (acknowledged or rejected)
         if (cur.mc_is_rejected) {
@@ -740,7 +789,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               <Tag color="red" icon={<CloseCircleOutlined />} className="m-0 text-xs">Rejected</Tag>
             </Tooltip>
           );
-        } else if (cur.mc_is_acknowledged) {
+        } else if (cur.is_acknowledged) {
           return (
             <Tooltip title={cur.mc_ack_remarks || 'Acknowledged by MC'}>
               <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>
@@ -751,25 +800,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         }
       }
     },
-    { title: <span className="text-xs font-semibold">ACKNOWLEDGED AT</span>, key: 'ack_time', width: 160,
-      render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
-        const statusTime = cur.mc_is_rejected ? cur.mc_reject_at : cur.mc_ack_at;
-        return <span className="text-xs text-slate-600">{formatDateTime(statusTime)}</span>;
-      }
-    },
     { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 220, align: 'center', fixed: 'right',
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const qualityDoc = isQualityDocument(cur);
         return (
           <div className="flex gap-1 justify-center">
             <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" /></Tooltip>
-            <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
-            <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
+            {!qualityDoc && (
+              <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
+            )}
+            {!qualityDoc && (
+              <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
+            )}
             <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur.id)} /></Tooltip>
-            <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
-            </Popconfirm>
+            {!qualityDoc && (
+              <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
+              </Popconfirm>
+            )}
           </div>
         );
       }
@@ -787,7 +836,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
             <span className="text-xs text-slate-500">Drag rows to reorder operations</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-              <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
+               <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Download Template</span><span className="sm:hidden">Template</span>
               </Button>
               <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
@@ -805,12 +854,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           <div className="flex-1 min-h-0 overflow-hidden">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOperationDragEnd}>
               <SortableContext items={operations.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-                <FitTable 
-                  dataSource={operations} 
-                  columns={operationsColumns} 
-                  rowKey="id" 
-                  className="docs-ops-table" 
+                <FitTable
+                  dataSource={operations}
+                  columns={operationsColumns}
+                  rowKey="id"
+                  className="docs-ops-table"
+                  bordered
                   locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                  pagination={denseMode ? {
+                    pageSize: 20,
+                    showSizeChanger: true,
+                    showTotal: (total) => `Total: ${total} operations`,
+                    pageSizeOptions: ['10', '20', '50', '100'],
+                    size: 'small',
+                    placement: ['bottomCenter'],
+                  } : false}
                   components={{
                     body: {
                       row: SortableRow,
@@ -820,8 +878,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               </SortableContext>
             </DndContext>
           </div>
-          {/* Small separation line between operations and bottom sections */}
-          <div className="border-t border-slate-200 my-1"></div>
         </div>
       ),
     }] : []),
@@ -837,7 +893,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <FitTable dataSource={latestPartDocs} rowKey="id" size="small" pagination={false} className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden" scrollX="max-content" columns={eBomColumns} />
+            <FitTable
+              dataSource={latestPartDocs}
+              rowKey="id"
+              size="small"
+              bordered
+              pagination={denseMode ? {
+                pageSize: 20,
+                showSizeChanger: true,
+                showTotal: (total) => `Total: ${total} documents`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                size: 'small',
+                placement: ['bottomCenter'],
+              } : false}
+              className="docs-ebom-table border border-slate-100"
+              columns={eBomColumns}
+            />
           </div>
 
           {/* Upload Modal */}
@@ -856,27 +927,35 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                 <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="00" className="bg-white" />
                 {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new revision for an existing document.</Text>}
               </div>
+
+              {/* Selected File Display - Moved for clarity */}
+              {selectedFileList.length > 0 && (
+                <div className="p-2 bg-blue-50 border border-blue-200 flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="bg-blue-500 p-1 shadow-sm"><FileTextOutlined className="text-white text-[10px]" /></div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[9px] text-blue-500 font-bold uppercase leading-none mb-0.5">Selected File</span>
+                      <span className="text-[11px] text-gray-800 truncate font-bold">{selectedFileList[0].name}</span>
+                    </div>
+                  </div>
+                  <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => setSelectedFileList([])} className="hover:bg-red-50 flex items-center justify-center h-6 w-6" />
+                </div>
+              )}
+
               <Dragger 
                 showUploadList={false}
                 multiple={false} 
                 fileList={selectedFileList} 
                 beforeUpload={f => { setSelectedFileList([f]); return false; }} 
-                className="bg-gray-50 border-dashed border-2"
+                className="bg-gray-50 border-dashed border-2 transition-all"
                 style={{ padding: '12px 0' }}
               >
                 <p className="ant-upload-drag-icon mb-1"><InboxOutlined className="text-xl text-blue-400" /></p>
-                <p className="ant-upload-text text-[11px] font-medium">Click or drag file here</p>
-                <p className="ant-upload-hint text-[10px] text-gray-400">PDF, STL, STEP, Images...</p>
+                <p className="ant-upload-text text-[11px] font-bold text-gray-600">
+                  {selectedFileList.length ? 'Drag another to replace' : 'Click or drag file here'}
+                </p>
               </Dragger>
-              {selectedFileList.length > 0 && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileTextOutlined className="text-blue-500 shrink-0" />
-                    <span className="text-[11px] text-gray-700 truncate font-medium">{selectedFileList[0].name}</span>
-                  </div>
-                  <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => setSelectedFileList([])} className="h-6 w-6 flex items-center justify-center p-0" />
-                </div>
-              )}
+
               <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
                 <Button onClick={() => setIsUploadModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
                 <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!selectedFileList.length || !uploadVersion.trim()} onClick={handleUpload} className="no-hover-btn w-full sm:w-auto">
@@ -915,13 +994,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   ];
 
   return (
-    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full" style={{ height: '100%' }}>
+    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full pdm-container" style={{ height: '100%' }}>
       <style>{`
-        .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2563eb!important;color:#fff!important;border:none!important;}
-        .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th{padding:${compactMode ? '4px 6px' : '6px 8px'}!important;}
-        .docs-ops-table .ant-table-thead>tr>th{font-weight:600;color:#334155!important;}
+        .primary-btn-sm,.no-hover-btn{/* use Ant Design default primary colors */}
+        .docs-ops-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
+        .docs-ops-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
+        .docs-ebom-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
+        .docs-ebom-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
-        .custom-fit-table .ant-table-body{overflow-y:auto!important;}
+        .custom-fit-table .ant-table-body{overflow-y:auto!important;padding-bottom:24px!important;scrollbar-gutter:stable;}
+        .custom-fit-table .ant-table-tbody > tr:last-child > td{padding-bottom:12px!important;}
+        .custom-fit-table.ant-table-wrapper,.custom-fit-table .ant-spin-nested-loading,.custom-fit-table .ant-spin-container,.custom-fit-table .ant-table,.custom-fit-table .ant-table-container{height:100%;}
+        .custom-fit-table .ant-table-container{display:flex;flex-direction:column;min-height:0;}
+        .custom-fit-table .ant-table-body{flex:1;min-height:0;}
+        .ant-pagination-item{font-size:${denseMode ? '11px' : '12px'}!important;}
+        .ant-pagination-total-text{font-size:${denseMode ? '11px' : '12px'}!important;}
         /* Blur operations table when modal is open */
         .ant-modal-mask + * .docs-ops-table,
         .ant-modal-mask + * .custom-fit-table,
@@ -1014,24 +1101,24 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         destroyOnHidden
       >
         {viewOperation && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 rounded-lg border border-blue-200 space-y-3 sm:space-y-4">
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 border border-blue-200 space-y-3 sm:space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
-                <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
+                <div className="bg-white p-2 sm:p-3 border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
                   {viewOperation.work_instructions || 'No instructions available'}
                 </div>
               </div>
               <div>
                 <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
-                <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
+                <div className="bg-white p-2 sm:p-3 border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto min-h-[60px]">
                   {viewOperation.notes || 'None specified'}
                 </div>
               </div>
             </div>
 
             {((viewOperation.tools && viewOperation.tools.length > 0)) && (
-              <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
+              <div className="bg-white p-2 sm:p-3 border border-gray-200 shadow-sm overflow-x-auto">
                 <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                   <ToolOutlined /> Tools Required:
                 </p>
@@ -1052,7 +1139,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               </div>
             )}
 
-            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
+            <div className="bg-white p-2 sm:p-3 border border-gray-200 shadow-sm">
               <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                 <FileTextOutlined /> Operation Documents:
               </p>
@@ -1061,6 +1148,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           </div>
         )}
       </Modal>
+
       <OperationChecklistsModal
         visible={showChecklistsModal}
         onClose={() => {
@@ -1074,6 +1162,3 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
 };
 
 export default DocumentsPanel;
-
-
-

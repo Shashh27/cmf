@@ -6,14 +6,28 @@ import QualityDocumentsModal from "./QualityDocumentsModal";
 import { api } from '../api/client.js';
 
 const border = "1px solid #d0d0d0";
-const thStyle = {
-  border, padding: "5px 8px", textAlign: "center",
-  fontWeight: 600, fontSize: 12, background: "#f0f5ff",
-  whiteSpace: "nowrap",
-};
-const tdStyle = {
-  border, padding: "4px 8px", fontSize: 11,
-  verticalAlign: "middle", textAlign: "center", color: "#333",
+
+/** Viewport-aware table density so all columns fit without horizontal scroll */
+const useInventoryTableDensity = () => {
+  const [width, setWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  if (width < 768) {
+    return { fontSize: 8, pad: "2px 3px", btnFs: 7, btnPad: "0px 2px", iconFs: 8, compact: true };
+  }
+  if (width < 1100) {
+    return { fontSize: 9, pad: "2px 4px", btnFs: 8, btnPad: "1px 3px", iconFs: 9, compact: true };
+  }
+  if (width < 1400) {
+    return { fontSize: 10, pad: "3px 5px", btnFs: 9, btnPad: "1px 4px", iconFs: 10, compact: false };
+  }
+  return { fontSize: 11, pad: "4px 6px", btnFs: 10, btnPad: "1px 5px", iconFs: 10, compact: false };
 };
 
 const fmtDim = (s) => {
@@ -51,15 +65,16 @@ const unitMatchesOrderPart = (unit, stock, ordArr, prtArr) => {
   return true;
 };
 
-const statusColor = (s) => {
-  if (s === "available") return { background: "#f6ffed", color: "#389e0d", border: "1px solid #b7eb8f", borderRadius: 4, padding: "1px 6px", fontSize: 11 };
-  if (s === "partially_used") return { background: "#fff7e6", color: "#d46b08", border: "1px solid #ffd591", borderRadius: 4, padding: "1px 6px", fontSize: 11 };
-  if (s === "not_available") return { background: "#f0f0f0", color: "#595959", border: "1px solid #d9d9d9", borderRadius: 4, padding: "1px 6px", fontSize: 11 };
-  return { background: "#fff1f0", color: "#cf1322", border: "1px solid #ffa39e", borderRadius: 4, padding: "1px 6px", fontSize: 11 };
+const statusColor = (s, fontSize = 10) => {
+  const base = { borderRadius: 3, padding: "0px 4px", fontSize, display: "inline-block", lineHeight: 1.3, maxWidth: "100%", wordBreak: "break-word" };
+  if (s === "available") return { ...base, background: "#f6ffed", color: "#389e0d", border: "1px solid #b7eb8f" };
+  if (s === "partially_used") return { ...base, background: "#fff7e6", color: "#d46b08", border: "1px solid #ffd591" };
+  if (s === "not_available") return { ...base, background: "#f0f0f0", color: "#595959", border: "1px solid #d9d9d9" };
+  return { ...base, background: "#fff1f0", color: "#cf1322", border: "1px solid #ffa39e" };
 };
 
 // ── Reusable column filter dropdown ────────────────────────────────────────
-const FilterHeader = ({ label, options, value, onChange, style = {} }) => {
+const FilterHeader = ({ label, options, value, onChange, style = {}, fontSize = 10 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -69,11 +84,11 @@ const FilterHeader = ({ label, options, value, onChange, style = {} }) => {
   }, []);
   const active = value && value.length > 0;
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 3, cursor: "pointer", userSelect: "none", ...style }}
+    <div ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 2, cursor: "pointer", userSelect: "none", flexWrap: "wrap", justifyContent: "center", ...style }}
       onClick={() => setOpen(o => !o)}>
-      <span>{label}</span>
-      <span style={{ fontSize: 9, color: active ? "#2563eb" : "#aaa" }}>▼</span>
-      {active && <span style={{ background: "#2563eb", color: "#fff", borderRadius: 8, fontSize: 9, padding: "0 4px", lineHeight: "14px" }}>{value.length}</span>}
+      <span style={{ fontSize }}>{label}</span>
+      <span style={{ fontSize: Math.max(7, fontSize - 2), color: active ? "#2563eb" : "#aaa" }}>▼</span>
+      {active && <span style={{ background: "#2563eb", color: "#fff", borderRadius: 8, fontSize: Math.max(7, fontSize - 2), padding: "0 3px", lineHeight: "12px" }}>{value.length}</span>}
       {open && (
         <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 4px)", left: "50%", transform: "translateX(-50%)", background: "#fff", border: "1px solid #d9d9d9", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.15)", zIndex: 9999, minWidth: 140, padding: "6px 0" }}>
           <div style={{ padding: "2px 10px", fontSize: 10, color: "#999", borderBottom: "1px solid #f0f0f0", marginBottom: 3 }}>Filter</div>
@@ -106,7 +121,7 @@ const RawMaterialInventoryView = ({
   const [allUnits, setAllUnits] = useState({});
   const [loading, setLoading] = useState(false);
   const [addStockModal, setAddStockModal] = useState({ open: false, material: null });
-  const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null });
+  const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null, unit: null });
 
   // ── Column header filters ──────────────────────────────────────────────────
   const [colProcess, setColProcess] = useState([]);
@@ -384,57 +399,122 @@ const RawMaterialInventoryView = ({
     }
   };
 
-  const openQualityDocs = (stock, material) => {
+  const openQualityDocs = (stock, material, unit = null) => {
     const dimensions = fmtDim(stock);
-    setQualityDocsModal({ 
-      open: true, 
-      stock, 
+    setQualityDocsModal({
+      open: true,
+      stock,
+      unit,
       materialName: material?.material_name || '',
-      dimensions 
+      dimensions,
     });
   };
 
-  const closeQualityDocs = () => setQualityDocsModal({ open: false, stock: null });
+  const closeQualityDocs = () => setQualityDocsModal({ open: false, stock: null, unit: null });
+
+  const density = useInventoryTableDensity();
+  const thStyle = {
+    border,
+    padding: density.pad,
+    textAlign: "center",
+    fontWeight: 600,
+    fontSize: density.fontSize,
+    background: "#f0f5ff",
+    wordBreak: "break-word",
+    lineHeight: 1.25,
+    verticalAlign: "middle",
+  };
+  const tdStyle = {
+    border,
+    padding: density.pad,
+    fontSize: density.fontSize,
+    verticalAlign: "middle",
+    textAlign: "center",
+    color: "#333",
+    wordBreak: "break-word",
+    lineHeight: 1.25,
+  };
+  const actionBtn = (colorBorder, colorBg, colorText) => ({
+    border: `1px solid ${colorBorder}`,
+    background: colorBg,
+    color: colorText,
+    borderRadius: 3,
+    padding: density.btnPad,
+    fontSize: density.btnFs,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    lineHeight: 1.2,
+  });
+  const badgeStyle = {
+    backgroundColor: "#ff4d4f",
+    fontSize: "8px",
+    height: "12px",
+    minWidth: "12px",
+    lineHeight: "12px",
+    padding: "0 2px",
+    fontWeight: "bold",
+  };
 
   return (
     <App>
-    <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-100 p-3">
+    <div className="mt-2 sm:mt-4 bg-white rounded-lg shadow-sm border border-gray-100 p-1.5 sm:p-3 w-full overflow-hidden">
       {loading ? (
         <div className="flex justify-center items-center py-16"><Spin size="large" /></div>
       ) : rows.length === 0 ? (
         <Empty description="No inventory data found" />
       ) : (
-        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, tableLayout: "auto", border }}>
+        <div className="w-full" style={{ overflow: "hidden" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", border }}>
+            <colgroup>
+              <col style={{ width: "2.5%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "5.5%" }} />
+              <col style={{ width: "4.5%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "3%" }} />
+              <col style={{ width: "4.5%" }} />
+              <col style={{ width: "4.5%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "4%" }} />
+              <col style={{ width: "5%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "4%" }} />
+              <col style={{ width: "5%" }} />
+              <col style={{ width: "5%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "5%" }} />
+              <col style={{ width: "4%" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 40 }}>SL</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 120, textAlign: "left" }}>Material</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}><FilterHeader label="Process" options={colFilterOptions.process} value={colProcess} onChange={setColProcess} /></th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 80 }}><FilterHeader label="Form" options={colFilterOptions.form} value={colForm} onChange={setColForm} /></th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 120 }}>Dimensions</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 50 }}>Qty</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 70 }}>Mass (kg)</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 70 }}><FilterHeader label="Source" options={colFilterOptions.source} value={colSource} onChange={setColSource} /></th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}><FilterHeader label="Stock Status" options={colFilterOptions.stockStatus} value={colStockStatus} onChange={setColStockStatus} /></th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 60, background: "#fff1f0" }}>Del Stock</th>
-                <th rowSpan={2} style={{ ...thStyle, minWidth: 80, background: "#e6f7ff" }}>Quality Docs</th>
-                <th colSpan={7} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
+                <th rowSpan={2} style={thStyle}>SL</th>
+                <th rowSpan={2} style={{ ...thStyle, textAlign: "left" }}>Material</th>
+                <th rowSpan={2} style={thStyle}><FilterHeader label="Process" options={colFilterOptions.process} value={colProcess} onChange={setColProcess} fontSize={density.fontSize} /></th>
+                <th rowSpan={2} style={thStyle}><FilterHeader label="Form" options={colFilterOptions.form} value={colForm} onChange={setColForm} fontSize={density.fontSize} /></th>
+                <th rowSpan={2} style={thStyle}>Dimensions</th>
+                <th rowSpan={2} style={thStyle}>Qty</th>
+                <th rowSpan={2} style={thStyle}>Mass</th>
+                <th rowSpan={2} style={thStyle}><FilterHeader label="Source" options={colFilterOptions.source} value={colSource} onChange={setColSource} fontSize={density.fontSize} /></th>
+                <th rowSpan={2} style={thStyle}><FilterHeader label={density.compact ? "Stk St" : "Stock Status"} options={colFilterOptions.stockStatus} value={colStockStatus} onChange={setColStockStatus} fontSize={density.fontSize} /></th>
+                <th rowSpan={2} style={{ ...thStyle, background: "#fff1f0" }}>{density.compact ? "Del" : "Del Stock"}</th>
+                <th rowSpan={2} style={{ ...thStyle, background: "#e6f7ff" }}>{density.compact ? "S Docs" : "Stock Docs"}</th>
+                <th colSpan={8} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
               </tr>
               <tr>
-                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Order No</th>
-                <th style={{ ...thStyle, minWidth: 55, background: "#f0fff4" }}>Unit</th>
-                <th style={{ ...thStyle, minWidth: 80, background: "#f0fff4" }}>Total Len</th>
-                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Remaining</th>
-                <th style={{ ...thStyle, minWidth: 120, background: "#f0fff4" }}>Used For</th>
-                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}><FilterHeader label="Unit Status" options={colFilterOptions.unitStatus} value={colUnitStatus} onChange={setColUnitStatus} style={{ color: "#333" }} /></th>
-                <th style={{ ...thStyle, minWidth: 60, background: "#fff1f0" }}>Del Unit</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}>Order</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}>Unit</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}>Total</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}>Rem</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}>Used For</th>
+                <th style={{ ...thStyle, background: "#f0fff4" }}><FilterHeader label={density.compact ? "U St" : "Unit Status"} options={colFilterOptions.unitStatus} value={colUnitStatus} onChange={setColUnitStatus} style={{ color: "#333" }} fontSize={density.fontSize} /></th>
+                <th style={{ ...thStyle, background: "#e6f7ff" }}>{density.compact ? "U Docs" : "Unit Docs"}</th>
+                <th style={{ ...thStyle, background: "#fff1f0" }}>Del</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row, idx) => (
                 <tr key={idx} style={{ background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  {/* Material cell — rowspan across all its unit rows */}
                   {row.matRowSpan > 0 && (
                     <td rowSpan={row.matRowSpan} style={{ ...tdStyle, fontWeight: 700, background: "#f5f5ff" }}>
                       {row.slNo}
@@ -442,32 +522,31 @@ const RawMaterialInventoryView = ({
                   )}
                   {row.matRowSpan > 0 && (
                     <td rowSpan={row.matRowSpan} style={{ ...tdStyle, fontWeight: 600, textAlign: "left", background: "#f5f5ff" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                        <span>{row.material.material_name || "-"}</span>
+                      <div style={{ display: "flex", flexDirection: density.compact ? "column" : "row", alignItems: density.compact ? "flex-start" : "center", justifyContent: "space-between", gap: 4 }}>
+                        <span style={{ overflowWrap: "anywhere" }}>{row.material.material_name || "-"}</span>
                         <button
                           onClick={() => openAddStock(row.material)}
                           title="Add Stock"
-                          style={{ border: "1px solid #2563eb", background: "#eff6ff", color: "#2563eb", borderRadius: 4, padding: "1px 6px", fontSize: 10, cursor: "pointer", whiteSpace: "nowrap" }}
-                        >+ Stock</button>
+                          style={actionBtn("#2563eb", "#eff6ff", "#2563eb")}
+                        >+{density.compact ? "" : " Stock"}</button>
                       </div>
                     </td>
                   )}
 
-                  {/* Stock cells — rowspan across all its unit rows */}
                   {row.type === "no-stock" ? (
-                    <td colSpan={7} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No stock available</td>
+                    <td colSpan={17} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No stock available</td>
                   ) : (
                     <>
                       {row.stockRowSpan > 0 && (
                         <>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.process_type || "-"}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.form_type || "-"}</td>
-                          <td rowSpan={row.stockRowSpan} style={{ ...tdStyle, fontFamily: "monospace" }}>{fmtDim(row.stock)}</td>
+                          <td rowSpan={row.stockRowSpan} style={{ ...tdStyle, fontFamily: "monospace", fontSize: Math.max(7, density.fontSize - 1) }}>{fmtDim(row.stock)}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.quantity ?? "-"}</td>
-                          <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.mass != null ? row.stock.mass.toFixed(3) : "-"}</td>
-                          <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.source_type === "order" ? "Order" : "General"}</td>
+                          <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.mass != null ? row.stock.mass.toFixed(2) : "-"}</td>
+                          <td rowSpan={row.stockRowSpan} style={tdStyle}>{row.stock.source_type === "order" ? "Order" : "Gen"}</td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>
-                            <span style={statusColor(row.stock.status)}>{row.stock.status?.replace(/_/g, " ")}</span>
+                            <span style={statusColor(row.stock.status, density.fontSize)}>{row.stock.status?.replace(/_/g, " ")}</span>
                           </td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>
                             <Popconfirm
@@ -477,37 +556,29 @@ const RawMaterialInventoryView = ({
                               okType="danger"
                               cancelText="Cancel"
                             >
-                              <button style={{ border: "1px solid #ff4d4f", background: "#fff1f0", color: "#cf1322", borderRadius: 4, padding: "1px 6px", fontSize: 10, cursor: "pointer" }}>Delete</button>
+                              <button style={actionBtn("#ff4d4f", "#fff1f0", "#cf1322")}>{density.compact ? "X" : "Delete"}</button>
                             </Popconfirm>
                           </td>
                           <td rowSpan={row.stockRowSpan} style={tdStyle}>
-                            <Badge 
-                              count={row.stock.quality_document_count || 0} 
-                              showZero 
+                            <Badge
+                              count={row.stock.quality_document_count || 0}
+                              showZero
                               offset={[0, 0]}
-                              style={{ 
-                                backgroundColor: '#ff4d4f',
-                                fontSize: '9px',
-                                height: '14px',
-                                minWidth: '14px',
-                                lineHeight: '14px',
-                                padding: '0 3px',
-                                fontWeight: 'bold'
-                              }}
+                              style={badgeStyle}
                             >
                               <button
                                 onClick={() => openQualityDocs(row.stock, row.material)}
-                                style={{ border: "1px solid #1890ff", background: "#e6f7ff", color: "#1890ff", borderRadius: 4, padding: "1px 4px", fontSize: 9, cursor: "pointer", whiteSpace: "nowrap" }}
+                                style={actionBtn("#1890ff", "#e6f7ff", "#1890ff")}
+                                title="Stock quality documents"
                               >
-                                <FileOutlined style={{ fontSize: 10 }} /> Docs
+                                <FileOutlined style={{ fontSize: density.iconFs }} />{density.compact ? "" : " Docs"}
                               </button>
                             </Badge>
                           </td>
                         </>
                       )}
-                      {/* Unit cells — one per row */}
                       {row.type === "no-unit" ? (
-                        <td colSpan={7} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No units</td>
+                        <td colSpan={8} style={{ ...tdStyle, color: "#aaa", fontStyle: "italic" }}>No units</td>
                       ) : (
                         <>
                           <td style={tdStyle}>
@@ -515,16 +586,32 @@ const RawMaterialInventoryView = ({
                               ? (row.stock.source_order_number || "-")
                               : (getUnitOrders(row.unit, row.stock)[0] || "-")}
                           </td>
-                          <td style={tdStyle}>Unit {row.unitSeq}</td>
-                          <td style={tdStyle}>{row.unit.total_length?.toFixed(2) ?? "-"}</td>
-                          <td style={tdStyle}>{row.unit.remaining_length?.toFixed(2) ?? "-"}</td>
-                          <td style={{ ...tdStyle, textAlign: "left", maxWidth: 160, wordBreak: "break-word" }}>
+                          <td style={tdStyle}>{density.compact ? row.unitSeq : `U${row.unitSeq}`}</td>
+                          <td style={tdStyle}>{row.unit.total_length?.toFixed(1) ?? "-"}</td>
+                          <td style={tdStyle}>{row.unit.remaining_length?.toFixed(1) ?? "-"}</td>
+                          <td style={{ ...tdStyle, textAlign: "left" }}>
                             {row.unit.usages?.length > 0
-                              ? row.unit.usages.map((u) => u.part_number ? `${u.part_number} (${u.used_length?.toFixed(2)}mm)` : null).filter(Boolean).join(", ") || "-"
+                              ? row.unit.usages.map((u) => u.part_number ? `${u.part_number} (${u.used_length?.toFixed(1)}mm)` : null).filter(Boolean).join(", ") || "-"
                               : "-"}
                           </td>
                           <td style={tdStyle}>
-                            <span style={statusColor(row.unit.status)}>{row.unit.status?.replace("_", " ")}</span>
+                            <span style={statusColor(row.unit.status, density.fontSize)}>{row.unit.status?.replace("_", " ")}</span>
+                          </td>
+                          <td style={tdStyle}>
+                            <Badge
+                              count={row.unit.quality_document_count || 0}
+                              showZero
+                              offset={[0, 0]}
+                              style={badgeStyle}
+                            >
+                              <button
+                                onClick={() => openQualityDocs(row.stock, row.material, row.unit)}
+                                style={actionBtn("#1890ff", "#e6f7ff", "#1890ff")}
+                                title="Unit quality documents"
+                              >
+                                <FileOutlined style={{ fontSize: density.iconFs }} />{density.compact ? "" : " Docs"}
+                              </button>
+                            </Badge>
                           </td>
                           <td style={tdStyle}>
                             <Popconfirm
@@ -534,7 +621,7 @@ const RawMaterialInventoryView = ({
                               okType="danger"
                               cancelText="No"
                             >
-                              <button style={{ border: "1px solid #ff4d4f", background: "#fff1f0", color: "#cf1322", borderRadius: 4, padding: "1px 6px", fontSize: 10, cursor: "pointer" }}>Del</button>
+                              <button style={actionBtn("#ff4d4f", "#fff1f0", "#cf1322")}>{density.compact ? "X" : "Del"}</button>
                             </Popconfirm>
                           </td>
                         </>
@@ -574,6 +661,7 @@ const RawMaterialInventoryView = ({
         open={qualityDocsModal.open}
         onClose={closeQualityDocs}
         stock={qualityDocsModal.stock}
+        unit={qualityDocsModal.unit}
         materialName={qualityDocsModal.materialName}
         dimensions={qualityDocsModal.dimensions}
         onDocumentsChanged={() => fetchAll()}

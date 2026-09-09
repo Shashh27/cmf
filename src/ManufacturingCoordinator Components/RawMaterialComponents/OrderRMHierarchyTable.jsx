@@ -92,12 +92,16 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
   const labelStyle = { fontSize: isMobile ? 9 : 10, color: '#333', fontWeight: 500, marginRight: 3 };
   const rowStyle = { display: 'flex', alignItems: 'center', gap: isMobile ? 5 : 8 };
 
-  const dimInput = (field, value) => (
+  const dimInput = (field, value) => {
+    // Number(null) === 0, so treat null/undefined/''/NaN as empty string for controlled inputs
+    const n = Number(value);
+    const displayValue = (value == null || value === '' || !Number.isFinite(n)) ? '' : value;
+    return (
     <input
       type="text"
       inputMode="decimal"
       style={inputStyle}
-      value={value ?? ''}
+      value={displayValue}
       onChange={(e) => {
         const val = e.target.value;
         if (val === '' || /^\d*\.?\d*$/.test(val)) {
@@ -108,7 +112,8 @@ const CompactDimensionInputs = ({ formType, dimensions, onChange, isMobile, disa
       placeholder="0"
       disabled={disabled}
     />
-  );
+    );
+  };
 
   if (formType === 'Round') {
     return (
@@ -551,10 +556,14 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   };
 
   const getSelectedMaterialId = (row) => {
-    if (selectedMaterialIds[row.key] != null) return Number(selectedMaterialIds[row.key]);
-    if (savedRows[row.key] && row.plannedRawMaterialId != null) return Number(row.plannedRawMaterialId);
-    const defaultId = getDefaultMaterialId(row);
-    return defaultId != null ? Number(defaultId) : undefined;
+    const toValidId = (raw) => {
+      if (raw == null || raw === '') return undefined;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    if (selectedMaterialIds[row.key] != null) return toValidId(selectedMaterialIds[row.key]);
+    if (savedRows[row.key] && row.plannedRawMaterialId != null) return toValidId(row.plannedRawMaterialId);
+    return toValidId(getDefaultMaterialId(row));
   };
 
   const getMaterialSelectOptions = (row) => {
@@ -566,18 +575,21 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
         .sort((a, b) => (a.material_name || '').localeCompare(b.material_name || ''))
         .map((rm) => {
           const rmId = Number(rm.id);
+          if (!Number.isFinite(rmId)) return null;
           return {
             value: rmId,
             label: isSaved && selectedId != null && rmId === Number(selectedId)
               ? `${rm.material_name} (planned)`
               : rm.material_name,
           };
-        });
+        })
+        .filter(Boolean);
     }
 
     const optionMap = new Map();
     (row.materialRecommendations || []).forEach((rec) => {
       const recId = Number(rec.id);
+      if (!Number.isFinite(recId)) return;
       const isPlanned = isSaved && selectedId != null && recId === Number(selectedId);
       optionMap.set(recId, {
         value: recId,
@@ -587,7 +599,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       });
     });
 
-    if (selectedId && !optionMap.has(selectedId)) {
+    if (selectedId != null && !optionMap.has(selectedId)) {
       const material = rawMaterialsList.find((rm) => Number(rm.id) === selectedId);
       if (material) {
         const rec = row.materialRecommendations?.find((m) => Number(m.id) === selectedId);
@@ -1115,13 +1127,26 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   }, [tableData]);
 
   const orderOptions = useMemo(() => [...new Set(tableData.map(r => r.orderName))], [tableData]);
-  const rmOptions = useMemo(() => {
-    const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
-    return [...new Set(base.map(r => r.rmName))];
-  }, [tableData, selectedOrder]);
+
+  // Rows scoped by top-bar Order filter (empty = all)
+  const orderScopedRows = useMemo(() => (
+    selectedOrder.length > 0
+      ? tableData.filter(r => selectedOrder.includes(r.orderName))
+      : tableData
+  ), [tableData, selectedOrder]);
+
+  const rmOptions = useMemo(
+    () => [...new Set(orderScopedRows.map(r => r.rmName).filter(Boolean))].sort(),
+    [orderScopedRows]
+  );
 
   useEffect(() => {
     setSelectedPartNumber([]);
+    setColOrder([]);
+    setColRM([]);
+    setColPartName([]);
+    setColPartNumber([]);
+    setColFormType([]);
   }, [selectedOrder]);
 
   useEffect(() => {
@@ -1166,24 +1191,85 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
   }, [extractedDataIdsKey, refreshTrigger, tableData]);
 
   const partNameOptions = useMemo(() => {
-    const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
+    const base = selectedRM.length > 0
+      ? orderScopedRows.filter(r => selectedRM.includes(r.rmName))
+      : orderScopedRows;
     return [...new Set(base.map(r => r.partName).filter(Boolean))].sort();
-  }, [tableData, selectedOrder]);
+  }, [orderScopedRows, selectedRM]);
 
   const partNumberOptions = useMemo(() => {
-    const base = selectedOrder.length > 0 ? tableData.filter(r => selectedOrder.includes(r.orderName)) : tableData;
+    let base = orderScopedRows;
+    if (selectedRM.length > 0) base = base.filter(r => selectedRM.includes(r.rmName));
+    if (selectedPartName.length > 0) base = base.filter(r => selectedPartName.includes(r.partName));
     return [...new Set(base.map(r => r.partNumber).filter(Boolean))];
-  }, [tableData, selectedOrder]);
+  }, [orderScopedRows, selectedRM, selectedPartName]);
 
-  // Derived column filter options
-  const colFilterOptions = useMemo(() => ({
-    orders: [...new Set(tableData.map(r => r.orderName).filter(Boolean))].sort(),
-    rms: [...new Set(tableData.map(r => r.rmName).filter(Boolean))].sort(),
-    partNames: [...new Set(tableData.map(r => r.partName).filter(Boolean))].sort(),
-    partNumbers: [...new Set(tableData.map(r => r.partNumber).filter(Boolean))].sort(),
-    formTypes: [...new Set(tableData.map(r => planningData[r.key]?.formType).filter(Boolean))].sort(),
-    sources: ['General Stock', 'Procured', 'Not Assigned'],
-  }), [tableData, planningData]);
+  // Drop stale top-bar selections when scoped options shrink (e.g. after order change)
+  useEffect(() => {
+    setSelectedRM(prev => {
+      const next = prev.filter(v => rmOptions.includes(v));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [rmOptions]);
+
+  useEffect(() => {
+    setSelectedPartName(prev => {
+      const next = prev.filter(v => partNameOptions.includes(v));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [partNameOptions]);
+
+  useEffect(() => {
+    setSelectedPartNumber(prev => {
+      const next = prev.filter(v => partNumberOptions.includes(v));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [partNumberOptions]);
+
+  // Rows for column-filter option lists: respect top-bar filters so dropdowns match visible scope
+  const colFilterBaseRows = useMemo(() => {
+    return tableData.filter(r => {
+      if (selectedOrder.length > 0 && !selectedOrder.includes(r.orderName)) return false;
+      if (selectedRM.length > 0 && !selectedRM.includes(r.rmName)) return false;
+      if (selectedPartName.length > 0 && !selectedPartName.includes(r.partName)) return false;
+      if (selectedPartNumber.length > 0 && !selectedPartNumber.includes(r.partNumber)) return false;
+      if (selectedDocStatus === 'no_2d' && !r.hasNo2DDocument) return false;
+      return true;
+    });
+  }, [tableData, selectedOrder, selectedRM, selectedPartName, selectedPartNumber, selectedDocStatus]);
+
+  // Derived column filter options (cascading — only values present in current scope)
+  const colFilterOptions = useMemo(() => {
+    const rowsForRms = colOrder.length > 0
+      ? colFilterBaseRows.filter(r => colOrder.includes(r.orderName))
+      : colFilterBaseRows;
+    const rowsForParts = [
+      ...(colOrder.length > 0 ? [(r) => colOrder.includes(r.orderName)] : []),
+      ...(colRM.length > 0 ? [(r) => colRM.includes(r.rmName)] : []),
+    ].reduce((rows, pred) => rows.filter(pred), colFilterBaseRows);
+
+    return {
+      orders: [...new Set(colFilterBaseRows.map(r => r.orderName).filter(Boolean))].sort(),
+      rms: [...new Set(rowsForRms.map(r => r.rmName).filter(Boolean))].sort(),
+      partNames: [...new Set(rowsForParts.map(r => r.partName).filter(Boolean))].sort(),
+      partNumbers: [...new Set(rowsForParts.map(r => r.partNumber).filter(Boolean))].sort(),
+      formTypes: [...new Set(rowsForParts.map(r => planningData[r.key]?.formType).filter(Boolean))].sort(),
+      sources: ['General Stock', 'Procured', 'Not Assigned'],
+    };
+  }, [colFilterBaseRows, colOrder, colRM, planningData]);
+
+  // Drop stale column-filter selections when options shrink
+  useEffect(() => {
+    const keep = (prev, options) => {
+      const next = prev.filter(v => options.includes(v));
+      return next.length === prev.length ? prev : next;
+    };
+    setColOrder(prev => keep(prev, colFilterOptions.orders));
+    setColRM(prev => keep(prev, colFilterOptions.rms));
+    setColPartName(prev => keep(prev, colFilterOptions.partNames));
+    setColPartNumber(prev => keep(prev, colFilterOptions.partNumbers));
+    setColFormType(prev => keep(prev, colFilterOptions.formTypes));
+  }, [colFilterOptions]);
 
   const filteredRows = useMemo(() => {
     const rows = tableData.filter(r => {
@@ -1383,7 +1469,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                             placeholder="Select raw material from master list"
                             style={{ width: '100%', fontSize: isMobile ? 9 : 10 }}
                             value={getSelectedMaterialId(row)}
-                            onChange={(val) => handleMaterialSelection(row.key, Number(val))}
+                            onChange={(val) => {
+                              const id = Number(val);
+                              if (Number.isFinite(id)) handleMaterialSelection(row.key, id);
+                            }}
                             options={getMaterialSelectOptions(row)}
                             optionFilterProp="label"
                             showSearch
@@ -1451,7 +1540,10 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
                               placeholder="Select raw material"
                               style={{ width: '100%', fontSize: isMobile ? 9 : 10 }}
                               value={getSelectedMaterialId(row)}
-                              onChange={(val) => handleMaterialSelection(row.key, Number(val))}
+                              onChange={(val) => {
+                              const id = Number(val);
+                              if (Number.isFinite(id)) handleMaterialSelection(row.key, id);
+                            }}
                               options={getMaterialSelectOptions(row)}
                               optionFilterProp="label"
                               disabled={isPartStockLocked(row.partId)}

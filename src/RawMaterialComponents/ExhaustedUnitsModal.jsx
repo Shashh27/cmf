@@ -33,10 +33,12 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
   const [qualityDocsModal, setQualityDocsModal] = useState({
     open: false,
     stock: null,
+    unit: null,
     materialName: "",
     dimensions: "",
   });
   const [docCountOverrides, setDocCountOverrides] = useState({});
+  const [unitDocCountOverrides, setUnitDocCountOverrides] = useState({});
 
   const tableData = useMemo(() => {
     const result = [];
@@ -115,30 +117,48 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
       ? docCountOverrides[stock.id]
       : (stock.quality_document_count || 0);
 
-  const openQualityDocs = (stock, material) => {
+  const getUnitDocCount = (unit) =>
+    unitDocCountOverrides[unit.id] != null
+      ? unitDocCountOverrides[unit.id]
+      : (unit.quality_document_count || 0);
+
+  const openQualityDocs = (stock, material, unit = null) => {
     setQualityDocsModal({
       open: true,
       stock,
+      unit,
       materialName: material?.material_name || "",
       dimensions: fmtDim(stock),
     });
   };
 
   const closeQualityDocs = () => {
-    setQualityDocsModal({ open: false, stock: null, materialName: "", dimensions: "" });
+    setQualityDocsModal({ open: false, stock: null, unit: null, materialName: "", dimensions: "" });
   };
 
-  const handleDocumentsChanged = async (stockId) => {
+  const handleDocumentsChanged = async (stockId, unitId = null) => {
     try {
-      const response = await api.get(`/stock-quality-documents/stock/${stockId}`);
-      setDocCountOverrides((prev) => ({
-        ...prev,
-        [stockId]: (response.data || []).length,
-      }));
+      if (unitId != null) {
+        const response = await api.get(`/stock-quality-documents/stock/${stockId}`, {
+          params: { unit_id: unitId },
+        });
+        setUnitDocCountOverrides((prev) => ({
+          ...prev,
+          [unitId]: (response.data || []).length,
+        }));
+      } else {
+        const response = await api.get(`/stock-quality-documents/stock/${stockId}`, {
+          params: { stock_level_only: true },
+        });
+        setDocCountOverrides((prev) => ({
+          ...prev,
+          [stockId]: (response.data || []).length,
+        }));
+      }
     } catch {
       // keep previous count
     }
-    onDocumentsChanged?.(stockId);
+    onDocumentsChanged?.(stockId, unitId);
   };
 
   return (
@@ -165,14 +185,15 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
                   <th rowSpan={2} style={{ ...thStyle, width: "12%" }}>Dimensions</th>
                   <th rowSpan={2} style={{ ...thStyle, width: "8%" }}>Mass (kg)</th>
                   <th rowSpan={2} style={{ ...thStyle, width: "8%" }}>Source</th>
-                  <th rowSpan={2} style={{ ...thStyle, width: "8%", background: "#e6f7ff" }}>Quality Docs</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: "8%", background: "#e6f7ff" }}>Stock Docs</th>
                   <th rowSpan={2} style={{ ...thStyle, width: "10%" }}>Order No</th>
-                  <th colSpan={3} style={{ ...thStyle, background: "#fee2e2" }}>Exhausted Units</th>
+                  <th colSpan={4} style={{ ...thStyle, background: "#fee2e2" }}>Exhausted Units</th>
                 </tr>
                 <tr>
                   <th style={{ ...thStyle, width: "6%", background: "#fee2e2" }}>Unit</th>
                   <th style={{ ...thStyle, width: "8%", background: "#fee2e2" }}>Total Len</th>
-                  <th style={{ ...thStyle, width: "16%", background: "#fee2e2" }}>Used For</th>
+                  <th style={{ ...thStyle, width: "14%", background: "#fee2e2" }}>Used For</th>
+                  <th style={{ ...thStyle, width: "8%", background: "#e6f7ff" }}>Unit Docs</th>
                 </tr>
               </thead>
               <tbody>
@@ -239,6 +260,38 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
                         ? row.unit.usages.map((u) => `${u.part_number} (${u.used_length?.toFixed(2)}mm)`).join(", ")
                         : "-"}
                     </td>
+                    <td style={tdStyle}>
+                      <Badge
+                        count={getUnitDocCount(row.unit)}
+                        showZero
+                        offset={[0, 0]}
+                        style={{
+                          backgroundColor: "#ff4d4f",
+                          fontSize: "9px",
+                          height: "14px",
+                          minWidth: "14px",
+                          lineHeight: "14px",
+                          padding: "0 3px",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        <button
+                          onClick={() => openQualityDocs(row.stock, row.material, row.unit)}
+                          style={{
+                            border: "1px solid #1890ff",
+                            background: "#e6f7ff",
+                            color: "#1890ff",
+                            borderRadius: 4,
+                            padding: "1px 4px",
+                            fontSize: 9,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <FileOutlined style={{ fontSize: 10 }} /> Docs
+                        </button>
+                      </Badge>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -254,6 +307,7 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
         open={qualityDocsModal.open}
         onClose={closeQualityDocs}
         stock={qualityDocsModal.stock}
+        unit={qualityDocsModal.unit}
         materialName={qualityDocsModal.materialName}
         dimensions={qualityDocsModal.dimensions}
         onDocumentsChanged={handleDocumentsChanged}

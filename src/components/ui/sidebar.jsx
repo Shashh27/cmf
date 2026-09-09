@@ -51,6 +51,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     if (path.startsWith('/manufacturing_coordinator')) return '/manufacturing_coordinator';
     if (path.startsWith('/supervisor')) return '/supervisor';
     if (path.startsWith('/inventory_supervisor')) return '/inventory_supervisor';
+    if (path.startsWith('/quality_assurance')) return '/quality_assurance';
     return ''; // Default fallback
   };
 
@@ -109,6 +110,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       fetchSupervisorNotificationCount();
     } else if (prefix === '/project_coordinator') {
       fetchPCNotificationCount();
+    } else if (prefix === '/quality_assurance') {
+      fetchQANotificationCount();
     }
     // Admin & MC: no sidebar count — unread indicator is on the header bell
   }, [prefix, isAuthenticated, bootstrapping]);
@@ -279,7 +282,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
   };
 
-
+  const fetchQANotificationCount = async () => {
+    try {
+      const response = await api.get(`/qa-rm-notifications/pending-count`);
+      setNotificationCount(response.data?.pending_count || 0);
+    } catch (error) {
+      console.error('Error fetching QA notification count:', error);
+    }
+  };
 
   const fetchAdminNotificationCount = async () => {
 
@@ -864,6 +874,32 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       },
 
+    ];
+
+  } else if (prefix === '/quality_assurance') {
+
+    items = [
+      {
+        key: `${prefix}/oms/orders`,
+        label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
+        icon: <ShoppingCartOutlined />,
+      },
+      {
+        key: `${prefix}/rawmaterials`,
+        label: <Link to={`${prefix}/rawmaterials`} onClick={() => setMobileDrawerOpen(false)}>Raw Materials</Link>,
+        icon: <ExperimentOutlined />,
+      },
+      {
+        key: `${prefix}/notifications`,
+        label: (
+          <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+            <Badge count={notificationCount} offset={[10, 0]}>
+              Notifications
+            </Badge>
+          </Link>
+        ),
+        icon: <BellOutlined />,
+      },
     ];
 
   } else {

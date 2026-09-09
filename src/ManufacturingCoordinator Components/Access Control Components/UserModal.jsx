@@ -12,6 +12,7 @@ export const roleLabels = {
   supervisor: 'Supervisor',
   inventory_supervisor: 'Supervisor-Tool Crib',
   operator: 'Operator',
+  quality_assurance: 'Quality Assurance',
 };
 
 const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] }) => {

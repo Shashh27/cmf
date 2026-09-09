@@ -5,12 +5,14 @@ import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "./PDM Components/BillOfMaterials";
 import ProductDetails from "./PDM Components/ProductDetails";
 import ProductSummary from "./PDM Components/ProductSummary";
+import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import Recyclebin from "./Recyclebin";
 import MCDocumentNotifications from "./MCDocumentNotifications";
 import MCOrderChatPanel, { OrderChatButton, useOrderChat } from "./chatbox/OrderChatPanel";
 import { useAuth } from "../auth/AuthContext.jsx";
+import "./PDM Components/pdm-theme.css";
 
 const { Sider, Content } = Layout;
 
@@ -43,6 +45,7 @@ const PDM = () => {
   });
 
   const [selectedItem, setSelectedItem] = useState(null);
+  const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1280
@@ -52,6 +55,7 @@ const PDM = () => {
   const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
   const [bomCollapsed, setBomCollapsed] = useState(false);
 
+  const userId = user?.id;
   const useBomDrawer = viewportWidth < 992;
   const bomWidth = useMemo(() => getBomWidth(viewportWidth), [viewportWidth]);
 
@@ -65,8 +69,16 @@ const PDM = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "auto";
+    };
+  }, []);
+
   const handleItemSelected = (item) => {
     setSelectedItem(item);
+    setPartDocuments([]);
     if (useBomDrawer) setMobileDrawerOpen(false);
   };
   const handleHierarchyLoaded = (productId, hierarchy) => {
@@ -76,16 +88,6 @@ const PDM = () => {
     setBomRefreshTrigger((prev) => prev + 1);
   };
   const isProductSelected = selectedItem?.itemType === "product";
-
-  const userId = (() => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) return null;
-    try {
-      return JSON.parse(userStr)?.id || null;
-    } catch {
-      return null;
-    }
-  })();
 
   const bomPanel = (
     <BillOfMaterials
@@ -100,7 +102,7 @@ const PDM = () => {
   return (
     <>
       <style>{`
-        .mc-pdm-shell {
+        .pdm-shell {
           height: 100%;
           width: 100%;
           min-width: 0;
@@ -109,7 +111,7 @@ const PDM = () => {
           display: flex;
           flex-direction: column;
         }
-        .mc-pdm-main {
+        .pdm-main-layout {
           flex: 1;
           min-height: 0;
           min-width: 0;
@@ -117,23 +119,24 @@ const PDM = () => {
           overflow: hidden;
           display: flex !important;
         }
-        .mc-pdm-bom-sider.ant-layout-sider {
+        .pdm-bom-sider.ant-layout-sider {
           flex: 0 0 auto !important;
           max-width: none !important;
           min-width: 0 !important;
         }
-        .mc-pdm-bom-sider .ant-layout-sider-children {
+        .pdm-bom-sider .ant-layout-sider-children {
           display: flex;
           flex-direction: column;
           height: 100%;
           min-width: 0;
           overflow: hidden;
         }
-        .mc-pdm-detail {
+        .pdm-detail-content {
           flex: 1 1 auto !important;
           min-width: 0 !important;
+          width: auto !important;
         }
-        .mc-pdm-bom-toggle {
+        .pdm-mobile-toggle {
           position: fixed;
           top: 12px;
           left: 12px;
@@ -142,20 +145,33 @@ const PDM = () => {
           box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
         @media (min-width: 768px) and (max-width: 991px) {
-          .mc-pdm-bom-toggle { left: 96px; }
+          .pdm-mobile-toggle {
+            top: 16px;
+            left: 96px;
+          }
+        }
+        .pdm-top-bar {
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .pdm-top-bar .ant-tabs {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .pdm-top-bar .ant-tabs-nav {
+          margin-bottom: 0 !important;
         }
       `}</style>
 
-      <div className="mc-pdm-shell" style={{ paddingTop: fromOms ? 0 : 8 }}>
+      <div className="pdm-container pdm-shell">
         {fromOms && (
           <div
+            className="pdm-section-header pdm-top-bar"
             style={{
-              padding: "0 8px 8px",
+              padding: "8px 12px",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              flexWrap: "wrap",
-              gap: 8,
               flexShrink: 0,
             }}
           >
@@ -169,7 +185,7 @@ const PDM = () => {
                 { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
               ]}
             />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
               {initialOrderId && (
                 <OrderChatButton
                   totalUnread={chat.totalUnread}
@@ -185,13 +201,13 @@ const PDM = () => {
         )}
 
         {!fromOms || activeTopTab === "pdm" ? (
-          <Layout className="mc-pdm-main">
+          <Layout className="pdm-main-layout">
             {useBomDrawer && (
               <Button
                 type="default"
                 icon={<MenuOutlined />}
                 onClick={() => setMobileDrawerOpen(true)}
-                className="mc-pdm-bom-toggle"
+                className="pdm-mobile-toggle"
               >
                 BOM
               </Button>
@@ -199,7 +215,7 @@ const PDM = () => {
 
             {!useBomDrawer && (
               <Sider
-                className="mc-pdm-bom-sider"
+                className="pdm-bom-sider"
                 width={bomWidth}
                 collapsedWidth={BOM_SIDER_COLLAPSED}
                 collapsed={bomCollapsed}
@@ -225,7 +241,9 @@ const PDM = () => {
                   }}
                 >
                   {!bomCollapsed && (
-                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>BOM panel</span>
+                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)", whiteSpace: "nowrap" }}>
+                      BOM panel
+                    </span>
                   )}
                   <Tooltip
                     title={bomCollapsed ? "Expand Bill of Materials" : "Minimise Bill of Materials"}
@@ -236,6 +254,7 @@ const PDM = () => {
                       size="small"
                       icon={bomCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
                       onClick={() => setBomCollapsed((c) => !c)}
+                      aria-label={bomCollapsed ? "Expand BOM" : "Collapse BOM"}
                     />
                   </Tooltip>
                 </div>
@@ -267,12 +286,12 @@ const PDM = () => {
             </Drawer>
 
             <Content
-              className="mc-pdm-detail"
+              className="pdm-detail-content"
               style={{
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
-                backgroundColor: "#f8fafc",
+                backgroundColor: "#ffffff",
                 height: "100%",
                 margin: 0,
                 padding: useBomDrawer ? "48px 8px 8px" : 0,
@@ -291,7 +310,12 @@ const PDM = () => {
                 <>
                   {selectedItem?.itemType === "part" && (
                     <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                      <ProductDetails selectedItem={selectedItem} />
+                      <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                        <DocumentsPanel
+                          selectedItem={selectedItem}
+                          onDocumentsLoaded={setPartDocuments}
+                        />
+                      </ProductDetails>
                     </div>
                   )}
                   {selectedItem?.itemType === "assembly" && (
@@ -302,6 +326,15 @@ const PDM = () => {
                       />
                     </div>
                   )}
+                  {selectedItem?.itemType !== "part" &&
+                    selectedItem?.itemType !== "assembly" && (
+                      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                        <DocumentsPanel
+                          selectedItem={selectedItem}
+                          onDocumentsLoaded={setPartDocuments}
+                        />
+                      </div>
+                    )}
                 </>
               )}
             </Content>

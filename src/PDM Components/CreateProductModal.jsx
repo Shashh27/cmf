@@ -674,7 +674,7 @@ const CreateProductModal = ({
 
       onCancel={handleCancel}
 
-      maskClosable={false}
+      mask={{ closable: false }}
 
       keyboard={false}
 
