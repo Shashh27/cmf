@@ -1,12 +1,8 @@
 """
-Shared PostgreSQL advisory lock for live schedule writers.
+Shared PostgreSQL advisory lock for writers of scheduling.rescheduling_items.
 
-Scheduler #2 (Rescheduler / dynamic_reschedule) and Scheduler #3
-(LiveReconciliationEngine) both write scheduling.rescheduling_items.
-They must not interleave.
-
-Session-level lock is reentrant on the same DB connection, so an event
-path that runs Rescheduler then Dynamic on one session is safe.
+Scheduler #2 (Rescheduler / dynamic_reschedule) uses this so concurrent
+reschedule calls do not interleave DELETE/INSERT on the live table.
 
 Non-PostgreSQL dialects (SQLite tests) are a no-op that always acquires.
 """

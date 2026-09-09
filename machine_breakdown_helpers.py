@@ -1,19 +1,18 @@
 """Helpers for machine breakdown windows vs job-card activation."""
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from time_utils import now_ist, to_naive_ist
 from DB.models.scheduling import MachineStatus
 
 STATUS_OFF = 2
 
 
 def _coerce_naive(dt: datetime) -> datetime:
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    return to_naive_ist(dt) or dt
 
 
 def get_active_breakdown(
@@ -82,7 +81,7 @@ def get_job_card_activation_block_message(
     at_time: Optional[datetime] = None,
 ) -> Optional[str]:
     """First blocking reason for job-card activation, or None if allowed."""
-    now = at_time or datetime.now()
+    now = at_time or now_ist()
     breakdown_msg = get_machine_breakdown_block_message(db, machine_id, now)
     if breakdown_msg:
         return breakdown_msg

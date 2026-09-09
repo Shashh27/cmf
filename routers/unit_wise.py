@@ -53,14 +53,32 @@ class UnitWiseRebuildRequest(BaseModel):
     population: Optional[int] = Field(None, ge=4, le=200, description="NSGA-II population size")
     generations: Optional[int] = Field(None, ge=1, le=500, description="NSGA-II generations")
     runs: Optional[int] = Field(None, ge=1, le=10, description="Independent NSGA-II runs")
+    # Frontend Intelligent Scheduler controls (replace ENV knobs)
+    pin_preferred: Optional[bool] = Field(
+        None,
+        description=(
+            "true = hard-pin preferred machine (batch qty on one machine, no WC split). "
+            "false = earliest-free WC machine (qty-wise split). "
+            "Omit to use server default."
+        ),
+    )
+    preferred_machine_id: Optional[int] = Field(
+        None,
+        description=(
+            "When pin_preferred=true, force this machine for ops whose workcenter "
+            "contains it (all remaining units on that machine)."
+        ),
+    )
+    preferred_workcenter_id: Optional[int] = Field(
+        None,
+        description="Optional WC filter hint for the UI; pin uses preferred_machine_id.",
+    )
 
 
 def _require_enabled():
-    if not unit_wise_enabled():
-        raise HTTPException(
-            status_code=503,
-            detail="Unit-wise scheduling is disabled. Set UNIT_WISE_SCHEDULE_ENABLED=true.",
-        )
+    # Intelligent Scheduler is always available from the API.
+    # Env UNIT_WISE_SCHEDULE_ENABLED is legacy; ignore for rebuild/list/compare.
+    return
 
 
 @router.post("/rebuild")
@@ -107,6 +125,8 @@ def rebuild_unit_wise_schedule(
             policy=policy,
             debug=bool(body.debug),
             ga_overrides=ga_overrides or None,
+            pin_preferred=body.pin_preferred,
+            preferred_machine_id=body.preferred_machine_id,
         )
         logger.info(
             "Unit-wise rebuild API",

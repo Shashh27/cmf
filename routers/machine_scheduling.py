@@ -1,17 +1,18 @@
 import logging
 from bisect import insort_right
-from threading import active_count
+from threading import Thread, active_count
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional, Dict
+from time_utils import now_ist
 from sqlalchemy import func
 
 # from sqlalchemy import cast, Integer  
 
 
 from sqlalchemy import exists, text, and_
-from DB.database import get_db
+from DB.database import SessionLocal, get_db
 
 from DB.models.oms import Order, Part, Product, Document
 from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus, Rescheduling, ProductionLog
@@ -40,7 +41,7 @@ from production_log_helpers import (
     total_approved_for_operation,
 )
 
-from datetime import datetime, timedelta, timezone, time as dtime
+from datetime import datetime, timedelta, time as dtime
 from typing import Optional, List, Dict, Tuple
 import calendar
 
@@ -913,14 +914,14 @@ def set_order_status(
         raise HTTPException(400, "No parts found for this order's product")
 
     if status == "inactive":
-        part_snapshots = [
-            _get_part_deactivation_snapshot(db, sale_order_id, part)
-            for part in parts
-        ]
-        if any(not snapshot["can_deactivate"] for snapshot in part_snapshots):
-            _raise_order_deactivation_blocked(sale_order_id, part_snapshots)
+        # Shop floor may deactivate an order even when some parts are
+        # in progress or completed (same flexibility as part-level).
+        # part_snapshots = [...]
+        # if any(not snapshot["can_deactivate"] ...):
+        #     _raise_order_deactivation_blocked(...)
+        pass
 
-    now = datetime.now(timezone.utc)
+    now = now_ist()
 
     # -----------------------------
     # Check raw material availability for each part
@@ -1479,46 +1480,15 @@ def update_part_status(
 
         revert_completed_parts_if_logs_cleared(db, {part_id})
 
-        if _part_is_schedule_completed(db, sale_order_id, part_id):
-            logger.warning(
-                "Part deactivation blocked",
-                extra={
-                    "event": "part_deactivation_blocked",
-                    "order_id": sale_order_id,
-                    "part_id": part_id,
-                    "part_number": part.part_number,
-                    "reason": "completed_part",
-                },
-            )
-            _raise_completed_deactivation_blocked(
-                f"part {part.part_number or part_id}",
-                [{
-                    "part_id": part_id,
-                    "part_number": part.part_number,
-                    "part_name": part.part_name,
-                    "block_reason": (
-                        "Part production is completed — deactivation is not allowed"
-                    ),
-                }],
-            )
-
-        production_blockers = _get_part_production_blockers(db, part_id)
-        if production_blockers:
-            logger.warning(
-                "Part deactivation blocked",
-                extra={
-                    "event": "part_deactivation_blocked",
-                    "order_id": sale_order_id,
-                    "part_id": part_id,
-                    "part_number": part.part_number,
-                    "reason": "active_production_or_pending_review",
-                    "blocking_operations": production_blockers,
-                },
-            )
-            for entry in production_blockers:
-                entry["part_number"] = part.part_number
-                entry["part_name"] = part.part_name
-            _raise_deactivation_blocked(production_blockers)
+        # Shop-floor needs to deactivate at any time:
+        #   - after some ops are done, to change the next op's machine
+        #   - after the part is completed, to add another operation
+        # Completed ops are not replanned by dynamic_reschedule.
+        # if _part_is_schedule_completed(db, sale_order_id, part_id):
+        #     ... completed deactivation block ...
+        # production_blockers = _get_part_production_blockers(db, part_id)
+        # if production_blockers:
+        #     ... in-progress deactivation block ...
 
     # ----------------------------
     # Check pre-requisites for activation (raw material and 2D drawing)
@@ -1532,61 +1502,10 @@ def update_part_status(
     print(f"[DEBUG] Pre-requisite check for Part {part.part_name} (ID: {part_id}) in Order {sale_order_id}")
     
     if status == "active":
-        # ----------------------------
-        # Block reactivation while production history still exists
-        # A part that has already produced output (in-progress or completed)
-        # cannot simply be flipped back to 'active' — that would silently
-        # re-insert it into the live priority queue and scheduler while its
-        # production_logs still reflect the earlier run. Only allow activation
-        # when there are zero production_logs entries for this part's operations
-        # (i.e. it truly never started, or an admin has explicitly cleared the
-        # history first).
-        # ----------------------------
-        part_operation_ids = [
-            row[0] for row in db.query(Operation.id)
-            .filter(Operation.part_id == part_id).all()
-        ]
-        if part_operation_ids:
-            existing_log_count = db.execute(
-                text("""
-                    SELECT COUNT(*)
-                    FROM scheduling.production_logs
-                    WHERE operation_id = ANY(:op_ids)
-                """),
-                {"op_ids": part_operation_ids}
-            ).scalar() or 0
-
-            if existing_log_count > 0:
-                logger.warning(
-                    "Part activation blocked",
-                    extra={
-                        "event": "part_activation_blocked",
-                        "order_id": sale_order_id,
-                        "part_id": part_id,
-                        "part_number": part.part_number,
-                        "reason": "production_history_exists",
-                        "existing_log_count": existing_log_count,
-                    },
-                )
-                return {
-                    "message": (
-                        "Cannot activate this part. It already has production history "
-                        "in production_logs — clear/reset the logs before reactivating."
-                    ),
-                    "sale_order_id": sale_order_id,
-                    "part_id": part_id,
-                    "part_name": part.part_name,
-                    "part_number": part.part_number,
-                    "part_type": part_type_name,
-                    "status": "Activation Blocked",
-                    "order_status": None,
-                    "will_be_scheduled": False,
-                    "note": (
-                        f"{existing_log_count} production_logs entries exist for this "
-                        f"part's operations. Activation is only allowed when there are "
-                        f"zero entries in production_logs for this part."
-                    )
-                }
+        # Shop floor reactivates after adding operations or changing a machine.
+        # Production logs are kept. dynamic_reschedule skips completed ops.
+        # if existing_log_count > 0:
+        #     return Activation Blocked (production_history_exists)
 
         # Check raw material availability
         raw_material_usage_exists = db.query(RawMaterialUsage).filter(
@@ -1651,7 +1570,7 @@ def update_part_status(
         PartScheduleStatus.part_id == part_id
     ).first()
 
-    now_utc = datetime.now(timezone.utc)
+    now = now_ist()
 
     # ----------------------------
     # IF RECORD EXISTS
@@ -1675,11 +1594,11 @@ def update_part_status(
 
         # update
         record.status = status
-        record.updated_at = now_utc
-        record.start_date = now_utc if status == "active" else None
+        record.updated_at = now
+        record.start_date = now if status == "active" else None
 
         # if status == "active":
-        #     record.start_date = now_utc
+        #     record.start_date = now
         # else:
         #     record.start_date = None
 
@@ -1689,9 +1608,9 @@ def update_part_status(
             sale_order_id=sale_order_id,
             part_id=part_id,
             status=status,
-            created_at=now_utc,
-            updated_at=now_utc,
-            start_date=now_utc if status == "active" else None
+            created_at=now,
+            updated_at=now,
+            start_date=now if status == "active" else None
         )
         db.add(record)
 
@@ -1742,7 +1661,8 @@ def update_part_status(
     # ----------------------------
     # Sync status on OrderPartPriority row
     # If deactivating: delete row and resequence remaining active (1..N)
-    # If activating: never revive a completed row into the live queue
+    # If activating: put the part back on the live queue, including parts
+    # that were marked completed so a newly added operation can be scheduled.
     # ----------------------------
     priority_row = db.query(OrderPartPriority).filter(
         OrderPartPriority.order_id == sale_order_id,
@@ -1763,24 +1683,35 @@ def update_part_status(
                 # Resequence remaining active parts globally to 1, 2, 3, ...
                 _resequence_active_order_part_priorities(db)
         elif status == "active":
-            # Do not flip completed → active (would put finished work back in queue).
-            # Fresh active rows are created in the block above when missing.
-            if priority_row.status == "completed":
-                priority_row.priority = 0
-            elif priority_row.status != "active":
+            if priority_row.status != "active" or not priority_row.priority or priority_row.priority <= 0:
+                _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050
+                db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY})
+                max_row = db.query(OrderPartPriority).filter(
+                    OrderPartPriority.priority > 0,
+                    OrderPartPriority.status == "active",
+                    OrderPartPriority.id != priority_row.id,
+                ).order_by(OrderPartPriority.priority.desc()).first()
                 priority_row.status = "active"
-                if not priority_row.priority or priority_row.priority <= 0:
-                    max_row = db.query(OrderPartPriority).filter(
-                        OrderPartPriority.priority > 0,
-                        OrderPartPriority.status == "active",
-                    ).order_by(OrderPartPriority.priority.desc()).first()
-                    priority_row.priority = (max_row.priority + 1) if max_row else 1
+                priority_row.priority = (max_row.priority + 1) if max_row else 1
                 _normalize_order_part_priorities(db)
 
     # ----------------------------
     # CLEANUP: Remove operation status entries for deactivated parts
     # ----------------------------
     if status == "inactive":
+        # Drop stale live Gantt rows so deactivate → machine change → activate
+        # does not leave August (or any past) paper slots visible until the
+        # next full-factory walk finishes.
+        deleted_live = db.query(Rescheduling).filter(
+            Rescheduling.part_id == part_id,
+            Rescheduling.order_id == sale_order_id,
+        ).delete(synchronize_session=False)
+        if deleted_live:
+            print(
+                f"[DEBUG] Cleared {deleted_live} rescheduling_items for "
+                f"deactivated part {part_id} / order {sale_order_id}"
+            )
+
         # Remove operation status entries for operations of this part
         # that are no longer in planned_schedule_items
         operations_to_cleanup = db.execute(text("""
@@ -1849,6 +1780,28 @@ def update_part_status(
 
     db.commit()
 
+    # IN-House activate: queue a part-scoped live rewrite so machine / start
+    # changes show up without waiting on a full-factory Update Actual Schedule.
+    if (
+        status == "active"
+        and part_type_name == "IN-House"
+        and record.status == "active"
+    ):
+        Thread(
+            target=_run_dynamic_reschedule_job,
+            args=(part_id, None),
+            daemon=True,
+            name=f"dyn-reschedule-activate-{part_id}",
+        ).start()
+        logger.info(
+            "Queued part-scoped dynamic reschedule after activate",
+            extra={
+                "event": "dynamic_reschedule_queued",
+                "part_id": part_id,
+                "trigger_source": "part_activate",
+            },
+        )
+
     # ----------------------------
     # RESPONSE LOGIC
     # ----------------------------
@@ -1878,7 +1831,10 @@ def update_part_status(
             "will_be_scheduled": True,
             "raw_material_status": raw_material_status,
             "drawing_status": drawing_status,
-            "note": "Part activated with both raw material and 2D drawing requirements met"
+            "note": (
+                "Part activated; part-scoped dynamic reschedule started "
+                "in the background."
+            ),
         }
     else:
         return {
@@ -2020,7 +1976,7 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
                 ).first()
                 if pps_record and pps_record.status != "completed":
                     pps_record.status = "completed"
-                    pps_record.updated_at = datetime.now(timezone.utc)
+                    pps_record.updated_at = now_ist()
                     pps_record.start_date = None
 
         db.commit()
@@ -4185,68 +4141,223 @@ def _get_operation_actual_times(
     return actual_start, actual_end
 
 
+def _get_baseline_planned_times_for_part(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+    schedule_history_id: Optional[int] = None,
+) -> Dict[int, Dict[str, Optional[datetime]]]:
+    """Frozen planned_schedule_items windows per operation (PPS heading)."""
+    planned: Dict[int, Dict[str, Optional[datetime]]] = {}
+
+    history_id = schedule_history_id
+    if history_id is None:
+        latest = (
+            db.query(ScheduleHistory)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .first()
+        )
+        history_id = latest.id if latest else None
+
+    if not history_id:
+        return planned
+
+    rows = (
+        db.query(PlannedScheduleItem)
+        .filter(
+            PlannedScheduleItem.schedule_history_id == history_id,
+            PlannedScheduleItem.sale_order_id == sale_order_id,
+            PlannedScheduleItem.part_id == part_id,
+        )
+        .order_by(PlannedScheduleItem.planned_start_time.asc())
+        .all()
+    )
+    for item in rows:
+        if item.operation_id not in planned:
+            planned[item.operation_id] = {
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time": item.planned_end_time,
+            }
+        else:
+            entry = planned[item.operation_id]
+            if item.planned_start_time < entry["planned_start_time"]:
+                entry["planned_start_time"] = item.planned_start_time
+            if item.planned_end_time > entry["planned_end_time"]:
+                entry["planned_end_time"] = item.planned_end_time
+    return planned
+
+
+def _get_live_schedule_times_for_part(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+) -> Dict[int, Dict[str, Optional[datetime]]]:
+    """Live rescheduling_items windows per operation (PPS dropdown current)."""
+    live: Dict[int, Dict[str, Optional[datetime]]] = {}
+    rows = (
+        db.query(Rescheduling)
+        .filter(
+            Rescheduling.order_id == sale_order_id,
+            Rescheduling.part_id == part_id,
+            Rescheduling.status.in_(["scheduled", "rescheduled"]),
+        )
+        .order_by(Rescheduling.start_time.asc())
+        .all()
+    )
+    for item in rows:
+        if item.operation_id not in live:
+            live[item.operation_id] = {
+                "current_start_time": item.start_time,
+                "current_end_time": item.end_time,
+                "machine_id": item.machine_id,
+            }
+        else:
+            entry = live[item.operation_id]
+            if item.start_time < entry["current_start_time"]:
+                entry["current_start_time"] = item.start_time
+            if item.end_time > entry["current_end_time"]:
+                entry["current_end_time"] = item.end_time
+            if item.machine_id:
+                entry["machine_id"] = item.machine_id
+    return live
+
+
 def _get_planned_times_for_part(
     db: Session,
     sale_order_id: int,
     part_id: int,
 ) -> Dict[int, Dict[str, Optional[datetime]]]:
-    """Consolidated planned start/end per operation from the latest schedule history."""
-    planned: Dict[int, Dict[str, Optional[datetime]]] = {}
+    """
+    Consolidated planned start/end per operation from frozen baseline,
+    falling back to live rescheduling only when baseline is missing.
+    """
+    planned = _get_baseline_planned_times_for_part(db, sale_order_id, part_id)
+    if planned:
+        return planned
 
-    latest = (
-        db.query(ScheduleHistory)
-        .order_by(ScheduleHistory.generated_at.desc())
-        .first()
+    live = _get_live_schedule_times_for_part(db, sale_order_id, part_id)
+    return {
+        op_id: {
+            "planned_start_time": times.get("current_start_time"),
+            "planned_end_time": times.get("current_end_time"),
+        }
+        for op_id, times in live.items()
+    }
+
+
+def _machine_display_name(db: Session, machine_id: Optional[int]) -> Optional[str]:
+    if not machine_id:
+        return None
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        return None
+    return f"{machine.make} {machine.model}".strip()
+
+
+def _build_part_operations_for_pps(
+    db: Session,
+    sale_order_id: int,
+    part_id: int,
+    schedule_history_id: Optional[int] = None,
+) -> List[dict]:
+    """
+    All process-plan operations for PPS expand row.
+
+    - planned_*  → frozen planned_schedule_items (heading)
+    - current_*  → live rescheduling when present; else actuals for completed;
+                   else planned fallback (dropdown)
+    - actual_*   → production logs
+    """
+    operations = (
+        db.query(Operation)
+        .filter(Operation.part_id == part_id)
+        .order_by(Operation.operation_number.asc(), Operation.id.asc())
+        .all()
     )
-    if latest:
-        rows = (
-            db.query(PlannedScheduleItem)
-            .filter(
-                PlannedScheduleItem.schedule_history_id == latest.id,
-                PlannedScheduleItem.sale_order_id == sale_order_id,
-                PlannedScheduleItem.part_id == part_id,
-            )
-            .order_by(PlannedScheduleItem.planned_start_time.asc())
-            .all()
-        )
-        for item in rows:
-            if item.operation_id not in planned:
-                planned[item.operation_id] = {
-                    "planned_start_time": item.planned_start_time,
-                    "planned_end_time": item.planned_end_time,
-                }
-            else:
-                entry = planned[item.operation_id]
-                if item.planned_start_time < entry["planned_start_time"]:
-                    entry["planned_start_time"] = item.planned_start_time
-                if item.planned_end_time > entry["planned_end_time"]:
-                    entry["planned_end_time"] = item.planned_end_time
+    baseline = _get_baseline_planned_times_for_part(
+        db, sale_order_id, part_id, schedule_history_id
+    )
+    live = _get_live_schedule_times_for_part(db, sale_order_id, part_id)
 
-    if not planned:
-        reschedule_rows = (
-            db.query(Rescheduling)
-            .filter(
-                Rescheduling.order_id == sale_order_id,
-                Rescheduling.part_id == part_id,
-                Rescheduling.status.in_(["scheduled", "rescheduled"]),
-            )
-            .order_by(Rescheduling.start_time.asc())
-            .all()
-        )
-        for item in reschedule_rows:
-            if item.operation_id not in planned:
-                planned[item.operation_id] = {
-                    "planned_start_time": item.start_time,
-                    "planned_end_time": item.end_time,
-                }
-            else:
-                entry = planned[item.operation_id]
-                if item.start_time < entry["planned_start_time"]:
-                    entry["planned_start_time"] = item.start_time
-                if item.end_time > entry["planned_end_time"]:
-                    entry["planned_end_time"] = item.end_time
+    result: List[dict] = []
+    for op in operations:
+        op_status = db.query(OperationStatus).filter(
+            OperationStatus.operation_id == op.id,
+            OperationStatus.order_id == sale_order_id,
+            OperationStatus.part_id == part_id,
+        ).first()
 
-    return planned
+        actual_start, actual_end = _get_operation_actual_times(db, op.id)
+        operation_status_str = (
+            op_status.status
+            if op_status
+            else ("completed" if actual_end is not None else "pending")
+        )
+        if actual_end is not None and operation_status_str not in ("completed",):
+            # Logs fully approved but operation_status row lagging.
+            if operation_status_str == "pending":
+                operation_status_str = "completed"
+
+        base = baseline.get(op.id, {})
+        live_row = live.get(op.id, {})
+        planned_start = base.get("planned_start_time")
+        planned_end = base.get("planned_end_time")
+
+        current_start = live_row.get("current_start_time")
+        current_end = live_row.get("current_end_time")
+        if current_start is None and current_end is None:
+            # Completed / no live row: show production actuals in the dropdown.
+            if actual_start is not None or actual_end is not None:
+                current_start = actual_start
+                current_end = actual_end
+            else:
+                current_start = planned_start
+                current_end = planned_end
+
+        machine_name = None
+        log_with_machine = (
+            db.query(ProductionLog)
+            .filter(
+                ProductionLog.operation_id == op.id,
+                ProductionLog.machine_id.isnot(None),
+            )
+            .order_by(ProductionLog.created_at.desc())
+            .first()
+        )
+        if log_with_machine and log_with_machine.machine:
+            machine_name = (
+                f"{log_with_machine.machine.make} "
+                f"{log_with_machine.machine.model}"
+            ).strip()
+        elif live_row.get("machine_id"):
+            machine_name = _machine_display_name(db, live_row.get("machine_id"))
+        elif op.machine_id:
+            machine_name = _machine_display_name(db, op.machine_id)
+
+        result.append({
+            "operation_id": op.id,
+            "operation": f"{op.operation_number} - {op.operation_name}",
+            "machine": machine_name,
+            "planned_start_time": planned_start,
+            "planned_end_time": planned_end,
+            "current_start_time": current_start,
+            "current_end_time": current_end,
+            # Backward compatible aliases: older UI used planned_* for live.
+            # Prefer current_* for dropdown; planned_* stays baseline.
+            "actual_start_time": actual_start,
+            "actual_end_time": actual_end,
+            "operation_status": operation_status_str,
+        })
+
+    return result
+
+
+def _part_level_planned_window(
+    operations: List[dict],
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    starts = [o["planned_start_time"] for o in operations if o.get("planned_start_time")]
+    ends = [o["planned_end_time"] for o in operations if o.get("planned_end_time")]
+    return (min(starts) if starts else None, max(ends) if ends else None)
 
 
 def _fetch_active_part_planned_rows(
@@ -4256,64 +4367,12 @@ def _fetch_active_part_planned_rows(
     schedule_history_id: int,
 ) -> List[dict]:
     """
-    Return schedule rows for an active part.
-    Prefers planned_schedule_items from the latest history; falls back to the
-    live rescheduling_items table when the part was scheduled dynamically.
+    Legacy helper retained for callers that still expect schedule-row dicts.
+    Prefer _build_part_operations_for_pps for PPS.
     """
-    rows = (
-        db.query(PlannedScheduleItem, Operation, Machine)
-        .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
-        .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
-        .filter(
-            PlannedScheduleItem.schedule_history_id == schedule_history_id,
-            PlannedScheduleItem.sale_order_id == sale_order_id,
-            PlannedScheduleItem.part_id == part_id,
-        )
-        .order_by(PlannedScheduleItem.planned_start_time.asc(), PlannedScheduleItem.id.asc())
-        .all()
+    return _build_part_operations_for_pps(
+        db, sale_order_id, part_id, schedule_history_id
     )
-
-    if rows:
-        return [
-            {
-                "operation_id": op.id,
-                "operation": f"{op.operation_number} - {op.operation_name}",
-                "machine": (
-                    f"{machine.make} {machine.model}".strip()
-                    if machine else None
-                ),
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time": item.planned_end_time,
-            }
-            for item, op, machine in rows
-        ]
-
-    reschedule_rows = (
-        db.query(Rescheduling, Operation, Machine)
-        .join(Operation, Operation.id == Rescheduling.operation_id)
-        .outerjoin(Machine, Machine.id == Rescheduling.machine_id)
-        .filter(
-            Rescheduling.order_id == sale_order_id,
-            Rescheduling.part_id == part_id,
-            Rescheduling.status.in_(["scheduled", "rescheduled"]),
-        )
-        .order_by(Rescheduling.start_time.asc(), Rescheduling.id.asc())
-        .all()
-    )
-
-    return [
-        {
-            "operation_id": op.id,
-            "operation": f"{op.operation_number} - {op.operation_name}",
-            "machine": (
-                f"{machine.make} {machine.model}".strip()
-                if machine else None
-            ),
-            "planned_start_time": item.start_time,
-            "planned_end_time": item.end_time,
-        }
-        for item, op, machine in reschedule_rows
-    ]
 
 
 def _build_active_part_operations(
@@ -4321,7 +4380,13 @@ def _build_active_part_operations(
     planned_rows: List[dict],
     consolidated: bool = False,
 ) -> List[dict]:
-    """Attach actual times; optionally consolidate multi-day rows per operation."""
+    """
+    If rows already come from _build_part_operations_for_pps, return as-is.
+    Otherwise attach actual times (legacy path).
+    """
+    if planned_rows and "current_start_time" in planned_rows[0]:
+        return planned_rows
+
     if not consolidated:
         return [
             _build_active_part_operation_row(
@@ -4343,9 +4408,15 @@ def _build_active_part_operations(
             continue
 
         group = operation_groups[op_id]
-        if row["planned_start_time"] < group["planned_start_time"]:
+        if row["planned_start_time"] and (
+            group["planned_start_time"] is None
+            or row["planned_start_time"] < group["planned_start_time"]
+        ):
             group["planned_start_time"] = row["planned_start_time"]
-        if row["planned_end_time"] > group["planned_end_time"]:
+        if row["planned_end_time"] and (
+            group["planned_end_time"] is None
+            or row["planned_end_time"] > group["planned_end_time"]
+        ):
             group["planned_end_time"] = row["planned_end_time"]
 
     return [
@@ -4359,7 +4430,10 @@ def _build_active_part_operations(
         )
         for group in sorted(
             operation_groups.values(),
-            key=lambda g: (g["planned_start_time"], g["operation_id"]),
+            key=lambda g: (
+                g["planned_start_time"] or datetime.max,
+                g["operation_id"],
+            ),
         )
     ]
 
@@ -4485,12 +4559,12 @@ def get_part_operation_details(
 ):
     """
     Dropdown endpoint for In-House Parts UI.
-    Returns operation, machine, planned start and planned end for one part.
 
-    Active parts return one row per operation (multi-day blocks consolidated to
-    earliest planned start and latest planned end). Falls back to live
-    rescheduling_items when the part was scheduled dynamically.
-    Completed parts return actual operation history with message "completed".
+    Active parts return ALL process-plan operations (including completed):
+      - planned_*  → frozen planned_schedule_items (use on part heading)
+      - current_*  → live rescheduling or production actuals (use in dropdown)
+      - actual_*   → production logs
+    Top-level planned_start_time / planned_end_time span the part heading.
     Inactive / missing parts return `{ "message": "Part is deactivated", "operations": [] }`.
     """
     try:
@@ -4517,11 +4591,15 @@ def get_part_operation_details(
         status_value = part_status[0] if part_status else None
 
         if status_value == "completed":
+            operations = _build_part_operations_for_pps(db, sale_order_id, part_id)
+            part_planned_start, part_planned_end = _part_level_planned_window(operations)
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "message": "completed",
-                "operations": _build_completed_part_operations(db, sale_order_id, part_id),
+                "planned_start_time": part_planned_start,
+                "planned_end_time": part_planned_end,
+                "operations": operations,
             }
 
         if status_value != "active":
@@ -4529,6 +4607,8 @@ def get_part_operation_details(
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "message": "Part is deactivated",
+                "planned_start_time": None,
+                "planned_end_time": None,
                 "operations": []
             }
 
@@ -4537,26 +4617,30 @@ def get_part_operation_details(
             .order_by(ScheduleHistory.generated_at.desc())
             .first()
         )
-        if not latest:
+        schedule_history_id = latest.id if latest else None
+
+        operations = _build_part_operations_for_pps(
+            db, sale_order_id, part_id, schedule_history_id
+        )
+        if not operations and not latest:
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "schedule_history_id": None,
                 "message": "No schedule found. Please generate a schedule first.",
+                "planned_start_time": None,
+                "planned_end_time": None,
                 "operations": []
             }
-        schedule_history_id = latest.id
 
-        planned_rows = _fetch_active_part_planned_rows(
-            db, sale_order_id, part_id, schedule_history_id
-        )
-        operations = _build_active_part_operations(db, planned_rows, consolidated=True)
-
+        part_planned_start, part_planned_end = _part_level_planned_window(operations)
         return {
             "sale_order_id": sale_order_id,
             "part_id": part_id,
             "schedule_history_id": schedule_history_id,
-            "operations": operations
+            "planned_start_time": part_planned_start,
+            "planned_end_time": part_planned_end,
+            "operations": operations,
         }
 
     except HTTPException:
@@ -4572,12 +4656,10 @@ def get_part_operation_details_consolidated(
     db: Session = Depends(get_db)
 ):
     """
-    Consolidated version of part-operation-details endpoint.
-    If an operation spans multiple days, consolidates into a single entry
-    with earliest start time and latest end time.
+    Same payload as part-operation-details (operations already consolidated
+    per operation_id with earliest start / latest end).
     """
     try:
-        # Optional validation: order + part should exist for this order's product
         order = db.query(Order).filter(Order.id == sale_order_id).first()
         if not order:
             raise HTTPException(404, "Order not found")
@@ -4600,12 +4682,16 @@ def get_part_operation_details_consolidated(
         status_value = part_status[0] if part_status else None
 
         if status_value == "completed":
+            operations = _build_part_operations_for_pps(db, sale_order_id, part_id)
+            part_planned_start, part_planned_end = _part_level_planned_window(operations)
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "part_name": part.part_name,
                 "message": "completed",
-                "operations": _build_completed_part_operations(db, sale_order_id, part_id),
+                "planned_start_time": part_planned_start,
+                "planned_end_time": part_planned_end,
+                "operations": operations,
             }
 
         if status_value != "active":
@@ -4614,6 +4700,8 @@ def get_part_operation_details_consolidated(
                 "part_id": part_id,
                 "part_name": part.part_name,
                 "message": "Part is deactivated",
+                "planned_start_time": None,
+                "planned_end_time": None,
                 "operations": []
             }
 
@@ -4622,30 +4710,31 @@ def get_part_operation_details_consolidated(
             .order_by(ScheduleHistory.generated_at.desc())
             .first()
         )
-        if not latest:
+        schedule_history_id = latest.id if latest else None
+        operations = _build_part_operations_for_pps(
+            db, sale_order_id, part_id, schedule_history_id
+        )
+        if not operations and not latest:
             return {
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "part_name": part.part_name,
                 "schedule_history_id": None,
                 "message": "No schedule found. Please generate a schedule first.",
+                "planned_start_time": None,
+                "planned_end_time": None,
                 "operations": []
             }
-        schedule_history_id = latest.id
 
-        planned_rows = _fetch_active_part_planned_rows(
-            db, sale_order_id, part_id, schedule_history_id
-        )
-        consolidated_operations = _build_active_part_operations(
-            db, planned_rows, consolidated=True
-        )
-
+        part_planned_start, part_planned_end = _part_level_planned_window(operations)
         return {
             "sale_order_id": sale_order_id,
             "part_id": part_id,
             "part_name": part.part_name,
             "schedule_history_id": schedule_history_id,
-            "operations": consolidated_operations
+            "planned_start_time": part_planned_start,
+            "planned_end_time": part_planned_end,
+            "operations": operations,
         }
 
     except HTTPException:
@@ -5908,7 +5997,7 @@ def get_machine_operations(
                 and int(work_due.get("available_quantity") or 0) > 0
             ):
                 activation_block = get_machine_breakdown_block_message(
-                    db, machine_id, datetime.now()
+                    db, machine_id, now_ist()
                 )
 
             production_block = get_operator_activation_block_reason(
@@ -6627,11 +6716,11 @@ def update_operation_status(
         op_status.status = new_status
         
         if new_status == "inprogress" and old_status != "inprogress":
-            op_status.started_at = datetime.now()
+            op_status.started_at = now_ist()
         elif new_status == "completed" and old_status != "completed":
-            op_status.completed_at = datetime.now()
+            op_status.completed_at = now_ist()
         
-        op_status.updated_at = datetime.now()
+        op_status.updated_at = now_ist()
         
         db.commit()
         db.refresh(op_status)
@@ -6665,7 +6754,7 @@ def initialize_machine_status(
     This should be called when setting up a new machine or resetting status.
     """
     try:
-        current_time = datetime.now()
+        current_time = now_ist()
         
         # Check if machine exists
         machine = db.query(Machine).filter(Machine.id == machine_id).first()
@@ -6832,7 +6921,7 @@ def activate_job_card(
                 raise HTTPException(400, machine_pending_review)
 
         breakdown_block = get_machine_breakdown_block_message(
-            db, machine_id, datetime.now()
+            db, machine_id, now_ist()
         )
         if breakdown_block:
             logger.warning(
@@ -6848,7 +6937,7 @@ def activate_job_card(
             raise HTTPException(400, breakdown_block)
 
         # Create or update production log
-        current_time = datetime.now()
+        current_time = now_ist()
         current_date = current_time.date()
         current_time_only = current_time.time()
         
@@ -6932,24 +7021,6 @@ def activate_job_card(
                 ),
             },
         )
-        
-        try:
-            from live_reconciliation import _safe_reconcile_after_event
-            _safe_reconcile_after_event(
-                db,
-                trigger="activation",
-                operation_id=operation_id,
-                part_id=rescheduling_item.part_id,
-            )
-        except Exception:
-            logger.exception(
-                "Live reconciliation after activation failed",
-                extra={
-                    "event": "live_reconciliation_hook_failed",
-                    "trigger": "activation",
-                    "operation_id": operation_id,
-                },
-            )
 
         return {
             "message": "Job card activated successfully",
@@ -6997,8 +7068,8 @@ def complete_job_card(
         
         # Update status and completion time
         op_status.status = "completed"
-        op_status.completed_at = datetime.now()
-        op_status.updated_at = datetime.now()
+        op_status.completed_at = now_ist()
+        op_status.updated_at = now_ist()
         
         # Ensure started_at is set if it wasn't already
         if not op_status.started_at:
@@ -7030,24 +7101,6 @@ def complete_job_card(
         except Exception as reschedule_error:
             print(f"[ERROR] Dynamic reschedule failed after completing operation {operation_id}: {reschedule_error}")
             # Don't fail the completion if reschedule fails, but log it
-
-        try:
-            from live_reconciliation import _safe_reconcile_after_event
-            _safe_reconcile_after_event(
-                db,
-                trigger="completion",
-                operation_id=operation_id,
-                part_id=op_status.part_id,
-            )
-        except Exception:
-            logger.exception(
-                "Live reconciliation after completion failed",
-                extra={
-                    "event": "live_reconciliation_hook_failed",
-                    "trigger": "completion",
-                    "operation_id": operation_id,
-                },
-            )
         
         return {
             "id": op_status.id,
@@ -7175,7 +7228,7 @@ def cleanup_all_operation_status(
             "inactive_cleanup": inactive_result,
             "final_state": final_report,
             "message": "Comprehensive cleanup completed",
-            "timestamp": datetime.now()
+            "timestamp": now_ist()
         }
         
     except HTTPException:
@@ -7392,14 +7445,14 @@ def upsert_out_source_status(
         part_id = operation.part_id
 
         # Default delivered_date when marking delivered
-        sent_date      = payload.sent_date or (datetime.now() if new_status in ("in_transit", "delivered") else None)
-        delivered_date = payload.delivered_date or (datetime.now() if new_status == "delivered" else None)
+        sent_date      = payload.sent_date or (now_ist() if new_status in ("in_transit", "delivered") else None)
+        delivered_date = payload.delivered_date or (now_ist() if new_status == "delivered" else None)
 
         # if new_status == "delivered" and delivered_date is None:
-        #     delivered_date = datetime.now(timezone.utc)
+        #     delivered_date = now_ist()
         # if new_status in ("in_transit", "delivered") and sent_date is None:
         #     # If we're already past 'pending' and sent_date wasn't supplied, default to now
-        #     sent_date = datetime.now(timezone.utc)
+        #     sent_date = now_ist()
 
         if new_status == "delivered" and sent_date and delivered_date and delivered_date < sent_date:
             raise HTTPException(400, "delivered_date cannot be earlier than sent_date")
@@ -7548,9 +7601,9 @@ def update_out_source_status(
                 raise HTTPException(400, f"Invalid status '{payload.status}'.")
             row.status = s
             if s in ("in_transit", "delivered") and row.sent_date is None:
-                row.sent_date = payload.sent_date or datetime.now()
+                row.sent_date = payload.sent_date or now_ist()
             if s == "delivered":
-                row.delivered_date = payload.delivered_date or datetime.now()
+                row.delivered_date = payload.delivered_date or now_ist()
 
         # if payload.sent_date is not None:
         #     row.sent_date = payload.sent_date
@@ -7565,7 +7618,7 @@ def update_out_source_status(
         #         )
         #     row.status = s
         #     if s == "delivered" and row.delivered_date is None:
-        #         row.delivered_date = datetime.now(timezone.utc)
+        #         row.delivered_date = now_ist()
 
         # Final sanity
         if row.sent_date and row.delivered_date and row.delivered_date < row.sent_date:
@@ -7688,57 +7741,105 @@ def get_inprogress_operations_by_machine(
 ):
     """
     Get all operations that are currently in progress for a specific machine.
-    
-    Args:
-        machine_id: ID of the machine to get in-progress operations for
-        
-    Returns:
-        List of operations with order_id, part_id, operation_id, and status
+
+    Source of truth is scheduling.production_logs (not the operation_status table):
+    the latest production log per operation_id is used, and only if that
+    latest log's status column is 'inprogress'.
     """
     try:
-        # Check if machine exists
         machine = db.query(Machine).filter(Machine.id == machine_id).first()
         if not machine:
             raise HTTPException(404, f"Machine with ID {machine_id} not found")
 
-        # Query operations with status 'inprogress' for the specific machine
+        machine_name = (
+            f"{machine.make} {machine.model}"
+            if machine.make and machine.model
+            else machine.make or "Unknown"
+        )
+
+        latest_log_ids = (
+            db.query(func.max(ProductionLog.id).label("log_id"))
+            .group_by(ProductionLog.operation_id)
+            .subquery()
+        )
+
         inprogress_operations = (
-            db.query(OperationStatus, Operation, Part, Machine)
-            .join(Operation, Operation.id == OperationStatus.operation_id)
+            db.query(ProductionLog, Operation, Part)
+            .join(
+                latest_log_ids,
+                ProductionLog.id == latest_log_ids.c.log_id,
+            )
+            .join(Operation, Operation.id == ProductionLog.operation_id)
             .join(Part, Part.id == Operation.part_id)
-            .join(Machine, Machine.id == Operation.machine_id)
             .filter(
-                OperationStatus.status == 'inprogress',
-                Operation.machine_id == machine_id
+                ProductionLog.status == "inprogress",
+                ProductionLog.machine_id == machine_id,
             )
             .all()
         )
 
-        # Build response
+        operation_ids = [operation.id for _, operation, _ in inprogress_operations]
+        order_id_by_operation = {}
+        if operation_ids:
+            for op_id, order_id in (
+                db.query(Rescheduling.operation_id, Rescheduling.order_id)
+                .filter(
+                    Rescheduling.operation_id.in_(operation_ids),
+                    Rescheduling.status.in_(["scheduled", "rescheduled"]),
+                )
+                .all()
+            ):
+                order_id_by_operation.setdefault(op_id, order_id)
+
+            missing_ops = [
+                operation
+                for _, operation, _ in inprogress_operations
+                if operation.id not in order_id_by_operation
+            ]
+            if missing_ops:
+                part_ids = {operation.part_id for operation in missing_ops}
+                order_id_by_part = {
+                    part_id: order_id
+                    for part_id, order_id in (
+                        db.query(OrderPartPriority.part_id, OrderPartPriority.order_id)
+                        .filter(
+                            OrderPartPriority.part_id.in_(part_ids),
+                            OrderPartPriority.status == "active",
+                        )
+                        .all()
+                    )
+                }
+                for operation in missing_ops:
+                    order_id_by_operation[operation.id] = order_id_by_part.get(
+                        operation.part_id
+                    )
+
         operations_list = []
-        for op_status, operation, part, machine in inprogress_operations:
-            operation_data = {
-                "order_id": op_status.order_id,
+        for log, operation, part in inprogress_operations:
+            started_at = None
+            if log.from_date and log.from_time:
+                started_at = datetime.combine(log.from_date, log.from_time)
+            operations_list.append({
+                "order_id": order_id_by_operation.get(operation.id),
                 "part_id": operation.part_id,
                 "operation_id": operation.id,
-                "status": op_status.status,
-                "started_at": op_status.started_at,
+                "status": log.status,
+                "started_at": started_at,
                 "operation_number": operation.operation_number,
                 "operation_name": operation.operation_name,
                 "part_number": part.part_number,
                 "part_name": part.part_name,
                 "machine_id": machine.id,
-                "machine_name": f"{machine.make} {machine.model}" if machine.make and machine.model else machine.make or "Unknown"
-            }
-            operations_list.append(operation_data)
+                "machine_name": machine_name,
+            })
 
         return {
             "machine_id": machine_id,
-            "machine_name": f"{machine.make} {machine.model}" if machine.make and machine.model else machine.make or "Unknown",
+            "machine_name": machine_name,
             "total_inprogress_operations": len(operations_list),
-            "operations": operations_list
+            "operations": operations_list,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -7947,11 +8048,69 @@ def view_rescheduling_items(db: Session = Depends(get_db)):
         raise HTTPException(500, f"Failed to view rescheduling items: {str(e)}")
 
 
+def _run_dynamic_reschedule_job(
+    part_id: Optional[int] = None,
+    op_id: Optional[int] = None,
+) -> None:
+    from algorithm import dynamic_reschedule
+
+    db = SessionLocal()
+    try:
+        dynamic_reschedule(
+            db,
+            triggered_by_part_id=part_id,
+            triggered_by_op_id=op_id,
+        )
+    except Exception:
+        logger.exception(
+            "Background dynamic reschedule failed",
+            extra={
+                "event": "dynamic_reschedule_failed",
+                "part_id": part_id,
+                "operation_id": op_id,
+            },
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 @router.post("/dynamic-reschedule")
 def run_dynamic_reschedule(
     part_id: Optional[int] = None,   # pass from frontend after log submission
     op_id:   Optional[int] = None,
-    db: Session = Depends(get_db)
 ):
-    result = dynamic_reschedule(db, triggered_by_part_id=part_id, triggered_by_op_id=op_id)
-    return result
+    """
+    Queue a full (or part-scoped) live reschedule and return immediately.
+
+    The factory walk can take minutes; holding this HTTP request open is what
+    left the Actual Schedule OK button spinning.
+    """
+    Thread(
+        target=_run_dynamic_reschedule_job,
+        args=(part_id, op_id),
+        daemon=True,
+        name="dyn-reschedule-manual",
+    ).start()
+    logger.info(
+        "Queued background dynamic reschedule",
+        extra={
+            "event": "dynamic_reschedule_queued",
+            "part_id": part_id,
+            "operation_id": op_id,
+        },
+    )
+    return {
+        "success": True,
+        "queued": True,
+        "message": "Dynamic reschedule started in the background.",
+        "reschedule_version": None,
+        "parts_rescheduled": 0,
+        "operations_inserted": 0,
+        "skipped_parts": [],
+        "skipped_orders": [],
+        "parts_without_operations": [],
+    }

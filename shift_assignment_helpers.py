@@ -1,5 +1,7 @@
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Optional
+
+from time_utils import now_ist
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -109,7 +111,7 @@ def priority_changed_by_audit(user: AccessUserModel) -> dict:
         "user_id": user.id,
         "priority_changed_by": user.role,
         "name": user.user_name,
-        "priority_changed_at": datetime.now(timezone.utc).isoformat(),
+        "priority_changed_at": now_ist().isoformat(),
     }
 
 

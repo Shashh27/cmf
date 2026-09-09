@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date
+from time_utils import now_ist
 import logging
 
 from assignment_notifications import notify_operator_assignment
@@ -454,7 +455,7 @@ def update_operator_shift_for_machine(
         assignment.shift_config_id = data.shift_config_id
 
     assignment.assigned_by_id = assigner.id
-    assignment.updated_at = datetime.utcnow()
+    assignment.updated_at = now_ist()
     
     db.commit()
     db.refresh(assignment)
@@ -706,7 +707,7 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
 # ---------------- GET ALL ----------------
 @router.get("/", response_model=list[ShiftHoursConfigResponse])
 def get_all_shift_configs(year: int = None, db: Session = Depends(get_db)):
-    today = datetime.today()
+    today = now_ist()
     
     # Default to current year if not provided
     if year is None:

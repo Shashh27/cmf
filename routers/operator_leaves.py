@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date
+from time_utils import now_ist
 import logging
 
 from DB import AccessUser as AccessUserModel, OperatorLeave
@@ -297,7 +298,7 @@ def update_leave(
             detail=f"Operator already has a leave request starting on {from_date}. An operator can only have one leave per start date."
         )
     
-    leave.updated_at = datetime.utcnow()
+    leave.updated_at = now_ist()
     
     db.commit()
     db.refresh(leave)
@@ -398,7 +399,7 @@ def approve_leave(
     # Update status and approver
     leave.status = status_update.status
     leave.approved_by = status_update.approved_by
-    leave.updated_at = datetime.utcnow()
+    leave.updated_at = now_ist()
     
     db.commit()
     db.refresh(leave)

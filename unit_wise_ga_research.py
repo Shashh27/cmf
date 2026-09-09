@@ -62,6 +62,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from time_utils import now_ist
+
 from sqlalchemy.orm import Session
 
 from DB.models.configuration import Machine
@@ -470,7 +472,7 @@ def decode_activity_priority(
             "objectives": evaluate_segments([], due_by_order={}),
         }
 
-    now = _strip_tz(now) or datetime.now()
+    now = _strip_tz(now) or now_ist()
     machine_free: Dict[int, datetime] = {}
     machine_last_ctx: Dict[int, Tuple[int, int]] = {}
     _freeze_active_machines(db, machine_free, now)
@@ -540,6 +542,7 @@ def decode_activity_priority(
                     machine_free,
                     unit_ready[(act.part_id, act.unit_index)],
                     preferred_id=act.preferred_id,
+                    hard_pin=True,
                 )
             else:
                 gene = 0
@@ -552,6 +555,7 @@ def decode_activity_priority(
                         machine_free,
                         unit_ready[(act.part_id, act.unit_index)],
                         preferred_id=act.preferred_id,
+                        hard_pin=False,
                     )
             if machine is None:
                 remaining.remove(aid)
@@ -1340,28 +1344,29 @@ def optimize_unit_plan_research(
     policy: str = "balanced",
     committed_lead_time: Optional[datetime] = None,
     debug: bool = False,
+    pin_preferred: Optional[bool] = None,
+    preferred_machine_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Multi-run NSGA-II optimizer with Policy Engine for final schedule selection.
 
-    Architecture: Greedy → NSGA-II → Pareto Front → Policy Engine → Final Schedule
-
-    Parameters
-    ----------
-    db : Session
-    scope : list of scope dicts (part, order, qty, priority, activation)
-    engine : SchedulerEngine instance
-    now : reference time (defaults to datetime.now())
-    config_overrides : dict of Nsga2Config field overrides
-    policy : policy name for PolicyEngine selection (default "balanced")
-    committed_lead_time : optional global delivery commitment datetime
-    debug : if True, attach profiling metrics to the response (dev mode only)
+    pin_preferred / preferred_machine_id: forwarded from Intelligent Scheduler UI.
     """
     cfg = Nsga2Config.from_env(config_overrides)
-    now = _strip_tz(now) or datetime.now()
+    if pin_preferred is not None:
+        cfg.pin_preferred = bool(pin_preferred)
+    now = _strip_tz(now) or now_ist()
 
     # ── Greedy baseline ──────────────────────────────────────────────
-    greedy = simulate_unit_plan(db, scope, engine=engine, now=now, source="greedy")
+    greedy = simulate_unit_plan(
+        db,
+        scope,
+        engine=engine,
+        now=now,
+        source="greedy",
+        pin_preferred=pin_preferred,
+        preferred_machine_id=preferred_machine_id,
+    )
     due_by_order = {
         item["order"].id: getattr(item["order"], "due_date", None) for item in scope
     }

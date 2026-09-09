@@ -1,7 +1,9 @@
 """Helpers for production log review (supervisor or manufacturing coordinator)."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from time_utils import now_ist
 
 from fastapi import HTTPException, status
 from sqlalchemy import text
@@ -229,7 +231,7 @@ def revert_completed_parts_if_logs_cleared(db: Session, part_ids: set) -> None:
             .all()
         ):
             pps_record.status = "inactive"
-            pps_record.updated_at = datetime.now(timezone.utc)
+            pps_record.updated_at = now_ist()
             changed = True
 
     if changed:

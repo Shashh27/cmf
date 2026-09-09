@@ -10,12 +10,32 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     ToolWithPart as ToolWithPartModel
 )
+from DB.models.scheduling import PartScheduleStatus
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
 
 router = APIRouter(
     prefix="/operations",
     tags=["operations"]
 )
+
+_ACTIVE_MACHINE_CHANGE_BLOCKED = (
+    "cannot change machine when job is active, "
+    "please inactivate the job to change the machine"
+)
+
+
+def _part_has_active_schedule(db: Session, part_id: int) -> bool:
+    if not part_id:
+        return False
+    return (
+        db.query(PartScheduleStatus.id)
+        .filter(
+            PartScheduleStatus.part_id == part_id,
+            PartScheduleStatus.status == "active",
+        )
+        .first()
+        is not None
+    )
 
 
 @router.post("/", response_model=Operation, status_code=status.HTTP_201_CREATED)
@@ -65,6 +85,13 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
         )
 
     update_data = operation.model_dump(exclude_unset=True)
+    if "machine_id" in update_data and update_data["machine_id"] != db_operation.machine_id:
+        if _part_has_active_schedule(db, db_operation.part_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_ACTIVE_MACHINE_CHANGE_BLOCKED,
+            )
+
     for field, value in update_data.items():
         setattr(db_operation, field, value)
 

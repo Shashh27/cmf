@@ -19,7 +19,7 @@ from sqlalchemy import (
 )
 from ..database import Base
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from time_utils import now_ist
 from datetime import date 
 from ..database import Base
 
@@ -79,7 +79,7 @@ class MachineDowntime(Base):
 
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=now_ist)
 
     # ?machine = relationship("Machine", back_populates="downtimes")
 
@@ -333,8 +333,8 @@ class MachineOperatorShiftAssignment(Base):
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     shift_config_id = Column(Integer, ForeignKey("scheduling.shift_hours_configuration.id"), nullable=False)
     assigned_by_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
     # Relationships
     machine = relationship("Machine", foreign_keys=[machine_id])

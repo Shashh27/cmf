@@ -113,22 +113,6 @@ async def startup_event():
     logger.info("Documentation available at /docs")
     logger.info("Prometheus metrics available at /metrics")
 
-    try:
-        from live_reconciliation import start_live_reconciliation_scheduler
-        start_live_reconciliation_scheduler()
-    except Exception:
-        logger.exception("Failed to start live reconciliation scheduler")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Stop the in-process live reconciliation scheduler."""
-    try:
-        from live_reconciliation import shutdown_live_reconciliation_scheduler
-        shutdown_live_reconciliation_scheduler()
-    except Exception:
-        logger.exception("Failed to stop live reconciliation scheduler")
-
 
 @app.get("/health")
 def health_check():

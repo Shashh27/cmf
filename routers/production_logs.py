@@ -3,9 +3,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime
+from time_utils import now_ist
+import threading
 
-from DB.database import get_db
+from DB.database import SessionLocal, get_db
 from DB.models import ProductionLog, AccessUser, Operation
 from DB.models.configuration import Machine
 from DB.models.inventory import RawMaterialUsage, RawMaterialStock, RawMaterial
@@ -653,6 +655,169 @@ def bulk_delete_production_logs(
     
     return None
 
+
+def _reschedule_after_production_review(log_id: int, operation_id: int) -> None:
+    """
+    Re-plan the live schedule after a reviewer action.
+
+    Runs on a background thread so PUT /production-logs/{id}/status can
+    return as soon as the log itself is saved. Uses its own DB session
+    because the request session is closed when the response is sent.
+    """
+    from algorithm import dynamic_reschedule
+    from DB.models.oms import Operation, OrderPartPriority
+    from DB.models.scheduling import PartScheduleStatus, Rescheduling
+    from sqlalchemy import text as sa_text
+    from unit_wise_scheduler import rebuild_unit_schedule, unit_wise_enabled
+
+    db = SessionLocal()
+    try:
+        rescheduling_row = db.query(Rescheduling).filter(
+            Rescheduling.operation_id == operation_id,
+            Rescheduling.status.in_(["scheduled", "rescheduled"]),
+        ).first()
+        part_id = None
+        if rescheduling_row:
+            part_id = rescheduling_row.part_id
+        else:
+            operation = db.query(Operation).filter(Operation.id == operation_id).first()
+            if operation:
+                part_id = operation.part_id
+
+        dynamic_reschedule(
+            db,
+            triggered_by_part_id=None,
+            triggered_by_op_id=operation_id,
+        )
+        logger.info(
+            "Dynamic reschedule triggered after production review",
+            extra={
+                "event": "dynamic_reschedule_triggered",
+                "trigger_source": "production_reviewed",
+                "log_id": log_id,
+                "operation_id": operation_id,
+                "part_id": part_id,
+            },
+        )
+
+        try:
+            if unit_wise_enabled():
+                uw = rebuild_unit_schedule(
+                    db,
+                    part_id=part_id,
+                    commit=True,
+                )
+                logger.info(
+                    "Unit-wise rebuild after production review",
+                    extra={
+                        "event": "unit_wise_rebuild_triggered",
+                        "trigger_source": "production_reviewed",
+                        "part_id": part_id,
+                        "rows_inserted": uw.get("rows_inserted"),
+                        "schedule_version": uw.get("schedule_version"),
+                    },
+                )
+        except Exception as uw_err:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            logger.exception(
+                "Unit-wise rebuild failed after review (batch dynamic OK)",
+                extra={
+                    "event": "unit_wise_rebuild_failed",
+                    "part_id": part_id,
+                    "error": str(uw_err),
+                },
+            )
+
+        if part_id:
+            op_ids = [
+                row[0] for row in db.query(Operation.id)
+                .filter(Operation.part_id == part_id).all()
+            ]
+            if op_ids:
+                completed_count_row = db.execute(
+                    sa_text("""
+                        SELECT COUNT(DISTINCT operation_id)
+                        FROM scheduling.production_logs
+                        WHERE operation_id = ANY(:op_ids)
+                          AND status = 'completed'
+                    """),
+                    {"op_ids": op_ids},
+                ).fetchone()
+                completed_count = completed_count_row[0] if completed_count_row else 0
+
+                if completed_count == len(op_ids):
+                    _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050
+                    db.execute(
+                        sa_text("SELECT pg_advisory_xact_lock(:key)"),
+                        {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY},
+                    )
+
+                    priority_record = db.query(OrderPartPriority).filter(
+                        OrderPartPriority.part_id == part_id,
+                        OrderPartPriority.status == "active",
+                    ).first()
+                    if priority_record:
+                        sale_order_id_for_part = priority_record.order_id
+                        priority_record.status = "completed"
+                        priority_record.priority = 0
+                        db.flush()
+
+                        active_rows = (
+                            db.query(OrderPartPriority)
+                            .filter(
+                                OrderPartPriority.status == "active",
+                                OrderPartPriority.priority > 0,
+                            )
+                            .order_by(
+                                OrderPartPriority.priority.asc(),
+                                OrderPartPriority.id.asc(),
+                            )
+                            .all()
+                        )
+                        for i, row in enumerate(active_rows, start=1):
+                            row.priority = i
+
+                        pps_record = db.query(PartScheduleStatus).filter(
+                            PartScheduleStatus.sale_order_id == sale_order_id_for_part,
+                            PartScheduleStatus.part_id == part_id,
+                        ).first()
+                        if pps_record:
+                            pps_record.status = "completed"
+                            pps_record.updated_at = now_ist()
+                            pps_record.start_date = None
+
+                        db.commit()
+                        logger.info(
+                            "Part marked completed",
+                            extra={
+                                "event": "part_marked_completed",
+                                "part_id": part_id,
+                                "order_id": sale_order_id_for_part,
+                                "completed_operations": len(op_ids),
+                                "remaining_active_parts": len(active_rows),
+                            },
+                        )
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception(
+            "Dynamic reschedule after production review failed",
+            extra={
+                "event": "dynamic_reschedule_failed",
+                "trigger_source": "production_reviewed",
+                "log_id": log_id,
+                "operation_id": operation_id,
+            },
+        )
+    finally:
+        db.close()
+
+
 @router.put("/{log_id}/status", response_model=ProductionLogResponse)
 def update_production_log_status(
     log_id: int,
@@ -856,205 +1021,26 @@ def update_production_log_status(
     )
 
 
-    # ── TRIGGER DYNAMIC RESCHEDULE ──────────────────────────────────────── #
-    # After supervisor approves (completed), marks rework, or rejects, re-plan remaining
-    # quantity for this part's entire operation chain in rescheduling_items.
+    # Re-plan remaining work off the request thread. A full factory
+    # reschedule here is what made Swagger sit on LOADING for minutes;
+    # the log itself is already committed above.
     if db_log.status in ["completed", "inprogress", "rework", "rejected"]:
-        try:
-            from algorithm import dynamic_reschedule
-            from DB.models.scheduling import Rescheduling
-            # Get part_id from Rescheduling or Operation (backward compatibility)
-            rescheduling_row = db.query(Rescheduling).filter(
-                Rescheduling.operation_id == db_log.operation_id,
-                Rescheduling.status.in_(['scheduled', 'rescheduled'])
-            ).first()
-            part_id = None
-            if rescheduling_row:
-                part_id = rescheduling_row.part_id
-            else:
-                operation = db.query(Operation).filter(Operation.id == db_log.operation_id).first()
-                if operation:
-                    part_id = operation.part_id
-            
-            dynamic_reschedule(
-                db,
-                triggered_by_part_id = None,              # full reschedule — re-plans ALL active parts
-                triggered_by_op_id   = db_log.operation_id
-            )
-            logger.info(
-                "Dynamic reschedule triggered after production review",
-                extra={
-                    "event": "dynamic_reschedule_triggered",
-                    "trigger_source": "production_reviewed",
-                    "log_id": log_id,
-                    "operation_id": db_log.operation_id,
-                    "part_id": part_id,
-                    "to_status": db_log.status,
-                },
-            )
-            try:
-                from live_reconciliation import _safe_reconcile_after_event
-                _safe_reconcile_after_event(
-                    db,
-                    trigger="production_review",
-                    operation_id=db_log.operation_id,
-                    part_id=part_id,
-                )
-            except Exception:
-                logger.exception(
-                    "Live reconciliation after production review failed",
-                    extra={
-                        "event": "live_reconciliation_hook_failed",
-                        "trigger": "production_review",
-                        "operation_id": db_log.operation_id,
-                    },
-                )
+        threading.Thread(
+            target=_reschedule_after_production_review,
+            args=(log_id, db_log.operation_id),
+            daemon=True,
+            name=f"dyn-reschedule-log-{log_id}",
+        ).start()
+        logger.info(
+            "Queued background reschedule after production review",
+            extra={
+                "event": "dynamic_reschedule_queued",
+                "trigger_source": "production_reviewed",
+                "log_id": log_id,
+                "operation_id": db_log.operation_id,
+            },
+        )
 
-            # Unit-wise greedy refresh (does not touch batch rescheduling_items)
-            try:
-                from unit_wise_scheduler import rebuild_unit_schedule, unit_wise_enabled
-
-                if unit_wise_enabled():
-                    uw = rebuild_unit_schedule(
-                        db,
-                        part_id=part_id,
-                        commit=True,
-                    )
-                    logger.info(
-                        "Unit-wise rebuild after production review",
-                        extra={
-                            "event": "unit_wise_rebuild_triggered",
-                            "trigger_source": "production_reviewed",
-                            "part_id": part_id,
-                            "rows_inserted": uw.get("rows_inserted"),
-                            "schedule_version": uw.get("schedule_version"),
-                        },
-                    )
-            except Exception as uw_err:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                logger.exception(
-                    "Unit-wise rebuild failed after review (batch dynamic OK)",
-                    extra={
-                        "event": "unit_wise_rebuild_failed",
-                        "part_id": part_id,
-                        "error": str(uw_err),
-                    },
-                )
-
-            # ── UPDATE PART STATUS TO COMPLETED IF ALL OPERATIONS DONE ──────────── #
-            if part_id:
-                from DB.models.oms import OrderPartPriority
-                from DB.models.scheduling import PartScheduleStatus
-                from sqlalchemy import text as sa_text
-
-                # Check if all operations for this part are completed
-                op_ids = [
-                    row[0] for row in db.query(Operation.id)
-                    .filter(Operation.part_id == part_id).all()
-                ]
-                if op_ids:
-                    completed_count_row = db.execute(
-                        sa_text("""
-                            SELECT COUNT(DISTINCT operation_id)
-                            FROM scheduling.production_logs
-                            WHERE operation_id = ANY(:op_ids)
-                              AND status = 'completed'
-                        """),
-                        {"op_ids": op_ids}
-                    ).fetchone()
-                    completed_count = completed_count_row[0] if completed_count_row else 0
- 
-                    # If all operations are completed, retire the part from the
-                    # live priority queue and take it off the active schedule.
-                    if completed_count == len(op_ids):
-                        # Same advisory-lock key used everywhere OrderPartPriority is
-                        # mutated (activation / deactivation / swap), so a completion
-                        # event can never race with those and produce duplicate/gappy
-                        # priorities.
-                        _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050  # "OPP" in hex
-                        db.execute(
-                            sa_text("SELECT pg_advisory_xact_lock(:key)"),
-                            {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY}
-                        )
- 
-                        priority_record = db.query(OrderPartPriority).filter(
-                            OrderPartPriority.part_id == part_id,
-                            OrderPartPriority.status == "active"
-                        ).first()
-                        if priority_record:
-                            sale_order_id_for_part = priority_record.order_id
- 
-                            # 1) Mark completed and pull it out of the active queue.
-                            #    (priority=0 mirrors the convention already used for
-                            #    deactivated rows — "not occupying a queue slot".)
-                            priority_record.status = "completed"
-                            priority_record.priority = 0
-                            db.flush()
- 
-                            # 2) Re-pack remaining active rows to 1, 2, 3, ... so the
-                            #    gap left behind is closed and swap/simulate-swap see
-                            #    a clean, contiguous sequence.
-                            active_rows = (
-                                db.query(OrderPartPriority)
-                                .filter(
-                                    OrderPartPriority.status == "active",
-                                    OrderPartPriority.priority > 0,
-                                )
-                                .order_by(
-                                    OrderPartPriority.priority.asc(),
-                                    OrderPartPriority.id.asc(),
-                                )
-                                .all()
-                            )
-                            for i, row in enumerate(active_rows, start=1):
-                                row.priority = i
- 
-                            # 3) Flip PartScheduleStatus (PPS) to 'completed' so the
-                            #    part drops out of "active parts" lists and can't be
-                            #    picked up by the scheduler again. It stays
-                            #    'completed' (not 'inactive') as long as its
-                            #    production_logs history exists — see
-                            #    _revert_completed_parts_to_inactive_if_logs_cleared,
-                            #    which drops it to 'inactive' once that history is
-                            #    cleared, matching the reactivation guard in
-                            #    /update-part-status.
-                            pps_record = db.query(PartScheduleStatus).filter(
-                                PartScheduleStatus.sale_order_id == sale_order_id_for_part,
-                                PartScheduleStatus.part_id == part_id
-                            ).first()
-                            if pps_record:
-                                pps_record.status = "completed"
-                                pps_record.updated_at = datetime.now(timezone.utc)
-                                pps_record.start_date = None
- 
-                            db.commit()
-                            logger.info(
-                                "Part marked completed",
-                                extra={
-                                    "event": "part_marked_completed",
-                                    "part_id": part_id,
-                                    "order_id": sale_order_id_for_part,
-                                    "completed_operations": len(op_ids),
-                                    "remaining_active_parts": len(active_rows),
-                                },
-                            )
-                
-        except Exception as e:
-            # Non-fatal: log the error but don't fail the approval
-            logger.exception(
-                "Dynamic reschedule after production review failed",
-                extra={
-                    "event": "dynamic_reschedule_failed",
-                    "trigger_source": "production_reviewed",
-                    "log_id": log_id,
-                    "operation_id": db_log.operation_id,
-                },
-            )
-    # ─────────────────────────────────────────────────────────────────────── #
- 
     return response
 
 @router.get("/operator/{operator_id}", response_model=List[ProductionLogResponse])
@@ -1220,7 +1206,7 @@ def submit_production_log(
             raise
         remaining_quantity = work["remaining_to_close"]
 
-        current_time = datetime.now()
+        current_time = now_ist()
 
         db_log.produced_quantity = submit_data.produced_quantity
         db_log.operator_rework_quantity = submit_data.rework_submit_quantity
@@ -1508,10 +1494,10 @@ def acknowledge_production_log(
     
     if operator_id:
         db_log.operator_acknowledged = True
-        db_log.operator_acknowledged_at = datetime.now()
+        db_log.operator_acknowledged_at = now_ist()
     elif user_id:
         db_log.acknowledged = True
-        db_log.acknowledged_at = datetime.now()
+        db_log.acknowledged_at = now_ist()
     
     db.commit()
     db.refresh(db_log)

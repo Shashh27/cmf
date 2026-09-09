@@ -111,3 +111,20 @@ class TestSchedulerDurationSplit:
         with_setup = engine._operation_duration_hours(op, 5, skip_setup=False)
         assert continuation == pytest.approx(5.0)
         assert with_setup == pytest.approx(5.0 + 25 / 60)
+
+    def test_varchar_cycle_time_string_does_not_crash(self):
+        """oms.operations.cycle_time is varchar on some rows (op 520: '01:00:00')."""
+        from algorithm import _duration_to_seconds
+
+        engine = SchedulerEngine(MagicMock())
+        op = SimpleNamespace(
+            id=520,
+            operation_number="30",
+            setup_time=time(0, 10, 0),
+            cycle_time="01:00:00",
+        )
+        hours = engine._operation_duration_hours(op, 9, skip_setup=True)
+        assert hours == pytest.approx(9.0)
+        assert _duration_to_seconds("01:00:00") == 3600
+        assert _duration_to_seconds(time(0, 10)) == 600
+        assert _duration_to_seconds(None) == 0

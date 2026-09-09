@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, date
+from time_utils import now_ist
 import calendar
 
 from DB.database import get_db
@@ -120,7 +121,7 @@ def get_machine_utilization(
     machine_id: Optional[int] = Query(None),
 ):
     if not month or not year:
-        now = datetime.now()
+        now = now_ist()
         month = month or now.month
         year = year or now.year
 

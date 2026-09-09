@@ -58,9 +58,37 @@ class TestUnitWiseHelpers:
             1: datetime(2026, 7, 24, 12, 0, 0),
             2: datetime(2026, 7, 24, 9, 0, 0),
         }
-        # Prefer machine 1 even though 2 is free earlier
-        picked = _pick_machine([m1, m2], free, ready, preferred_id=1)
+        # Hard pin: prefer machine 1 even though 2 is free earlier
+        picked = _pick_machine(
+            [m1, m2], free, ready, preferred_id=1, hard_pin=True
+        )
         assert picked.id == 1
+
+    def test_soft_pin_picks_earliest_over_preferred(self):
+        m1 = SimpleNamespace(id=1)
+        m2 = SimpleNamespace(id=2)
+        ready = datetime(2026, 7, 24, 10, 0, 0)
+        free = {
+            1: datetime(2026, 7, 24, 12, 0, 0),
+            2: datetime(2026, 7, 24, 9, 0, 0),
+        }
+        picked = _pick_machine(
+            [m1, m2], free, ready, preferred_id=1, hard_pin=False
+        )
+        assert picked.id == 2
+
+    def test_soft_pin_tie_break_uses_preferred(self):
+        m1 = SimpleNamespace(id=1)
+        m2 = SimpleNamespace(id=2)
+        ready = datetime(2026, 7, 24, 10, 0, 0)
+        free = {
+            1: datetime(2026, 7, 24, 9, 0, 0),
+            2: datetime(2026, 7, 24, 9, 0, 0),
+        }
+        picked = _pick_machine(
+            [m1, m2], free, ready, preferred_id=2, hard_pin=False
+        )
+        assert picked.id == 2
 
     def test_feature_flag_default_true(self):
         with patch.dict("os.environ", {}, clear=False):
@@ -314,21 +342,23 @@ class TestReschedulingCompletedHandoff:
         )
         assert handoff == datetime(2026, 8, 12, 13, 30, 0)
 
-    def test_completed_run_end_prefers_rescheduling_over_job_card(self):
+    def test_completed_run_end_prefers_actual_over_rescheduling_cascade(self):
+        """Production actual beats batch remaining-row start (upstream cascade)."""
         from DB.models.scheduling import ProductionLog, Rescheduling
         from unit_wise_scheduler import _completed_run_end
 
         log = SimpleNamespace(
-            to_date=datetime(2026, 8, 13).date(),
-            to_time=datetime(2026, 8, 13, 11, 38, 0).time(),
+            to_date=datetime(2026, 9, 9).date(),
+            to_time=datetime(2026, 9, 9, 10, 36, 45).time(),
+            status="completed",
         )
         ri = SimpleNamespace(
-            start_time=datetime(2026, 8, 10, 15, 7, 51),
-            end_time=datetime(2026, 8, 10, 16, 37, 51),
-            remaining_qty=5,
-            completed_qty=5,
-            total_qty=10,
-            id=18420,
+            start_time=datetime(2026, 9, 9, 12, 25, 1),
+            end_time=datetime(2026, 9, 9, 12, 29, 1),
+            remaining_qty=4,
+            completed_qty=1,
+            total_qty=5,
+            id=19626,
         )
 
         def query_router(model):
@@ -345,9 +375,9 @@ class TestReschedulingCompletedHandoff:
         db = MagicMock()
         db.query.side_effect = query_router
         end = _completed_run_end(
-            db, 536, order_id=200, qty=10, approved=5
+            db, 484, order_id=180, qty=5, approved=1
         )
-        assert end == datetime(2026, 8, 10, 15, 7, 51)
+        assert end == datetime(2026, 9, 9, 10, 36, 45)
 
     def test_partial_remaining_does_not_clamp_to_rebuild_now(self):
         """Op 536 style: 5/10 done, remaining-work starts 10 Aug — not rebuild now."""

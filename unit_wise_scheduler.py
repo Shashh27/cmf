@@ -1,6 +1,10 @@
 """
 Unit-wise greedy scheduler + NSGA-II optimizer entry via rebuild(optimizer=...).
 
+TEST BED for shop-floor utilization (manager: implicit WC pick + qty-wise
+split + unit pipelining). Does NOT write scheduling.rescheduling_items —
+batch dynamic / shop-floor Gantt stays production-safe and unchanged.
+
 Architecture
 ------------
 Greedy → NSGA-II → Pareto Front → Policy Engine → Selected Production Schedule
@@ -12,24 +16,24 @@ is still on Op10).
 After production: units 1..approved on an op are treated as done (no new
 rows). Each finished unit keeps its own end time so it can enter the next
 op immediately (Unit 1 Op20 while Unit 2+ still on Op10). Remaining units
-on the same op start from the last completed unit's end (qty 10, 5 done →
-unit 6 from 5th-unit end via rescheduling_items). Do not stamp every unit
-with the batch remaining-work start — that collapses unit-wise into batch.
+on the same op start from the last completed unit's **actual / continuity**
+end (qty 10, 5 done → unit 6 from 5th-unit end). Prefer production-log
+actual_end over batch rescheduling_items remaining-row start — the latter
+embeds upstream batch cascade and collapses pipelining (e.g. Op30 waiting
+for Op20's full remaining block).
 
 Scheduling rules (greedy):
   - Part order: oms.order_part_priorities (active, priority > 0)
   - Part earliest start: scheduling.part_schedule_status.start_date (activation)
   - No closed production yet: planned_schedule_items can floor op starts
     only for units not yet advanced by an upstream op (never before activation).
-    Batch planned starts must NOT delay a unit that already finished its
-    predecessor — that would collapse unit-wise pipelining into batch-wise.
   - Fully completed / partial upstream op: each unit's ready time is THAT
-    unit's end on the predecessor (walk remaining_qty or cycle walk-back).
-    Do not set every unit to the last unit's end — Unit 1 must enter the
-    next op as soon as it finishes.
-  - After partial complete: only the first remaining unit (unit 6 of 10)
-    is floored to the rescheduling_items remaining-work start. Later
-    remaining units follow serial placement on the machine.
+    unit's end on the predecessor.
+  - After partial complete: first remaining unit floored to same-op continuity
+    (actual end); later remaining units use earliest-free WC machine and may
+    run in parallel (qty-wise split) when UNIT_WISE_PIN_PREFERRED=false.
+  - Machine pick (test bed): default earliest available in workcenter.
+    Set UNIT_WISE_PIN_PREFERRED=true to hard-pin routing / live preferred.
   - Rework with approved=0 and a closed job card: remaining starts at
     max(ready, machine free, actual_end, now)
   - Shifts / OFF: SchedulerEngine + ShiftHoursConfiguration
@@ -39,6 +43,7 @@ Phase 2:
   - Per-machine OT: only machines with operator assignment get NEXT/OT shifts
   - Mid-shift breakdown splits segments (resume at MachineStatus.available_to)
   - Prefer machine from active job / rescheduling / operation.machine_id
+    only when UNIT_WISE_PIN_PREFERRED=true
   - Freeze machines with in-progress job cards (no start before now)
   - Rework slots after review use cycle-only (no re-setup)
 
@@ -49,11 +54,13 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, time, timezone
+from datetime import datetime, timedelta, time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
+
+from time_utils import now_ist, to_naive_ist
 
 from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Order, OrderPartPriority, Part
@@ -90,17 +97,13 @@ def unit_wise_enabled() -> bool:
 
 
 def _strip_tz(dt: Optional[datetime]) -> Optional[datetime]:
-    if dt is None:
-        return None
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    """Naive IST clock. Aware UTC values are shifted +05:30, not dropped to UTC."""
+    return to_naive_ist(dt)
 
 
-def _secs(t: Optional[time]) -> int:
-    if t is None:
-        return 0
-    return t.hour * 3600 + t.minute * 60 + t.second
+def _secs(t) -> int:
+    from algorithm import _duration_to_seconds
+    return _duration_to_seconds(t)
 
 
 def _op_number_key(operation_number: Any) -> Tuple:
@@ -122,7 +125,7 @@ def _duration(operation: Operation, skip_setup: bool) -> timedelta:
 
 def _snap_to_shift_start(dt: datetime) -> datetime:
     """If outside default shift, move to next shift start (simple Phase-1 calendar)."""
-    dt = _strip_tz(dt) or datetime.now()
+    dt = _strip_tz(dt) or now_ist()
     d = dt.date()
     start = datetime.combine(d, DEFAULT_SHIFT_START)
     end = datetime.combine(d, DEFAULT_SHIFT_END)
@@ -593,24 +596,24 @@ def _completed_run_end(
     actual_end: Optional[datetime] = None,
 ) -> Optional[datetime]:
     """
-    When remaining units may start after completed qty.
+    When remaining units may start after completed qty on THIS operation.
 
-    Prefer live rescheduling_items (remaining-work start / remaining_qty walk)
-    so unit-wise matches dynamic: qty 10, 5 done → unit 6 from 5th-unit end.
-    Fall back to closed job-card to_time when the live table has no handoff.
+    Prefer production-log actual_end (same-op continuity). Batch
+    rescheduling_items remaining-row start often embeds upstream cascade
+    (Op30 waiting for Op20's full remaining block) and collapses unit
+    pipelining — use it only when there is no actual end.
     """
-    resched = _rescheduling_completed_handoff(
+    if actual_end is None:
+        actual_end = _actual_end_for_operation(db, operation_id)
+    if actual_end is not None:
+        return actual_end
+    return _rescheduling_completed_handoff(
         db,
         operation_id,
         order_id=order_id,
         qty=qty,
         approved=approved,
     )
-    if resched is not None:
-        return resched
-    if actual_end is None:
-        actual_end = _actual_end_for_operation(db, operation_id)
-    return actual_end
 
 
 def _walk_back_cycle_ends(
@@ -701,7 +704,9 @@ def _per_unit_operation_ends(
         ends.update(_unit_ends_from_full_plan_rows(rows, qty))
 
     if is_remaining_plan and rows:
-        fifth_end = _strip_tz(rows[0].start_time) or completed_run_end
+        # Continuity end for approved units: prefer completed_run_end (actual)
+        # over batch remaining-row start (may be upstream cascade).
+        fifth_end = completed_run_end or _strip_tz(rows[0].start_time)
         if fifth_end and approved > 0:
             ends.update(_walk_back_cycle_ends(fifth_end, approved, cycle))
 
@@ -757,10 +762,19 @@ def _pick_machine(
     ready: datetime,
     preferred_id: Optional[int] = None,
     engine=None,
+    *,
+    hard_pin: bool = False,
 ) -> Optional[Machine]:
+    """
+    Pick a workcenter machine for one unit.
+
+    hard_pin=True  → always use preferred when present (explicit / shop pin).
+    hard_pin=False → earliest available in the WC (implicit / qty-wise split);
+                     preferred_id is only a tie-break when start times equal.
+    """
     if not machines:
         return None
-    if preferred_id is not None:
+    if hard_pin and preferred_id is not None:
         for m in machines:
             if m.id == preferred_id:
                 return m
@@ -777,6 +791,13 @@ def _pick_machine(
         if best_start is None or cand < best_start:
             best = m
             best_start = cand
+        elif (
+            preferred_id is not None
+            and m.id == preferred_id
+            and best_start is not None
+            and cand == best_start
+        ):
+            best = m
     return best
 
 
@@ -820,7 +841,7 @@ def _load_active_scope(
         activation = (
             _strip_tz(pss.start_date)
             or _strip_tz(getattr(pss, "created_at", None))
-            or _strip_tz(datetime.now())
+            or _strip_tz(now_ist())
         )
         scope.append(
             {
@@ -845,7 +866,7 @@ def _part_activation_start(engine, activation: Optional[datetime], now: datetime
     Earliest unit-ready time for a part = part_schedule_status activation,
     snapped onto configured shifts. Does not force rebuild 'now'.
     """
-    base = _strip_tz(activation) or _strip_tz(now) or datetime.now()
+    base = _strip_tz(activation) or _strip_tz(now) or now_ist()
     try:
         snapped = engine.adjust_to_shift(base)
         return _strip_tz(snapped) or base
@@ -862,26 +883,32 @@ def simulate_unit_plan(
     unit_order_by_part: Optional[Dict[int, List[int]]] = None,
     machine_by_slot: Optional[Dict[Tuple[int, int, int], int]] = None,
     source: str = "greedy",
+    pin_preferred: Optional[bool] = None,
+    preferred_machine_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Build in-memory unit segments for scope without writing to DB.
 
     unit_order_by_part: optional per-part processing order of unit indexes.
     machine_by_slot: optional (part_id, operation_id, unit_index) -> machine_id.
-      When set, overrides earliest/preferred picker for that slot.
-      Preferred pin still wins when UNIT_WISE_PIN_PREFERRED is on (default)
-      unless the slot override equals an allowed WC machine and pin is off.
+    pin_preferred: when True, hard-pin preferred machine (no WC qty split).
+      When False, earliest-free WC (qty-wise split). None → server default false.
+    preferred_machine_id: when pin_preferred, force this machine for ops whose
+      workcenter contains it (batch all remaining units onto that spindle).
     """
     unit_order_by_part = unit_order_by_part or {}
     machine_by_slot = machine_by_slot or {}
-    pin_preferred = os.getenv("UNIT_WISE_PIN_PREFERRED", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    if pin_preferred is None:
+        pin_preferred = os.getenv("UNIT_WISE_PIN_PREFERRED", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    else:
+        pin_preferred = bool(pin_preferred)
 
-    now = _strip_tz(now) or _strip_tz(datetime.now()) or datetime.now()
+    now = _strip_tz(now) or now_ist()
     machine_free: Dict[int, datetime] = {}
     machine_last_ctx: Dict[int, Tuple[int, int]] = {}
     machine_cache: Dict[int, Machine] = {}
@@ -930,6 +957,13 @@ def simulate_unit_plan(
             rework_due = _rework_due_for_operation(db, operation.id, qty, approved)
             machines = _machines_for_workcenter(db, operation.workcenter_id)
             preferred_id = _preferred_machine_id(db, operation, order.id)
+            # Frontend Intelligent Scheduler: explicit machine pin for this WC
+            if (
+                pin_preferred
+                and preferred_machine_id is not None
+                and any(m.id == preferred_machine_id for m in machines)
+            ):
+                preferred_id = preferred_machine_id
 
             # Preferred pin only if the machine belongs to this work center
             # (do not inject foreign-WC machines into the eligible set).
@@ -992,25 +1026,28 @@ def simulate_unit_plan(
                     unit_ready[u] = max(unit_ready[u], planned_start)
 
             remaining_to_close = max(0, qty - approved)
-            # Serial model: units approved+1..qty still to place; ensure at least
-            # remaining_to_close slots (covers rework when qty already approved).
+            # Remaining units approved+1..qty. With soft WC pick they may run
+            # in parallel on different machines (qty-wise split).
             remaining_set = set(range(approved + 1, qty + 1))
             if remaining_to_close > len(remaining_set) and rework_due > 0:
                 # Fully approved but rework still due — re-queue last rework_due units
                 for u in range(max(1, qty - rework_due + 1), qty + 1):
                     remaining_set.add(u)
 
-            # Only the first remaining unit is floored to the last completed
-            # unit's end (qty 10, 5 done → unit 6). Units 7..10 follow serial
-            # placement; they must not inherit the batch remaining-work start
-            # as their next-op predecessor.
+            # First remaining unit: same-op continuity (actual end), not batch
+            # cascade. Later units pick earliest-free WC machines and may run
+            # in parallel (qty-wise split) when pin_preferred is false.
             if completed_run_end is not None and remaining_set:
                 first_remaining = min(remaining_set)
                 unit_ready[first_remaining] = max(
                     unit_ready[first_remaining], completed_run_end
                 )
-                if preferred_id is not None:
-                    machine_free[preferred_id] = completed_run_end
+                # Only hard-pin path anchors the preferred machine clock;
+                # soft pick must leave other WC machines free for parallel units.
+                if pin_preferred and preferred_id is not None:
+                    existing = machine_free.get(preferred_id)
+                    if existing is None or completed_run_end > existing:
+                        machine_free[preferred_id] = completed_run_end
 
             remaining_units = [
                 u for u in order_units if u in remaining_set and u not in blocked_units
@@ -1030,31 +1067,16 @@ def simulate_unit_plan(
                 override_mid = machine_by_slot.get(slot_key)
 
                 machine = None
-                if pin_preferred and preferred_id is not None:
-                    machine = _pick_machine(
-                        machines,
-                        machine_free,
-                        unit_ready[u],
-                        preferred_id=preferred_id,
-                        engine=engine,
-                    )
-                elif override_mid is not None:
+                if override_mid is not None and not pin_preferred:
                     machine = next((m for m in machines if m.id == override_mid), None)
-                    if machine is None:
-                        machine = _pick_machine(
-                            machines,
-                            machine_free,
-                            unit_ready[u],
-                            preferred_id=preferred_id,
-                            engine=engine,
-                        )
-                else:
+                if machine is None:
                     machine = _pick_machine(
                         machines,
                         machine_free,
                         unit_ready[u],
                         preferred_id=preferred_id,
                         engine=engine,
+                        hard_pin=pin_preferred,
                     )
                 if machine is None:
                     blocked_units.add(u)
@@ -1136,30 +1158,16 @@ def rebuild_unit_schedule(
     policy: str = "balanced",
     debug: bool = False,
     ga_overrides: Optional[Dict[str, Any]] = None,
+    pin_preferred: Optional[bool] = None,
+    preferred_machine_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Delete existing unit rows for scope and insert a fresh plan.
 
-    Single optimization path: Greedy → NSGA-II → Policy Engine → Final Schedule
-
-    optimizer: "greedy" (default) | "nsga2" | "ga" | "ga_research" (all GA variants
-               use NSGA-II internally)
-    policy: Policy Engine selection policy (default "balanced").
-            Options: balanced, throughput, minimum_setup, minimum_makespan,
-                     rush_order, energy_efficient
-    debug: if True, include profiling metrics in the ga metadata (dev mode only).
-    ga_overrides: optional NSGA-II config overrides (population, generations, runs).
-    Env UNIT_WISE_OPTIMIZER overrides default when optimizer is None.
+    pin_preferred / preferred_machine_id come from the Intelligent Scheduler UI
+    (replace UNIT_WISE_PIN_PREFERRED env for shop demos).
     """
-    if not unit_wise_enabled():
-        return {
-            "success": False,
-            "message": "Unit-wise scheduling is disabled (UNIT_WISE_SCHEDULE_ENABLED).",
-            "rows_inserted": 0,
-            "schedule_version": None,
-            "parts": 0,
-        }
-
+    # Always allow rebuild from API / Intelligent Scheduler (env gate removed).
     opt = (optimizer or os.getenv("UNIT_WISE_OPTIMIZER", "greedy") or "greedy").lower()
     # All GA-mode aliases use NSGA-II
     if opt not in ("greedy", "nsga2", "ga", "ga_research"):
@@ -1190,7 +1198,7 @@ def rebuild_unit_schedule(
         from algorithm import SchedulerEngine
 
         engine = SchedulerEngine(db)
-        now = _strip_tz(datetime.now()) or datetime.now()
+        now = now_ist()
 
         if use_nsga2:
             from unit_wise_ga_research import optimize_unit_plan_research
@@ -1203,11 +1211,19 @@ def rebuild_unit_schedule(
                 policy=policy,
                 debug=debug,
                 config_overrides=ga_overrides,
+                pin_preferred=pin_preferred,
+                preferred_machine_id=preferred_machine_id,
             )
             ga_meta = plan.get("ga") or {}
         else:
             plan = simulate_unit_plan(
-                db, scope, engine=engine, now=now, source="greedy"
+                db,
+                scope,
+                engine=engine,
+                now=now,
+                source="greedy",
+                pin_preferred=pin_preferred,
+                preferred_machine_id=preferred_machine_id,
             )
 
         max_ver = db.query(func.max(UnitScheduleItem.schedule_version)).scalar() or 0

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime, date
+from time_utils import now_ist
 from sqlalchemy.orm import joinedload
 from DB.database import get_db
 from DB.models.scheduling import MachineStatus, Status, MachineDowntime
@@ -191,11 +192,11 @@ async def update_machine_status(
             ).first()
             
             if existing_downtime:
-                existing_downtime.end_time = datetime.utcnow()
+                existing_downtime.end_time = now_ist()
             
             # Create new downtime record for the status change
             # Use user-provided dates if available, otherwise use current time
-            start_time = status_update.available_from if status_update.available_from else datetime.utcnow()
+            start_time = status_update.available_from if status_update.available_from else now_ist()
             
             # Only set end_time if user provided it, otherwise keep as active (1970 placeholder)
             if status_update.available_to:
@@ -210,7 +211,7 @@ async def update_machine_status(
                 description=status_update.description or f"Status changed from {previous_status_id} to {status_update.status_id}",
                 start_time=start_time,
                 end_time=end_time,
-                created_at=datetime.utcnow()  # Explicitly set created_at to current time
+                created_at=now_ist()  # Explicitly set created_at to current time
             )
             db.add(new_downtime)
         
@@ -283,22 +284,6 @@ async def update_machine_status(
                             if status_update.status_id == STATUS_OFF
                             else "machine_restored"
                         ),
-                    },
-                )
-            try:
-                from live_reconciliation import _safe_reconcile_after_event
-                _safe_reconcile_after_event(
-                    db,
-                    trigger="machine_status",
-                    machine_id=machine_id,
-                )
-            except Exception:
-                logger.exception(
-                    "Live reconciliation after machine status change failed",
-                    extra={
-                        "event": "live_reconciliation_hook_failed",
-                        "trigger": "machine_status",
-                        "machine_id": machine_id,
                     },
                 )
         
