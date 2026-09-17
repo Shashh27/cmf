@@ -32,6 +32,10 @@ Scheduling rules (greedy):
   - After partial complete: first remaining unit floored to same-op continuity
     (actual end); later remaining units use earliest-free WC machine and may
     run in parallel (qty-wise split) when UNIT_WISE_PIN_PREFERRED=false.
+  - Setup: charge setup on a machine the first time that (part, op) lands on
+    it in this plan. Skip setup only for the same machine continuing the same
+    (part, op) run, or for rework slots. Do NOT skip setup for unit 2+ merely
+    because unit 1 already ran the op on a different WC sibling.
   - Machine pick (test bed): default earliest available in workcenter.
     Set UNIT_WISE_PIN_PREFERRED=true to hard-pin routing / live preferred.
   - Rework with approved=0 and a closed job card: remaining starts at
@@ -1054,13 +1058,14 @@ def simulate_unit_plan(
             ]
 
             # Closed production on this op (approve / job-card to_time /
-            # rescheduling handoff). Must NOT reuse the setup-run flag —
-            # that becomes True after unit 1 is placed and would wrongly push
-            # virgin unit 2+ to rebuild clock time.
+            # rescheduling handoff). Must NOT clamp virgin unit starts to
+            # rebuild clock — only rework (approved=0 + closed card) uses now.
             has_production = approved > 0 or completed_run_end is not None
-            # Setup already consumed for this op on this continuous greedy pass
-            # (or prior closed run / rework). Independent of has_production.
-            setup_consumed = has_production
+            # Shop-floor: machine that already produced this op is already set up.
+            # Seed machine_last_ctx so the first remaining unit on that spindle
+            # skips setup; a different WC sibling still pays setup.
+            if has_production and preferred_id is not None:
+                machine_last_ctx[preferred_id] = (part.id, operation.id)
 
             for rem_i, u in enumerate(remaining_units):
                 slot_key = (part.id, operation.id, u)
@@ -1096,9 +1101,10 @@ def simulate_unit_plan(
                 prev_ctx = machine_last_ctx.get(machine.id)
                 same_run = prev_ctx == (part.id, operation.id)
                 is_rework_slot = rem_i < rework_due
-                skip_setup = same_run or setup_consumed or is_rework_slot
+                # Per-machine setup only — never skip just because another
+                # unit already ran this op on a different machine.
+                skip_setup = same_run or is_rework_slot
                 duration = _duration(operation, skip_setup=skip_setup)
-                setup_consumed = True
 
                 placed = _place_within_shifts_engine(
                     engine,
@@ -1176,10 +1182,35 @@ def rebuild_unit_schedule(
 
     scope = _load_active_scope(db, part_id=part_id, order_id=order_id)
     if not scope:
+        # No active parts to plan — still drop stale unit-wise rows so a full
+        # deactivate + rebuild does not leave orphan Gantt bars in the DB.
+        clear_q = db.query(UnitScheduleItem)
+        if part_id is not None:
+            clear_q = clear_q.filter(UnitScheduleItem.part_id == part_id)
+        elif order_id is not None:
+            clear_q = clear_q.filter(UnitScheduleItem.order_id == order_id)
+        cleared = clear_q.delete(synchronize_session=False)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        logger.info(
+            "Unit-wise rebuild: empty active scope — cleared stale rows",
+            extra={
+                "event": "unit_wise_rebuild_empty_scope_cleared",
+                "part_id": part_id,
+                "order_id": order_id,
+                "rows_cleared": cleared,
+            },
+        )
         return {
             "success": True,
-            "message": "No active parts in scope.",
+            "message": (
+                "No active parts in scope."
+                + (f" Cleared {cleared} stale unit_schedule_items." if cleared else "")
+            ),
             "rows_inserted": 0,
+            "rows_cleared": cleared,
             "schedule_version": None,
             "parts": 0,
             "optimizer": "nsga2" if use_nsga2 else "greedy",

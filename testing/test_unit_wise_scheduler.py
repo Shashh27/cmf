@@ -476,11 +476,43 @@ class TestUnitWisePerUnitPipeline:
         assert end == datetime(2026, 8, 12, 14, 0, 0)
 
 
+class TestPerMachineSetupRule:
+    """Shop-floor: setup is per (machine, part, op), not once per operation."""
+
+    def test_new_machine_pays_setup_even_after_unit1(self):
+        part_id, op_id = 1630, 483
+        machine_last_ctx = {}
+
+        # Unit 1 on machine 25
+        mid1 = 25
+        same_run = machine_last_ctx.get(mid1) == (part_id, op_id)
+        skip1 = same_run
+        assert skip1 is False
+        machine_last_ctx[mid1] = (part_id, op_id)
+
+        # Unit 2 on different machine 22 — must pay setup
+        mid2 = 22
+        same_run2 = machine_last_ctx.get(mid2) == (part_id, op_id)
+        skip2 = same_run2
+        assert skip2 is False
+
+        # Unit 3 again on 25 — same run, skip setup
+        same_run3 = machine_last_ctx.get(mid1) == (part_id, op_id)
+        assert same_run3 is True
+
+    def test_duration_op10_and_op20_with_and_without_setup(self):
+        facing = SimpleNamespace(setup_time=time(0, 4, 0), cycle_time=time(0, 5, 0))
+        od = SimpleNamespace(setup_time=time(0, 10, 0), cycle_time=time(1, 0, 0))
+        assert _duration(facing, skip_setup=False) == timedelta(minutes=9)
+        assert _duration(facing, skip_setup=True) == timedelta(minutes=5)
+        assert _duration(od, skip_setup=False) == timedelta(hours=1, minutes=10)
+        assert _duration(od, skip_setup=True) == timedelta(hours=1)
+
+
 class TestActualEndAfterJobCardContinued:
     def test_virgin_unit2_does_not_clamp_to_rebuild_now(self):
         """
-        Regression (op 532 style): qty>1, no production — after unit 1 places,
-        setup_consumed becomes True for skip-setup, but must NOT clamp unit 2
+        Regression (op 532 style): qty>1, no production — unit 2 must NOT clamp
         to rebuild 'now' (that was pulling schedules to Aug rebuild clock).
         """
         planned = datetime(2026, 7, 28, 10, 46, 33)
@@ -488,21 +520,18 @@ class TestActualEndAfterJobCardContinued:
         approved = 0
         actual_end = None
         has_production = approved > 0 or actual_end is not None
-        setup_consumed = has_production
 
         # Unit 1
         start1 = max(planned, planned)
-        if has_production:
+        if has_production and approved == 0:
             start1 = max(start1, now)
-        setup_consumed = True
         assert start1 == planned
 
         # Unit 2 continues after unit 1 (machine free = end of unit 1)
         free2 = planned + timedelta(hours=3, minutes=20)
         start2 = max(planned, free2)
-        if has_production:
+        if has_production and approved == 0:
             start2 = max(start2, now)
-        assert setup_consumed is True
         assert start2 == free2
         assert start2 < now
 

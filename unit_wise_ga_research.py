@@ -403,10 +403,9 @@ def evaluate_segments(
     if setup_count <= 0:
         setup_count = sum(1 for s in segments if s.get("is_setup"))
     if setup_count <= 0 and segments:
-        # Same changeover rule as NSGA decode: first (part, op) on a machine,
-        # or a different (part, op) after another job, counts as a setup.
+        # Per-machine changeover: first (part, op) on a given machine counts as
+        # a setup; continuing the same (part, op) on that machine does not.
         last_ctx: Dict[Any, Any] = {}
-        op_seen: Set[Tuple[Any, Any]] = set()
         for s in sorted(
             segments,
             key=lambda x: (x.get("start_time") or datetime.min, x.get("machine_id") or 0),
@@ -418,10 +417,9 @@ def evaluate_segments(
                 continue
             op_key = (pid, oid)
             same_run = last_ctx.get(mid) == op_key
-            skip = same_run or op_key in op_seen or bool(s.get("rework_slot"))
+            skip = same_run or bool(s.get("rework_slot"))
             if not skip:
                 setup_count += 1
-            op_seen.add(op_key)
             last_ctx[mid] = op_key
 
     return {
@@ -508,13 +506,13 @@ def decode_activity_priority(
                 for u in range(1, qty + 1):
                     unit_ready[(part.id, u)] = max(unit_ready[(part.id, u)], planned_start)
 
-    # Track first placement per (part, op) for setup skip
-    op_started: Dict[Tuple[int, int], bool] = {}
+    # Shop-floor: if an op already has approved qty, the preferred/live machine
+    # is already set up — seed context so the first remaining unit there skips
+    # setup; other WC machines still pay setup.
     for a in activities:
-        key = (a.part_id, a.operation.id)
         approved = int(total_approved_for_operation(db, a.operation.id) or 0)
-        if approved > 0:
-            op_started[key] = True
+        if approved > 0 and a.preferred_id is not None:
+            machine_last_ctx[a.preferred_id] = (a.part_id, a.operation.id)
 
     completed: set = set()
     remaining = set(perm)
@@ -598,12 +596,11 @@ def decode_activity_priority(
 
             prev_ctx = machine_last_ctx.get(machine.id)
             same_run = prev_ctx == (act.part_id, act.operation.id)
-            op_key = (act.part_id, act.operation.id)
-            skip_setup = same_run or op_started.get(op_key, False) or act.rework_slot
+            # Per-machine setup only (same shop-floor rule as greedy).
+            skip_setup = same_run or act.rework_slot
             if not skip_setup:
                 setup_count += 1
             duration = _duration(act.operation, skip_setup=skip_setup)
-            op_started[op_key] = True
 
             placed = _place_within_shifts_engine(
                 engine, machine.id, start_candidate, duration
