@@ -67,12 +67,14 @@ def generate_pm_missed_notifications():
             PMAssignmentItem, PMMachineAssignment, PMCheckpointSubmission,
         )
         from services.pm_service import is_checkpoint_due
+        from services.pm_machine_availability import fetch_machine_availability, is_machine_id_down_on
 
         SessionLocal = sessionmaker(bind=engine)
         db = SessionLocal()
         today = date.today()
 
         try:
+            availability = fetch_machine_availability(db)
             items = (
                 db.query(PMAssignmentItem)
                 .options(
@@ -91,6 +93,8 @@ def generate_pm_missed_notifications():
                 assignment = ai.assignment
                 ci = ai.checklist_item
                 if not schedule or not assignment or not ci:
+                    continue
+                if is_machine_id_down_on(availability, assignment.machine_id, today, today):
                     continue
                 if not is_checkpoint_due(ai, schedule, today):
                     continue

@@ -79,6 +79,23 @@ class ChatConversationWithUnreadCount(ChatConversation):
 
 
 # =======================
+# Chat Message Attachment
+# =======================
+
+class ChatMessageAttachment(BaseModel):
+    id: int
+    message_id: int
+    file_name: str
+    file_url: str
+    file_category: str
+    uploaded_by: int
+    uploaded_by_name: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# =======================
 # Chat Message
 # =======================
 
@@ -91,7 +108,7 @@ class ChatMessageBase(BaseModel):
     @field_validator("message_type")
     @classmethod
     def validate_message_type(cls, v: str) -> str:
-        allowed = {"text", "image", "file", "system"}
+        allowed = {"text", "image", "video", "file", "system"}
         if v not in allowed:
             raise ValueError(f"message_type must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -133,6 +150,7 @@ class ChatMessage(ChatMessageBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     read_by: List[int] = []
+    attachments: List[ChatMessageAttachment] = []
 
     model_config = ConfigDict(from_attributes=True)
 

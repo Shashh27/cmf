@@ -1,7 +1,8 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -35,6 +36,7 @@ from DB.schemas.configuration import (
     PMCheckpointSubmission as PMCheckpointSubmissionSchema,
     PMCheckpointSubmissionWithDetails,
 )
+from services.pm_machine_availability import fetch_machine_availability
 from services.pm_service import (
     validate_checklist_item_frequency,
     validate_assignment_frequency,
@@ -439,9 +441,15 @@ def delete_assigned_checkpoint(
 # Schedule APIs
 # =======================
 
+@router.get("/machine-availability")
+def get_pm_machine_availability(db: Session = Depends(get_db)):
+    """Current ON/OFF windows from scheduling.machine_status for PM calendars."""
+    return list(fetch_machine_availability(db).values())
+
+
 @router.get("/schedules/machine/{machine_id}/due", response_model=List[DueCheckpointResponse])
 def get_todays_due_checkpoints(machine_id: int, db: Session = Depends(get_db)):
-    """Fetch due checkpoints for operator login screen."""
+    """Fetch due checkpoints for operator login screen. Empty while machine is OFF."""
     return get_due_checkpoints_for_machine(db, machine_id)
 
 
@@ -665,6 +673,10 @@ def get_supervisor_submissions(
 # Missed compulsory notifications (Admin / MC / Supervisor — PM module)
 # =======================
 
+class PMMissedAckAllBody(BaseModel):
+    ids: Optional[List[int]] = Field(default=None, description="If set, only these pending ids are acknowledged")
+
+
 @router.get("/missed-notifications")
 def list_pm_missed_notifications(
     pending_only: bool = True,
@@ -672,11 +684,30 @@ def list_pm_missed_notifications(
     db: Session = Depends(get_db),
 ):
     from DB.models.notifications import PMMissedNotification
+    from DB.models.access_control import AccessUser
 
     q = db.query(PMMissedNotification).order_by(PMMissedNotification.created_at.desc())
     if pending_only:
         q = q.filter(PMMissedNotification.is_ack.is_(False))
     rows = q.limit(min(limit, 500)).all()
+
+    # Resolve numeric ack_by (user id) → display name
+    id_keys = set()
+    for r in rows:
+        if r.is_ack and r.ack_by and str(r.ack_by).isdigit():
+            id_keys.add(int(r.ack_by))
+    name_map = {}
+    if id_keys:
+        for u in db.query(AccessUser).filter(AccessUser.id.in_(id_keys)).all():
+            name_map[str(u.id)] = u.user_name or f"User {u.id}"
+
+    def ack_label(ack_by: Optional[str]) -> Optional[str]:
+        if not ack_by:
+            return None
+        if str(ack_by).isdigit() and str(ack_by) in name_map:
+            return name_map[str(ack_by)]
+        return ack_by
+
     return [
         {
             "id": r.id,
@@ -689,10 +720,38 @@ def list_pm_missed_notifications(
             "checklist_name": r.checklist_name,
             "message": r.message,
             "is_ack": r.is_ack,
+            "ack_by": r.ack_by,
+            "ack_by_name": ack_label(r.ack_by) if r.is_ack else None,
+            "ack_at": r.ack_at.isoformat() if r.ack_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
     ]
+
+
+@router.post("/missed-notifications/ack-all")
+def ack_all_pm_missed_notifications(
+    ack_by: Optional[str] = None,
+    body: PMMissedAckAllBody = Body(default=PMMissedAckAllBody()),
+    db: Session = Depends(get_db),
+):
+    """Acknowledge all pending missed notifications, or a given list of ids."""
+    from DB.models.notifications import PMMissedNotification
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    q = db.query(PMMissedNotification).filter(PMMissedNotification.is_ack.is_(False))
+    if body.ids is not None:
+        if not body.ids:
+            return {"ok": True, "count": 0}
+        q = q.filter(PMMissedNotification.id.in_(body.ids))
+    rows = q.all()
+    for row in rows:
+        row.is_ack = True
+        row.ack_by = ack_by or "user"
+        row.ack_at = now
+    db.commit()
+    return {"ok": True, "count": len(rows)}
 
 
 @router.post("/missed-notifications/{notification_id}/ack")

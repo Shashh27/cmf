@@ -1257,8 +1257,10 @@ class RawMaterialHistoryResponse(BaseModel):
 
 class StockQualityDocumentBase(BaseModel):
     stock_id: int
+    unit_id: Optional[int] = None
     document_name: str
     document_url: str
+    remarks: Optional[str] = None
     version: float
     parent_id: Optional[int] = None
     user_id: int
@@ -1271,6 +1273,7 @@ class StockQualityDocumentCreate(StockQualityDocumentBase):
 class StockQualityDocumentUpdate(BaseModel):
     document_name: Optional[str] = None
     document_url: Optional[str] = None
+    remarks: Optional[str] = None
     user_id: int
 
 
@@ -1278,6 +1281,7 @@ class StockQualityDocument(StockQualityDocumentBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    user_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -1291,7 +1295,9 @@ class StockQualityDocumentVersionResponse(BaseModel):
     id: int
     document_name: str
     document_url: str
+    remarks: Optional[str] = None
     version: float
     created_at: datetime
     parent_id: Optional[int] = None
+    unit_id: Optional[int] = None
 

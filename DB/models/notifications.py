@@ -144,3 +144,23 @@ class PMMissedNotification(Base):
     ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
+
+class QARMReceivedNotification(Base):
+    """Notify Quality Assurance when order raw material status becomes received."""
+    __tablename__ = "qa_rm_received_notifications"
+    __table_args__ = {"schema": "notifications"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey("oms.orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    material_id = Column(Integer, nullable=True)
+    material_name = Column(String, nullable=True)
+    sale_order_number = Column(String, nullable=True)
+    product_name = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=True)
+    is_ack = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+    ack_by = Column(String, nullable=True)
+    ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+

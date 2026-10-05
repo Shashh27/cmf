@@ -1,86 +1,103 @@
-import psycopg2
-from DB.utils.password import encrypt_password
+"""Convert remaining bcrypt passwords on SERVER DB to Fernet.
 
-LOCAL_DB_URL = "postgresql://postgres:postgres@172.18.7.86:5432/CMF_Demo"
+Run from backend folder:
+  python migrate_bcrypt_to_fernet.py
+
+For each bcrypt user you will be asked for the ORIGINAL password.
+  - Enter password → verified against bcrypt → saved as Fernet
+  - Press Enter (blank) → skip that user
+  - Wrong password → not updated, you can retry by re-running
+"""
+
+from getpass import getpass
+
+import psycopg2
+from passlib.context import CryptContext
+
+from DB.utils.password import encrypt_password, is_encrypted
+
+SERVER_DB_URL = "postgresql://postgres:postgres@172.18.7.91:5432/CMF_DIGITIZATION"
+BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 def migrate_bcrypt_to_fernet():
-    """Migrate bcrypt hashed passwords to Fernet encryption"""
-    
-    # Users with bcrypt passwords (from current analysis)
-    bcrypt_users = [
-        {"id": 3, "user_name": "operator1"},
-        {"id": 12, "user_name": "operator"},
-        {"id": 16, "user_name": "admin"},
-        {"id": 20, "user_name": "Ramesh"},
-        {"id": 30, "user_name": "supervisor"},
-        {"id": 32, "user_name": "bharath"},
-        {"id": 34, "user_name": "vignesh"}
-    ]
-    
     print("=" * 80)
-    print("MIGRATE BCRYPT PASSWORDS TO FERNET ENCRYPTION")
+    print("MIGRATE BCRYPT → FERNET  (server: CMF_DIGITIZATION)")
     print("=" * 80)
-    print("\nUsers with bcrypt passwords:")
-    for user in bcrypt_users:
-        print(f"  - ID: {user['id']}, Username: {user['user_name']}")
-    
-    print("\n" + "=" * 80)
-    print("⚠️  WARNING: You need the ORIGINAL plaintext passwords for these users")
-    print("⚠️  Bcrypt cannot be reversed - you must know the original passwords")
-    print("=" * 80)
-    
-    conn = psycopg2.connect(LOCAL_DB_URL)
-    
+
+    conn = psycopg2.connect(SERVER_DB_URL)
+    converted = 0
+    skipped = 0
+    wrong = 0
+    already = 0
+
     try:
-        for user_info in bcrypt_users:
-            user_id = user_info["id"]
-            user_name = user_info["user_name"]
-            
-            print(f"\nProcessing user: {user_name} (ID: {user_id})")
-            
-            # Get current password
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT password FROM accesscontrol.access_users WHERE id = %s",
-                    (user_id,)
-                )
-                result = cur.fetchone()
-                if not result:
-                    print(f"  ❌ User not found")
-                    continue
-                
-                current_password = result[0]
-                print(f"  Current password type: {'Bcrypt' if current_password.startswith('$2') else 'Unknown'}")
-            
-            # Ask for original password
-            original_password = input(f"  Enter original password for {user_name}: ")
-            
-            if not original_password:
-                print(f"  ⚠️  Skipping {user_name} - no password provided")
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, user_name, password FROM accesscontrol.access_users ORDER BY id"
+            )
+            users = cur.fetchall()
+
+        bcrypt_users = [
+            (uid, name, pw)
+            for uid, name, pw in users
+            if pw and pw.startswith(BCRYPT_PREFIXES)
+        ]
+        already = sum(1 for _, _, pw in users if pw and is_encrypted(pw))
+
+        print(f"\nTotal users: {len(users)}")
+        print(f"Already Fernet: {already}")
+        print(f"Still bcrypt:   {len(bcrypt_users)}\n")
+
+        if not bcrypt_users:
+            print("Nothing to convert — all non-null passwords are Fernet.")
+            return
+
+        print("Enter ORIGINAL password for each user (blank = skip).\n")
+
+        for user_id, user_name, stored in bcrypt_users:
+            plain = getpass(f"  password for {user_name}: ").strip()
+            if not plain:
+                skipped += 1
+                print(f"    skipped {user_name}")
                 continue
-            
-            # Encrypt with Fernet
-            encrypted_password = encrypt_password(original_password)
-            print(f"  Encrypted password: {encrypted_password[:50]}...")
-            
-            # Update database
+
+            try:
+                ok = pwd_context.verify(plain, stored)
+            except Exception:
+                ok = False
+
+            if not ok:
+                wrong += 1
+                print(f"    WRONG password for {user_name} — not updated")
+                continue
+
+            encrypted = encrypt_password(plain)
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE accesscontrol.access_users SET password = %s WHERE id = %s",
-                    (encrypted_password, user_id)
+                    (encrypted, user_id),
                 )
-                conn.commit()
-                print(f"  ✅ Successfully migrated {user_name} to Fernet encryption")
-        
+            converted += 1
+            print(f"    OK → Fernet  {user_name}")
+
+        conn.commit()
+
         print("\n" + "=" * 80)
-        print("MIGRATION COMPLETE")
+        print("SUMMARY")
+        print(f"  Converted to Fernet: {converted}")
+        print(f"  Skipped (blank):     {skipped}")
+        print(f"  Wrong password:      {wrong}")
         print("=" * 80)
-        
+
     except Exception as e:
         conn.rollback()
-        print(f"\n❌ Error during migration: {e}")
+        print(f"\nError: {e}")
+        raise
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     migrate_bcrypt_to_fernet()

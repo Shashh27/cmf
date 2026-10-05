@@ -28,6 +28,7 @@ from services.raw_material_calculations import RawMaterialCalculationService
 from services.stock_auto_update import StockAutoUpdateService
 from services.auto_extract_service import AutoExtractService
 from services.raw_material_history_service import RawMaterialHistoryService
+from services.qa_rm_notification_service import create_qa_rm_received_notifications
 from services.purchase_request_service import generate_purchase_request_docx
 
 # Import models for hierarchy fetching
@@ -407,6 +408,12 @@ def receive_order_material(stock_id: int, final_cost: Optional[float] = None, db
         except Exception as e:
             # Log error but don't fail the operation
             print(f"Error logging order status change history: {e}")
+
+        try:
+            create_qa_rm_received_notifications(db, [stock])
+            db.commit()
+        except Exception as e:
+            print(f"Error creating QA RM received notification: {e}")
         
         return {
             "message": "Order material received successfully",
@@ -772,6 +779,9 @@ def update_order_parts_raw_material_linked(
     try:
         from services.raw_material_calculations import RawMaterialCalculationService
         
+        # Capture status before mutation so we only notify on transition → received
+        old_order_status = stock.order_status
+
         # Update stock fields
         update_data = stock_update.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -896,6 +906,18 @@ def update_order_parts_raw_material_linked(
         
         # 🔥 Update stock status based on unit statuses (this will respect order_status logic)
         StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        # Notify QA when order RM becomes received
+        if (
+            'order_status' in update_data
+            and update_data.get('order_status') == 'received'
+            and old_order_status != 'received'
+        ):
+            try:
+                create_qa_rm_received_notifications(db, [stock])
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notification: {e}")
         
         return _stock_with_details(stock, db)
         
@@ -936,9 +958,11 @@ def update_order_parts_status_group(
         )
     
     try:
+        received_stocks = []
         for stock in stocks:
             # Handle order_status change
             if 'order_status' in update_data:
+                old_order_status = stock.order_status
                 new_order_status = update_data['order_status']
                 stock.order_status = new_order_status
                 
@@ -951,6 +975,8 @@ def update_order_parts_status_group(
                     ).all()
                     for unit in units:
                         unit.status = 'available'
+                    if old_order_status != 'received':
+                        received_stocks.append(stock)
                 elif new_order_status in ['enquiry', 'purchase_request', 'purchase_order']:
                     stock.status = 'not_available'
                     # Update all units for this stock to 'not_available'
@@ -1108,6 +1134,13 @@ def update_order_parts_status_group(
         # 🔥 Update stock status based on unit statuses for all stocks in the group
         for stock in stocks:
             StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        if received_stocks:
+            try:
+                create_qa_rm_received_notifications(db, received_stocks)
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notifications: {e}")
         
         # Return updated stocks
         result = [_stock_with_details(stock, db) for stock in stocks]
@@ -1286,12 +1319,47 @@ def delete_order_parts_raw_material_linked(
 
 # ==================== Order Raw Material Hierarchy (Simplified) ====================
 
-def fetch_simplified_hierarchy(db: Session, product_id: int):
+def _load_hierarchy_shared_context(db: Session):
+    """Load lookup maps shared across multiple product hierarchies."""
+    all_raw_materials = db.query(RawMaterialModel).all()
+    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+
+    all_units = db.query(RawMaterialUnitModel).options(
+        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
+    ).all()
+    unit_map = {unit.id: unit for unit in all_units}
+
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    all_users = db.query(AccessUserModel).all()
+    user_map = {u.id: u.user_name for u in all_users}
+
+    return {
+        "raw_material_map": raw_material_map,
+        "raw_material_status_map": raw_material_status_map,
+        "unit_map": unit_map,
+        "part_type_map": part_type_map,
+        "user_map": user_map,
+    }
+
+
+def fetch_simplified_hierarchy(db: Session, product_id: int, shared_context=None):
     """
     Fetch simplified product hierarchy for raw materials.
     Returns only: parts, assemblies, documents, extracted_data, and raw material info.
     Excludes: operations, operation_documents, tools.
     """
+    if shared_context is None:
+        shared_context = _load_hierarchy_shared_context(db)
+
+    raw_material_map = shared_context["raw_material_map"]
+    raw_material_status_map = shared_context["raw_material_status_map"]
+    unit_map = shared_context["unit_map"]
+    part_type_map = shared_context["part_type_map"]
+    user_map = shared_context["user_map"]
+
     # Get product
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
@@ -1306,25 +1374,6 @@ def fetch_simplified_hierarchy(db: Session, product_id: int):
 
     # Get all parts for this product
     all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
-
-    # Get all raw materials for mapping
-    all_raw_materials = db.query(RawMaterialModel).all()
-    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
-    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
-    
-    # Get all raw material units for mapping
-    all_units = db.query(RawMaterialUnitModel).options(
-        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
-    ).all()
-    unit_map = {unit.id: unit for unit in all_units}
-    
-    # Get all part types for mapping
-    all_part_types = db.query(PartTypeModel).all()
-    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
-
-    # User map for part.user_id -> user_name
-    all_users = db.query(AccessUserModel).all()
-    user_map = {u.id: u.user_name for u in all_users}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -1531,36 +1580,8 @@ def fetch_simplified_hierarchy(db: Session, product_id: int):
     }
 
 
-@router.get("/order-raw-material-hierarchy/{order_id}")
-def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db)):
-    """
-    Get order with simplified product hierarchy for raw materials.
-    Returns only: extracted text, part information, and assigned raw materials.
-    Excludes: operations, operation documents, tools.
-    """
-    # Get order
-    order = (
-        db.query(OrderModel)
-        .options(
-            joinedload(OrderModel.customer),
-            joinedload(OrderModel.product),
-            joinedload(OrderModel.user),
-            joinedload(OrderModel.project_coordinator),
-            joinedload(OrderModel.admin),
-            joinedload(OrderModel.manufacturing_coordinator),
-        )
-        .filter(OrderModel.id == order_id)
-        .first()
-    )
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    # Get simplified hierarchy
-    hierarchy = fetch_simplified_hierarchy(db, order.product_id)
-
-    # Build order response
-    order_response = {
+def _build_order_hierarchy_response(order: OrderModel, hierarchy: dict):
+    return {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
         "project_name": order.project_name,
@@ -1586,10 +1607,82 @@ def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db
         "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
-        "product_hierarchy": hierarchy
+        "product_hierarchy": hierarchy,
     }
 
-    return order_response
+
+@router.get("/order-raw-material-hierarchies")
+def get_all_order_raw_material_hierarchies(
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
+    """
+    Get all scoped orders with simplified product hierarchies in one request.
+    Reuses hierarchy data when multiple orders share the same product.
+    """
+    order_query = (
+        db.query(OrderModel)
+        .options(
+            joinedload(OrderModel.customer),
+            joinedload(OrderModel.product),
+            joinedload(OrderModel.user),
+            joinedload(OrderModel.project_coordinator),
+            joinedload(OrderModel.admin),
+            joinedload(OrderModel.manufacturing_coordinator),
+        )
+        .order_by(OrderModel.id.asc())
+    )
+    order_query = apply_order_role_scope(order_query, OrderModel, current_user)
+    orders = order_query.all()
+
+    shared_context = _load_hierarchy_shared_context(db)
+    hierarchy_by_product_id = {}
+    results = []
+
+    for order in orders:
+        hierarchy = None
+        if order.product_id:
+            if order.product_id not in hierarchy_by_product_id:
+                try:
+                    hierarchy_by_product_id[order.product_id] = fetch_simplified_hierarchy(
+                        db, order.product_id, shared_context
+                    )
+                except HTTPException:
+                    hierarchy_by_product_id[order.product_id] = None
+            hierarchy = hierarchy_by_product_id[order.product_id]
+
+        results.append(_build_order_hierarchy_response(order, hierarchy))
+
+    return results
+
+
+@router.get("/order-raw-material-hierarchy/{order_id}")
+def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db)):
+    """
+    Get order with simplified product hierarchy for raw materials.
+    Returns only: extracted text, part information, and assigned raw materials.
+    Excludes: operations, operation documents, tools.
+    """
+    # Get order
+    order = (
+        db.query(OrderModel)
+        .options(
+            joinedload(OrderModel.customer),
+            joinedload(OrderModel.product),
+            joinedload(OrderModel.user),
+            joinedload(OrderModel.project_coordinator),
+            joinedload(OrderModel.admin),
+            joinedload(OrderModel.manufacturing_coordinator),
+        )
+        .filter(OrderModel.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    hierarchy = fetch_simplified_hierarchy(db, order.product_id)
+    return _build_order_hierarchy_response(order, hierarchy)
 
 
 # ==================== Auto-Extract Raw Materials ====================
@@ -1830,6 +1923,7 @@ def update_group(
     
     try:
         # Update all stocks in the group
+        received_stocks = []
         for stock in stocks:
             update_fields = update_data.copy()
             
@@ -1848,6 +1942,7 @@ def update_group(
             
             # Handle order_status update
             if 'order_status' in update_fields:
+                old_order_status = stock.order_status
                 stock.order_status = update_fields['order_status']
                 
                 # Update stock and units status based on order_status
@@ -1858,6 +1953,8 @@ def update_group(
                     ).all()
                     for unit in units:
                         unit.status = 'available'
+                    if old_order_status != 'received':
+                        received_stocks.append(stock)
                 elif update_fields['order_status'] in ['enquiry', 'purchase_request', 'purchase_order']:
                     stock.status = 'not_available'
                     units = db.query(RawMaterialUnitModel).filter(
@@ -1889,6 +1986,13 @@ def update_group(
         # Update stock status based on unit statuses
         for stock in stocks:
             StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+
+        if received_stocks:
+            try:
+                create_qa_rm_received_notifications(db, received_stocks)
+                db.commit()
+            except Exception as e:
+                print(f"Error creating QA RM received notifications: {e}")
         
         # Return updated stocks with details
         result = [_stock_with_details(stock, db) for stock in stocks]

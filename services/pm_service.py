@@ -241,11 +241,16 @@ def is_checkpoint_due(
 
 def get_due_checkpoints_for_machine(db: Session, machine_id: int) -> List[dict]:
     """Fetch checkpoints due today or earlier for operator screen."""
+    from services.pm_machine_availability import fetch_machine_availability, is_machine_id_down_on
+
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
 
     today = date.today()
+    availability = fetch_machine_availability(db)
+    if is_machine_id_down_on(availability, machine_id, today, today):
+        return []
     assignments = (
         db.query(PMMachineAssignment)
         .options(
@@ -358,6 +363,9 @@ def get_operator_assignments_for_machine(db: Session, machine_id: int) -> List[d
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
 
     today = date.today()
+    from services.pm_machine_availability import fetch_machine_availability, is_machine_id_down_on
+    down_today = is_machine_id_down_on(fetch_machine_availability(db), machine_id, today, today)
+
     assignments = (
         db.query(PMMachineAssignment)
         .options(
@@ -384,7 +392,11 @@ def get_operator_assignments_for_machine(db: Session, machine_id: int) -> List[d
             schedule = ai.schedule
             if not ci or not schedule:
                 continue
-            checkpoints.append(build_operator_checkpoint_fields(db, ai, ci, schedule, today))
+            fields = build_operator_checkpoint_fields(db, ai, ci, schedule, today)
+            # Breakdown window: not due to fill. After available_to they become due again.
+            if down_today:
+                fields["is_due"] = False
+            checkpoints.append(fields)
 
         result.append(
             {

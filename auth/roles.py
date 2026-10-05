@@ -8,6 +8,7 @@ CANONICAL_ROLES = frozenset(
         "supervisor",
         "inventory_supervisor",
         "operator",
+        "quality_assurance",
     }
 )
 
@@ -22,6 +23,8 @@ _ROLE_ALIASES = {
     "inventory supervisor": "inventory_supervisor",
     "inventory_supervisor": "inventory_supervisor",
     "operator": "operator",
+    "quality assurance": "quality_assurance",
+    "quality_assurance": "quality_assurance",
 }
 
 

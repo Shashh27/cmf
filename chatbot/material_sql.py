@@ -3,6 +3,8 @@
 import re
 from typing import Optional, Tuple
 
+from chatbot.part_sql import is_part_material_query
+
 MATERIAL_QUERY_RE = re.compile(
     r"\b(stock|stocks|raw\s*material|raw\s*materials|material|materials|inventory|"
     r"barstock|bar\s*stock|en\d+|quantity|available\s*quantity|allocated)\b",
@@ -31,6 +33,8 @@ TOOL_QUERY_RE = re.compile(
 
 def is_material_query(question: str) -> bool:
     q = question or ""
+    if is_part_material_query(q):
+        return False
     if re.search(r"\border\b", q, re.IGNORECASE) and re.search(
         r"\b(stock|inventory|quantity|level|available)\b", q, re.IGNORECASE
     ):
@@ -135,9 +139,10 @@ def try_material_query(question: str) -> Tuple[Optional[str], bool]:
     # Named material token only e.g. "EN8" or "stock EN8"
     tokens = re.findall(r"[A-Za-z0-9][\w\-/]*", question or "")
     stop = {
-        "show", "list", "all", "get", "stock", "stocks", "material", "materials",
+        "show", "list", "all", "get", "stock", "material", "materials",
         "raw", "for", "of", "the", "related", "dimension", "dimensions", "unit", "units",
-        "quantity", "available", "give", "me", "what", "is",
+        "quantity", "available", "give", "me", "what", "is", "used", "part", "parts",
+        "linked", "which", "tell",
     }
     names = [t for t in tokens if t.lower() not in stop and len(t) >= 2]
     if names:

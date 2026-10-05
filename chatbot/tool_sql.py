@@ -148,7 +148,7 @@ def try_tool_query(question: str) -> Tuple[Optional[str], bool]:
 
     q = (question or "").lower()
     if re.search(
-        r"\btools?\s*list\b|\blist\s+tools?\b|\bshow\s+(?:all\s+)?tools?\b|"
+        r"\b(?:list|show)\s+(?:all\s+)?tools?\b|\btools?\s*list\b|\blist\s+(?:all\s+)?tools?\b|"
         r"^(?:tools?|list\s+tools?|show\s+tools?)\s*$",
         q,
     ):

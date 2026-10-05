@@ -343,16 +343,25 @@ def get_inventory_view(
             "order_numbers": [order_number] if order_number else [],
         })
 
-    # 7. Quality document counts for all stocks (bulk)
+    # 7. Quality document counts for all stocks / units (bulk)
+    # Stock-level badge: unit_id IS NULL. Unit-level badge: per unit_id.
     doc_counts_by_stock = {}
+    doc_counts_by_unit = {}
     if stock_ids:
-        doc_counts = (
-            db.query(StockQualityDocumentModel.stock_id, StockQualityDocumentModel.id)
+        doc_rows = (
+            db.query(
+                StockQualityDocumentModel.stock_id,
+                StockQualityDocumentModel.unit_id,
+                StockQualityDocumentModel.id,
+            )
             .filter(StockQualityDocumentModel.stock_id.in_(stock_ids))
             .all()
         )
-        for stock_id, _ in doc_counts:
-            doc_counts_by_stock[stock_id] = doc_counts_by_stock.get(stock_id, 0) + 1
+        for stock_id, unit_id, _ in doc_rows:
+            if unit_id is None:
+                doc_counts_by_stock[stock_id] = doc_counts_by_stock.get(stock_id, 0) + 1
+            else:
+                doc_counts_by_unit[unit_id] = doc_counts_by_unit.get(unit_id, 0) + 1
 
     # Build units by stock map
     units_by_stock = {}
@@ -368,6 +377,7 @@ def get_inventory_view(
             "cost": u.cost,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "usages": usages_by_unit.get(u.id, []),
+            "quality_document_count": doc_counts_by_unit.get(u.id, 0),
         })
 
     # Build stocks by material map
@@ -1520,6 +1530,21 @@ def delete_raw_material_unit(unit_id: int, db: Session = Depends(get_db)):
         db.query(RawMaterialUsageModel).filter(
             RawMaterialUsageModel.raw_material_unit_id == unit_id
         ).delete(synchronize_session=False)
+
+        # Delete unit-level quality documents (MinIO best-effort)
+        unit_docs = db.query(StockQualityDocumentModel).filter(
+            StockQualityDocumentModel.unit_id == unit_id
+        ).all()
+        for doc in unit_docs:
+            try:
+                from DB.minio_client import get_minio_client
+                minio_client = get_minio_client()
+                url_parts = doc.document_url.split('/')
+                object_name = '/'.join(url_parts[4:])
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Error deleting unit quality doc from MinIO: {e}")
+            db.delete(doc)
         
         # Delete history records for this unit
         db.query(RawMaterialHistoryModel).filter(

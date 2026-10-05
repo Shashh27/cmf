@@ -6,3 +6,4 @@ from .tool_issues_notification import router as tool_issues_notification_router
 from .pc_notifications import router as pc_notifications_router
 from .mc_notifications import router as mc_notifications_router
 from .admin_document_notifications import router as admin_document_notifications_router
+from .qa_rm_notifications import router as qa_rm_notifications_router

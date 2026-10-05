@@ -149,6 +149,39 @@ class ChatMessage(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    attachments = relationship(
+        "ChatMessageAttachment",
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )
+
+
+class ChatMessageAttachment(Base):
+    __tablename__ = "chat_message_attachments"
+    __table_args__ = (
+        Index("ix_chat_message_attachments_message_id", "message_id"),
+        Index("ix_chat_message_attachments_uploaded_by", "uploaded_by"),
+        {"schema": "chatbox"},
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer,
+        ForeignKey("chatbox.chat_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_name = Column(String, nullable=False)
+    file_url = Column(String, nullable=False)
+    file_category = Column(String, nullable=False)  # image | video | file
+    uploaded_by = Column(
+        Integer,
+        ForeignKey("accesscontrol.access_users.id"),
+        nullable=False,
+    )
+    uploaded_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    message = relationship("ChatMessage", back_populates="attachments")
+    uploader = relationship("AccessUser", foreign_keys=[uploaded_by])
 
 
 class ChatMessageReadStatus(Base):

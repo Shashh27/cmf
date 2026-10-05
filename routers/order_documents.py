@@ -20,15 +20,39 @@ def get_file_extension(filename: str) -> str:
     """Extract file extension from filename"""
     return os.path.splitext(filename)[1].lower()
 
-def _can_upload_order_document(order, user_id: Optional[int]) -> bool:
-    """Only project_coordinator, admin, manufacturing_coordinator, or order creator can upload."""
+def _normalize_role(role: Optional[str]) -> str:
+    return (role or "").strip().lower().replace(" ", "_")
+
+
+def _is_quality_assurance(role: Optional[str]) -> bool:
+    return _normalize_role(role) in ("quality_assurance", "qa")
+
+
+def _can_upload_order_document(order, user_id: Optional[int], user_role: Optional[str] = None) -> bool:
+    """project_coordinator, admin, manufacturing_coordinator, quality_assurance, or order creator can upload."""
     if user_id is None:
         return False
+    if _is_quality_assurance(user_role):
+        return True
     return (
         order.project_coordinator_id == user_id
         or order.admin_id == user_id
         or order.manufacturing_coordinator_id == user_id
         or order.user_id == user_id  # Allow order creator to upload
+    )
+
+
+def _can_view_order_document(order, user_id: Optional[int], user_role: Optional[str]) -> bool:
+    """project_coordinator, admin, manufacturing_coordinator, quality_assurance, or order creator can view."""
+    if user_id is None:
+        return False
+    if _is_quality_assurance(user_role):
+        return True  # Quality Assurance can view all documents
+    return (
+        order.project_coordinator_id == user_id
+        or order.admin_id == user_id
+        or order.manufacturing_coordinator_id == user_id
+        or order.user_id == user_id  # Allow order creator to view
     )
 
 
@@ -53,10 +77,10 @@ async def upload_order_document(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    if not _can_upload_order_document(order, user_id):
+    if not _can_upload_order_document(order, user_id, getattr(current_user, "role", None)):
         raise HTTPException(
             status_code=403,
-            detail="Only project coordinator, admin, manufacturing coordinator, or order creator can upload order documents."
+            detail="Only project coordinator, admin, manufacturing coordinator, quality assurance, or order creator can upload order documents."
         )
 
     # Check if parent exists if provided
@@ -64,13 +88,20 @@ async def upload_order_document(
         parent = db.query(OrderDocument).filter(OrderDocument.id == parent_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent document not found")
-        
+
+        # Quality Assurance may only add revisions to documents they uploaded
+        if _is_quality_assurance(getattr(current_user, "role", None)) and parent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only upload a new version for documents you uploaded."
+            )
+
         # Check for duplicate revision within the same document group
         existing_version = db.query(OrderDocument).filter(
             (OrderDocument.id == parent_id) | (OrderDocument.parent_id == parent_id),
             OrderDocument.document_version == document_version
         ).first()
-        
+
         if existing_version:
             raise HTTPException(
                 status_code=400,
@@ -169,16 +200,21 @@ async def upload_order_documents_bulk(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    if not _can_upload_order_document(order, user_id):
+    if not _can_upload_order_document(order, user_id, getattr(current_user, "role", None)):
         raise HTTPException(
             status_code=403,
-            detail="Only project coordinator, admin, or manufacturing coordinator for this order can upload order documents.",
+            detail="Only project coordinator, admin, manufacturing coordinator, quality assurance, or order creator can upload order documents.",
         )
 
     if parent_id:
         parent = db.query(OrderDocument).filter(OrderDocument.id == parent_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent document not found")
+        if _is_quality_assurance(getattr(current_user, "role", None)) and parent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only upload a new version for documents you uploaded."
+            )
 
     if not files:
         return []
@@ -320,11 +356,22 @@ async def replace_order_document(
         raise HTTPException(status_code=500, detail=f"Failed to replace document: {str(e)}")
 
 @router.delete("/{document_id}")
-def delete_order_document(document_id: int, db: Session = Depends(get_db)):
+def delete_order_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Delete an order document and remove file from MinIO"""
     db_document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not db_document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Quality Assurance may only delete documents they uploaded
+    if _is_quality_assurance(getattr(current_user, "role", None)) and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete documents you uploaded."
+        )
 
     # Log order document deletion for PC notifications before deletion
     user_name = None
@@ -446,7 +493,11 @@ def get_order_documents(
     """Get order documents for the authenticated uploader (client user_id ignored)."""
     user_id = current_user.id
     query = db.query(OrderDocument).order_by(OrderDocument.id.asc())
-    query = query.filter(OrderDocument.user_id == user_id)
+    
+    # Quality Assurance can see all documents, others only their own
+    if current_user.role != 'quality_assurance':
+        query = query.filter(OrderDocument.user_id == user_id)
+    
     return query.all()
 
 
@@ -524,12 +575,15 @@ def get_documents_by_order(
     current_user: AccessUser = Depends(get_current_user),
 ):
     """Get all documents for a specific order. Client user_id ignored (JWT required for auth)."""
-    _ = current_user
     user_id = None
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
     query = db.query(OrderDocument).filter(OrderDocument.order_id == order_id)
-    if user_id is not None:
+    
+    # Quality Assurance can see all documents, others only their own
+    if current_user.role != 'quality_assurance' and user_id is not None:
         query = query.filter(OrderDocument.user_id == user_id)
+    
     return query.all()

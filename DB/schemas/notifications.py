@@ -268,3 +268,49 @@ class PCNotificationWithDetails(PCNotification):
     part_name: Optional[str] = None
     part_number: Optional[str] = None
     document_version: Optional[str] = None
+
+
+# =======================
+# QA RM Received Notifications
+# =======================
+
+class QARMReceivedNotificationBase(BaseModel):
+    stock_id: int
+    order_id: Optional[int] = None
+    material_id: Optional[int] = None
+    material_name: Optional[str] = None
+    sale_order_number: Optional[str] = None
+    product_name: Optional[str] = None
+    quantity: Optional[int] = None
+    is_ack: Optional[bool] = False
+
+
+class QARMReceivedNotificationCreate(QARMReceivedNotificationBase):
+    pass
+
+
+class QARMReceivedNotification(QARMReceivedNotificationBase):
+    id: int
+    ack_by: Optional[str] = None
+    ack_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class QARMReceivedNotificationWithDetails(QARMReceivedNotification):
+    """Notification enriched with live stock dimension details."""
+    process_type: Optional[str] = None
+    form_type: Optional[str] = None
+    dimensions: Optional[str] = None
+    diameter: Optional[float] = None
+    length: Optional[float] = None
+    breadth: Optional[float] = None
+    height: Optional[float] = None
+    inner_diameter: Optional[float] = None
+    outer_diameter: Optional[float] = None
+    mass: Optional[float] = None
+    final_cost: Optional[float] = None
+    stock_status: Optional[str] = None
