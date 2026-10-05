@@ -422,7 +422,7 @@ const RawMaterialInventoryView = ({
                 <th colSpan={7} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
               </tr>
               <tr>
-                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Order No</th>
+                <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Project No</th>
                 <th style={{ ...thStyle, minWidth: 55, background: "#f0fff4" }}>Unit</th>
                 <th style={{ ...thStyle, minWidth: 80, background: "#f0fff4" }}>Total Len</th>
                 <th style={{ ...thStyle, minWidth: 90, background: "#f0fff4" }}>Remaining</th>

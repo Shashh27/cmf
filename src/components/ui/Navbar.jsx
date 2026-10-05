@@ -181,6 +181,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/inventory-data')) return 'Inventory Data';
     if (path.includes('/documents')) return 'Documents';
     if (path.includes('/leave-log')) return 'Leave Log';
+    if (path.includes('/notes')) return 'Right Now Jobs';
     if (path.includes('/recycle-bin')) return 'Recycle Bin';
     return '';
   };

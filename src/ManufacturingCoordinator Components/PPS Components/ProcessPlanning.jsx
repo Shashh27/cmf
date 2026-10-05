@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker, Tooltip } from "antd";
-import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
+import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined, LinkOutlined } from "@ant-design/icons";
 import { SCHEDULING_API_BASE_URL } from "../../Config/schedulingconfig.js";
 import dayjs from "dayjs";
 import axios from "axios";
@@ -65,6 +65,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const [operationStatusLoading, setOperationStatusLoading] = useState({});
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [inhouseSearchText, setInhouseSearchText] = useState('');
+
+  const [machineLinkOpen, setMachineLinkOpen] = useState(false);
+  const [machineLinkLoading, setMachineLinkLoading] = useState(false);
+  const [machineLinkSaving, setMachineLinkSaving] = useState(false);
+  const [machineLinkPartId, setMachineLinkPartId] = useState(null);
+  const [machineLinkOp, setMachineLinkOp] = useState(null); // enriched op from /operations/{id}
+  const [workcenterMachines, setWorkcenterMachines] = useState([]);
+  const [selectedMachineId, setSelectedMachineId] = useState(null);
 
   // ================================
   // FETCH ORDERS
@@ -141,9 +149,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   // ================================
   // FETCH PART OPERATION DETAILS
   // ================================
-  const fetchPartOperationDetails = async (partId) => {
+  const fetchPartOperationDetails = async (partId, forceRefresh = false) => {
     if (!selectedOrderId || !partId) return;
-    if (partOpDetails[partId]) return;
+    if (!forceRefresh && partOpDetails[partId]) return;
 
     setPartOpLoading(prev => ({ ...prev, [partId]: true }));
     try {
@@ -160,7 +168,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
         // Fetch operation status for each unique operation in the response
         const operations = res.data.operations || [];
         const uniqueOperationIds = [...new Set(operations.map(op => op.operation_id))];
-
+        
         uniqueOperationIds.forEach(operationId => {
           if (operationId && !operationStatus[operationId]) {
             fetchOperationStatus(operationId);
@@ -171,6 +179,79 @@ const ProcessPlanning = ({ initialOrderId }) => {
       // ignore
     }
     setPartOpLoading(prev => ({ ...prev, [partId]: false }));
+  };
+
+  const closeMachineLinkModal = () => {
+    setMachineLinkOpen(false);
+    setMachineLinkLoading(false);
+    setMachineLinkSaving(false);
+    setMachineLinkPartId(null);
+    setMachineLinkOp(null);
+    setWorkcenterMachines([]);
+    setSelectedMachineId(null);
+  };
+
+  const openMachineLinkModal = async (opRow, partId) => {
+    const operationId = opRow?.operation_id;
+    if (!operationId) {
+      message.warning("Operation id missing");
+      return;
+    }
+    setMachineLinkOpen(true);
+    setMachineLinkLoading(true);
+    setMachineLinkPartId(partId);
+    setMachineLinkOp(null);
+    setWorkcenterMachines([]);
+    setSelectedMachineId(null);
+    try {
+      const opRes = await api.get(`/operations/${operationId}`);
+      const op = opRes.data;
+      setMachineLinkOp(op);
+      setSelectedMachineId(op?.machine_id ?? null);
+      if (op?.workcenter_id) {
+        const mRes = await api.get(`/machines/workcenter/${op.workcenter_id}`);
+        setWorkcenterMachines(Array.isArray(mRes.data) ? mRes.data : []);
+      } else {
+        message.warning("No workcenter linked to this operation");
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to load machine linking details"));
+      closeMachineLinkModal();
+    } finally {
+      setMachineLinkLoading(false);
+    }
+  };
+
+  const saveMachineLink = async () => {
+    if (!machineLinkOp?.id) return;
+    if (!selectedMachineId) {
+      message.warning("Please select a machine");
+      return;
+    }
+    setMachineLinkSaving(true);
+    try {
+      await api.put(`/operations/${machineLinkOp.id}`, { machine_id: selectedMachineId });
+      message.success("Machine updated successfully");
+      const partId = machineLinkPartId;
+      closeMachineLinkModal();
+      if (partId) await fetchPartOperationDetails(partId, true);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to update machine"));
+    } finally {
+      setMachineLinkSaving(false);
+    }
+  };
+
+  const machineOptionLabel = (m) => m?.make || m?.model || `Machine ${m?.id}`;
+
+  const getOpRuntimeStatus = (operationId) => {
+    const statusData = operationStatus[operationId];
+    return String(statusData?.status || statusData?.operation_status || "").toLowerCase().replace(/\s+/g, "");
+  };
+
+  const canChangeMachine = (operationId) => {
+    if (!operationId || operationStatusLoading[operationId]) return false;
+    return getOpRuntimeStatus(operationId) === "pending";
   };
 
   const fetchOperationStatus = async (operationId) => {
@@ -1062,7 +1143,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
                     const loading = partOpLoading[record.id];
                     const columns = [
                       { title: "Operation Name", dataIndex: "operation" },
-                      { title: "Machine Name", dataIndex: "machine" },
+                      {
+                        title: "Machine Name",
+                        dataIndex: "machine",
+                        render: (text) => text || "-",
+                      },
                       {
                         title: "Start Time",
                         dataIndex: "planned_start_time",
@@ -1100,11 +1185,46 @@ const ProcessPlanning = ({ initialOrderId }) => {
                           }
                           // Use status from the API response (or fallback to operation_status)
                           const status = statusData.status || statusData.operation_status;
-                          const color = status === "completed" ? "green" :
-                            status === "inprogress" ? "blue" :
-                              status === "pending" ? "orange" : "default";
+                          const color = status === "completed" ? "green" : 
+                                       status === "inprogress" ? "blue" : 
+                                       status === "pending" ? "orange" : "default";
                           return <Tag color={color}>{status?.toUpperCase() || "-"}</Tag>;
                         }
+                      },
+                      {
+                        title: "Action",
+                        key: "action",
+                        align: "center",
+                        fixed: "right",
+                        width: 72,
+                        render: (_, opRow) => {
+                          const linkEnabled = canChangeMachine(opRow.operation_id);
+                          return (
+                            <Tooltip
+                              title={
+                                linkEnabled
+                                  ? "Change machine"
+                                  : "Machine can be changed only when operation status is Pending"
+                              }
+                            >
+                              <Button
+                                type="text"
+                                size="small"
+                                disabled={!linkEnabled}
+                                icon={
+                                  <LinkOutlined
+                                    style={{ color: linkEnabled ? "#1677ff" : "#bfbfbf" }}
+                                  />
+                                }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!linkEnabled) return;
+                                  openMachineLinkModal(opRow, record.id);
+                                }}
+                              />
+                            </Tooltip>
+                          );
+                        },
                       },
                     ];
                     return (
@@ -1136,6 +1256,114 @@ const ProcessPlanning = ({ initialOrderId }) => {
           </Tabs>
         </Card>
       )}
+
+      <Modal
+        title={
+          <Space>
+            <LinkOutlined />
+            <span>Machine-WorkCenter Linking</span>
+          </Space>
+        }
+        open={machineLinkOpen}
+        onCancel={closeMachineLinkModal}
+        destroyOnClose
+        footer={[
+          <Button key="cancel" onClick={closeMachineLinkModal}>
+            Cancel
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            loading={machineLinkSaving}
+            disabled={machineLinkLoading || !selectedMachineId || !machineLinkOp?.workcenter_id}
+            onClick={saveMachineLink}
+          >
+            Save Changes
+          </Button>,
+        ]}
+      >
+        {machineLinkLoading ? (
+          <div style={{ textAlign: "center", padding: 24 }}>
+            <Spin />
+          </div>
+        ) : (
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <div
+              style={{
+                background: "#f5f5f5",
+                borderRadius: 8,
+                padding: "12px 14px",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  Operation Number
+                </Typography.Text>
+                <div style={{ fontWeight: 600 }}>
+                  {machineLinkOp?.operation_number || "-"}
+                </div>
+              </div>
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  work centre
+                </Typography.Text>
+                <div style={{ fontWeight: 600 }}>
+                  {machineLinkOp?.work_center_name || machineLinkOp?.workcenter_id || "-"}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Typography.Text strong>
+                <span style={{ color: "#ff4d4f" }}>*</span> Select Machine
+              </Typography.Text>
+              <Select
+                showSearch
+                allowClear
+                placeholder={
+                  machineLinkOp?.workcenter_id
+                    ? "Search / select machine"
+                    : "No workcenter on this operation"
+                }
+                disabled={!machineLinkOp?.workcenter_id}
+                value={selectedMachineId}
+                onChange={setSelectedMachineId}
+                style={{ width: "100%", marginTop: 8 }}
+                optionFilterProp="label"
+                options={workcenterMachines.map((m) => ({
+                  value: m.id,
+                  label: machineOptionLabel(m),
+                  model: m.model,
+                  type: m.type,
+                }))}
+                optionRender={(option) => (
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{option.data.label}</div>
+                    <div style={{ fontSize: 11, color: "#8c8c8c" }}>
+                      Model: {option.data.model || "-"} | Type: {option.data.type || "-"}
+                    </div>
+                  </div>
+                )}
+                labelRender={({ label, value }) => {
+                  const m = workcenterMachines.find((x) => x.id === value);
+                  if (!m) return label;
+                  return (
+                    <div style={{ lineHeight: 1.2, padding: "2px 0" }}>
+                      <div>{machineOptionLabel(m)}</div>
+                      <div style={{ fontSize: 11, color: "#8c8c8c" }}>
+                        Model: {m.model || "-"} | Type: {m.type || "-"}
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+            </div>
+          </Space>
+        )}
+      </Modal>
     </div>
   );
 };

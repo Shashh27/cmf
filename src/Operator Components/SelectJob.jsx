@@ -223,7 +223,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
 
           <Row gutter={[12, 12]}>
             <Col span={8}>
-              <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Production Order</Text>
+              <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Project</Text>
               <Select
                 placeholder="Filter by order..."
                 style={{ width: '100%' }}
@@ -328,7 +328,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                   <Row gutter={[16, 16]}>
                     <Col span={12}>
                       <div style={{ marginBottom: 8 }}>
-                        <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Production Order</Text>
+                        <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Project Details</Text>
                         <Text strong>{job.sale_order_number || 'N/A'}</Text>
                       </div>
                       <div>

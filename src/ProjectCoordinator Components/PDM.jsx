@@ -7,8 +7,8 @@ import ProductDetails from "./PDM Components/ProductDetails";
 import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
-import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import Recyclebin from "./Recyclebin";
+import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import PCOrderChatPanel, { OrderChatButton, useOrderChat } from "./chatbox/OrderChatPanel";
 import { useAuth } from "../auth/AuthContext.jsx";
 
@@ -168,7 +168,7 @@ const PDM = () => {
               size={viewportWidth < 1100 ? "small" : "middle"}
               items={[
                 { key: "pdm", label: "PDM" },
-                { key: "pps", label: "PPS" },
+                { key: "order", label: viewportWidth < 1100 ? "Tracking" : "Project Tracking" },
                 { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
               ]}
             />
@@ -180,7 +180,7 @@ const PDM = () => {
                 />
               )}
               <Button size="small" onClick={() => navigate("/project_coordinator/oms/orders")}>
-                {viewportWidth < 900 ? "Back" : "Back to Orders"}
+                {viewportWidth < 900 ? "Back" : "Back to Projects"}
               </Button>
             </div>
           </div>
@@ -314,13 +314,18 @@ const PDM = () => {
               )}
             </Content>
           </Layout>
-        ) : activeTopTab === "pps" ? (
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-            <ProcessPlanning initialOrderId={initialOrderId} />
+        ) : activeTopTab === "order" ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 8px 8px" }}>
+            <OrderTracking productId={initialProductId} />
           </div>
         ) : activeTopTab === "recycle-bin" ? (
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-            <Recyclebin orderId={initialOrderId} />
+            <Recyclebin
+              orderId={initialOrderId}
+              productId={Number.isFinite(productIdNum) ? productIdNum : null}
+              projectName={projectName}
+              projectNumber={projectNumber}
+            />
           </div>
         ) : null}
       </div>

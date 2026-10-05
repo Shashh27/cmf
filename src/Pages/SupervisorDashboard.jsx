@@ -5,6 +5,7 @@ import ProductionCompletion from '../Supervisor Components/ProductionCompletion'
 import AssetsAvailability from '../Supervisor Components/Assets Availability';
 import PreventiveMaintenance from '../Supervisor Components/PreventiveMaintenance';
 import PokaYokeOperationChecklist from '../Supervisor Components/PokaYokeOperationChecklist';
+import SupervisorNotes from '../Supervisor Components/Notes';
 
 const SupervisorDashboard = () => {
   const location = useLocation();
@@ -19,6 +20,9 @@ const SupervisorDashboard = () => {
     }
     if (path.includes('/pokayoke-checklists')) {
       return <PokaYokeOperationChecklist />;
+    }
+    if (path.includes('/notes')) {
+      return <SupervisorNotes />;
     }
     if (path.includes('/production_logs')) {
       return (

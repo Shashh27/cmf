@@ -142,7 +142,7 @@ const Maintenance = () => {
     { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (componentPagination.current - 1) * componentPagination.pageSize + idx + 1 },
     { title: 'Component Status', dataIndex: 'component_status', key: 'component_status', width: 180 },
     {
-      title: 'Production Order',
+      title: 'Project',
       key: 'order',
       width: 220,
       render: (_, r) => r.order_name ?? r.production_order_id,

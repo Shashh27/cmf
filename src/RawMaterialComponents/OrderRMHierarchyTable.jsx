@@ -1234,7 +1234,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: isMobile ? 10 : 14, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: isMobile ? 14 : 16, whiteSpace: 'nowrap' }}>Plan & Procure Raw Materials</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-          <Select mode="multiple" value={selectedOrder} placeholder="Order" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartName([]); setSelectedPartNumber([]); }}>
+          <Select mode="multiple" value={selectedOrder} placeholder="Project" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => { setSelectedOrder(val || []); setSelectedRM([]); setSelectedPartName([]); setSelectedPartNumber([]); }}>
             {orderOptions.map(o => <Option key={o} value={o}>{o}</Option>)}
           </Select>
           <Select mode="multiple" value={selectedPartName} placeholder="Part Name" allowClear showSearch maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} style={{ minWidth: isMobile ? 110 : 160 }} onChange={val => setSelectedPartName(val || [])}>
@@ -1279,7 +1279,7 @@ const OrderRMHierarchyTable = ({ rawMaterials, refreshTrigger }) => {
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: isMobile ? '1200px' : '100%', border }}>
             <thead>
               <tr>
-                <th rowSpan={2} style={thStyle}><FilterHeader label="Order" options={colFilterOptions.orders} value={colOrder} onChange={setColOrder} /></th>
+                <th rowSpan={2} style={thStyle}><FilterHeader label="Project" options={colFilterOptions.orders} value={colOrder} onChange={setColOrder} /></th>
                 <th rowSpan={2} style={thStyle}><FilterHeader label="Extracted Raw Material" options={colFilterOptions.rms} value={colRM} onChange={setColRM} /></th>
                 <th colSpan={4} style={thStyle}>Part</th>
                 <th rowSpan={2} style={thStyle}>Extracted Dimension</th>

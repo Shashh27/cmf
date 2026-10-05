@@ -5,6 +5,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import { API_BASE_URL } from '../Config/auth.js';
 import NotificationPokaYoke from './NotificationPokaYoke';
 import OTNotification from './OTNotification';
+import RightNowJobNotifications from '../Notification Components/RightNowJobNotifications';
 import { authFetch } from '../api/client.js';
 
 const Notifications = () => {
@@ -13,6 +14,7 @@ const Notifications = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [activeTab, setActiveTab] = useState('production');
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [ackingAll, setAckingAll] = useState(false);
   const [productionMachineFilter, setProductionMachineFilter] = useState([]);
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
@@ -21,6 +23,7 @@ const Notifications = () => {
   const [selectedOperations, setSelectedOperations] = useState([]);
   const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
   const [otUnacknowledgedCount, setOtUnacknowledgedCount] = useState(0);
+  const [rightNowJobCount, setRightNowJobCount] = useState(0);
 
   useEffect(() => {
     fetchNotifications();
@@ -105,15 +108,7 @@ const Notifications = () => {
           const hasSubmission = (log.produced_quantity || 0) > 0 || (log.operator_rework_quantity || 0) > 0;
           return isReviewed && hasSubmission;
         });
-        // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorRespondedLogs.sort((a, b) => {
-          const isAckA = isOperatorAcknowledged(a);
-          const isAckB = isOperatorAcknowledged(b);
-          // Unacknowledged (false) comes before acknowledged (true)
-          if (isAckA !== isAckB) {
-            return isAckA ? 1 : -1;
-          }
-          // Within same acknowledgment status, sort by created_at descending
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
@@ -198,6 +193,46 @@ const Notifications = () => {
         newSet.delete(logId);
         return newSet;
       });
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    const pending = notifications.filter((record) => !isOperatorAcknowledged(record));
+    if (!pending.length) return;
+
+    let operatorId = null;
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        operatorId = JSON.parse(storedUser).id;
+      } catch (e) {
+        console.error('Error parsing user from local storage', e);
+      }
+    }
+    if (!operatorId) operatorId = localStorage.getItem('operator_id');
+    if (!operatorId) {
+      message.error('Operator not found in session. Please log in again.');
+      return;
+    }
+
+    setAckingAll(true);
+    try {
+      const results = await Promise.allSettled(pending.map((record) =>
+        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${record.id}/acknowledge?operator_id=${operatorId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+        }).then((response) => {
+          if (!response.ok) throw new Error('failed');
+        })
+      ));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      await fetchNotifications();
+      if (failed) message.warning(`Acknowledged ${pending.length - failed} of ${pending.length}`);
+      else message.success('All notifications acknowledged');
+    } catch {
+      message.error('Failed to acknowledge notifications');
+    } finally {
+      setAckingAll(false);
     }
   };
 
@@ -681,9 +716,20 @@ const Notifications = () => {
                         </Button>
                       )}
                     </Space>
-                    <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
-                      Refresh
-                    </Button>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<CheckOutlined />}
+                        onClick={handleAcknowledgeAll}
+                        loading={ackingAll}
+                        disabled={!notifications.some((record) => !isOperatorAcknowledged(record))}
+                      >
+                        Acknowledge All
+                      </Button>
+                      <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
+                        Refresh
+                      </Button>
+                    </Space>
                   </div>
                   <Table
                     columns={columns}
@@ -718,6 +764,20 @@ const Notifications = () => {
                     }}
                   />
                 </Spin>
+              ),
+            },
+            {
+              key: 'right-now-jobs',
+              label: (
+                <Badge count={rightNowJobCount} showZero={false}>
+                  Right Now Jobs
+                </Badge>
+              ),
+              children: (
+                <RightNowJobNotifications
+                  audience="operator"
+                  onUnreadCountChange={setRightNowJobCount}
+                />
               ),
             },
             {

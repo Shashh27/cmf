@@ -618,11 +618,11 @@ const RawMaterialHistoryTab = () => {
                 ]}
               />
 
-              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Order:</Text>
+              <Text strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Project:</Text>
               <Select
                 size="small"
                 style={{ width: 150 }}
-                placeholder="Order Numbers"
+                placeholder="Project Numbers"
                 value={filterOrderNumber}
                 onChange={setFilterOrderNumber}
                 allowClear
@@ -691,7 +691,7 @@ const RawMaterialHistoryTab = () => {
                       <th rowSpan={2} style={thStyle}><FilterHeader label="Form Type" options={colFilterOptions.formTypes} value={colFormType} onChange={setColFormType} /></th>
                       <th rowSpan={2} style={thStyle}>Dimensions</th>
                       <th rowSpan={2} style={thStyle}><FilterHeader label="Source" options={colFilterOptions.sources} value={colSource} onChange={setColSource} /></th>
-                      <th rowSpan={2} style={thStyle}><FilterHeader label="Order" options={colFilterOptions.orders} value={colOrder} onChange={setColOrder} /></th>
+                      <th rowSpan={2} style={thStyle}><FilterHeader label="Project" options={colFilterOptions.orders} value={colOrder} onChange={setColOrder} /></th>
                       <th rowSpan={2} style={thStyle}><FilterHeader label="Part" options={colFilterOptions.parts} value={colPart} onChange={setColPart} /></th>
                       <th rowSpan={2} style={thStyle}>Length Used</th>
                       <th rowSpan={2} style={thStyle}><FilterHeader label="User" options={colFilterOptions.users} value={colUser} onChange={setColUser} /></th>

@@ -573,7 +573,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                       <div className="flex flex-wrap gap-2 items-center">
                         <div className="min-w-[120px] flex-1">
                           <Select
-                            placeholder="Order Number"
+                            placeholder="Project Number"
                             allowClear
                             value={stockFilters.orderNumber}
                             onChange={(value) => setStockFilters(prev => ({ ...prev, orderNumber: value, partNumber: null }))}

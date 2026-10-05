@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge, Input, Space, Modal, Tooltip, Alert, Empty } from 'antd';
-import { BellOutlined, CheckOutlined, ReloadOutlined, CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge, Input, Space, Modal, Tooltip, Alert, Empty, Select } from 'antd';
+import { BellOutlined, CheckOutlined, ReloadOutlined, CheckCircleOutlined, EyeOutlined, CloudDownloadOutlined, InfoCircleOutlined, AppstoreOutlined, ClearOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import config from '../Config/config';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
@@ -10,6 +10,9 @@ import { useNavigate } from 'react-router-dom';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
 import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
 import PokayokeOperationNotification from './PokayokeOperationNotification';
+import RightNowJobNotifications from '../Notification Components/RightNowJobNotifications';
+import { API_BASE_URL } from '../Config/auth.js';
+import { authFetch } from '../api/client.js';
 
 const { Title, Text } = Typography;
 
@@ -106,8 +109,16 @@ const Notifications = () => {
   const [inspectionPagination, setInspectionPagination] = useState({ current: 1, pageSize: 10 });
   const [activeTab, setActiveTab] = useState('production');
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [ackingAll, setAckingAll] = useState(false);
   const [query, setQuery] = useState('');
   const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
+  const [rightNowJobCount, setRightNowJobCount] = useState(0);
+  const [productionMachineFilter, setProductionMachineFilter] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedOperations, setSelectedOperations] = useState([]);
 
   // FTP Modal States
   const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
@@ -134,6 +145,21 @@ const Notifications = () => {
   useEffect(() => {
     fetchNotifications();
     fetchInspectionNotifications();
+  }, []);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await authFetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
   }, []);
 
   useEffect(() => {
@@ -195,15 +221,7 @@ const Notifications = () => {
                  String(log.supervisor_id) === String(supervisorId)) &&
                  (log.produced_quantity || 0) > 0
         );
-        // Sort by acknowledgment status first (unacknowledged at top), then by created_at descending
         const sortedLogs = supervisorLogs.sort((a, b) => {
-          const isAckA = a.supervisor_acknowledged_at || a.acknowledged;
-          const isAckB = b.supervisor_acknowledged_at || b.acknowledged;
-          // Unacknowledged (false) comes before acknowledged (true)
-          if (isAckA !== isAckB) {
-            return isAckA ? 1 : -1;
-          }
-          // Within same acknowledgment status, sort by created_at descending
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
@@ -282,6 +300,46 @@ const Notifications = () => {
         newSet.delete(logId);
         return newSet;
       });
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    const pending = notifications.filter((record) => !(record.supervisor_acknowledged_at || record.acknowledged));
+    if (!pending.length) return;
+
+    const storedUser = localStorage.getItem('user');
+    let supervisorId = null;
+    if (storedUser) {
+      try {
+        supervisorId = JSON.parse(storedUser).id;
+      } catch (e) {
+        console.error('Error parsing user from local storage', e);
+      }
+    }
+    if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
+    if (!supervisorId) {
+      message.error('Supervisor not found in session. Please log in again.');
+      return;
+    }
+
+    setAckingAll(true);
+    try {
+      const results = await Promise.allSettled(pending.map((record) =>
+        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${record.id}/acknowledge?supervisor_id=${supervisorId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+        }).then((response) => {
+          if (!response.ok) throw new Error('failed');
+        })
+      ));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      await fetchNotifications();
+      if (failed) message.warning(`Acknowledged ${pending.length - failed} of ${pending.length}`);
+      else message.success('All notifications acknowledged');
+    } catch {
+      message.error('Failed to acknowledge notifications');
+    } finally {
+      setAckingAll(false);
     }
   };
 
@@ -856,13 +914,95 @@ const Notifications = () => {
     }
   };
 
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    authFetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
+
+  const productionMachineOptions = useMemo(() => {
+    const machineMap = new Map();
+    notifications.forEach((record) => {
+      const machine = record.machine;
+      if (machine && machine.id !== undefined && machine.id !== null && !machineMap.has(machine.id)) {
+        const label = [machine.make, machine.model].filter(Boolean).join(' - ') || `Machine ${machine.id}`;
+        machineMap.set(machine.id, label);
+      }
+    });
+    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [notifications]);
+
+  const productionOperationOptions = useMemo(() => {
+    const opMap = new Map();
+    notifications.forEach((record) => {
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return;
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return;
+
+      const opNum = record.operation?.operation_number;
+      if (opNum === undefined || opNum === null || opMap.has(opNum)) return;
+
+      const opName = record.operation?.operation_name;
+      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
+      opMap.set(opNum, label);
+    });
+    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
+  }, [notifications, selectedSaleOrder, selectedParts]);
+
+  const filteredNotifications = useMemo(() => notifications.filter((record) => {
+    if (productionMachineFilter.length > 0) {
+      if (!record.machine?.id || !productionMachineFilter.includes(record.machine.id)) return false;
+    }
+    if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return false;
+    if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return false;
+    if (selectedOperations.length > 0 && !selectedOperations.includes(record.operation?.operation_number)) return false;
+    return true;
+  }), [notifications, productionMachineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
+
+  const hasProductionFilters = (
+    productionMachineFilter.length > 0 ||
+    selectedProjectId != null ||
+    selectedParts.length > 0 ||
+    selectedOperations.length > 0
+  );
+
+  const clearProductionFilters = () => {
+    setProductionMachineFilter([]);
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+  };
+
   const columns = [
     {
       title: 'Sl\nNo',
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) =>
+        (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Project\nDetails',
@@ -1310,36 +1450,7 @@ const Notifications = () => {
   return (
     <div style={{ padding: '16px' }}>
       {/* Header Card */}
-      <Card
-        style={{ borderRadius: 8, marginBottom: '16px' }}
-        styles={{ body: { padding: '16px' } }}
-      >
-        <Row justify="space-between" align="middle">
-          <Col>
-            <div>
-              <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
-                <BellOutlined /> Notifications
-              </Title>
-              <Text type="secondary">
-                View and acknowledge notifications from operators
-              </Text>
-            </div>
-          </Col>
-          <Col>
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              size="large"
-              onClick={() => {
-                fetchNotifications();
-                fetchInspectionNotifications();
-              }}
-            >
-              Refresh
-            </Button>
-          </Col>
-        </Row>
-      </Card>
+     
 
       {/* Tabs Section */}
       <Card
@@ -1358,9 +1469,103 @@ const Notifications = () => {
               label: 'Production Logs',
               children: (
                 <Spin spinning={loading}>
+                  <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
+                    <Space wrap>
+                      <Select
+                        mode="multiple"
+                        showSearch
+                        allowClear
+                        placeholder="Filter by machine"
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        value={productionMachineFilter}
+                        onChange={(value) => {
+                          setProductionMachineFilter(value || []);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        options={productionMachineOptions}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                      <Select
+                        placeholder="Select Project"
+                        showSearch
+                        allowClear
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedProjectId}
+                        onChange={handleProjectChange}
+                        style={{ minWidth: 180 }}
+                        options={orders.map((o) => ({
+                          value: o.id,
+                          label: o.sale_order_number || `Order ${o.id}`,
+                        }))}
+                      />
+                      <Select
+                        mode="multiple"
+                        placeholder="Select Parts"
+                        showSearch
+                        allowClear
+                        disabled={!selectedProjectId}
+                        maxTagCount={1}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedParts}
+                        onChange={(val) => {
+                          setSelectedParts(val);
+                          setSelectedOperations([]);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        options={parts.map((p) => ({
+                          value: p.part_number,
+                          label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+                        }))}
+                      />
+                      <Select
+                        mode="multiple"
+                        placeholder="Select Operations"
+                        showSearch
+                        allowClear
+                        disabled={!selectedProjectId}
+                        maxTagCount={1}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedOperations}
+                        onChange={(val) => {
+                          setSelectedOperations(val);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        options={productionOperationOptions}
+                      />
+                      {hasProductionFilters && (
+                        <Button icon={<ClearOutlined />} onClick={clearProductionFilters}>
+                          Clear
+                        </Button>
+                      )}
+                    </Space>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<CheckOutlined />}
+                        onClick={handleAcknowledgeAll}
+                        loading={ackingAll}
+                        disabled={!notifications.some((record) => !(record.supervisor_acknowledged_at || record.acknowledged))}
+                      >
+                        Acknowledge All
+                      </Button>
+                      <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
+                        Refresh
+                      </Button>
+                    </Space>
+                  </div>
                   <Table
                     columns={columns}
-                    dataSource={notifications}
+                    dataSource={filteredNotifications}
                     rowKey="id"
                     pagination={{
                       current: pagination.current,
@@ -1391,6 +1596,20 @@ const Notifications = () => {
                     }}
                   />
                 </Spin>
+              ),
+            },
+            {
+              key: 'right-now-jobs',
+              label: (
+                <Badge count={rightNowJobCount} showZero={false}>
+                  Right Now Jobs
+                </Badge>
+              ),
+              children: (
+                <RightNowJobNotifications
+                  audience="supervisor"
+                  onUnreadCountChange={setRightNowJobCount}
+                />
               ),
             },
             {

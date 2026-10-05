@@ -1118,7 +1118,7 @@ const PartsPriority = () => {
                                   render: (t, r) => (
                                     <div>
                                       <div style={{ fontWeight: 600 }}>{t || "-"}</div>
-                                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Order {r.order_id ?? "-"} · Due {r.due_date || "-"}</div>
+                                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Project {r.order_id ?? "-"} · Due {r.due_date || "-"}</div>
                                     </div>
                                   ),
                                 },

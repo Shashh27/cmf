@@ -42,7 +42,7 @@ const RawMaterialInventoryTab = ({ rawMaterials = [] }) => {
               <Option value="general">General</Option>
               <Option value="order">Order</Option>
             </Select>
-            <Select mode="multiple" placeholder="Order No" allowClear showSearch optionFilterProp="children" value={invFilters.fOrder} onChange={v => { setInvFilters(p => ({ ...p, fOrder: v || [], fPart: [] })); }} style={{ minWidth: 140, maxWidth: 260 }} size="middle" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} disabled={invFilters.fSource.length > 0 && !invFilters.fSource.includes('order')}>
+            <Select mode="multiple" placeholder="Project No" allowClear showSearch optionFilterProp="children" value={invFilters.fOrder} onChange={v => { setInvFilters(p => ({ ...p, fOrder: v || [], fPart: [] })); }} style={{ minWidth: 140, maxWidth: 260 }} size="middle" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} disabled={invFilters.fSource.length > 0 && !invFilters.fSource.includes('order')}>
               {invFilterOptions.orders.map(o => <Option key={o} value={o}>{o}</Option>)}
             </Select>
             <Select mode="multiple" placeholder="Part No" allowClear showSearch optionFilterProp="children" value={invFilters.fPart} onChange={v => setF('fPart', v)} style={{ minWidth: 130, maxWidth: 260 }} size="middle" maxTagCount={1} maxTagPlaceholder={(omitted) => `+${omitted.length} more`} disabled={invFilters.fOrder.length === 0}>

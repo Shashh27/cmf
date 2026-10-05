@@ -166,7 +166,7 @@ const ExhaustedUnitsModal = ({ open, onClose, inventoryData, onDocumentsChanged 
                   <th rowSpan={2} style={{ ...thStyle, width: "8%" }}>Mass (kg)</th>
                   <th rowSpan={2} style={{ ...thStyle, width: "8%" }}>Source</th>
                   <th rowSpan={2} style={{ ...thStyle, width: "8%", background: "#e6f7ff" }}>Quality Docs</th>
-                  <th rowSpan={2} style={{ ...thStyle, width: "10%" }}>Order No</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: "10%" }}>Project No</th>
                   <th colSpan={3} style={{ ...thStyle, background: "#fee2e2" }}>Exhausted Units</th>
                 </tr>
                 <tr>

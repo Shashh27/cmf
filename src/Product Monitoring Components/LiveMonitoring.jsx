@@ -527,7 +527,7 @@ const MachineCard = ({ machine, onOpenProcess }) => {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flex: 1, minHeight: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
-            <Field label="Production Order" value={order} />
+            <Field label="Project" value={order} />
             <Field label="Part Number" value={partNo} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: programLabel ? '1fr 1fr' : '1fr', gap: '0 14px' }}>

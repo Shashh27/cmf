@@ -947,7 +947,7 @@ const IsometricMachineView = ({ embedded = false, selectedMachineIds: externalSe
             <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {[
-                  ['SALE ORDER',    selectedMachine.sale_order_number || '—'],
+                  ['PROJECT',    selectedMachine.sale_order_number || '—'],
                   ['PART NUMBER',   selectedMachine.part_number       || '—'],
                   ['OPERATION',     selectedMachine.operation_name    || '—'],
                   ['WORK CENTER',   selectedMachine.work_center_name  || selectedMachine.lineName || '—'],

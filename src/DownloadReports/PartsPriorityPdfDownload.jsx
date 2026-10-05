@@ -190,7 +190,7 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
             Order Wise Priority Report
           </Text>
           <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total orders: {total}</Text>
+            <Text style={styles.metaText}>Total projects: {total}</Text>
             <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
           </View>
         </View>
@@ -435,7 +435,7 @@ export const OrderWisePriorityPdfDownload = ({
       ["CMF DIGITIZATION "],
       ["Order Wise Priority Report"],
       [],
-      [`Total Orders: ${data.length}`],
+      [`Total Projects: ${data.length}`],
       [`Generated on: ${new Date().toLocaleString()}`],
       []
     ], { origin: "A1" });

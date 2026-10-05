@@ -136,8 +136,8 @@ export default function OrderChatPanelView({
     setCreateName(
       type === 'group'
         ? orderLabel
-          ? `Order ${orderLabel} Discussion`
-          : 'Order Discussion'
+          ? `Project ${orderLabel} Discussion`
+          : 'Project Discussion'
         : ''
     );
     setCreateParticipants([]);
@@ -201,7 +201,7 @@ export default function OrderChatPanelView({
         <MessageOutlined className="order-chatbox-drawer-title-icon" />
       </Badge>
       <span>
-        Order Chat
+        Project Chat
         {orderLabel ? (
           <Text type="secondary" style={{ marginLeft: 8, fontWeight: 400, color: '#8696a0' }}>
             #{orderLabel}
@@ -389,7 +389,7 @@ export default function OrderChatPanelView({
                 <div className="order-chatbox-empty">
                   <div>
                     <MessageOutlined style={{ fontSize: 48, color: '#8696a0', marginBottom: 12 }} />
-                    <div>Order Chat</div>
+                    <div>Project Chat</div>
                     <Text type="secondary">Select a chat or start a new conversation</Text>
                   </div>
                 </div>
@@ -640,7 +640,7 @@ export default function OrderChatPanelView({
             onChange={(e) => setCreateName(e.target.value)}
             placeholder={
               createType === 'group'
-                ? 'e.g. Order Discussion'
+                ? 'e.g. Project Discussion'
                 : 'e.g. Design review with John'
             }
           />
@@ -694,7 +694,7 @@ export function OrderChatButton({ totalUnread = 0, onClick, disabled, size = 'sm
         className="order-chatbox-trigger-btn"
         style={totalUnread > 0 ? { borderColor: '#0da3d8', color: '#0da3d8' } : undefined}
       >
-        <span className="order-chatbox-trigger-label">Order Chat</span>
+        <span className="order-chatbox-trigger-label">Project Chat</span>
       </Button>
     </Badge>
   );

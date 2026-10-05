@@ -199,7 +199,7 @@ const PDM = () => {
               )}
               <AdminDocumentNotifications orderId={initialOrderId} />
               <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
-                {viewportWidth < 900 ? "Back" : "Back to Orders"}
+                {viewportWidth < 900 ? "Back" : "Back to Projects"}
               </Button>
             </div>
           </div>

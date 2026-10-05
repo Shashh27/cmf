@@ -4,7 +4,7 @@ import {
   ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined, UserOutlined, CalendarOutlined,
   SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined, InfoCircleOutlined, CloseCircleOutlined,
 } from "@ant-design/icons";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Select } from "antd";
 import { api } from '../api/client.js';
 import OrderModal from "./OMS Components/OrderModal";
 import DocumentModal from "./OMS Components/DocumentModal";
@@ -30,6 +30,8 @@ const OMS = () => {
   const [searchText, setSearchText] = useState("");
   const [dateRange, setDateRange] = useState(null);
   const [selectedKpiFilter, setSelectedKpiFilter] = useState(null);
+  const [filterCustomers, setFilterCustomers] = useState([]);
+  const [filterProjects, setFilterProjects] = useState([]);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
@@ -203,6 +205,24 @@ const OMS = () => {
     return !orderDatesSet.has(current.format('YYYY-MM-DD'));
   };
 
+  const uniqueCustomerOptions = useMemo(() => {
+    const seen = new Set();
+    return orders
+      .map(o => ({ id: o.customer_id, label: getCustomerName(o.customer_id, o) }))
+      .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ id, label }) => ({ value: id, label }));
+  }, [orders, customers]);
+
+  const uniqueProjectOptions = useMemo(() => {
+    const seen = new Set();
+    return orders
+      .map(o => ({ id: o.product_id, label: getProductName(o.product_id, o) }))
+      .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ id, label }) => ({ value: id, label }));
+  }, [orders]);
+
   const tableColumnFilters = useMemo(() => {
     const mfgCoordinatorFilters = Array.from(
       new Set(
@@ -272,6 +292,17 @@ const OMS = () => {
 
     // 1. Product ID Filter (from URL)
     if (productId && order.product_id?.toString() !== productId) return false;
+
+    // Customer multi-select filter
+    if (filterCustomers.length > 0 && !filterCustomers.includes(order.customer_id)) return false;
+
+    // Project multi-select filter (normalize id types — API may return number or string)
+    if (
+      filterProjects.length > 0 &&
+      !filterProjects.some((id) => String(id) === String(order.product_id))
+    ) {
+      return false;
+    }
 
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
@@ -346,7 +377,7 @@ const OMS = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="flex flex-col items-center">
           <Spin size="large" />
-          <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
+          <p className="mt-4 text-gray-500 font-medium">Loading projects...</p>
         </div>
       </div>
     );
@@ -380,7 +411,7 @@ const OMS = () => {
       ellipsis: true,
       render: (pid, record) => (
         record.approval_status === "Rejected" ? (
-          <Tooltip title="Order rejected - cannot access project">
+          <Tooltip title="Project rejected - cannot access">
             <Space className="text-gray-400" size={2}>
               <AppstoreOutlined className="text-xs" />
               <span className="font-medium text-xs truncate">{getProductName(pid, record)}</span>
@@ -827,11 +858,31 @@ const OMS = () => {
               size="middle"
               style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
             />
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="Project"
+              value={filterProjects}
+              onChange={setFilterProjects}
+              options={uniqueProjectOptions}
+              maxTagCount={1}
+              maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+              size="middle"
+              style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
+            />
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="Customer"
+              value={filterCustomers}
+              onChange={setFilterCustomers}
+              options={uniqueCustomerOptions}
+              maxTagCount={1}
+              maxTagPlaceholder={(omitted) => `+${omitted.length} more`}
+              size="middle"
+              style={{ minWidth: 120, flex: 1, fontWeight: 600 }}
+            />
             <div className="flex gap-2">
-              <OMSOrdersPdfDownload
-                orders={ordersForPdf}
-                formatDate={formatDate}
-              />
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
@@ -843,6 +894,10 @@ const OMS = () => {
                 <span className="hidden sm:inline">New Project</span>
                 <span className="sm:hidden">New</span>
               </Button>
+              <OMSOrdersPdfDownload
+                orders={ordersForPdf}
+                formatDate={formatDate}
+              />
             </div>
           </div>
         </div>
@@ -880,7 +935,7 @@ const OMS = () => {
           size="small"
           bordered
           className="modern-table"
-          locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
+          locale={{ emptyText: <Empty description={searchText ? "No projects found matching your search" : "No projects found"} /> }}
           scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         />
       </Card>

@@ -72,7 +72,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   const handleUpload = async (values) => {
     const file = values.file?.[0]?.originFileObj;
     if (!file || !selectedOrderId) {
-      message.error("Please select a file and order");
+      message.error("Please select a file and project");
       return;
     }
 
@@ -364,7 +364,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>Revision History</Title>
               {orderId ? (
-                <Tag color="cyan" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Order: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
+                <Tag color="cyan" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Project: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
               ) : (
                 <Select
                   value={selectedOrderId}
@@ -372,7 +372,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                     setSelectedOrderId(value);
                     fetchDocuments(value);
                   }}
-                  placeholder="Select order"
+                  placeholder="Select project"
                   style={{ width: '100%', maxWidth: 200 }}
                   size="small"
                 >
@@ -390,7 +390,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                 documents.length === 0 ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="No documents found for this order"
+                    description="No documents found for this project"
                     style={{ padding: '40px 0', backgroundColor: '#fafafa', borderRadius: 8 }}
                   />
                 ) : (
@@ -402,7 +402,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                   ))
                 )
               ) : (
-                <Empty description="Select an order to view documents" />
+                <Empty description="Select an project to view documents" />
               )}
             </div>
           </Col>

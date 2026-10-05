@@ -149,7 +149,7 @@ const PlannedVsActualTable = () => {
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #d46b08', fontWeight: '600' }}>Total Qty</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #d46b08', fontWeight: '600' }}>Remaining Qty</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #d46b08', fontWeight: '600' }}>Status</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #d46b08', fontWeight: '600' }}>Sale Order</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #d46b08', fontWeight: '600' }}>Project</th>
                     </tr>
                   </thead>
                   <tbody>

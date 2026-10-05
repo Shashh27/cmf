@@ -121,7 +121,7 @@ const RawMaterialSummaryPdfDocument = ({ orders }) => {
             Raw Material Summary by Order
           </Text>
           <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total orders: {total}</Text>
+            <Text style={styles.metaText}>Total projects: {total}</Text>
             <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
           </View>
         </View>
@@ -241,7 +241,7 @@ export const RawMaterialSummaryPdfDownload = ({
       ["CMF DIGITIZATION"],
       ["Raw Material Summary by Order"],
       [],
-      [`Total Orders: ${orders.length}`],
+      [`Total projects: ${orders.length}`],
       [`Generated on: ${new Date().toLocaleString()}`],
       []
     ], { origin: "A1" });

@@ -407,7 +407,7 @@ const SimpleGanttChart = ({
             title: `
               <div style="font-weight: 400; margin-bottom: 8px; color: ${titleColor};">${titleLabel}</div>
               ${item.type === 'issues' && item.issue_reason ? `<div style="margin-bottom: 4px;"><strong>Reason:</strong> ${item.issue_reason}</div>` : ''}
-              ${item.type !== 'live' && item.type !== 'issues' && item.po ? `<div style="margin-bottom: 4px;"><strong>Order:</strong> ${item.po}</div>` : ''}
+              ${item.type !== 'live' && item.type !== 'issues' && item.po ? `<div style="margin-bottom: 4px;"><strong>Project:</strong> ${item.po}</div>` : ''}
               ${item.type !== 'live' && item.type !== 'issues' && item.component ? `<div style="margin-bottom: 4px;"><strong>Part Name:</strong> ${item.component}</div>` : ''}
               ${item.operation_name ? `<div style="margin-bottom: 4px;"><strong>Operation:</strong> ${item.operation_name}</div>` : ''}
               ${item.operation_number ? `<div style="margin-bottom: 4px;"><strong>Operation #:</strong> ${item.operation_number}</div>` : ''}
@@ -667,12 +667,12 @@ const SimpleGanttChart = ({
               value={selectedOrder}
               onChange={setSelectedOrder}
               style={{ width: 200 }}
-              placeholder="Filter by Order"
+              placeholder="Filter by Project"
               disabled={isLoading || productionOrders.length === 0}
               allowClear
               onClear={() => setSelectedOrder('all')}
               options={[
-                { value: 'all', label: 'All Production Orders' },
+                { value: 'all', label: 'All Projects' },
                 ...productionOrders.map(order => ({
                   value: order,
                   label: order

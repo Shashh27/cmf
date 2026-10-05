@@ -573,7 +573,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                       <div className="flex flex-wrap gap-2 items-center">
                         <div className="min-w-[120px] flex-1">
                           <Select
-                            placeholder="Order Number"
+                            placeholder="Project Number"
                             allowClear
                             value={stockFilters.orderNumber}
                             onChange={(value) => setStockFilters(prev => ({ ...prev, orderNumber: value, partNumber: null }))}
@@ -620,7 +620,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                                 <Option key={part} value={part}>{part}</Option>
                               ))
                             ) : (
-                              <Option disabled value="">Select order first</Option>
+                              <Option disabled value="">Select project first</Option>
                             )}
                           </Select>
                         </div>
@@ -661,7 +661,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                           { title: 'Source', dataIndex: 'source_type', key: 'source_type', render: (s) => 
                             s === 'order' ? 'Order' : 'General'
                           },
-                          { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', render: (order) => order || '-' },
+                          { title: 'Project', dataIndex: 'source_order_number', key: 'source_order_number', render: (order) => order || '-' },
                           { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', render: (parts) => 
                             parts?.length > 0 ? parts.join(', ') : '-'
                           },

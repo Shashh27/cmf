@@ -166,7 +166,7 @@ const OrderTracking = () => {
       if (data.length > 0 && !selectedOrderId) {
         setSelectedOrderId(data[0].id);
       }
-    } catch { message.error('Failed to fetch orders'); setOrders([]); }
+    } catch { message.error('Failed to fetch projects'); setOrders([]); }
     finally { setInitialLoading(false); }
   };
 
@@ -175,7 +175,7 @@ const OrderTracking = () => {
     try {
       const res = await api.get(`/orders/${orderId}/hierarchical`);
       setOrderDetails(res.data);
-    } catch { message.error('Failed to fetch order details'); }
+    } catch { message.error('Failed to fetch project details'); }
     finally { setLoading(false); }
   };
 
@@ -465,12 +465,12 @@ const OrderTracking = () => {
       <div className="order-tracking-grid">
         {/* Orders */}
         <Card
-          title={<Space size={6}><DatabaseOutlined /> Orders</Space>}
+          title={<Space size={6}><DatabaseOutlined /> Projects</Space>}
           extra={(
             <Select
               showSearch
               allowClear
-              placeholder="Search orders..."
+              placeholder="Search projects..."
               className="ot-panel-search"
               searchValue={searchOrder}
               onSearch={setSearchOrder}
@@ -488,7 +488,7 @@ const OrderTracking = () => {
               value={selectedOrderId}
               filterOption={false}
               loading={initialLoading}
-              notFoundContent={searchOrder ? 'No matching orders' : 'No orders'}
+              notFoundContent={searchOrder ? 'No matching projects' : 'No projects'}
             >
               {filteredOrders.map((order) => (
                 <Select.Option key={order.id} value={order.id}>
@@ -507,7 +507,7 @@ const OrderTracking = () => {
             {initialLoading ? (
               <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
             ) : filteredOrders.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No orders" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No projects" />
             ) : (
               filteredOrders.map((order) => (
                 <div

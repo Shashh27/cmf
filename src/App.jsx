@@ -477,6 +477,8 @@ function App() {
 
           <Route path="/supervisor/pokayoke-checklists" element={<SupervisorDashboard />} />
 
+          <Route path="/supervisor/notes" element={<SupervisorDashboard />} />
+
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
 
           <Route path="/supervisor/quality-management" element={<QualityManagement />} />
@@ -537,6 +539,8 @@ function App() {
           <Route path="/operator/notifications" element={<OperatorDashboard />} />
 
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
+
+          <Route path="/operator/notes" element={<OperatorDashboard />} />
 
           <Route path="/operator/preventive-maintenance" element={<OperatorDashboard />} />
 
