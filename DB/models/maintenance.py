@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, func
+from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, func
 from sqlalchemy.types import DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
@@ -71,3 +71,30 @@ class HelpSupport(Base):
 
     machine = relationship("Machine")
     replied_by_user = relationship("AccessUser", foreign_keys=[replied_by])
+
+
+class Note(Base):
+    __tablename__ = "notes"
+    __table_args__ = {"schema": "maintenance"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id", ondelete="CASCADE"), nullable=True)
+    order_no = Column(String, nullable=True)
+    project_name = Column(String, nullable=True)
+    part_no = Column(String, nullable=True)
+    part_name = Column(String, nullable=True)
+    description = Column(Text, nullable=False)
+    supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    remark = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=False), nullable=True)
+    supervisor_ack = Column(Boolean, nullable=False, default=False)
+    supervisor_ack_at = Column(DateTime(timezone=False), nullable=True)
+    operator_ack = Column(Boolean, nullable=False, default=False)
+    operator_ack_at = Column(DateTime(timezone=False), nullable=True)
+    created_at = Column(DateTime(timezone=False), default=get_ist_time, nullable=False)
+
+    machine = relationship("Machine")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])

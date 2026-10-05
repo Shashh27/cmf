@@ -75,6 +75,7 @@ maintenance.machine_breakdown(machine_id, reported_by, issue_category, machine_s
 maintenance.component_issues(machine_id, production_order_id, part_id, operation_id, component_status, description)
 maintenance.oee_issues(machine_id, issue_category, issue_reason, start_time, end_time)
 maintenance.help_support(machine_id, production_order_id, part_id, operation_id, description, mc_reply)
+maintenance.notes(operator_id, machine_id, order_no, project_name, part_no, part_name, description, supervisor_id, status, remark, reviewed_at)
 
 ═══ QUALITY ═══
 quality.stage_inspection(part_id, sale_order_id, op_no, dimension_type, nominal_value, uppertol, lowertol, measured_mean, is_done)
