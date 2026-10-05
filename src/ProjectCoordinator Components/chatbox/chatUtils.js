@@ -62,6 +62,27 @@ export function isMessageEdited(message) {
   return message.updated_at !== message.created_at;
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
+]);
+const VIDEO_EXTENSIONS = new Set([
+  '.mp4', '.webm', '.mov', '.avi', '.mkv',
+]);
+
+export function getPendingFileCategory(file) {
+  if (!file?.name) return 'file';
+  const ext = file.name.includes('.')
+    ? `.${file.name.split('.').pop().toLowerCase()}`
+    : '';
+  if (IMAGE_EXTENSIONS.has(ext) || file.type?.startsWith('image/')) return 'image';
+  if (VIDEO_EXTENSIONS.has(ext) || file.type?.startsWith('video/')) return 'video';
+  return 'file';
+}
+
+export function canPreviewPendingFile(category) {
+  return category === 'image' || category === 'video';
+}
+
 export function applyConversationsPayload(setConversations, setTotalUnread, payload) {
   if (!payload || payload.type !== 'conversations') return;
   if (Array.isArray(payload.conversations)) {

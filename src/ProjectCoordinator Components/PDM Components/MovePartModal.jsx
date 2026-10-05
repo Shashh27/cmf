@@ -101,7 +101,7 @@ const MovePartModal = ({
       okText="Confirm Move"
       cancelText="Cancel"
       confirmLoading={submitting}
-      destroyOnClose
+      destroyOnHidden
       okButtonProps={{
         id: part ? `move-part-ok-${part.id}` : "move-part-ok",
       }}

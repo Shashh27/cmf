@@ -53,6 +53,7 @@ export const INTERVAL_UNITS = ['Day', 'Week', 'Month', 'Year'];
 export const PM_FIELD_LIMITS = {
   checklistName: 50,
   description: 50,
+  checkpointCode: 32,
   checkpointText: 50,
   expectedValue: 50,
   remarks: 100,
@@ -80,6 +81,11 @@ export const descriptionRules = [
 export const checkpointTextRules = [
   { required: true, whitespace: true, message: 'Checkpoint text is required' },
   { max: PM_FIELD_LIMITS.checkpointText, message: MAX_MSG },
+];
+
+export const checkpointCodeRules = [
+  { required: true, whitespace: true, message: 'Checkpoint code is required' },
+  { max: PM_FIELD_LIMITS.checkpointCode, message: MAX_MSG },
 ];
 
 export const expectedValueRules = [
@@ -132,6 +138,23 @@ export function getCurrentUserId() {
     return user.id || user.user_id || 1;
   } catch {
     return 1;
+  }
+}
+
+/** Display name for acknowledgements (falls back to id). */
+export function getCurrentUserLabel() {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    return (
+      user.user_name
+      || user.name
+      || user.username
+      || (user.id != null ? `User ${user.id}` : null)
+      || (user.user_id != null ? `User ${user.user_id}` : null)
+      || 'user'
+    );
+  } catch {
+    return 'user';
   }
 }
 
@@ -232,6 +255,7 @@ export async function fetchAllChecklistsWithItems() {
 
 export function buildCheckpointPayload(item, index) {
   return {
+    item_code: String(item.item_code || '').trim().toUpperCase(),
     item_text: item.item_text,
     sequence_number: index + 1,
     item_type: item.item_type,
@@ -243,6 +267,7 @@ export function buildCheckpointPayload(item, index) {
 export function emptyCheckpoint(seq = 1) {
   return {
     id: `tmp-${Date.now()}-${Math.random()}`,
+    item_code: '',
     item_text: '',
     sequence_number: seq,
     item_type: 'Boolean',
@@ -252,6 +277,11 @@ export function emptyCheckpoint(seq = 1) {
 }
 
 export function validateCheckpoint(item) {
+  const code = String(item.item_code || '').trim();
+  if (!code) return 'Checkpoint code is required';
+  if (code.length > PM_FIELD_LIMITS.checkpointCode) {
+    return `Checkpoint code must be at most ${PM_FIELD_LIMITS.checkpointCode} characters`;
+  }
   if (!item.item_text?.trim()) return 'Checkpoint text is required';
   if (item.item_text.trim().length > PM_FIELD_LIMITS.checkpointText) {
     return 'Maximum character limit exceeded';
@@ -299,4 +329,145 @@ export function machineLabel(machine) {
   if (!machine) return '-';
   if (machine.make && machine.model) return `${machine.make} - ${machine.model}`;
   return machine.make || machine.type || `Machine ${machine.id}`;
+}
+
+const ymdFromAny = (v) => {
+  if (!v) return null;
+  const s = String(v);
+  if (s.length >= 10) return s.slice(0, 10);
+  return null;
+};
+
+export function indexMachineAvailability(list) {
+  const map = {};
+  (Array.isArray(list) ? list : []).forEach((r) => {
+    if (r?.machine_id != null) map[r.machine_id] = r;
+  });
+  return map;
+}
+
+export function isMachineBreakdownOnDay(availabilityById, machineId, ymd, todayYmd) {
+  if (machineId == null || !ymd) return false;
+  const rec = availabilityById?.[machineId];
+  if (!rec?.is_breakdown) return false;
+  const from = ymdFromAny(rec.available_from);
+  const to = ymdFromAny(rec.available_to);
+  if (from && ymd < from) return false;
+  if (to && ymd > to) return false;
+  if (!to && todayYmd && ymd > todayYmd) return false;
+  return true;
+}
+
+export function resolveAssignmentItemFrequency(ai) {
+  const ci = ai?.checklist_item;
+  if (ai?.frequency_type) {
+    return {
+      frequency_type: ai.frequency_type,
+      interval_value: ai.interval_value,
+      interval_unit: ai.interval_unit,
+      trigger_hours: ai.trigger_hours,
+    };
+  }
+  return ci || null;
+}
+
+export function isConditionOnDemand(freq) {
+  return (
+    freq?.frequency_type === 'Condition Based'
+    && (freq.interval_value == null || freq.interval_value === '' || !freq.interval_unit)
+  );
+}
+
+export function isTimeDaily(freq) {
+  return (
+    freq?.frequency_type === 'Time Based'
+    && freq.interval_value === 1
+    && freq.interval_unit === 'Day'
+  );
+}
+
+export function getRecurrenceAnchor(freq, assignedDay) {
+  if (!freq || !assignedDay) return assignedDay;
+  if (isTimeDaily(freq)) return assignedDay;
+  if (freq.frequency_type !== 'Time Based') return assignedDay;
+
+  const iv = freq.interval_value || 1;
+  const iu = freq.interval_unit;
+  if (iu === 'Week') return dayjs(assignedDay).add(iv, 'week').format('YYYY-MM-DD');
+  if (iu === 'Month') return dayjs(assignedDay).add(iv, 'month').format('YYYY-MM-DD');
+  if (iu === 'Year') return dayjs(assignedDay).add(iv, 'year').format('YYYY-MM-DD');
+  return assignedDay;
+}
+
+export function isScheduledDueOnDate(freq, anchorDateKey, dateKey) {
+  if (!freq || !anchorDateKey || !dateKey) return false;
+  if (isTimeDaily(freq) || isConditionOnDemand(freq)) return false;
+
+  const due = dayjs(anchorDateKey);
+  const target = dayjs(dateKey);
+  if (target.isBefore(due, 'day')) return false;
+
+  if (freq.frequency_type === 'Usage Based') {
+    return target.isSame(due, 'day');
+  }
+
+  const iv = freq.interval_value || 1;
+  const iu = freq.interval_unit || 'Day';
+
+  if (iu === 'Day') {
+    const days = target.diff(due, 'day');
+    return days >= 0 && days % iv === 0;
+  }
+  if (iu === 'Week') {
+    if (target.day() !== due.day()) return false;
+    const weeks = target.diff(due.startOf('week'), 'week');
+    const dueWeeks = due.diff(due.startOf('week'), 'week');
+    return weeks >= dueWeeks && (weeks - dueWeeks) % iv === 0;
+  }
+  if (iu === 'Month') {
+    if (target.date() !== due.date()) return false;
+    const months = target.diff(due, 'month');
+    return months >= 0 && months % iv === 0;
+  }
+  if (iu === 'Year') {
+    if (target.month() !== due.month() || target.date() !== due.date()) return false;
+    const years = target.diff(due, 'year');
+    return years >= 0 && years % iv === 0;
+  }
+  return target.isSame(due, 'day');
+}
+
+export function isAssignmentItemDueOnDate(ai, assignment, dateKey) {
+  if (!ai || !assignment || !dateKey) return false;
+  if (ai.is_required === false) return false;
+
+  const assignedDay = dayjs(assignment.assigned_at).format('YYYY-MM-DD');
+  if (dateKey < assignedDay) return false;
+
+  const freq = resolveAssignmentItemFrequency(ai);
+  if (!freq?.frequency_type) return false;
+  if (isConditionOnDemand(freq)) return false;
+  if (isTimeDaily(freq)) return true;
+
+  const anchor = getRecurrenceAnchor(freq, assignedDay);
+  return isScheduledDueOnDate(freq, anchor, dateKey);
+}
+
+export function countDueAssignmentItemsForMachineOnDate(assignments, machineId, dateKey) {
+  let count = 0;
+  (assignments || []).forEach((assignment) => {
+    if (assignment.machine_id !== machineId) return;
+    (assignment.assignment_items || []).forEach((ai) => {
+      if (isAssignmentItemDueOnDate(ai, assignment, dateKey)) count += 1;
+    });
+  });
+  return count;
+}
+
+export function resolveDayTone(submittedCount, rejectedCount, expectedCount) {
+  if (!expectedCount) return null;
+  if (!submittedCount) return null;
+  const incomplete = submittedCount < expectedCount;
+  if (incomplete || rejectedCount > 0) return 'orange';
+  return 'green';
 }

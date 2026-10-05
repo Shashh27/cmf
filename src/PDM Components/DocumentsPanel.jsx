@@ -119,30 +119,49 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
 };
 
 // ── FitTable ────────────────────────────────────────────────────────────────
-const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
+const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrollIgnored, ...props }) => {
   const ref = useRef(null);
-  const [scrollY, setScrollY] = useState(400);
+  const [scrollY, setScrollY] = useState(200);
 
   useEffect(() => {
-    // Use the container's own height so the table always gets an internal scroll area
-    // even when this panel sits inside another fixed-height/overflow-hidden layout (PDM).
+    // Measure container and table header so body scroll height fits and last rows stay visible.
     const update = () => {
       if (!ref.current) return;
-      const h = ref.current.clientHeight || 0;
-      // Reduced header space calculation to allow more room for operations
-      // (Header is typically ~30-40px with reduced padding, plus minimal breathing room)
-      setScrollY(Math.max(h - 40, 200));
+      const containerH = ref.current.clientHeight || 0;
+      const headerEl =
+        ref.current.querySelector('.ant-table-header') ||
+        ref.current.querySelector('.ant-table-thead');
+      const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 40;
+      // Extra space so last rows (incl. quality docs) are fully visible when scrolled to end
+      const bottomPad = 48;
+      setScrollY(Math.max(Math.floor(containerH - headerH - bottomPad), 120));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
     update();
+    const t1 = window.setTimeout(update, 80);
+    const t2 = window.setTimeout(update, 250);
     window.addEventListener('resize', update);
-    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
-  }, []);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [dataSource?.length, columns?.length]);
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
-      <Table columns={columns} dataSource={dataSource} pagination={false} scroll={{ y: scrollY, x: scrollX }} size="small" {...props} className={`${props.className || ''} custom-fit-table`} />
+    <div className="flex-1 min-h-0 overflow-hidden w-full relative h-full" ref={ref}>
+      <Table
+        columns={columns}
+        dataSource={dataSource}
+        pagination={false}
+        size="small"
+        {...props}
+        rowKey={(r) => String(r?.id)}
+        scroll={{ y: scrollY, x: scrollX }}
+        className={`${props.className || ''} custom-fit-table`}
+      />
     </div>
   );
 };
@@ -210,19 +229,35 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const parseV = (v) => parseFloat(String(v).replace(/^v/i, ''));
 
   const groupedPartDocs = useMemo(() =>
-    documents.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {}),
+    documents.reduce((acc, d) => {
+      const r = String(d.parent_id ?? d.id);
+      (acc[r] = acc[r] || []).push(d);
+      return acc;
+    }, {}),
   [documents]);
 
-  const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => b.id - a.id)[0]),
-  [groupedPartDocs]);
+  const latestPartDocs = useMemo(() => {
+    const latest = Object.values(groupedPartDocs).map(
+      (g) => [...g].sort((a, b) => Number(b.id) - Number(a.id))[0]
+    );
+    // Show linked stock/unit quality docs first so they are not lost at the bottom
+    return latest.sort((a, b) => {
+      const aq = a?.document_type === 'Quality Document' || Number(a?.id) < 0 ? 0 : 1;
+      const bq = b?.document_type === 'Quality Document' || Number(b?.id) < 0 ? 0 : 1;
+      if (aq !== bq) return aq - bq;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [groupedPartDocs]);
 
   useEffect(() => {
     const next = { ...selectedVersions };
     let changed = false;
     latestPartDocs.forEach(doc => {
-      const r = doc.parent_id || doc.id;
-      if (!next[r] || !groupedPartDocs[r]?.find(d => d.id === next[r].id)) { next[r] = doc; changed = true; }
+      const r = String(doc.parent_id ?? doc.id);
+      if (!next[r] || !groupedPartDocs[r]?.find(d => d.id === next[r].id)) {
+        next[r] = doc;
+        changed = true;
+      }
     });
     if (changed) setSelectedVersions(next);
   }, [latestPartDocs, groupedPartDocs]);
@@ -304,6 +339,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const handleDownload = (id) => {
     downloadWithAuth(`/documents/${id}/download`, `document-${id}`);
   };
+
+  const isQualityDocument = (doc) =>
+    doc?.document_type === 'Quality Document' || (doc?.id != null && Number(doc.id) < 0);
 
   const handlePreview = (doc) => {
     setPreviewDoc({ doc, source: 'part' });
@@ -652,14 +690,36 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
+      render: (_, r) => {
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const displayName = getDocumentDisplayName(cur);
+        return (
+          <div className="flex items-center gap-3 py-1">
+            <div className={`p-2 ${isQualityDocument(cur) ? 'bg-purple-50' : 'bg-blue-50'}`}>
+              <FilePdfOutlined className={isQualityDocument(cur) ? 'text-purple-500' : 'text-blue-500'} />
+            </div>
+            <Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text>
+          </div>
+        );
+      }
     },
-    { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
+    { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 140,
+      render: (_, r) => {
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const isQuality = isQualityDocument(cur);
+        return (
+          <Tag
+            color={isQuality ? 'purple' : 'blue'}
+            className={`m-0 text-xs px-1 leading-4 uppercase border-none ${isQuality ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}
+          >
+            {cur.document_type || '2D'}
+          </Tag>
+        );
+      }
     },
     { title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
-        const rootId = r.parent_id || r.id;
+        const rootId = String(r.parent_id ?? r.id);
         const group  = groupedPartDocs[rootId] || [];
         const cur    = selectedVersions[rootId] || r;
         const versionWidth = 88;
@@ -701,19 +761,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     },
     { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
       }
     },
     { title: <span className="text-xs font-semibold">DATE</span>, key: 'date', width: 120,
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         return cur.created_at ? <span className="text-xs text-slate-700 font-medium">{new Date(cur.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-xs text-slate-400">—</span>;
       }
     },
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         
         // Check if MC has handled this document (acknowledged or rejected)
         if (cur.mc_is_rejected) {
@@ -735,16 +795,23 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     },
     { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 220, align: 'center', fixed: 'right',
       render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
+        const qualityDoc = isQualityDocument(cur);
         return (
           <div className="flex gap-1 justify-center">
             <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" /></Tooltip>
-            <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
-            <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
+            {!qualityDoc && (
+              <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
+            )}
+            {!qualityDoc && (
+              <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
+            )}
             <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur.id)} /></Tooltip>
-            <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
-            </Popconfirm>
+            {!qualityDoc && (
+              <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
+              </Popconfirm>
+            )}
           </div>
         );
       }
@@ -793,9 +860,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                     showTotal: (total) => `Total: ${total} operations`,
                     pageSizeOptions: ['10', '20', '50', '100'],
                     size: 'small',
-                    position: ['bottomCenter'],
+                    placement: ['bottomCenter'],
                   } : false}
-                  scroll={{ y: denseMode ? 'calc(100vh - 380px)' : '100%', x: 'max-content' }}
                   components={{
                     body: {
                       row: SortableRow,
@@ -805,8 +871,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               </SortableContext>
             </DndContext>
           </div>
-          {/* Small separation line between operations and bottom sections */}
-          <div className="border-t border-slate-200 my-1"></div>
         </div>
       ),
     }] : []),
@@ -833,10 +897,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                 showTotal: (total) => `Total: ${total} documents`,
                 pageSizeOptions: ['10', '20', '50', '100'],
                 size: 'small',
-                position: ['bottomCenter'],
+                placement: ['bottomCenter'],
               } : false}
-              className="docs-ebom-table border border-slate-100 overflow-hidden"
-              scroll={{ y: denseMode ? 'calc(100vh - 380px)' : '100%', x: 'max-content' }}
+              className="docs-ebom-table border border-slate-100"
               columns={eBomColumns}
             />
           </div>
@@ -932,7 +995,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         .docs-ebom-table .ant-table-tbody>tr>td{padding:${denseMode ? '2px 4px' : compactMode ? '4px 6px' : '6px 8px'}!important;font-size:${denseMode ? '10px' : '11px'}!important;}
         .docs-ebom-table .ant-table-thead>tr>th{padding:${denseMode ? '4px 6px' : compactMode ? '5px 8px' : '6px 10px'}!important;font-size:${denseMode ? '13px' : '14px'}!important;font-weight:600;color:#334155!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
-        .custom-fit-table .ant-table-body{overflow-y:auto!important;}
+        .custom-fit-table .ant-table-body{overflow-y:auto!important;padding-bottom:24px!important;scrollbar-gutter:stable;}
+        .custom-fit-table .ant-table-tbody > tr:last-child > td{padding-bottom:12px!important;}
+        .custom-fit-table.ant-table-wrapper,.custom-fit-table .ant-spin-nested-loading,.custom-fit-table .ant-spin-container,.custom-fit-table .ant-table,.custom-fit-table .ant-table-container{height:100%;}
+        .custom-fit-table .ant-table-container{display:flex;flex-direction:column;min-height:0;}
+        .custom-fit-table .ant-table-body{flex:1;min-height:0;}
         .ant-pagination-item{font-size:${denseMode ? '11px' : '12px'}!important;}
         .ant-pagination-total-text{font-size:${denseMode ? '11px' : '12px'}!important;}
         /* Blur operations table when modal is open */

@@ -42,6 +42,7 @@
 }
 
 .order-chatbox-layout {
+  position: relative;
   display: flex;
   height: 100%;
   min-height: 0;
@@ -579,6 +580,254 @@
   display: flex;
   gap: 8px;
   align-items: flex-end;
+}
+
+.order-chatbox-file-input {
+  display: none;
+}
+
+.order-chatbox-attach-btn {
+  flex-shrink: 0;
+  width: 42px !important;
+  height: 42px !important;
+  color: #0a5f7d !important;
+  border-radius: 12px !important;
+}
+
+.order-chatbox-attach-btn:disabled {
+  color: #c5d0d8 !important;
+}
+
+.order-chatbox-pending-attachment {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: #eef6fa;
+  border: 1px solid #cfe8f3;
+}
+
+.order-chatbox-pending-attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.order-chatbox-pending-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.order-chatbox-pending-item {
+  position: relative;
+  width: 108px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #d8dee4;
+}
+
+.order-chatbox-pending-thumb {
+  display: block;
+  width: 108px;
+  height: 88px;
+  object-fit: cover;
+}
+
+.order-chatbox-pending-file-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 108px;
+  min-height: 88px;
+  padding: 8px;
+  text-align: center;
+}
+
+.order-chatbox-pending-file-thumb-name {
+  font-size: 11px;
+  line-height: 1.25;
+  color: #1a2b33;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.order-chatbox-pending-item-remove {
+  position: absolute !important;
+  top: 2px;
+  right: 2px;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-radius: 999px !important;
+  color: #5c6770 !important;
+}
+
+.order-chatbox-pending-file-hint {
+  display: block;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.order-chatbox-attachment-preview {
+  margin-bottom: 6px;
+}
+
+.order-chatbox-attachment-image-btn,
+.order-chatbox-pending-thumb-btn {
+  display: block;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.order-chatbox-attachment-image {
+  display: block;
+  max-width: min(280px, 100%);
+  max-height: 220px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.order-chatbox-attachment-video-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: min(280px, 100%);
+}
+
+.order-chatbox-attachment-video {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+}
+
+.order-chatbox-attachment-expand-btn {
+  position: absolute !important;
+  top: 6px;
+  right: 6px;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: #0a5f7d !important;
+}
+
+.order-chatbox-inline-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 56, 77, 0.78);
+}
+
+.order-chatbox-inline-preview-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 760px);
+  max-height: 100%;
+  background: #fff;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(6, 56, 77, 0.28);
+}
+
+.order-chatbox-inline-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8edf1;
+  background: #f7f9fb;
+}
+
+.order-chatbox-inline-preview-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2b33;
+}
+
+.order-chatbox-inline-preview-media {
+  display: block;
+  width: 100%;
+  max-height: min(72vh, 640px);
+  object-fit: contain;
+  background: #0b1419;
+}
+
+.order-chatbox-attachment-file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(13, 163, 216, 0.08);
+}
+
+.order-chatbox-bubble.mine .order-chatbox-attachment-file-card {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.order-chatbox-attachment-file-icon {
+  font-size: 22px;
+  color: #0a5f7d;
+  flex-shrink: 0;
+}
+
+.order-chatbox-bubble.mine .order-chatbox-attachment-file-icon {
+  color: #fff;
+}
+
+.order-chatbox-attachment-file-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.order-chatbox-attachment-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.order-chatbox-bubble.mine .order-chatbox-attachment-file-name {
+  color: #fff;
+}
+
+.order-chatbox-attachment-file-hint {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.order-chatbox-bubble.mine .order-chatbox-attachment-file-hint {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.order-chatbox-attachment-download-btn {
+  flex-shrink: 0;
+  padding-inline: 4px !important;
+}
+
+.order-chatbox-bubble.mine .order-chatbox-attachment-download-btn {
+  color: #fff !important;
 }
 
 .order-chatbox-composer-input {

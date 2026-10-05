@@ -1,0 +1,694 @@
+import React, { useState, useEffect } from "react";
+import { API_BASE_URL } from "../../Config/auth";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip, Spin } from "antd";
+import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined, SyncOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
+import { api } from '../../api/client.js';
+
+// Shared utility: normalise a revision string as the user types
+const normalizeRevision = (raw) => {
+  let v = raw || '';
+  // Allow alphanumeric and common revisioning symbols: . - _ / space
+  v = v.replace(/[^0-9a-zA-Z\s._\/-]/g, '');
+  return v;
+};
+
+const cleanDocName = (name) => {
+  if (!name) return '';
+  return String(name).replace(/^re\s+/i, '');
+};
+
+const { Title, Text } = Typography;
+const { Option } = Select;
+
+const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders }) => {
+  const [form] = Form.useForm();
+  const [selectedOrderId, setSelectedOrderId] = useState(orderId || "");
+  const [loading, setLoading] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerDoc, setViewerDoc] = useState(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
+  const [viewerError, setViewerError] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [parentId, setParentId] = useState(null);
+  const [updatingDocName, setUpdatingDocName] = useState("");
+
+  const handleRevisionChange = (e) => {
+    form.setFieldValue('document_version', normalizeRevision(e.target.value));
+  };
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && orderId) {
+      setSelectedOrderId(orderId.toString());
+      fetchDocuments(orderId);
+    } else if (isOpen && selectedOrderId) {
+      fetchDocuments(selectedOrderId);
+    }
+  }, [isOpen, orderId]);
+
+
+  const fetchDocuments = async (orderId) => {
+    try {
+      const response = await api.get(`/order-documents/order/${orderId}`);
+      setDocuments(response.data);
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+    }
+  };
+
+
+  const isOwnDocument = (doc) => {
+    const currentUserId = getCurrentUserId();
+    if (currentUserId == null || !doc) return false;
+    return Number(doc.user_id) === Number(currentUserId);
+  };
+
+  const handleUpload = async (values) => {
+    const file = values.file?.[0]?.originFileObj;
+    if (!file || !selectedOrderId) {
+      message.error("Please select a file and order");
+      return;
+    }
+
+    if (
+      values.document_type === "Other" &&
+      !(values.document_type_other && values.document_type_other.trim())
+    ) {
+      message.error("Please enter document type name for 'Other' document type");
+      return;
+    }
+
+    const currentUserId = getCurrentUserId();
+    if (currentUserId == null) {
+      message.error("User is required. Please ensure you are logged in.");
+      return;
+    }
+
+    if (parentId) {
+      const parentDoc = documents.find((d) => d.id === parentId) || documents.find((d) => d.parent_id === parentId);
+      const rootDoc = documents.find((d) => d.id === parentId) || documents.find((d) => d.id === (parentDoc?.parent_id || parentId));
+      if (rootDoc && !isOwnDocument(rootDoc)) {
+        message.error("You can only upload a new version for documents you uploaded.");
+        return;
+      }
+    }
+
+    // Save to database
+    setLoading(true);
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
+    uploadFormData.append("document_name", file.name);
+    let docType = values.document_type || "";
+    if (docType === "Other" && values.document_type_other && values.document_type_other.trim()) {
+      docType = values.document_type_other.trim();
+    }
+    uploadFormData.append("document_type", docType);
+    uploadFormData.append("document_version", values.document_version || "");
+    if (parentId) {
+      uploadFormData.append("parent_id", parentId);
+    }
+    uploadFormData.append("user_id", String(currentUserId));
+
+    try {
+      const response = await api.post(`/order-documents/upload/${selectedOrderId}`,
+        uploadFormData
+      );
+
+      const result = response.data;
+      onDocumentUploaded(result);
+      form.resetFields();
+      form.setFieldsValue({ document_version: "" });
+      setParentId(null);
+      setUpdatingDocName("");
+      if (selectedOrderId) {
+        fetchDocuments(selectedOrderId);
+      }
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error uploading document";
+      message.error(detail);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async (documentId, documentName) => {
+    try {
+      const response = await api.get(`/order-documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+      const blob = response.data;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = documentName || "document";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error downloading document:", error);
+      message.error("Error downloading document");
+    }
+  };
+
+  const handleView = (documentId) => {
+    const doc = documents.find(d => d.id === documentId);
+    if (!doc?.document_url) {
+      message.error("No document URL available");
+      return;
+    }
+    setViewerDoc(doc);
+    setViewerOpen(true);
+    setViewerLoading(true);
+    setViewerError(false);
+    setPdfBlobUrl(null);
+
+    // Fetch PDF as blob for better iframe compatibility
+    const fetchPdfBlob = async () => {
+      try {
+        const response = await api.get(`/order-documents/${documentId}/preview`, {
+          responseType: 'blob'
+        });
+        const blob = new Blob([response.data], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(blobUrl);
+      } catch (error) {
+        console.error("Error fetching PDF blob:", error);
+        setViewerError(true);
+      } finally {
+        setViewerLoading(false);
+      }
+    };
+
+    fetchPdfBlob();
+  };
+
+  const handleDelete = async (documentId) => {
+    try {
+      const doc = documents.find((d) => d.id === documentId);
+      if (doc && !isOwnDocument(doc)) {
+        message.error("You can only delete documents you uploaded.");
+        return;
+      }
+      await api.delete(`/order-documents/${documentId}`);
+      message.success("Document deleted successfully");
+      if (selectedOrderId) {
+        fetchDocuments(selectedOrderId);
+      }
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      let detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error deleting document";
+      message.error(detail);
+    }
+  };
+
+  const handleUpdateRevision = (doc) => {
+    if (!isOwnDocument(doc)) {
+      message.error("You can only upload a new version for documents you uploaded.");
+      return;
+    }
+    // Determine the root parent ID. If this doc is already a revision, use its parent_id.
+    // Otherwise, use its own id as the root for all future revisions.
+    const rootId = doc.parent_id || doc.id;
+    setParentId(rootId);
+    setUpdatingDocName(doc.document_name);
+    
+    form.setFieldsValue({
+      document_type: doc.document_type,
+      document_version: "" // Let the user enter revision manually
+    });
+    
+    message.info(`Please enter new revision for: ${doc.document_name}`);
+  };
+
+  const groupDocuments = () => {
+    // Revision ordering inside each root:
+    // - FIFO  : smaller `id` (earlier inserted) first
+    // - LIFO  : larger `id` (latest inserted) first
+    // We sort by `id` because `document_version` is stored like "v1.0" which caused NaN sorting.
+    const REVISION_ORDER = "FIFO"; // oldest first
+    const rootSort = (a, b) => (REVISION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+    const revisionSort = (a, b) => (REVISION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+
+    const roots = documents
+      .filter((d) => !d.parent_id)
+      .sort(rootSort);
+
+    return roots.map((root) => ({
+      ...root,
+      revisions: documents
+        .filter((v) => v.parent_id === root.id)
+        .sort(revisionSort),
+    }));
+  };
+
+  const renderDocumentItem = (doc, isRevision = false) => (
+    <div 
+      key={doc.id} 
+      style={{ 
+        padding: '12px', 
+        backgroundColor: isRevision ? '#fdfeff' : '#fff', 
+        border: '1px solid #f0f0f0', 
+        borderRadius: 8,
+        marginBottom: isRevision ? 8 : 12,
+        marginLeft: isRevision ? 24 : 0,
+        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+        borderLeft: isRevision ? '3px solid #ffa940' : '3px solid #1890ff'
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <FileTextOutlined style={{ color: isRevision ? '#ffa940' : '#1890ff', fontSize: 16 }} />
+            <Text strong style={{ fontSize: 14 }}>{cleanDocName(doc.document_name)}</Text>
+            <Tag color="blue" style={{ fontSize: '13px', fontWeight: 'bold', border: '1px solid #91d5ff' }}>
+              {doc.document_version}
+            </Tag>
+          </div>
+          {doc.document_type && String(doc.document_type).trim().toLowerCase() !== 're' && (
+            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Tag color="blue" variant="filled" style={{ fontSize: '11px' }}>{doc.document_type}</Tag>
+            </div>
+          )}
+        </div>
+        <Space size={4} style={{ flexShrink: 0 }}>
+          {isOwnDocument(doc) && (
+            <Tooltip title="Upload New Revision">
+              <Button
+                type="text"
+                size="small"
+                onClick={() => handleUpdateRevision(doc)}
+                icon={<UploadOutlined style={{ color: '#fa8c16' }} />}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title="View Document">
+            <Button
+              type="text"
+              size="small"
+              onClick={() => handleView(doc.id)}
+              icon={<FileTextOutlined style={{ color: '#1890ff' }} />}
+            />
+          </Tooltip>
+          <Tooltip title="Download">
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined style={{ color: '#52c41a' }} />}
+              onClick={() => handleDownload(doc.id, doc.document_name)}
+            />
+          </Tooltip>
+          {isOwnDocument(doc) && (
+            <Popconfirm
+              title="Delete this document?"
+              onConfirm={() => handleDelete(doc.id)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
+        </Space>
+      </div>
+    </div>
+  );
+
+  const handleClose = () => {
+    form.resetFields();
+    form.setFieldsValue({ document_version: "" });
+    setDocuments([]);
+    setParentId(null);
+    setUpdatingDocName("");
+    onClose();
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onCancel={handleClose}
+      footer={null}
+      width="95%"
+      style={{ maxWidth: 1000 }}
+      centered
+      title={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24, flexWrap: 'wrap', gap: '8px' }}>
+          <Space>
+            <div style={{ backgroundColor: '#e6f7ff', padding: '8px', borderRadius: '50%', display: 'flex' }}>
+              <FileTextOutlined style={{ color: '#1890ff', fontSize: 20 }} />
+            </div>
+            <div>
+              <Title level={4} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 18px)' }}>Document Management</Title>
+              <Text type="secondary" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Manage and track all document revisions</Text>
+            </div>
+          </Space>
+          <Badge count={documents.length} overflowCount={99} style={{ backgroundColor: '#1890ff' }}>
+            <Tag color="blue" style={{ margin: 0, padding: '4px 12px', borderRadius: 16, fontSize: 'clamp(10px, 2vw, 12px)' }}>
+              Total Documents
+            </Tag>
+          </Badge>
+        </div>
+      }
+      destroyOnHidden
+    >
+      <style>{`
+        @media (max-width: 768px) {
+          .ant-modal-body {
+            padding: 12px;
+          }
+        }
+      `}</style>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={handleUpload}
+        initialValues={{ 
+          document_type: "Technical",
+          document_version: ""
+        }}
+      >
+        <Row gutter={[12, 12]}>
+          <Col xs={24} lg={14}>
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>Revision History</Title>
+              {orderId ? (
+                <Tag color="cyan" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Order: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
+              ) : (
+                <Select
+                  value={selectedOrderId}
+                  onChange={(value) => {
+                    setSelectedOrderId(value);
+                    fetchDocuments(value);
+                  }}
+                  placeholder="Select order"
+                  style={{ width: '100%', maxWidth: 200 }}
+                  size="small"
+                >
+                  {orders.map((order) => (
+                    <Option key={order.id} value={order.id.toString()}>
+                      {order.sale_order_number}
+                    </Option>
+                  ))}
+                </Select>
+              )}
+            </div>
+            
+            <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 8 }}>
+              {selectedOrderId ? (
+                documents.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="No documents found for this order"
+                    style={{ padding: '40px 0', backgroundColor: '#fafafa', borderRadius: 8 }}
+                  />
+                ) : (
+                  groupDocuments().map(root => (
+                    <div key={root.id} style={{ marginBottom: 16 }}>
+                      {renderDocumentItem(root)}
+                      {root.revisions.map(v => renderDocumentItem(v, true))}
+                    </div>
+                  ))
+                )
+              ) : (
+                <Empty description="Select an order to view documents" />
+              )}
+            </div>
+          </Col>
+
+          <Col xs={24} lg={10}>
+            <div 
+              style={{ 
+                backgroundColor: '#f9fafb', 
+                padding: '16px', 
+                borderRadius: 12, 
+                border: '1px solid #f0f0f0',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: '8px' }}>
+                <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>
+                  {parentId ? (
+                    <Space><UploadOutlined /> Update Revision</Space>
+                  ) : (
+                    <Space><UploadOutlined /> New Upload</Space>
+                  )}
+                </Title>
+                {parentId && (
+                  <Button 
+                    type="link" 
+                    danger 
+                    size="small" 
+                    onClick={() => {
+                      setParentId(null);
+                      setUpdatingDocName("");
+                      form.resetFields();
+                      form.setFieldsValue({ document_version: "" });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+
+              {parentId && (
+                <div style={{ marginBottom: 16, padding: '10px', backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6 }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>UPDATING FILE:</Text>
+                  <Text strong style={{ fontSize: 13 }}>{updatingDocName}</Text>
+                </div>
+              )}
+
+              <Form.Item 
+                name="file" 
+                valuePropName="fileList"
+                getValueFromEvent={(e) => {
+                  if (Array.isArray(e)) return e;
+                  return e?.fileList;
+                }}
+                rules={[{ required: true, message: 'Please select a file' }]} 
+                style={{ marginBottom: 16 }}
+              >
+                <Upload.Dragger
+                  multiple={false}
+                  beforeUpload={() => false}
+                  maxCount={1}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                  style={{ backgroundColor: '#fff' }}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <UploadOutlined style={{ color: '#1890ff' }} />
+                  </p>
+                  <p className="ant-upload-text" style={{ fontSize: 'clamp(12px, 3vw, 14px)' }}>Click or drag file</p>
+                  <p className="ant-upload-hint" style={{ fontSize: 'clamp(10px, 2vw, 11px)' }}>PDF, DOC, XLS, CSV, TXT</p>
+                </Upload.Dragger>
+              </Form.Item>
+
+              <Row gutter={[12, 12]}>
+                <Col xs={24} sm={14}>
+                  <Form.Item
+                    shouldUpdate={(prev, current) => prev.document_type !== current.document_type}
+                    label={<Text strong>Document Type</Text>}
+                    style={{ marginBottom: 16 }}
+                  >
+                    {({ getFieldValue }) => {
+                      const type = getFieldValue("document_type");
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+                          <Form.Item
+                            name="document_type"
+                            style={{ marginBottom: 0 }}
+                            rules={[{ required: true, message: "Please select document type" }]}
+                          >
+                            <Select placeholder="Select type">
+                              <Option value="Technical">Technical Drawing</Option>
+                              <Option value="Invoice">Invoice</Option>
+                              <Option value="Purchase Order">Purchase Order</Option>
+                              <Option value="Quote">Quote</Option>
+                              <Option value="Other">Other</Option>
+                            </Select>
+                          </Form.Item>
+                          {type === "Other" && (
+                            <Form.Item
+                              name="document_type_other"
+                              style={{ marginBottom: 0 }}
+                              rules={[{ required: true, message: "Please enter type name" }]}
+                            >
+                              <Input placeholder="Enter document type name" />
+                            </Form.Item>
+                          )}
+                        </div>
+                      );
+                    }}
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={10}>
+                  <Form.Item
+                    name="document_version"
+                    label={<Text strong>Revision</Text>}
+                    rules={[{ required: true, message: 'Required' }]}
+                    style={{ marginBottom: 16 }}
+                  >
+                    <Input
+                      placeholder="00"
+                      onChange={handleRevisionChange}
+                      autoComplete="off"
+                      style={{ fontWeight: 'bold', textAlign: 'center' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={loading} 
+                disabled={!selectedOrderId}
+                icon={<UploadOutlined />}
+                block
+                size="large"
+                style={{ height: 45, borderRadius: 8, marginTop: 8 }}
+              >
+                {parentId ? "Upload New Revision" : "Upload Document"}
+              </Button>
+            </div>
+          </Col>
+        </Row>
+      </Form>
+
+      <Divider style={{ margin: '16px 0' }} />
+      <div style={{ textAlign: 'right' }}>
+        <Button onClick={handleClose}>Close</Button>
+      </div>
+
+      <Modal
+        open={viewerOpen}
+        onCancel={() => { 
+          setViewerOpen(false); 
+          setViewerDoc(null); 
+          setViewerError(false);
+          if (pdfBlobUrl) {
+            URL.revokeObjectURL(pdfBlobUrl);
+            setPdfBlobUrl(null);
+          }
+        }}
+        footer={[
+          <Button 
+            key="dl" 
+            icon={<DownloadOutlined />} 
+            onClick={() => { 
+              if (viewerDoc?.id) { 
+                handleDownload(viewerDoc.id, viewerDoc.document_name);
+              } 
+              setViewerOpen(false); 
+              setViewerDoc(null); 
+              setViewerError(false);
+              if (pdfBlobUrl) {
+                URL.revokeObjectURL(pdfBlobUrl);
+                setPdfBlobUrl(null);
+              }
+            }}
+          >
+            Download
+          </Button>,
+          <Button key="cl" type="primary" onClick={() => { 
+            setViewerOpen(false); 
+            setViewerDoc(null); 
+            setViewerError(false);
+            if (pdfBlobUrl) {
+              URL.revokeObjectURL(pdfBlobUrl);
+              setPdfBlobUrl(null);
+            }
+          }}>Close</Button>
+        ]}
+        width="95%"
+        style={{ maxWidth: 1000 }}
+        title={viewerDoc?.document_name || 'Preview'}
+      >
+        {viewerDoc ? (
+          (() => {
+            const getPreviewType = (name) => {
+              const ext = (name || "").split(".").pop().toLowerCase();
+              if (["jpg", "jpeg", "png", "gif", "svg"].includes(ext)) return "image";
+              if (ext === "pdf") return "pdf";
+              return "other";
+            };
+            
+            const displayName = viewerDoc.document_name || viewerDoc.document_url?.split('/').pop() || 'Document';
+            const type = getPreviewType(displayName);
+            const previewUrl = `${API_BASE_URL}/order-documents/${viewerDoc.id}/preview`;
+            
+            if (type === "image") {
+              return (
+                <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+                  <img 
+                    src={previewUrl} 
+                    alt={displayName} 
+                    style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain" }}
+                    onLoad={() => setViewerLoading(false)}
+                    onError={() => { setViewerLoading(false); setViewerError(true); }}
+                  />
+                </div>
+              );
+            }
+            
+            if (type === "pdf") {
+              return (
+                <div style={{ position: 'relative', width: '100%', height: '75vh' }}>
+                  {viewerLoading && (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <Spin size="large" />
+                    </div>
+                  )}
+                  {viewerError && (
+                    <div className="flex flex-col items-center justify-center h-full bg-gray-50 p-8 text-center">
+                      <ExclamationCircleOutlined className="text-5xl text-red-400 mb-4" />
+                      <p className="text-gray-700 font-medium mb-2">Failed to load PDF document</p>
+                      <p className="text-gray-500 mb-4">Please click the Reload button to try again</p>
+                    </div>
+                  )}
+                  {pdfBlobUrl && (
+                    <iframe
+                      key={viewerError ? `reload-${Date.now()}` : viewerDoc.id}
+                      src={pdfBlobUrl}
+                      title="Document Preview"
+                      style={{ width: '100%', height: '75vh', border: 'none' }}
+                      allowFullScreen
+                    />
+                  )}
+                </div>
+              );
+            }
+            
+            return (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+                <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+                <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+                <p className="text-gray-500">Please download the file to view it.</p>
+              </div>
+            );
+          })()
+        ) : null}
+      </Modal>
+    </Modal>
+  );
+};
+
+export default DocumentModal;

@@ -12,6 +12,7 @@ export function normalizeRoleKey(role) {
   }
   if (n.includes('inventory supervisor')) return 'inventory_supervisor';
   if (n.includes('supervisor')) return 'supervisor';
+  if (n.includes('quality assurance') || n === 'qa') return 'quality_assurance';
   if (n.includes('operator')) return 'operator';
   return n.replace(/\s+/g, '_');
 }
@@ -22,6 +23,7 @@ export const ROLE_HOME_PATHS = {
   manufacturing_coordinator: '/manufacturing_coordinator/dashboard',
   inventory_supervisor: '/inventory_supervisor/inventory-management/inventory-master',
   supervisor: '/supervisor/production_logs',
+  quality_assurance: '/quality_assurance/oms/orders',
   operator: '/operator/dashboard',
 };
 

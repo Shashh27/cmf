@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Typography, Divider, Tooltip, Card, Select, InputNumber, Row, Col, DatePicker,
 } from 'antd';
@@ -16,6 +16,32 @@ import PmDownloadButton from './PmDownloadButton';
 import { buildChecklistsReportConfig } from './pmReportDownload';
 
 const { Title, Text } = Typography;
+
+const highlightText = (text, q) => {
+  if (!q || text == null || text === '') return text || '—';
+  const str = String(text);
+  const lower = str.toLowerCase();
+  const qi = lower.indexOf(q.toLowerCase());
+  if (qi < 0) return str;
+  return (
+    <>
+      {str.slice(0, qi)}
+      <mark style={{ background: '#FEF08A', padding: '0 1px', borderRadius: 2 }}>{str.slice(qi, qi + q.length)}</mark>
+      {str.slice(qi + q.length)}
+    </>
+  );
+};
+
+const checkpointMatchesSearch = (item, q) => {
+  if (!q) return false;
+  const hay = [
+    item.item_code,
+    item.item_text,
+    item.remarks,
+    item.expected_value,
+  ].map((v) => String(v || '').toLowerCase()).join(' ');
+  return hay.includes(q);
+};
 
 /* ── Inline checkpoint row for create modal (frequency set at assign) ── */
 const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
@@ -61,7 +87,7 @@ const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
 );
 
 /* ── Expanded row grid (read-only) ── */
-const ExpandedCheckpoints = ({ items, compact = false }) => {
+const ExpandedCheckpoints = ({ items, compact = false, highlightQuery = '' }) => {
   if (!items?.length) {
     return (
       <div style={{ textAlign: 'center', padding: compact ? 12 : 20, color: '#999', fontSize: compact ? 11 : 12 }}>
@@ -70,6 +96,7 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
     );
   }
 
+  const q = (highlightQuery || '').trim().toLowerCase();
   const gridCols = compact
     ? '28px 56px 1fr 58px 68px 1fr'
     : '50px 80px 1fr 80px 100px 1fr';
@@ -96,41 +123,49 @@ const ExpandedCheckpoints = ({ items, compact = false }) => {
         }}>
           <div>#</div><div>Code</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Remarks</div>
         </div>
-        {items.map((item, index) => (
-          <div key={item.id} style={{
-            display: 'grid',
-            gridTemplateColumns: gridCols,
-            padding: compact ? '3px 8px' : '6px 12px',
-            gap: compact ? 6 : 12,
-            alignItems: 'center',
-            minHeight: compact ? 28 : undefined,
-            borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
-            background: index % 2 === 0 ? '#fff' : '#fafafa',
-          }}>
-            <div style={{ fontSize: cellFont, color: '#8c8c8c' }}>{index + 1}</div>
-            <div style={{ fontSize: cellFont, fontWeight: 700, color: '#1e3a5f' }}>{item.item_code || '—'}</div>
-            <div style={{
-              fontSize: cellFont,
-              fontWeight: 600,
-              lineHeight: compact ? '16px' : undefined,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+        {items.map((item, index) => {
+          const matched = q ? checkpointMatchesSearch(item, q) : false;
+          return (
+            <div key={item.id} style={{
+              display: 'grid',
+              gridTemplateColumns: gridCols,
+              padding: compact ? '3px 8px' : '6px 12px',
+              gap: compact ? 6 : 12,
+              alignItems: 'center',
+              minHeight: compact ? 28 : undefined,
+              borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+              background: matched ? '#FEF9C3' : (index % 2 === 0 ? '#fff' : '#fafafa'),
+              boxShadow: matched ? 'inset 3px 0 0 #EAB308' : undefined,
             }}>
-              {item.item_text}
+              <div style={{ fontSize: cellFont, color: '#8c8c8c' }}>{index + 1}</div>
+              <div style={{ fontSize: cellFont, fontWeight: 700, color: '#1e3a5f' }}>
+                {q ? highlightText(item.item_code || '—', q) : (item.item_code || '—')}
+              </div>
+              <div style={{
+                fontSize: cellFont,
+                fontWeight: 600,
+                lineHeight: compact ? '16px' : undefined,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {q ? highlightText(item.item_text, q) : item.item_text}
+              </div>
+              <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
+              <div style={{ fontSize: cellFont }}>
+                {q ? highlightText(item.expected_value || '-', q) : (item.expected_value || '-')}
+              </div>
+              <div style={{
+                fontSize: cellFont,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {q ? highlightText(item.remarks || '-', q) : (item.remarks || '-')}
+              </div>
             </div>
-            <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
-            <div style={{ fontSize: cellFont }}>{item.expected_value || '-'}</div>
-            <div style={{
-              fontSize: cellFont,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {item.remarks || '-'}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -143,6 +178,13 @@ const PokaYokeChecklists = () => {
   const [dateRange, setDateRange] = useState(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const expandedRowKeysRef = useRef(expandedRowKeys);
+  const paginationRef = useRef(pagination);
+  const prevSearchRef = useRef('');
+  const savedExpandedRef = useRef(null);
+  const savedPaginationRef = useRef(null);
+  expandedRowKeysRef.current = expandedRowKeys;
+  paginationRef.current = pagination;
 
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
@@ -176,6 +218,9 @@ const PokaYokeChecklists = () => {
   const handleRefresh = async () => {
     setExpandedRowKeys([]);
     setPagination((p) => ({ ...p, current: 1 }));
+    savedExpandedRef.current = null;
+    savedPaginationRef.current = null;
+    prevSearchRef.current = '';
     await fetchChecklists();
     message.success('Checklists refreshed');
   };
@@ -360,14 +405,47 @@ const PokaYokeChecklists = () => {
     }
   };
 
-  const filteredChecklists = checklists.filter((item) =>
-    item.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    (item.description || '').toLowerCase().includes(searchText.toLowerCase())
-  );
+  const filteredChecklists = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return checklists;
+    return checklists.filter((item) =>
+      (item.name || '').toLowerCase().includes(q)
+      || (item.description || '').toLowerCase().includes(q)
+      || (item.items || []).some((cp) => checkpointMatchesSearch(cp, q))
+    );
+  }, [checklists, searchText]);
 
-  const dateFilteredChecklists = filteredChecklists.filter((item) =>
+  const dateFilteredChecklists = useMemo(() => filteredChecklists.filter((item) =>
     isDateInRange(item.created_at, normalizeDateRange(dateRange))
-  );
+  ), [filteredChecklists, dateRange]);
+
+  // Search by checkpoint/code → auto-open matches; clear search → restore prior expand + page
+  useEffect(() => {
+    const q = searchText.trim().toLowerCase();
+    const prevQ = (prevSearchRef.current || '').trim().toLowerCase();
+    prevSearchRef.current = searchText;
+
+    if (!q) {
+      if (prevQ) {
+        setExpandedRowKeys(savedExpandedRef.current ?? []);
+        setPagination(savedPaginationRef.current ?? { current: 1, pageSize: 10 });
+        savedExpandedRef.current = null;
+        savedPaginationRef.current = null;
+      }
+      return;
+    }
+
+    if (!prevQ) {
+      savedExpandedRef.current = [...expandedRowKeysRef.current];
+      savedPaginationRef.current = { ...paginationRef.current };
+    }
+
+    const keys = dateFilteredChecklists
+      .filter((c) => (c.items || []).some((cp) => checkpointMatchesSearch(cp, q)))
+      .map((c) => c.id);
+    setExpandedRowKeys(keys);
+    setPagination((p) => ({ ...p, current: 1 }));
+  }, [searchText, dateFilteredChecklists]);
 
   const columns = [
     { title: 'SL NO', key: 'sl', width: 55, align: 'center', className: 'table-header-styled',
@@ -461,7 +539,7 @@ const PokaYokeChecklists = () => {
     <div style={{ padding: 0, background: PM_T.bg, width: '100%', overflowX: 'auto' }}>
       <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
         <Space wrap>
-          <Input.Search placeholder="Search by name or description..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
+          <Input.Search placeholder="Search name, code, or checkpoint..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
             onChange={(e) => setSearchText(e.target.value)} />
           <DatePicker.RangePicker
             allowClear
@@ -521,7 +599,9 @@ const PokaYokeChecklists = () => {
               ? [...expandedRowKeys, record.id]
               : expandedRowKeys.filter((k) => k !== record.id));
           },
-          expandedRowRender: (record) => <ExpandedCheckpoints items={record.items} />,
+          expandedRowRender: (record) => (
+            <ExpandedCheckpoints items={record.items} highlightQuery={searchText} />
+          ),
           rowExpandable: () => true,
         }}
         style={{ background: PM_T.surface }}

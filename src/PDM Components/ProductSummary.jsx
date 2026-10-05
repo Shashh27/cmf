@@ -420,7 +420,7 @@ const ProductSummary = ({ productId, orderId, userId }) => {
 
   if (loading) return (
     <div className="h-full w-full flex items-center justify-center bg-white">
-      <Spin tip="Loading product summary..."><div style={{ width: 40, height: 40 }} /></Spin>
+      <Spin description="Loading product summary..."><div style={{ width: 40, height: 40 }} /></Spin>
     </div>
   );
 

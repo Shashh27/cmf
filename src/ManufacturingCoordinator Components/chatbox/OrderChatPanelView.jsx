@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   Drawer,
   Button,
@@ -27,6 +27,7 @@ import {
   ClearOutlined,
   UndoOutlined,
   SearchOutlined,
+  PaperClipOutlined,
 } from '@ant-design/icons';
 import {
   conversationTitle,
@@ -35,6 +36,11 @@ import {
   avatarInitials,
   isMessageEdited,
 } from './chatUtils';
+import {
+  ChatInlinePreview,
+  MessageAttachment,
+  PendingAttachmentPreview,
+} from './ChatAttachmentPreview';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -74,6 +80,8 @@ export default function OrderChatPanelView({
   const [editingPreview, setEditingPreview] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [convSearch, setConvSearch] = useState('');
+  const [inlinePreview, setInlinePreview] = useState(null);
+  const fileInputRef = useRef(null);
 
   const {
     loading,
@@ -86,6 +94,8 @@ export default function OrderChatPanelView({
     draft,
     setDraft,
     sending,
+    uploading,
+    pendingFiles,
     replyTo,
     setReplyTo,
     mobileView,
@@ -94,12 +104,23 @@ export default function OrderChatPanelView({
     handleSelectConv,
     handleBackToList,
     handleSend,
+    handleSelectFiles,
+    clearPendingFiles,
+    removePendingFile,
     handleDeleteMessage,
     handleEditMessage,
     handleDeleteConversation,
     handleClearAllMessages,
     handleCreateConversation,
   } = chat;
+
+  React.useEffect(() => {
+    if (!open) setInlinePreview(null);
+  }, [open]);
+
+  React.useEffect(() => {
+    setInlinePreview(null);
+  }, [activeConvId]);
 
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === activeConvId) || null,
@@ -161,10 +182,9 @@ export default function OrderChatPanelView({
   };
 
   const onComposerSubmit = async () => {
-    const text = draft.trim();
-    if (!text) return;
-
     if (editingMessageId) {
+      const text = draft.trim();
+      if (!text) return;
       setSavingEdit(true);
       const ok = await handleEditMessage(editingMessageId, text);
       setSavingEdit(false);
@@ -172,8 +192,11 @@ export default function OrderChatPanelView({
       return;
     }
 
+    if (!draft.trim() && !pendingFiles.length) return;
     handleSend();
   };
+
+  const canSend = Boolean(draft.trim() || pendingFiles.length);
 
   const onCreate = async () => {
     if (!createName.trim()) {
@@ -480,9 +503,19 @@ export default function OrderChatPanelView({
                                     {m.reply_to_message.message_text}
                                   </div>
                                 )}
-                                <div className="order-chatbox-bubble-text">
-                                  {m.message_text}
-                                </div>
+                                {(m.attachments || []).map((att) => (
+                                  <MessageAttachment
+                                    key={att.id}
+                                    attachment={att}
+                                    onPreview={setInlinePreview}
+                                  />
+                                ))}
+                                {(!m.attachments?.length ||
+                                  m.message_text !== m.attachments[0]?.file_name) && (
+                                  <div className="order-chatbox-bubble-text">
+                                    {m.message_text}
+                                  </div>
+                                )}
                                 <div className="order-chatbox-bubble-footer">
                                   {isMessageEdited(m) && (
                                     <span className="order-chatbox-edited">edited</span>
@@ -586,13 +619,66 @@ export default function OrderChatPanelView({
                         />
                       </div>
                     )}
+                    {pendingFiles.length > 0 && !editingMessageId && (
+                      <div className="order-chatbox-pending-attachment">
+                        <div className="order-chatbox-pending-attachment-header">
+                          <Text type="secondary">
+                            {pendingFiles.length} file{pendingFiles.length > 1 ? 's' : ''} ready
+                            to send
+                          </Text>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={clearPendingFiles}
+                            disabled={uploading}
+                          >
+                            Clear all
+                          </Button>
+                        </div>
+                        <div className="order-chatbox-pending-grid">
+                          {pendingFiles.map((item) => (
+                            <PendingAttachmentPreview
+                              key={item.id}
+                              item={item}
+                              onRemove={removePendingFile}
+                              onPreview={setInlinePreview}
+                              disabled={uploading}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="order-chatbox-composer-row">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="order-chatbox-file-input"
+                        accept="image/*,video/*,.pdf,.doc,.docx,.txt,.xlsx,.xls,.csv"
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (files?.length) handleSelectFiles(files);
+                          e.target.value = '';
+                        }}
+                      />
+                      <Button
+                        type="text"
+                        shape="circle"
+                        icon={<PaperClipOutlined />}
+                        disabled={!activeConvId || !!editingMessageId || uploading}
+                        className="order-chatbox-attach-btn"
+                        onClick={() => fileInputRef.current?.click()}
+                      />
                       <TextArea
                         className="order-chatbox-composer-input"
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         placeholder={
-                          editingMessageId ? 'Edit your message' : 'Type a message'
+                          editingMessageId
+                            ? 'Edit your message'
+                            : pendingFiles.length
+                              ? 'Add a caption for the first file (optional)'
+                              : 'Type a message'
                         }
                         autoSize={{ minRows: 1, maxRows: 5 }}
                         onPressEnter={(e) => {
@@ -606,9 +692,9 @@ export default function OrderChatPanelView({
                         type="primary"
                         shape="circle"
                         icon={<SendOutlined />}
-                        loading={sending || savingEdit}
+                        loading={sending || savingEdit || uploading}
                         onClick={onComposerSubmit}
-                        disabled={!draft.trim()}
+                        disabled={!canSend || uploading}
                         className="order-chatbox-send-btn"
                       />
                     </div>
@@ -616,6 +702,10 @@ export default function OrderChatPanelView({
                 </>
               )}
             </main>
+            <ChatInlinePreview
+              preview={inlinePreview}
+              onClose={() => setInlinePreview(null)}
+            />
           </div>
         )}
       </Drawer>

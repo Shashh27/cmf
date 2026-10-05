@@ -27,6 +27,7 @@ const Login = () => {
   const [mcForm] = Form.useForm();
   const [supervisorForm] = Form.useForm();
   const [invSupervisorForm] = Form.useForm();
+  const [qaForm] = Form.useForm();
 
   // Fetch machines when operator role is selected
   React.useEffect(() => {
@@ -62,6 +63,7 @@ const Login = () => {
     mcForm.resetFields();
     supervisorForm.resetFields();
     invSupervisorForm.resetFields();
+    qaForm.resetFields();
   };
 
   const onMachineSubmit = async (values) => {
@@ -131,6 +133,7 @@ const Login = () => {
     { value: 'inventory_supervisor', label: 'Supervisor-Tool Crib' },
     { value: 'coordinator', label: 'Project Coordinator' },
     { value: 'manufacturing_coordinator', label: 'Manufacturing Coordinator' },
+    { value: 'quality_assurance', label: 'Quality Assurance' },
     { value: 'operator', label: 'Operator' },
   ];
 
@@ -426,6 +429,32 @@ const Login = () => {
             {activeRole === 'admin' && (
               <Form form={adminForm} layout="vertical" onFinish={(v) => onLogin(v, 'Admin')} autoComplete="off">
                 <Text strong style={{ display: 'block', marginBottom: '16px' }}>Admin Credentials</Text>
+                <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
+                  <Input 
+                    prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your name" 
+                    size="large" 
+                    autoComplete="off"
+                  />
+                </Form.Item>
+                <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+                  <Input.Password 
+                    prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your password" 
+                    size="large" 
+                    autoComplete="new-password"
+                  />
+                </Form.Item>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
+                  Next
+                </Button>
+              </Form>
+            )}
+
+            {/* Quality Assurance Login Form */}
+            {activeRole === 'quality_assurance' && (
+              <Form form={qaForm} layout="vertical" onFinish={(v) => onLogin(v, 'Quality Assurance')} autoComplete="off">
+                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Quality Assurance Credentials</Text>
                 <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
                   <Input 
                     prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 

@@ -796,7 +796,7 @@ const EditOperationModal = ({
       ] : null}
       width="95%" style={{ maxWidth: activeTab === 'details' ? 850 : 1000, top: 10 }}
       styles={{ body: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden', padding: '8px 16px' } }}
-      centered maskClosable={false} destroyOnHidden
+      centered mask={{ closable: false }} destroyOnHidden
     >
       <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{box-shadow:none!important;}`}</style>
       <div className="mt-2">

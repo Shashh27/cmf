@@ -651,7 +651,7 @@ const ProductDetails = ({ selectedItem }) => {
         width="100%"
         style={{ top: 0, maxWidth: '100vw', paddingBottom: 0 }}
         styles={{ body: { padding: 0, height: 'calc(100vh - 55px)' } }}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <div className="flex items-center justify-between p-3 border-b border-[#d9d9d9] bg-white flex-wrap gap-2">

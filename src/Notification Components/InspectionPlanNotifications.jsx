@@ -9,6 +9,12 @@ import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
 import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
 import { resolveBaseDrawingDocument } from '../Quality Management Components/InspectorComponents/drawingDocumentUtils';
+import {
+  useLatestCallback,
+  ModernTableStyles,
+  getNotificationTableProps,
+  renderAckCell,
+} from './notificationTableUtils';
 
 const { Text } = Typography;
 
@@ -26,7 +32,7 @@ function pdfEmbedSrcForReview(url) {
   return `${base}#toolbar=0&navpanes=0&pagemode=none`;
 }
 
-const InspectionPlanNotifications = ({ dateRange, onCount }) => {
+const InspectionPlanNotifications = ({ dateRange, onCount, refreshKey = 0, query = '' }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();

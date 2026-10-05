@@ -9,6 +9,7 @@ import {
   FileTextOutlined,
   DeleteOutlined,
   UploadOutlined,
+  ThunderboltOutlined,
   ApiOutlined,
   ExclamationCircleOutlined,
   CheckCircleOutlined,
@@ -46,9 +47,11 @@ const sanitizeDeleteError = (e) => {
     "";
   const msg = String(raw || "");
   if (!msg) return "Failed to delete document";
+  // Foreign key: trying to delete a document that has versions/children
   if (msg.toLowerCase().includes("foreignkeyviolation") || msg.toLowerCase().includes("violates foreign key")) {
     return "Cannot delete this document because it has versions (child documents). Delete the versions first.";
   }
+  // Keep it short if backend sends SQL
   return msg.length > 160 ? `${msg.slice(0, 160)}...` : msg;
 };
 
@@ -187,6 +190,21 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     return "other";
   };
 
+  const is3DFile = (doc) => {
+    if (!doc) return false;
+    
+    // Check document_name first
+    const name = doc.document_name || "";
+    const nameExt = name.split(".").pop().toLowerCase();
+    
+    // Also check document_url as fallback
+    const url = doc.document_url || "";
+    const urlExt = url.split(".").pop().toLowerCase();
+    
+    const extensions = ["step", "stp", "stl", "obj", "gltf", "glb"];
+    return extensions.includes(nameExt) || extensions.includes(urlExt);
+  };
+
   const handlePreview = (doc) => {
     setPreviewDocument(doc);
     setIsPreviewModalOpen(true);
@@ -223,48 +241,6 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPreviewModalOpen, previewDocument?.id]);
-
-  // Download via the authenticated api client so the JWT is sent, then save the
-  // returned blob. A raw <a href> to the API would be sent without the token
-  // and get a 401.
-  const downloadBlobWithAuth = async (documentId, fileName) => {
-    try {
-      const res = await api.get(`/documents/${documentId}/download`, {
-        responseType: "blob",
-      });
-      const blobUrl = window.URL.createObjectURL(res.data);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.setAttribute("download", fileName || `document_${documentId}`);
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
-    } catch (e) {
-      console.error("Error downloading document", e);
-      message.error("Failed to download document");
-    }
-  };
-
-  const handleDownload = (documentId, fileName) => {
-    downloadBlobWithAuth(documentId, fileName);
-  };
-
-  const is3DFile = (doc) => {
-    if (!doc) return false;
-    
-    // Check document_name first
-    const name = doc.document_name || "";
-    const nameExt = name.split(".").pop().toLowerCase();
-    
-    // Also check document_url as fallback
-    const url = doc.document_url || "";
-    const urlExt = url.split(".").pop().toLowerCase();
-    
-    const extensions = ["step", "stp", "stl", "obj", "gltf", "glb"];
-    return extensions.includes(nameExt) || extensions.includes(urlExt);
-  };
 
   const handle3DView = (doc) => {
     setSelected3DDocument(doc);
@@ -316,7 +292,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     
     const viewButtons = [
       { key: 'front', label: 'Front' },
-      { key: 'isometric', label: 'Isometric' },
+      { key: 'iso', label: 'Isometric' },
       { key: 'top', label: 'Top' },
       { key: 'bottom', label: 'Bottom' }
     ];
@@ -335,6 +311,34 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         ))}
       </Space>
     );
+  };
+
+  
+  // Download via the authenticated api client so the JWT is sent, then save the
+  // returned blob. A raw <a href> to the API would be sent without the token
+  // and get a 401.
+  const downloadBlobWithAuth = async (documentId, fileName) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+      const blobUrl = window.URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", fileName || `document_${documentId}`);
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    } catch (e) {
+      console.error("Error downloading document", e);
+      message.error("Failed to download document");
+    }
+  };
+
+  const handleDownload = (documentId, fileName) => {
+    downloadBlobWithAuth(documentId, fileName);
   };
 
   const handleDelete = async (documentId) => {
@@ -628,19 +632,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               onClick={() => handlePreview(currentDoc)}
               className="hover:text-blue-500 hover:bg-blue-50"
             />
-            {is3DFile(currentDoc) && (
-              <Button
-                size="small"
-                type="text"
-                icon={<ApiOutlined />}
-                onClick={() => {
-                  setSelectedThreeDDocumentId(currentDoc.id);
-                  openViewModal();
-                }}
-                className="hover:text-purple-500 hover:bg-purple-50"
-                title="3D View"
-              />
-            )}
+           
             <Button
               size="small"
               type="text"
@@ -732,9 +724,9 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             size="small"
             icon={<PlusOutlined />}
             onClick={() => {
-            resetUploadState();
-            setIsUploadModalOpen(true);
-          }}
+              resetUploadState();
+              setIsUploadModalOpen(true);
+            }}
           >
             Add Document
           </Button>
@@ -747,6 +739,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         dataSource={latestDocs}
         rowKey="id"
         size="small"
+        bordered
         pagination={false}
         columns={columns}
         className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"
@@ -758,7 +751,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             />
           ),
         }}
-        scroll={{ x: true, y: "calc(100vh - 260px)" }}
+        scroll={{ x: true, y: "calc(100vh - 280px)" }}
       />
     </div>
 
@@ -899,7 +892,8 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between items-center">
                     <Text type="secondary" className="text-[11px] block font-medium">
-                      * Revision
+
+-                      * Revision
                     </Text>
                   </div>
                   <Input
@@ -923,40 +917,40 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
           ))}
         </div>
 
-        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100 pt-4">
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            {!uploadParentId && (
-              <Button
-                type="dashed"
-                icon={<PlusOutlined />}
-                onClick={addUploadRow}
-                className="w-full sm:w-auto"
-              >
-                Add Another Row
-              </Button>
-            )}
-          </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+        {!uploadParentId && (
+          <div className="mt-4 flex justify-center">
             <Button 
-              onClick={() => {
-                setIsUploadModalOpen(false);
-                resetUploadState();
-              }}
-              className="w-full sm:w-auto min-w-[100px]"
+              type="dashed" 
+              size="middle" 
+              icon={<PlusOutlined />}
+              onClick={addUploadRow}
+              className="text-blue-600 border-blue-200 hover:border-blue-400 w-full max-w-xs bg-blue-50/30"
             >
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              icon={<UploadOutlined />}
-              loading={uploading}
-              disabled={uploadRows.some(r => r.fileList.length === 0)}
-              onClick={handleUpload}
-              className="w-full sm:w-auto min-w-[140px]"
-            >
-              {uploadParentId ? "Upload New Revision" : `Upload ${uploadRows.length} Document(s)`}
+              Add Another Document
             </Button>
           </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row justify-end gap-2 pt-6 sticky bottom-0 bg-white py-3 border-t border-slate-100 mt-4">
+          <Button
+            onClick={() => {
+              setIsUploadModalOpen(false);
+              resetUploadState();
+            }}
+            className="w-full sm:w-auto"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="primary"
+            icon={<UploadOutlined />}
+            loading={uploading}
+            disabled={uploadRows.some(r => r.fileList.length === 0)}
+            onClick={handleUpload}
+            className="w-full sm:w-auto min-w-[140px]"
+          >
+            {uploadParentId ? "Upload New Revision" : `Upload ${uploadRows.length} Document(s)`}
+          </Button>
         </div>
       </div>
     </Modal>

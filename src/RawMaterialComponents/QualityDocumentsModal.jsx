@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Spin, Empty, Modal, App, Popconfirm, Upload, Button, Table, Tag, Space, Image } from "antd";
+import { Spin, Empty, Modal, App, Popconfirm, Upload, Button, Table, Tag, Space, Image, Input } from "antd";
 import { UploadOutlined, FileOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FilePdfOutlined, FileImageOutlined, FileTextOutlined, InboxOutlined } from "@ant-design/icons";
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -14,33 +14,85 @@ const getFileIcon = (fileName) => {
   return <FileOutlined style={{ fontSize: 32, color: '#8c8c8c' }} />;
 };
 
-const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions, onDocumentsChanged }) => {
+const getApiErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail
+      .map((item) => (typeof item === 'string' ? item : item?.msg))
+      .filter(Boolean)
+      .join(', ');
+  }
+  const messageText = error?.response?.data?.message;
+  if (typeof messageText === 'string' && messageText.trim()) return messageText;
+  return fallback;
+};
+
+/**
+ * Quality documents modal.
+ * - stock only (unit omitted) → stock-level docs (unit_id NULL)
+ * - stock + unit → unit-level docs for that unit
+ */
+const QualityDocumentsModal = ({ open, onClose, stock, unit = null, materialName, dimensions, onDocumentsChanged }) => {
   const { message } = App.useApp();
   const { isAuthenticated, bootstrapping, user } = useAuth();
   const [qualityDocs, setQualityDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [previewModal, setPreviewModal] = useState({ open: false, url: null, type: null, doc: null });
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [fileRemarks, setFileRemarks] = useState({});
 
-  useEffect(() => {
-    if (open && stock && isAuthenticated && !bootstrapping) {
-      fetchQualityDocs(stock.id);
-    } else if (!open) {
-      setQualityDocs([]);
-      setSelectedFiles([]);
-    }
-  }, [open, stock, isAuthenticated, bootstrapping]);
+  const unitId = unit?.id ?? null;
+  const isUnitLevel = unitId != null;
 
-  const fetchQualityDocs = async (stockId) => {
+  const fetchQualityDocs = async (stockId, forUnitId = null) => {
     setDocsLoading(true);
     try {
-      const response = await api.get(`/stock-quality-documents/stock/${stockId}`);
+      const params = forUnitId != null
+        ? { unit_id: forUnitId }
+        : { stock_level_only: true };
+      const response = await api.get(`/stock-quality-documents/stock/${stockId}`, { params });
       setQualityDocs(response.data || []);
     } catch (err) {
       message.error("Failed to fetch quality documents");
     } finally {
       setDocsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (open && stock && isAuthenticated && !bootstrapping) {
+      fetchQualityDocs(stock.id, unitId);
+    } else if (!open) {
+      setQualityDocs([]);
+      setSelectedFiles([]);
+      setFileRemarks({});
+    }
+  }, [open, stock, unitId, isAuthenticated, bootstrapping]);
+
+  const notifyChanged = () => {
+    onDocumentsChanged?.(stock.id, unitId);
+  };
+
+  const handleFileListChange = (info) => {
+    const nextList = info.fileList || [];
+    setSelectedFiles(nextList);
+    setFileRemarks((prev) => {
+      const next = {};
+      nextList.forEach((file) => {
+        next[file.uid] = prev[file.uid] ?? "";
+      });
+      return next;
+    });
+  };
+
+  const handleRemoveFile = (file) => {
+    setSelectedFiles((prev) => prev.filter((f) => f.uid !== file.uid));
+    setFileRemarks((prev) => {
+      const next = { ...prev };
+      delete next[file.uid];
+      return next;
+    });
   };
 
   const handleUploadMultipleQualityDocs = async (info) => {
@@ -50,23 +102,32 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
 
     const formData = new FormData();
     formData.append('stock_id', stock.id);
+    if (isUnitLevel) {
+      formData.append('unit_id', String(unitId));
+    }
     if (user?.id) {
       formData.append('user_id', String(user.id));
     }
-    
+
     fileList.forEach((file) => {
       formData.append('files', file.originFileObj || file);
     });
+    // One remarks string per file, same order as files (JSON avoids Form list quirks)
+    formData.append(
+      'remarks_json',
+      JSON.stringify(fileList.map((file) => (fileRemarks[file.uid] || '').trim()))
+    );
 
     try {
       const response = await api.post(`/stock-quality-documents/upload-bulk`, formData);
-      
+
       const uploadedCount = response.data?.length || 0;
       message.success(`${uploadedCount} document(s) uploaded successfully`);
-      
-      await fetchQualityDocs(stock.id);
+
+      await fetchQualityDocs(stock.id, unitId);
       setSelectedFiles([]);
-      onDocumentsChanged?.(stock.id);
+      setFileRemarks({});
+      notifyChanged();
     } catch (err) {
       if (err.response?.status === 207) {
         const data = err.response.data.detail;
@@ -78,11 +139,12 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
           message.error(`${failed} document(s) failed to upload`);
           console.error('Failed files:', failed_files);
         }
-        fetchQualityDocs(stock.id);
+        fetchQualityDocs(stock.id, unitId);
         setSelectedFiles([]);
-        onDocumentsChanged?.(stock.id);
+        setFileRemarks({});
+        notifyChanged();
       } else {
-        message.error(err.response?.data?.detail || "Failed to upload documents");
+        message.error(getApiErrorMessage(err, "Failed to upload documents"));
       }
     }
   };
@@ -91,11 +153,11 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
     try {
       await api.delete(`/stock-quality-documents/${docId}`);
       message.success("Document deleted successfully");
-      await fetchQualityDocs(stock.id);
-      onDocumentsChanged?.(stock.id);
+      await fetchQualityDocs(stock.id, unitId);
+      notifyChanged();
     } catch (err) {
       if (err.response?.status === 400) {
-        message.error(err.response?.data?.detail || "Cannot delete document with newer versions");
+        message.error(getApiErrorMessage(err, "Cannot delete document with newer versions"));
       } else {
         message.error("Failed to delete document");
       }
@@ -107,14 +169,14 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
       const response = await api.get(doc.document_url, {
         responseType: 'blob'
       });
-      
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', doc.document_name);
       document.body.appendChild(link);
       link.click();
-      
+
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
@@ -139,6 +201,10 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
     setPreviewModal({ open: false, url: null, type: null, doc: null });
   };
 
+  const scopeLabel = isUnitLevel
+    ? `Unit ${unitId}`
+    : 'Stock';
+
   return (
     <>
       <Modal
@@ -148,7 +214,7 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
         style={{ maxWidth: 900 }}
         title={
           <span className="font-bold text-gray-800 text-sm">
-            Quality Documents — {materialName} {dimensions && `(${dimensions})`}
+            Quality Documents ({scopeLabel}) — {materialName} {dimensions && `(${dimensions})`}
           </span>
         }
         footer={null}
@@ -156,16 +222,12 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
       >
         <div style={{ padding: "8px 0" }}>
           <Space orientation="vertical" style={{ width: "100%" }} size="small">
-            {/* Upload Section */}
             <div style={{ background: "#f5f5ff", padding: "8px", borderRadius: 4 }}>
               <Dragger
                 multiple
                 beforeUpload={() => false}
-                onChange={(info) => setSelectedFiles(info.fileList)}
-                showUploadList={true}
-                onRemove={(file) => {
-                  setSelectedFiles(prev => prev.filter(f => f.uid !== file.uid));
-                }}
+                onChange={handleFileListChange}
+                showUploadList={false}
                 fileList={selectedFiles}
                 accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt,.png,.jpg,.jpeg,.gif,.svg"
                 style={{ background: "#fff" }}
@@ -179,11 +241,54 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
                 </p>
                 <p className="ant-upload-hint" style={{ color: "#999", fontSize: 11, margin: '8px 0 0 0', lineHeight: 1.4 }}>
                   PDF, DOCX, XLSX, CSV, TXT, PNG, JPG, GIF, SVG
+                  {isUnitLevel ? ' — saved for this unit' : ' — saved for this stock'}
                 </p>
               </Dragger>
+
+              {selectedFiles.length > 0 && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {selectedFiles.map((file) => (
+                    <div
+                      key={file.uid}
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                        <Space size="small">
+                          {getFileIcon(file.name || "")}
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>{file.name}</span>
+                        </Space>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleRemoveFile(file)}
+                        />
+                      </div>
+                      <Input.TextArea
+                        value={fileRemarks[file.uid] || ""}
+                        onChange={(e) =>
+                          setFileRemarks((prev) => ({ ...prev, [file.uid]: e.target.value }))
+                        }
+                        placeholder={`Remarks for ${file.name} (optional)`}
+                        maxLength={1000}
+                        showCount
+                        rows={2}
+                        style={{ fontSize: 12 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div style={{ marginTop: 12, textAlign: "center" }}>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   onClick={() => handleUploadMultipleQualityDocs({ fileList: selectedFiles })}
                   disabled={selectedFiles.length === 0}
                   size="small"
@@ -193,7 +298,6 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
               </div>
             </div>
 
-            {/* Documents List */}
             {docsLoading ? (
               <div style={{ textAlign: "center", padding: "24px" }}>
                 <Spin />
@@ -206,14 +310,14 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
                 rowKey="id"
                 size="small"
                 pagination={false}
-                scroll={{ x: 600 }}
+                scroll={{ x: 760 }}
                 columns={[
                   {
                     title: 'Document Name',
                     dataIndex: 'document_name',
                     key: 'document_name',
                     ellipsis: true,
-                    render: (text, record) => (
+                    render: (text) => (
                       <Space size="small">
                         {getFileIcon(text)}
                         <span style={{ fontSize: 12 }}>{text}</span>
@@ -228,13 +332,36 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
                     render: (version) => <Tag color="blue" style={{ fontSize: 11 }}>v{version}</Tag>
                   },
                   {
+                    title: 'Remarks',
+                    dataIndex: 'remarks',
+                    key: 'remarks',
+                    ellipsis: true,
+                    render: (text) => (
+                      <span style={{ fontSize: 11, color: text ? "#333" : "#999" }}>
+                        {text || "-"}
+                      </span>
+                    )
+                  },
+                  {
+                    title: 'Uploaded By',
+                    dataIndex: 'user_name',
+                    key: 'user_name',
+                    width: 140,
+                    ellipsis: true,
+                    render: (name) => (
+                      <span style={{ fontSize: 11, color: name ? "#333" : "#999" }}>
+                        {name || "Unknown"}
+                      </span>
+                    )
+                  },
+                  {
                     title: 'Uploaded',
                     dataIndex: 'created_at',
                     key: 'created_at',
                     width: 130,
                     render: (date) => (
                       <span style={{ fontSize: 11 }}>
-                        {new Date(date).toLocaleDateString()}
+                        {date ? new Date(date).toLocaleDateString() : "-"}
                       </span>
                     )
                   },
@@ -278,7 +405,6 @@ const QualityDocumentsModal = ({ open, onClose, stock, materialName, dimensions,
         </div>
       </Modal>
 
-      {/* Preview Modal */}
       <Modal
         open={previewModal.open}
         onCancel={closePreviewModal}

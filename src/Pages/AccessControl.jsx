@@ -172,6 +172,7 @@ const AccessControl = () => {
         { text: 'Supervisor', value: 'supervisor' },
         { text: 'Supervisor-Tool Crib', value: 'inventory_supervisor' },
         { text: 'Operator', value: 'operator' },
+        { text: 'Quality Assurance', value: 'quality_assurance' },
       ],
       onFilter: (value, record) => record.role === value,
       render: (role) => {
