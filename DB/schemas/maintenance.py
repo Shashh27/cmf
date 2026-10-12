@@ -263,3 +263,98 @@ class HelpSupport(HelpSupportBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Operator Notes Schemas
+# =======================
+class NoteCreate(BaseModel):
+    operator_id: int
+    machine_id: Optional[int] = None
+    order_no: Optional[str] = None
+    project_name: Optional[str] = None
+    part_no: Optional[str] = None
+    part_name: Optional[str] = None
+    description: str
+
+    @field_validator("description")
+    @classmethod
+    def require_description(cls, v: str):
+        if v is None or not str(v).strip():
+            raise ValueError("Description is required")
+        return str(v).strip()
+
+    @field_validator("order_no", "project_name", "part_no", "part_name")
+    @classmethod
+    def strip_optional(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
+class NoteReview(BaseModel):
+    supervisor_id: int
+    status: str
+    remark: Optional[str] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str):
+        allowed = {"accepted", "rejected"}
+        if v is None:
+            raise ValueError("status required")
+        vv = v.strip().lower()
+        if vv not in allowed:
+            raise ValueError("status must be accepted or rejected")
+        return vv
+
+    @field_validator("remark")
+    @classmethod
+    def strip_remark(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
+class NoteAcknowledge(BaseModel):
+    user_id: int
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str):
+        allowed = {"operator", "supervisor"}
+        if v is None:
+            raise ValueError("role required")
+        vv = v.strip().lower()
+        if vv not in allowed:
+            raise ValueError("role must be operator or supervisor")
+        return vv
+
+
+class Note(BaseModel):
+    id: int
+    operator_id: int
+    operator_name: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_name: Optional[str] = None
+    order_no: Optional[str] = None
+    project_name: Optional[str] = None
+    part_no: Optional[str] = None
+    part_name: Optional[str] = None
+    description: str
+    supervisor_id: Optional[int] = None
+    supervisor_name: Optional[str] = None
+    status: str
+    remark: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    supervisor_ack: bool = False
+    supervisor_ack_at: Optional[datetime] = None
+    operator_ack: bool = False
+    operator_ack_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

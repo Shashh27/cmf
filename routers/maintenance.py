@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from DB.database import get_db
-from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel
+from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel, Note as NoteModel, get_ist_time
 from DB.models.configuration import Machine as MachineModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel, Part as PartModel, Operation as OperationModel, Product as ProductModel
@@ -20,6 +20,10 @@ from DB.schemas.maintenance import (
     HelpSupport as HelpSupportSchema,
     HelpSupportCreate,
     HelpSupportUpdate,
+    Note as NoteSchema,
+    NoteCreate,
+    NoteReview,
+    NoteAcknowledge,
 )
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -553,3 +557,145 @@ def delete_help_support(id: int, db: Session = Depends(get_db)):
     db.delete(obj)
     db.commit()
     return {"message": "Help support deleted"}
+
+
+def _serialize_note(obj: NoteModel, db: Session) -> dict:
+    operator = db.query(AccessUserModel).filter(AccessUserModel.id == obj.operator_id).first()
+    supervisor = (
+        db.query(AccessUserModel).filter(AccessUserModel.id == obj.supervisor_id).first()
+        if obj.supervisor_id
+        else None
+    )
+    machine = db.query(MachineModel).filter(MachineModel.id == obj.machine_id).first()
+    return {
+        "id": obj.id,
+        "operator_id": obj.operator_id,
+        "operator_name": operator.user_name if operator else None,
+        "machine_id": obj.machine_id,
+        "machine_name": _machine_label(machine),
+        "order_no": obj.order_no,
+        "project_name": obj.project_name,
+        "part_no": obj.part_no,
+        "part_name": obj.part_name,
+        "description": obj.description,
+        "supervisor_id": obj.supervisor_id,
+        "supervisor_name": supervisor.user_name if supervisor else None,
+        "status": obj.status,
+        "remark": obj.remark,
+        "reviewed_at": obj.reviewed_at,
+        "supervisor_ack": bool(obj.supervisor_ack),
+        "supervisor_ack_at": obj.supervisor_ack_at,
+        "operator_ack": bool(obj.operator_ack),
+        "operator_ack_at": obj.operator_ack_at,
+        "created_at": obj.created_at,
+    }
+
+
+@router.post("/notes", response_model=NoteSchema)
+def create_note(payload: NoteCreate, db: Session = Depends(get_db)):
+    operator = db.query(AccessUserModel).filter(AccessUserModel.id == payload.operator_id).first()
+    if not operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    if payload.machine_id is not None:
+        machine = db.query(MachineModel).filter(MachineModel.id == payload.machine_id).first()
+        if not machine:
+            raise HTTPException(status_code=404, detail="Machine not found")
+
+    obj = NoteModel(
+        operator_id=payload.operator_id,
+        machine_id=payload.machine_id,
+        order_no=payload.order_no,
+        project_name=payload.project_name,
+        part_no=payload.part_no,
+        part_name=payload.part_name,
+        description=payload.description,
+        status="pending",
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return _serialize_note(obj, db)
+
+
+@router.get("/notes", response_model=List[NoteSchema])
+def list_notes(
+    operator_id: Optional[int] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(NoteModel)
+    if operator_id is not None:
+        query = query.filter(NoteModel.operator_id == operator_id)
+    if status:
+        query = query.filter(NoteModel.status == status.strip().lower())
+    rows = query.order_by(NoteModel.id.desc()).all()
+    return [_serialize_note(row, db) for row in rows]
+
+
+@router.get("/notes/{id}", response_model=NoteSchema)
+def get_note(id: int, db: Session = Depends(get_db)):
+    obj = db.query(NoteModel).filter(NoteModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return _serialize_note(obj, db)
+
+
+@router.put("/notes/{id}/review", response_model=NoteSchema)
+def review_note(id: int, payload: NoteReview, db: Session = Depends(get_db)):
+    obj = db.query(NoteModel).filter(NoteModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if (obj.status or "").lower() != "pending":
+        raise HTTPException(status_code=400, detail="This note has already been reviewed")
+
+    supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == payload.supervisor_id).first()
+    if not supervisor:
+        raise HTTPException(status_code=404, detail="Supervisor not found")
+
+    remark = (payload.remark or "").strip() or None
+    if payload.status == "rejected" and not remark:
+        raise HTTPException(status_code=400, detail="Remarks are required to reject")
+
+    obj.supervisor_id = payload.supervisor_id
+    obj.status = payload.status
+    obj.remark = remark
+    obj.reviewed_at = get_ist_time()
+    if not obj.supervisor_ack:
+        obj.supervisor_ack = True
+        obj.supervisor_ack_at = obj.reviewed_at
+    obj.operator_ack = False
+    obj.operator_ack_at = None
+    db.commit()
+    db.refresh(obj)
+    return _serialize_note(obj, db)
+
+
+@router.put("/notes/{id}/acknowledge", response_model=NoteSchema)
+def acknowledge_note(id: int, payload: NoteAcknowledge, db: Session = Depends(get_db)):
+    obj = db.query(NoteModel).filter(NoteModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    user = db.query(AccessUserModel).filter(AccessUserModel.id == payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    now = get_ist_time()
+    if payload.role == "operator":
+        if obj.operator_id != payload.user_id:
+            raise HTTPException(status_code=403, detail="You can only acknowledge your own job notes")
+        if (obj.status or "").lower() == "pending":
+            raise HTTPException(status_code=400, detail="This job has not been reviewed yet")
+        if not obj.operator_ack:
+            obj.operator_ack = True
+            obj.operator_ack_at = now
+    else:
+        if not obj.supervisor_ack:
+            obj.supervisor_ack = True
+            obj.supervisor_ack_at = now
+        if not obj.supervisor_id:
+            obj.supervisor_id = payload.user_id
+
+    db.commit()
+    db.refresh(obj)
+    return _serialize_note(obj, db)

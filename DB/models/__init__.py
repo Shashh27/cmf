@@ -44,7 +44,8 @@ from .maintenance import (
     OEEIssue,
     MachineBreakdown,
     ComponentIssue,
-    HelpSupport
+    HelpSupport,
+    Note,
 )
 from .documents import (
     GeneralFolder,
@@ -96,6 +97,7 @@ __all__ = [
     "MachineBreakdown",
     "ComponentIssue",
     "HelpSupport",
+    "Note",
     "GeneralFolder",
     "GeneralDocument",
     "MachineFolder",
