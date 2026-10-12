@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd';
-import { CheckOutlined, CloseOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined, ReloadOutlined, SearchOutlined, FileOutlined, EyeOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { API_BASE_URL } from '../Config/auth.js';
 import { authFetch, readStoredUser } from '../api/client.js';
@@ -112,6 +112,10 @@ const SupervisorNotes = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [machineFilter, setMachineFilter] = useState([]);
+  const [attachmentsModalOpen, setAttachmentsModalOpen] = useState(false);
+  const [selectedNoteAttachments, setSelectedNoteAttachments] = useState([]);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   const loadNotes = async () => {
     setLoading(true);
@@ -168,6 +172,25 @@ const SupervisorNotes = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const loadAttachments = async (noteId) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/maintenance/notes/${noteId}/attachments`);
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      setSelectedNoteAttachments(await response.json());
+      setAttachmentsModalOpen(true);
+    } catch {
+      message.error('Failed to load attachments');
+    }
+  };
+
+  const openPreview = (attachment) => {
+    setPreviewFile(attachment);
+    setPreviewModalOpen(true);
   };
 
   const filteredNotes = useMemo(() => {
@@ -296,7 +319,7 @@ const SupervisorNotes = () => {
     {
       title: 'Action',
       key: 'action',
-      width: 110,
+      width: 150,
       fixed: 'right',
       render: (_, record) => {
         const pending = record.status === 'pending';
@@ -327,6 +350,14 @@ const SupervisorNotes = () => {
                   setRemark('');
                   setRemarkError(false);
                 }}
+              />
+            </Tooltip>
+            <Tooltip title="View Attachments">
+              <Button
+                type="text"
+                icon={<FileOutlined />}
+                size="small"
+                onClick={() => loadAttachments(record.id)}
               />
             </Tooltip>
           </Space>
@@ -383,7 +414,7 @@ const SupervisorNotes = () => {
             onChange: (nextPage) => setPage(nextPage),
           }}
           tableLayout="fixed"
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1450 }}
           components={{
             header: {
               cell: (props) => (
@@ -453,6 +484,87 @@ const SupervisorNotes = () => {
           <Text type="danger" style={{ display: 'block', marginTop: 4 }}>
             Remarks are required to reject
           </Text>
+        )}
+      </Modal>
+
+      <Modal
+        title="Attachments"
+        open={attachmentsModalOpen}
+        onCancel={() => setAttachmentsModalOpen(false)}
+        footer={null}
+        width={600}
+      >
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {selectedNoteAttachments.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#999' }}>No attachments</p>
+          ) : (
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              {selectedNoteAttachments.map((attachment) => (
+                <Card
+                  key={attachment.id}
+                  size="small"
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
+                  <Space>
+                    <FileOutlined />
+                    <Text>{attachment.file_name}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      ({(attachment.file_size / 1024).toFixed(1)} KB)
+                    </Text>
+                  </Space>
+                  <Tooltip title="Preview">
+                    <Button
+                      type="text"
+                      icon={<EyeOutlined />}
+                      size="small"
+                      onClick={() => openPreview(attachment)}
+                    />
+                  </Tooltip>
+                </Card>
+              ))}
+            </Space>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title={previewFile?.file_name || 'Preview'}
+        open={previewModalOpen}
+        onCancel={() => setPreviewModalOpen(false)}
+        footer={[
+          <Button key="download" type="primary" href={previewFile?.minio_url} target="_blank" rel="noopener noreferrer">
+            Download
+          </Button>,
+          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
+            Close
+          </Button>,
+        ]}
+        width={800}
+      >
+        {previewFile && (
+          <div style={{ textAlign: 'center' }}>
+            {previewFile.file_type.startsWith('image/') ? (
+              <img
+                src={previewFile.minio_url}
+                alt={previewFile.file_name}
+                style={{ maxWidth: '100%', maxHeight: '60vh' }}
+              />
+            ) : previewFile.file_type.startsWith('video/') ? (
+              <video
+                src={previewFile.minio_url}
+                controls
+                style={{ maxWidth: '100%', maxHeight: '60vh' }}
+              />
+            ) : previewFile.file_type === 'application/pdf' ? (
+              <iframe
+                src={previewFile.minio_url}
+                style={{ width: '100%', height: '60vh', border: 'none' }}
+                title={previewFile.file_name}
+              />
+            ) : (
+              <p>Preview not available for this file type. Please download to view.</p>
+            )}
+          </div>
         )}
       </Modal>
     </div>
