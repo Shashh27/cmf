@@ -2,87 +2,36 @@ import { useMemo, useState } from 'react';
 import { Table, Tag } from 'antd';
 import { Copy, Check, ChevronDown } from 'lucide-react';
 
-const HIDDEN_COLS = new Set(['id', 'created_at', 'updated_at', 'user_id', 'material_id', 'stock_id']);
+/** Soft hide for internal keys if they slip through; prefer response columns. */
+const HIDDEN_COLS = new Set([
+  'id', 'created_at', 'updated_at', 'user_id', 'material_id', 'stock_id',
+]);
 
-const COLUMN_LABELS = {
-  material_name: 'Material',
-  form_type: 'Form',
-  process_type: 'Process',
-  diameter: 'Diameter (mm)',
-  length: 'Length (mm)',
-  breadth: 'Breadth (mm)',
-  height: 'Height (mm)',
-  inner_diameter: 'Inner Ø (mm)',
-  outer_diameter: 'Outer Ø (mm)',
-  quantity: 'Qty',
-  available_quantity: 'Available Qty',
-  allocated_quantity: 'Allocated Qty',
-  unit_mass_kg: 'Unit Mass (kg)',
-  unit_volume_m3: 'Unit Volume (m³)',
-  unit_weight_n: 'Unit Weight (N)',
-  stock_status: 'Stock Status',
-  order_status: 'Order Status',
-  bar_total_length_mm: 'Bar Total (mm)',
-  bar_remaining_length_mm: 'Bar Remaining (mm)',
-  bar_mass_kg: 'Bar Mass (kg)',
-  bar_status: 'Bar Status',
-  sale_order_number: 'Order No.',
-  part_name: 'Part',
-  part_number: 'Part No.',
-  product_name: 'Product',
-  company_name: 'Customer',
-  operation_name: 'Operation',
-  notification_type: 'Type',
-  reference: 'Reference',
-  source_type: 'Type',
-  title: 'Name',
-  subtitle: 'Details',
-  tool_stock_status: 'Tool Stock',
-  material_stock_status: 'Material Stock',
-  material_available_qty: 'Material Available',
-  overall_status: 'Status',
-  required_tool: 'Required Tool',
-  order_no: 'Order No.',
-  item_description: 'Tool',
-  identification_code: 'ID Code',
-  user_name: 'Operator',
-  work_center_name: 'Work Center',
-};
-
-const MATERIAL_COL_ORDER = [
-  'material_name', 'form_type', 'process_type', 'diameter', 'length', 'breadth', 'height',
-  'inner_diameter', 'outer_diameter', 'quantity', 'available_quantity', 'allocated_quantity',
-  'bar_total_length_mm', 'bar_remaining_length_mm', 'bar_mass_kg', 'unit_mass_kg',
-  'stock_status', 'bar_status', 'order_status',
-];
-
-function formatLabel(key) {
-  if (COLUMN_LABELS[key]) return COLUMN_LABELS[key];
-  return key
+function humanizeKey(key) {
+  return String(key || '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function pickColumns(rows) {
-  if (!rows?.length) return [];
-  const keys = Object.keys(rows[0]);
-  const visible = keys.filter((k) => {
-    if (HIDDEN_COLS.has(k)) return false;
-    if (k.endsWith('_id') && k !== 'id') {
-      const base = k.replace(/_id$/, '');
-      return !keys.some((x) => x.includes(base) && x !== k);
-    }
-    return true;
-  });
-  if (!visible.length) return keys.slice(0, 10);
+function formatLabel(key, labels) {
+  if (labels && labels[key]) return labels[key];
+  return humanizeKey(key);
+}
 
-  if (visible.includes('material_name')) {
-    const ordered = MATERIAL_COL_ORDER.filter((k) => visible.includes(k));
-    const rest = visible.filter((k) => !ordered.includes(k));
-    return [...ordered, ...rest].slice(0, 14);
+/**
+ * Table columns come from the API (column agent per module).
+ * Prefer displayColumns from response; else first-row key order.
+ */
+function columnsFromResponse(rows, displayColumns) {
+  if (!rows?.length) return [];
+
+  if (Array.isArray(displayColumns) && displayColumns.length) {
+    const available = new Set(Object.keys(rows[0]));
+    const ordered = displayColumns.filter((k) => available.has(k));
+    if (ordered.length) return ordered;
   }
 
-  return visible.slice(0, 10);
+  return Object.keys(rows[0]).filter((k) => !HIDDEN_COLS.has(k));
 }
 
 const STATUS_COLORS = {
@@ -128,14 +77,17 @@ function formatCell(value, key) {
   return String(value);
 }
 
-export const DataTable = ({ data }) => {
+export const DataTable = ({ data, columns: displayColumns, labels }) => {
   const [copied, setCopied] = useState(false);
-  const cols = useMemo(() => pickColumns(data), [data]);
+  const cols = useMemo(
+    () => columnsFromResponse(data, displayColumns),
+    [data, displayColumns],
+  );
 
   if (!data?.length) return null;
 
   const columns = cols.map((key) => ({
-    title: formatLabel(key),
+    title: formatLabel(key, labels),
     dataIndex: key,
     key,
     ellipsis: true,
