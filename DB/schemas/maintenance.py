@@ -293,6 +293,30 @@ class NoteCreate(BaseModel):
         return text or None
 
 
+class NoteUpdate(BaseModel):
+    machine_id: Optional[int] = None
+    order_no: Optional[str] = None
+    project_name: Optional[str] = None
+    part_no: Optional[str] = None
+    part_name: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: Optional[str]):
+        if v is not None and not str(v).strip():
+            raise ValueError("Description cannot be empty if provided")
+        return str(v).strip() if v is not None else None
+
+    @field_validator("order_no", "project_name", "part_no", "part_name")
+    @classmethod
+    def strip_optional(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
 class NoteReview(BaseModel):
     supervisor_id: int
     status: str
@@ -355,6 +379,29 @@ class Note(BaseModel):
     operator_ack: bool = False
     operator_ack_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Note Attachment Schemas
+# =======================
+class NoteAttachmentBase(BaseModel):
+    note_id: int
+    file_name: str
+    file_type: str
+    file_size: int
+    minio_url: str
+
+
+class NoteAttachmentCreate(NoteAttachmentBase):
+    pass
+
+
+class NoteAttachment(NoteAttachmentBase):
+    id: int
+    uploaded_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
