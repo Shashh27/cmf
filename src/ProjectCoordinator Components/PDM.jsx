@@ -168,7 +168,7 @@ const PDM = () => {
               size={viewportWidth < 1100 ? "small" : "middle"}
               items={[
                 { key: "pdm", label: "PDM" },
-                { key: "order-tracking", label: viewportWidth < 1100 ? "Tracking" : "Order Tracking" },
+                { key: "order-tracking", label: viewportWidth < 1100 ? "Tracking" : "Project Tracking" },
                 { key: "recycle-bin", label: viewportWidth < 1100 ? "Recycle" : "Recycle Bin" },
               ]}
             />
@@ -180,7 +180,7 @@ const PDM = () => {
                 />
               )}
               <Button size="small" onClick={() => navigate("/project_coordinator/oms/orders")}>
-                {viewportWidth < 900 ? "Back" : "Back to Orders"}
+                {viewportWidth < 900 ? "Back" : "Back to Projects"}
               </Button>
             </div>
           </div>
@@ -320,7 +320,12 @@ const PDM = () => {
           </div>
         ) : activeTopTab === "recycle-bin" ? (
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-            <Recyclebin orderId={initialOrderId} />
+            <Recyclebin
+              orderId={initialOrderId}
+              productId={Number.isFinite(productIdNum) ? productIdNum : null}
+              projectName={projectName}
+              projectNumber={projectNumber}
+            />
           </div>
         ) : null}
       </div>

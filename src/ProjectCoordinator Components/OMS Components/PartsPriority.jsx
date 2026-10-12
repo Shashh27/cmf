@@ -524,7 +524,7 @@ const PartsPriority = () => {
       const newOrderIds = newItems.map((item) => item.order_id);
 
       Modal.confirm({
-        title: "Confirm Order Reorder",
+        title: "Confirm Project Reorder",
         icon: <ExclamationCircleOutlined />,
         content: (
           <div>
@@ -633,7 +633,7 @@ const PartsPriority = () => {
       <div className="p-0">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-3 pt-0 pb-1 gap-2">
           <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
-            Order Wise Priority
+            Project Wise Priority
           </Typography.Text>
           <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
             <Input.Search
@@ -702,7 +702,7 @@ const PartsPriority = () => {
       key: "order-wise",
       label: (
         <span className="flex items-center gap-2 px-2">
-          <AppstoreOutlined /> Order Wise Priority
+          <AppstoreOutlined /> Project Wise Priority
         </span>
       ),
       children: renderOrderWiseContent(),

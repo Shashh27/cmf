@@ -391,7 +391,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         doc.document_type === "Other" &&
         !(doc.document_type_other && doc.document_type_other.trim())
       )) {
-        message.error("Please enter document type name for all 'Other' order documents");
+        message.error("Please enter document type name for all 'Other' project documents");
         setLoading(false);
         return;
       }
@@ -417,14 +417,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         handleClose();
       } else {
         const errorData = response.data || {};
-        message.error(errorData.detail || "Failed to save order");
+        message.error(errorData.detail || "Failed to save project");
       }
     } catch (error) {
-      console.error("Error saving order:", error);
+      console.error("Error saving project:", error);
       console.error("Error response:", error?.response?.data);
       console.error("Error status:", error?.response?.status);
       
-      let errorMessage = "Error saving order";
+      let errorMessage = "Error saving project";
       
       if (error?.response?.data) {
         const errorData = error.response.data;

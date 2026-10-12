@@ -10,6 +10,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
   const [acknowledgingChecklistIds, setAcknowledgingChecklistIds] = useState(new Set());
+  const [ackingAll, setAckingAll] = useState(false);
   const [machineFilter, setMachineFilter] = useState([]);
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
@@ -74,13 +75,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       const response = await authFetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
-        // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
         const sortedLogs = (data || []).sort((a, b) => {
-          const isAckA = a.supervisor_ack_by;
-          const isAckB = b.supervisor_ack_by;
-          if (isAckA !== isAckB) {
-            return isAckA ? 1 : -1;
-          }
           const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
           const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
           return dateB - dateA;
@@ -96,6 +91,42 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       setPokayokeChecklistNotifications([]);
     } finally {
       setPokayokeChecklistLoading(false);
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    const pending = pokayokeChecklistNotifications.filter((log) => !log.supervisor_ack_by);
+    if (!pending.length) return;
+
+    const storedUser = localStorage.getItem('user');
+    let role = 'supervisor';
+    if (storedUser) {
+      try {
+        role = JSON.parse(storedUser).role || 'supervisor';
+      } catch (e) {
+        console.error('Error parsing user from local storage', e);
+      }
+    }
+
+    setAckingAll(true);
+    try {
+      const results = await Promise.allSettled(pending.map((log) =>
+        authFetch(`${config.API_BASE_URL}/operation-checklists/submissions/${log.id}/acknowledge`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role }),
+        }).then((response) => {
+          if (!response.ok) throw new Error('failed');
+        })
+      ));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      await fetchPokayokeChecklistNotifications();
+      if (failed) message.warning(`Acknowledged ${pending.length - failed} of ${pending.length}`);
+      else message.success('All notifications acknowledged');
+    } catch {
+      message.error('Failed to acknowledge checklist');
+    } finally {
+      setAckingAll(false);
     }
   };
 
@@ -499,9 +530,20 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
             </Button>
           )}
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={fetchPokayokeChecklistNotifications} loading={pokayokeChecklistLoading}>
-          Refresh
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            onClick={handleAcknowledgeAll}
+            loading={ackingAll}
+            disabled={!pokayokeChecklistNotifications.some((log) => !log.supervisor_ack_by)}
+          >
+            Acknowledge All
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={fetchPokayokeChecklistNotifications} loading={pokayokeChecklistLoading}>
+            Refresh
+          </Button>
+        </Space>
       </div>
       <Table
         columns={pokayokeChecklistColumns}

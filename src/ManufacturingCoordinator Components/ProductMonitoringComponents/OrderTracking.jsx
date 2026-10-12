@@ -168,7 +168,7 @@ const OrderTracking = () => {
       const res = await api.get(`/orders/${orderId}/hierarchical`);
       setOrderDetails(res.data);
     } catch {
-      message.error('Failed to fetch order details');
+      message.error('Failed to fetch project details');
     } finally {
       setLoading(false);
     }
@@ -280,7 +280,7 @@ const OrderTracking = () => {
       key: 'all',
       label: 'Total Parts',
       value: totalParts,
-      sub: `${orderCompletion}% order complete`,
+      sub: `${orderCompletion}% project complete`,
       color: '#1677ff',
       icon: <AppstoreOutlined />,
       progress: orderCompletion,
@@ -515,7 +515,7 @@ const OrderTracking = () => {
 
   const ordersColumns = [
     {
-      title: 'Sale Order',
+      title: 'Project',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
       ellipsis: true,
@@ -535,7 +535,7 @@ const OrderTracking = () => {
             <div className="ot-order-summary">
               <div className="ot-order-summary-main">
                 <Text type="secondary" style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}>
-                  ORDER
+                  PROJECT
                 </Text>
                 <Text strong style={{ fontSize: 16, lineHeight: 1.2 }}>
                   {orderTrackingData?.sale_order_number || selectedOrderMeta?.sale_order_number || '—'}
@@ -607,12 +607,12 @@ const OrderTracking = () => {
       <div className="order-tracking-grid">
         {/* Orders */}
         <Card
-          title={<Space size={6}><DatabaseOutlined /> Orders</Space>}
+          title={<Space size={6}><DatabaseOutlined /> Projects</Space>}
           extra={(
             <Select
               showSearch
               allowClear
-              placeholder="Search orders..."
+              placeholder="Search projects..."
               className="ot-panel-search"
               searchValue={searchOrder}
               onSearch={setSearchOrder}
@@ -630,7 +630,7 @@ const OrderTracking = () => {
               value={selectedOrderId}
               filterOption={false}
               loading={initialLoading}
-              notFoundContent={searchOrder ? 'No matching orders' : 'No orders'}
+              notFoundContent={searchOrder ? 'No matching projects' : 'No projects'}
             >
               {filteredOrders.map((order) => (
                 <Select.Option key={order.id} value={order.id}>
@@ -649,7 +649,7 @@ const OrderTracking = () => {
             {initialLoading ? (
               <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
             ) : filteredOrders.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No orders" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No projectss" />
             ) : (
               <Table
                 className="ot-fit-table"

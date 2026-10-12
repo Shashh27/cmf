@@ -9,6 +9,7 @@ import LeaveLog from '../Operator Components/LeaveLog';
 import PokaYokeChecklist from '../Operator Components/PokaYokeChecklist';
 import OperatorNotifications from '../Operator Components/Notifications';
 import ProductionLogsHistory from '../Operator Components/ProductionLogsHistory';
+import OperatorNotes from '../Operator Components/Notes';
 
 const OperatorDashboard = () => {
   const location = useLocation();
@@ -33,6 +34,9 @@ const OperatorDashboard = () => {
     }
     if (path.includes('/notifications')) {
       return <OperatorNotifications />;
+    }
+    if (path.includes('/notes')) {
+      return <OperatorNotes />;
     }
     if (path.includes('/production-logs')) {
       return (

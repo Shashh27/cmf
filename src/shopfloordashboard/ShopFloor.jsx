@@ -282,10 +282,10 @@ function SelectedMachineModal({ machine, workCenters, open, onClose }) {
           size="small"
           column={1}
           style={{ marginTop: 12 }}
-          title="Live Order Details"
+          title="Live Project Details"
           styles={{ label: { width: 140, background: '#fafafa' } }}
         >
-          <Descriptions.Item label="Sale order">{machine.saleOrderNumber || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Project">{machine.saleOrderNumber || '—'}</Descriptions.Item>
           <Descriptions.Item label="Part number">{machine.partNumber || '—'}</Descriptions.Item>
           <Descriptions.Item label="Operation">{machine.operationName || '—'}</Descriptions.Item>
           <Descriptions.Item label="Operation no.">{machine.operationNumber || '—'}</Descriptions.Item>

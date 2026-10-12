@@ -396,7 +396,7 @@ const Maintenance = () => {
       render: (v) => titleCase(v),
     },
     {
-      title: 'Order Details',
+      title: 'Project Details',
       key: 'order_details',
       width: 160,
       sorter: (a, b) => (a.order_name ?? a.production_order_id ?? '').localeCompare(b.order_name ?? b.production_order_id ?? ''),
@@ -471,7 +471,7 @@ const Maintenance = () => {
   const helpSupportColumns = [
     { title: 'Sl No', key: 'sl', width: 50, render: (_, __, idx) => (helpSupportPagination.current - 1) * helpSupportPagination.pageSize + idx + 1 },
     {
-      title: 'Order Details',
+      title: 'Project Details',
       key: 'order_details',
       width: 160,
       sorter: (a, b) => (a.order_name ?? a.production_order_id ?? '').localeCompare(b.order_name ?? b.production_order_id ?? ''),

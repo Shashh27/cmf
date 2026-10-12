@@ -119,6 +119,19 @@ const BillOfMaterials = ({
 
   const isPartActive = (part) => (part?.schedule_status || '').toLowerCase() === 'active';
 
+  const getDocRevision = (item) => {
+    const raw =
+      getLatestRevision(item?.documents)
+      || item?.latest_document_version
+      || item?.document_info?.latest_version
+      || item?.document_version
+      || null;
+    if (raw == null || String(raw).trim() === '') return null;
+    const clean = String(raw).replace(/^v/i, '').trim();
+    if (!clean) return null;
+    return /^\d+$/.test(clean) ? clean.padStart(2, '0') : clean;
+  };
+
   const getTypeColor = (type) => {
     const normalized = (type || "").toString().toLowerCase();
     const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
@@ -953,7 +966,11 @@ const BillOfMaterials = ({
     if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     const isInRecycleBin = part.recycle_bin === true;
-    const docRowStatus = part.document_row_status || 'none';
+    const docRowStatus =
+      part.document_row_status
+      || part.document_info?.row_status
+      || (part.has_unacknowledged_documents ? 'released' : 'none');
+    const revision = getDocRevision(part);
 
     return (
       <DraggablePartRow
@@ -980,22 +997,34 @@ const BillOfMaterials = ({
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
           <div className="flex flex-col min-w-0">
-              {/* ── Highlighted part name ── */}
-              <Text className={`text-sm font-medium truncate leading-tight ${
-                isInRecycleBin
-                  ? 'text-gray-400'
-                  : docRowStatus === 'rejected'
-                  ? 'text-red-900'
-                  : docRowStatus === 'accepted'
-                  ? 'text-green-900'
-                  : docRowStatus === 'released'
-                  ? 'text-amber-900'
-                  : isSelected
-                  ? 'text-indigo-800'
-                  : 'text-slate-700'
-              }`}>
-                {searchTerm ? highlightText(part.part_name, searchTerm) : part.part_name}
-              </Text>
+              <div className="flex items-center gap-1 min-w-0">
+                <Text className={`text-sm font-medium truncate leading-tight ${
+                  isInRecycleBin
+                    ? 'text-gray-400'
+                    : docRowStatus === 'rejected'
+                    ? 'text-red-900'
+                    : docRowStatus === 'accepted'
+                    ? 'text-green-900'
+                    : docRowStatus === 'released'
+                    ? 'text-amber-900'
+                    : isSelected
+                    ? 'text-indigo-800'
+                    : 'text-slate-700'
+                }`}>
+                  {searchTerm ? highlightText(part.part_name, searchTerm) : part.part_name}
+                </Text>
+                {revision && (
+                  <Tooltip title={`Document revision ${revision}`}>
+                    <Tag
+                      color="blue"
+                      className="m-0 shrink-0"
+                      style={{ fontSize: 9, lineHeight: '14px', padding: '0 4px' }}
+                    >
+                      {/^v/i.test(String(part.latest_document_version || '')) ? String(part.latest_document_version) : `v${revision}`}
+                    </Tag>
+                  </Tooltip>
+                )}
+              </div>
               {part.part_number && (
                 <Text className={`text-xs truncate ${
                   isInRecycleBin
@@ -1085,6 +1114,7 @@ const BillOfMaterials = ({
                     : 'text-slate-400'
                 }`}>
                   {assembly.assembly_number}
+                  {getDocRevision(assembly) ? ` · Rev ${getDocRevision(assembly)}` : ''}
                 </Text>
               </div>
           </div>

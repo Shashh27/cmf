@@ -654,7 +654,7 @@ const OrderTrackingModule = () => {
               value={selectedOrderId}
               filterOption={false}
               loading={initialLoading}
-              notFoundContent={searchOrder ? 'No matching orders' : 'No orders'}
+              notFoundContent={searchOrder ? 'No matching projects' : 'No projects'}
               labelRender={({ label, value }) => {
                 const order = orders.find((o) => o.id === value);
                 const full = order?.sale_order_number || label;
@@ -684,7 +684,7 @@ const OrderTrackingModule = () => {
             {initialLoading ? (
               <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
             ) : filteredOrders.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No orders" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No projects" />
             ) : (
               filteredOrders.map((order) => (
                 <div

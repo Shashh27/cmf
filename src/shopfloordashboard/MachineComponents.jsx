@@ -179,7 +179,7 @@ const MachineCard = ({ machine }) => {
 
   const orderColumns = [
     {
-      title: 'Order Number',
+      title: 'Project Number',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
       render: (text) => (
@@ -301,7 +301,7 @@ const MachineCard = ({ machine }) => {
                 <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
                   {machine.total_orders || 0}
                 </div>
-                <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Orders</div>
+                <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Projects</div>
               </div>
               <div style={{
                 flex: 1,
@@ -467,7 +467,7 @@ const MachineCard = ({ machine }) => {
                   <div><strong>Status:</strong> {getMachineStatusText(machine.machine_status?.status || 'off')}</div>
                   <div><strong>Work Center:</strong> {machine.work_center || 'N/A'}</div>
                   <div><strong>Type:</strong> {machine.machine_type || 'N/A'}</div>
-                  <div><strong>Order:</strong> {machine.orders?.[0]?.sale_order_number || 'N/A'}</div>
+                  <div><strong>Project:</strong> {machine.orders?.[0]?.sale_order_number || 'N/A'}</div>
                   <div><strong>Part:</strong> {partsOperations[0]?.part_number || 'N/A'}</div>
                   <div><strong>Operation:</strong> {partsOperations[0]?.operation_name || 'N/A'}</div>
                 </Space>

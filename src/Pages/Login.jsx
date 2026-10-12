@@ -291,7 +291,7 @@ const Login = () => {
                     </Form>
                   ) : (
                     <Form form={operatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Operator')} autoComplete="off">
-                      <Form.Item name="operator_id" rules={[{ required: true, message: 'Enter Operator ID' }]}>
+                      <Form.Item name="operator_id" rules={[{ required: true, message: 'Enter Username' }]}>
                         <Input 
                           prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
                           placeholder="Operator Name" 
@@ -299,7 +299,7 @@ const Login = () => {
                           autoComplete="off"
                         />
                       </Form.Item>
-                      <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+                      <Form.Item name="password" rules={[{ required: true, message: 'Enter Password' }]}>
                         <Input.Password 
                           prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
                           placeholder="Password" 

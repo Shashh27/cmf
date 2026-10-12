@@ -21,7 +21,7 @@ const getDimensions = (s) => {
 
 const COLUMNS = [
   "SL", "Material", "Process", "Form", "Dimensions",
-  "Qty", "Mass (kg)", "Source", "Order No", "Stock Status",
+  "Qty", "Mass (kg)", "Source", "Project No", "Stock Status",
   "Unit", "Total Len", "Remaining", "Used For", "Unit Status",
 ];
 

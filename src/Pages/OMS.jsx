@@ -143,14 +143,14 @@ const OMS = () => {
     setOrderModalOpen(false);
     setEditingOrder(null);
     if (order) {
-      messageApi.success(`Order "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
+      messageApi.success(`Project "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
     }
   };
 
   const handleDeleteOrder = (order) => {
     modal.confirm({
-      title: "Delete Order",
-      content: `Are you sure you want to delete order "${order.sale_order_number}"?`,
+      title: "Delete Project",
+      content: `Are you sure you want to delete project "${order.sale_order_number}"?`,
       okText: "Delete",
       okType: "danger",
       cancelText: "Cancel",
@@ -161,16 +161,16 @@ const OMS = () => {
           const result = response.data || {};
           fetchOrders();
           if (result.product_also_deleted) {
-            messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
+            messageApi.success(`Project "${order.sale_order_number}" and its associated product deleted successfully!`);
           } else {
-            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            messageApi.success(`Project "${order.sale_order_number}" deleted successfully!`);
           }
         } catch (error) {
           console.error("Error deleting order:", error);
           const detail =
             error?.response?.data?.detail ||
             error?.response?.data?.message ||
-            "Failed to delete order";
+            "Failed to delete project";
           messageApi.error(detail);
         }
       },
@@ -200,13 +200,13 @@ const OMS = () => {
         approval_status: values.approval_status,
         approval_remarks: values.approval_remarks,
       });
-      messageApi.success(`Order ${values.approval_status.toLowerCase()} successfully!`);
+      messageApi.success(`Project ${values.approval_status.toLowerCase()} successfully!`);
       setApprovalModalOpen(false);
       approvalForm.resetFields();
       setSelectedOrderForApproval(null);
       fetchOrders();
     } catch (error) {
-      console.error("Error approving/rejecting order:", error);
+      console.error("Error approving/rejecting project:", error);
       messageApi.error(error?.response?.data?.detail || "Failed to process approval");
     }
   };
@@ -464,7 +464,7 @@ const OMS = () => {
       ellipsis: true,
       render: (productId, record) => (
         record.approval_status === "Rejected" ? (
-          <Tooltip title="Order rejected - cannot access project">
+          <Tooltip title="Project rejected - cannot access project">
             <Space className="text-gray-400" size={2}>
               <AppstoreOutlined className="text-xs" />
               <span className="font-medium text-xs truncate">{getProductName(productId, record)}</span>
@@ -635,7 +635,7 @@ const OMS = () => {
         <Space size={4}>
           {record.approval_status === "Pending Approval" && record.user_role !== 'admin' && (
             <>
-              <Tooltip title="Approve Order">
+              <Tooltip title="Approve Project">
                 <Button
                   type="text"
                   size="small"
@@ -644,7 +644,7 @@ const OMS = () => {
                   onClick={() => handleApprovalAction(record, "Approved")}
                 />
               </Tooltip>
-              <Tooltip title="Reject Order">
+              <Tooltip title="Reject Project">
                 <Button
                   type="text"
                   size="small"
@@ -655,7 +655,7 @@ const OMS = () => {
               </Tooltip>
             </>
           )}
-          <Tooltip title="Edit Order">
+          <Tooltip title="Edit Project">
             <Button
                 type="text"
                 size="small"
@@ -664,7 +664,7 @@ const OMS = () => {
                 onClick={() => handleEditOrder(record)}
             />
           </Tooltip>
-          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected order" : "Documents"}>
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected project" : "Documents"}>
             <Button
                 type="text"
                 size="small"
@@ -677,7 +677,7 @@ const OMS = () => {
                 }}
             />
           </Tooltip>
-          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected order" : "Delete Order"}>
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected project" : "Delete Project"}>
             <Button
                 type="text"
                 size="small"
@@ -699,7 +699,7 @@ const OMS = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="flex flex-col items-center">
             <Spin size="large" />
-            <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
+            <p className="mt-4 text-gray-500 font-medium">Loading projects...</p>
         </div>
       </div>
     );
@@ -803,7 +803,7 @@ const OMS = () => {
           >
             <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Orders</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Projects</div>
                 <div className="text-lg sm:text-xl font-bold text-blue-700 leading-tight">{kpiStats.total}</div>
               </div>
               <ShoppingOutlined className="text-blue-600 text-lg sm:text-xl" />
@@ -915,7 +915,7 @@ const OMS = () => {
                     style={{ backgroundColor: '#2563eb' }}
                     className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
                 >
-                    <span className="hidden sm:inline">New Order</span>
+                    <span className="hidden sm:inline">New Project</span>
                     <span className="sm:hidden">New</span>
                 </Button>
                 <OMSOrdersPdfDownload
@@ -955,7 +955,7 @@ const OMS = () => {
             size="small"
             bordered
             className="modern-table"
-            locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
+            locale={{ emptyText: <Empty description={searchText ? "No projects found matching your search" : "No projects found"} /> }}
             scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         />
       </Card>
@@ -988,7 +988,7 @@ const OMS = () => {
               <CloseOutlined className="text-red-500" />
             )}
             <span className="font-bold text-gray-800">
-              {approvalAction === "Approved" ? "Approve" : "Reject"} Order
+              {approvalAction === "Approved" ? "Approve" : "Reject"} Project
             </span>
           </div>
         }
@@ -1005,7 +1005,7 @@ const OMS = () => {
       >
         <div className="mb-4">
           <p className="text-gray-600">
-            Order: <span className="font-semibold text-gray-800">{selectedOrderForApproval?.sale_order_number}</span>
+            Project: <span className="font-semibold text-gray-800">{selectedOrderForApproval?.sale_order_number}</span>
           </p>
           <p className="text-gray-600">
             Customer: <span className="font-semibold text-gray-800">{getCustomerName(selectedOrderForApproval?.customer_id, selectedOrderForApproval)}</span>

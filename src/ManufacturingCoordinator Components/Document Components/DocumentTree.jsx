@@ -94,13 +94,13 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     try {
       const response = await authFetch(`${config.API_BASE_URL}/orders/`);
       if (!response.ok) {
-        throw new Error('Failed to fetch orders');
+        throw new Error('Failed to fetch projects');
       }
       const data = await response.json();
       setOrders(data);
       initializeTreeData(data, machines);
     } catch (error) {
-      message.error('Failed to fetch orders: ' + error.message);
+      message.error('Failed to fetch projects: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -439,10 +439,10 @@ const buildMachineFoldersTree = (folders, machine) => {
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <ShoppingCartOutlined style={{ color: '#1890ff' }} />
-            <span>Orders</span>
+            <span>Projects</span>
           </span>
         ),
-        titleText: 'Orders',
+        titleText: 'Projects',
         key: 'orders-root',
         selectable: false,
         children: ordersData.map(order => ({

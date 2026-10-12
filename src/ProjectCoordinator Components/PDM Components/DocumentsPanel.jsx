@@ -288,6 +288,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       const ops = oR.data;
       setDocuments(docs); setOperations(ops);
       if (onDocumentsLoaded) onDocumentsLoaded(docs);
+      notifyBomDocsChanged();
       return docs; // ← return fresh docs to caller
     } catch (e) { console.error(e); return []; }
     finally { setLoading(false); }

@@ -644,7 +644,7 @@ const ProductionCompletion = () => {
         margin: { left: margin, right: margin },
         tableWidth,
         head: [[
-          'Sl No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
+          'Sl No', 'Project No', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
           'Operator', 'Machine', 'Total Qty', 'New Prod.', 'Rework Sub.', 'Produced',
           'Approved', 'Rework', 'Rejected', 'Rem. Close', 'Rework Due', 'Reject Due',
           'Notes', 'Start Time', 'End Time', 'Remarks', 'Approved By',

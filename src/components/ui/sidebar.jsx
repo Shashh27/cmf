@@ -7,7 +7,7 @@ import { Layout, Menu, Drawer, Button, Badge } from "antd";
 import {
   SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined,DeleteOutlined
 
-, AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined } from "@ant-design/icons";
+, AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined,FormOutlined } from "@ant-design/icons";
 import { Link, useLocation } from "react-router-dom";
 import { api, authFetch } from '../../api/client.js';
 import { API_BASE_URL } from '../../Config/auth';
@@ -138,15 +138,17 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [productionResponse, pokayokeChecklistResponse, otResponse] = await Promise.all([
+      const [productionResponse, pokayokeChecklistResponse, otResponse, notesResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
         authFetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
         fetch(`${SCHEDULING_API_BASE_URL}/notifications/operator/${operatorId}?unread_only=true&limit=50`),
+        authFetch(`${API_BASE_URL}/maintenance/notes?operator_id=${operatorId}`),
       ]);
 
       let productionCount = 0;
       let pokayokeChecklistCount = 0;
       let otCount = 0;
+      let rightNowJobCount = 0;
 
       if (productionResponse.ok) {
         const data = await productionResponse.json();
@@ -180,7 +182,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         ).length;
       }
 
-      setNotificationCount(productionCount + pokayokeChecklistCount + otCount);
+      if (notesResponse.ok) {
+        const data = await notesResponse.json();
+        rightNowJobCount = (data || []).filter(
+          (note) => note.status && note.status !== 'pending' && !note.operator_ack
+        ).length;
+      }
+
+      setNotificationCount(productionCount + pokayokeChecklistCount + otCount + rightNowJobCount);
 
     } catch (error) {
 
@@ -226,13 +235,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
+      const [productionResponse, pokayokeChecklistResponse, notesResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
         api.get(`/operation-checklists/submissions`).then((r) => ({ ok: true, json: async () => r.data })).catch(() => ({ ok: false })),
+        authFetch(`${API_BASE_URL}/maintenance/notes`).then((r) => ({ ok: r.ok, json: () => r.json() })).catch(() => ({ ok: false })),
       ]);
 
       let productionCount = 0;
       let pokayokeChecklistCount = 0;
+      let rightNowJobCount = 0;
 
       if (productionResponse.ok) {
         const data = await productionResponse.json();
@@ -250,7 +261,12 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         pokayokeChecklistCount = (data || []).filter((log) => !log.supervisor_ack_by).length;
       }
 
-      setNotificationCount(productionCount + pokayokeChecklistCount);
+      if (notesResponse.ok) {
+        const data = await notesResponse.json();
+        rightNowJobCount = (data || []).filter((note) => !note.supervisor_ack).length;
+      }
+
+      setNotificationCount(productionCount + pokayokeChecklistCount + rightNowJobCount);
 
     } catch (error) {
 
@@ -528,7 +544,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       label: 'OMS',
       icon: <ShoppingCartOutlined />,
       children: [
-        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
+        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Projects</Link> },
         { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
       ],
     },
@@ -643,6 +659,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <CarryOutOutlined />,
       },
       {
+        key: `${prefix}/notes`,
+        label: <Link to={`${prefix}/notes`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        icon: <FormOutlined />,
+      },
+      {
         key: `${prefix}/inspection-results`,
         label: <Link to={`${prefix}/inspection-results`} onClick={() => setMobileDrawerOpen(false)}>Inspection Results</Link>,
         icon: <SafetyCertificateOutlined />,
@@ -735,7 +756,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: 'OMS',
         icon: <ShoppingCartOutlined />,
         children: [
-          { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
+          { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Projects</Link> },
           { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
         ],
       },
@@ -822,6 +843,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/production_logs`,
         label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
         icon: <FileTextOutlined />,
+      },
+      {
+        key: `${prefix}/notes`,
+        label: <Link to={`${prefix}/notes`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        icon: <FormOutlined />,
       },
       {
         key: `${prefix}/create-inspection-plan`,

@@ -216,7 +216,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
       )
     },
     {
-      title: 'Order',
+      title: 'Project',
       dataIndex: 'sale_order_number',
       key: 'sale_order_number',
       render: (text) => (

@@ -709,7 +709,7 @@ const Dashboard = () => {
             }}>
               {/* Production Order */}
               <div>
-                <Text style={{ color: '#94a3b8', fontSize: 12 }}>Production Order</Text>
+                <Text style={{ color: '#94a3b8', fontSize: 12 }}>Project Details</Text>
                 <div style={{ fontWeight: 700, color: '#1677FF', fontSize: 14, marginTop: 4 }}>
                   {selectedJob?.sale_order_number || selectedJob?.production_order || 'None'}
                 </div>

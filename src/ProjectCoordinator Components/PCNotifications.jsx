@@ -318,7 +318,7 @@ const PCNotifications = () => {
               placeholder="Type"
             >
               <Option value="all">All</Option>
-              <Option value="order">Order</Option>
+              <Option value="order">Project</Option>
               <Option value="part">Part</Option>
               <Option value="operation">Operation</Option>
               <Option value="document">Document</Option>

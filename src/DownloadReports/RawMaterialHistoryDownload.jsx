@@ -56,7 +56,7 @@ const exportPDF = (historyData, selectedMaterial) => {
 
   drawHeader();
 
-  const headers = ["Date & Time", "Activity", "Raw Material", "Form Type", "Dimensions", "Source", "Order", "Part", "Length Used", "User", "Vendor"];
+  const headers = ["Date & Time", "Activity", "Raw Material", "Form Type", "Dimensions", "Source", "Project", "Part", "Length Used", "User", "Vendor"];
   const body = historyData.map((item) => [
     formatDate(item.timestamp),
     item.activity_type?.replace(/_/g, ' ') || '-',
@@ -189,7 +189,7 @@ const exportExcel = (historyData, selectedMaterial) => {
       "Form Type",
       "Dimensions",
       "Source",
-      "Order",
+      "Project",
       "Part",
       "Length Used",
       "User",

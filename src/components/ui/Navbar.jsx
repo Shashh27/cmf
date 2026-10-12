@@ -152,7 +152,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/production_logs')) return 'Production Logs';
     if (path.includes('/dashboard')) return 'Dashboard';
     if (path.includes('/oms/orders')) {
-      if (path.startsWith('/admin') || path.startsWith('/manufacturing_coordinator')) return 'Orders';
+      if (path.startsWith('/admin') || path.startsWith('/manufacturing_coordinator')) return 'Projects';
       return 'Projects';
     }
     if (path.includes('/oms/product/')) return 'Product Data Management';
@@ -184,6 +184,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/inventory-data')) return 'Inventory Data';
     if (path.includes('/documents')) return 'Documents';
     if (path.includes('/leave-log')) return 'Leave Log';
+    if (path.includes('/notes')) return 'Right Now Jobs';
     if (path.includes('/recycle-bin')) return 'Recycle Bin';
     return '';
   };

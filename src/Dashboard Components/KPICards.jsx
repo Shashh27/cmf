@@ -13,8 +13,8 @@ const KPICards = ({ data }) => {
   const kpiCards = [
     {
       id: 'total-orders',
-      title: 'Total Orders',
-      subtitle: 'All Orders',
+      title: 'Total Projects',
+      subtitle: 'All Projects',
       value: data.totalOrders,
       icon: <ShoppingCartOutlined />,
       color: '#3b82f6',

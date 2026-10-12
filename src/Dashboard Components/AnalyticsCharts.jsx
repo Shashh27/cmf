@@ -295,7 +295,7 @@ const AnalyticsCharts = ({ data }) => {
           title={
             <Space>
               <BarChartOutlined style={{ color: '#1890ff' }} />
-              <span>Monthly Order Status Overview</span>
+              <span>Monthly Project Status Overview</span>
             </Space>
           }
           style={{ boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)' }}
@@ -319,7 +319,7 @@ const AnalyticsCharts = ({ data }) => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Space>
                 <LineChartOutlined style={{ color: '#52c41a' }} />
-                <span>Yearly Order Trends</span>
+                <span>Yearly Project Trends</span>
               </Space>
               <Select
                 value={selectedYear}
@@ -337,7 +337,7 @@ const AnalyticsCharts = ({ data }) => {
         >
           <SimpleLineChart
             chartData={yearlyData}
-            title={`${selectedYear} Order Trends`}
+            title={`${selectedYear} Project Trends`}
             lines={[
               { key: 'inProgress', name: 'In Progress', color: '#f97316' },
               { key: 'scheduled', name: 'Scheduled', color: '#8b5cf6' },

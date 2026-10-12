@@ -83,6 +83,7 @@ const OTNotification = ({ onUnacknowledgedCountChange }) => {
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [ackingAll, setAckingAll] = useState(false);
   const [machineFilter, setMachineFilter] = useState([]);
 
   useEffect(() => {
@@ -121,10 +122,6 @@ const OTNotification = ({ onUnacknowledgedCountChange }) => {
         : (data.items || data.notifications || data.data || []);
 
       const sorted = [...list].sort((a, b) => {
-        const ackA = isAcknowledged(a);
-        const ackB = isAcknowledged(b);
-        if (ackA !== ackB) return ackA ? 1 : -1;
-
         const dateA = new Date(a.shift_date || a.created_at || a.date || 0).getTime();
         const dateB = new Date(b.shift_date || b.created_at || b.date || 0).getTime();
         return dateB - dateA;
@@ -188,6 +185,35 @@ const OTNotification = ({ onUnacknowledgedCountChange }) => {
         next.delete(notificationId);
         return next;
       });
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    const pending = notifications.filter((record) => !isAcknowledged(record));
+    if (!pending.length) return;
+
+    setAckingAll(true);
+    try {
+      const results = await Promise.allSettled(pending.map((record) =>
+        fetch(`${SCHEDULING_API_BASE_URL}/notifications/${record.id}/read`, {
+          method: 'PATCH',
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ is_read: true }),
+        }).then((response) => {
+          if (!response.ok) throw new Error('failed');
+        })
+      ));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      await fetchNotifications();
+      if (failed) message.warning(`Acknowledged ${pending.length - failed} of ${pending.length}`);
+      else message.success('All notifications acknowledged');
+    } catch {
+      message.error('Failed to acknowledge OT assignments');
+    } finally {
+      setAckingAll(false);
     }
   };
 
@@ -308,9 +334,20 @@ const OTNotification = ({ onUnacknowledgedCountChange }) => {
             </Button>
           )}
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
-          Refresh
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            onClick={handleAcknowledgeAll}
+            loading={ackingAll}
+            disabled={!notifications.some((record) => !isAcknowledged(record))}
+          >
+            Acknowledge All
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
+            Refresh
+          </Button>
+        </Space>
       </div>
       <Table
         columns={columns}

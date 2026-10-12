@@ -413,7 +413,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         const count = await getGroupCount(trimmedGroupId);
 
-        message.success(`Status updated successfully for ${count} grouped orders`);
+        message.success(`Status updated successfully for ${count} grouped projects`);
 
       } else {
 
@@ -471,7 +471,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       title: 'Confirm Delete',
 
-      content: 'Are you sure you want to remove this material from the order and parts?',
+      content: 'Are you sure you want to remove this material from the project and parts?',
 
       okText: 'Delete',
 
@@ -625,7 +625,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         );
 
-        message.success(`Vendors linked successfully to ${await getGroupCount(trimmedGroupId)} grouped orders`);
+        message.success(`Vendors linked successfully to ${await getGroupCount(trimmedGroupId)} grouped projects`);
 
       } else {
 
@@ -767,7 +767,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     if (selectedRowKeys.length < 2) {
 
-      message.warning('Please select at least 2 orders to group');
+      message.warning('Please select at least 2 projects to group');
 
       return;
 
@@ -779,7 +779,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       title: 'Confirm Group',
 
-      content: `Are you sure you want to group ${selectedRowKeys.length} orders? After grouping, vendor linking and status changes will apply to ALL grouped orders together.`,
+      content: `Are you sure you want to group ${selectedRowKeys.length} projects? After grouping, vendor linking and status changes will apply to ALL grouped projects together.`,
 
       okText: 'Yes, Group',
 
@@ -805,7 +805,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
           );
 
-          message.success('Orders grouped successfully. Now you can link vendors or change status for all grouped orders at once.');
+          message.success('Projects grouped successfully. Now you can link vendors or change status for all grouped projects at once.');
 
           setSelectedRowKeys([]);
 
@@ -813,7 +813,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         } catch (error) {
 
-          message.error(error?.response?.data?.detail || 'Failed to group orders');
+          message.error(error?.response?.data?.detail || 'Failed to group projects');
 
         } finally {
 
@@ -833,7 +833,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     if (selectedRowKeys.length === 0) {
 
-      message.warning('Please select orders to ungroup');
+      message.warning('Please select projects to ungroup');
 
       return;
 
@@ -845,7 +845,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
       title: 'Confirm Ungroup',
 
-      content: `Are you sure you want to ungroup ${selectedRowKeys.length} orders? After ungrouping, you will need to manage vendor linking and status changes individually for each order.`,
+      content: `Are you sure you want to ungroup ${selectedRowKeys.length} projects? After ungrouping, you will need to manage vendor linking and status changes individually for each projects.`,
 
       okText: 'Yes, Ungroup',
 
@@ -865,7 +865,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
           );
 
-          message.success('Orders ungrouped successfully');
+          message.success('Projects ungrouped successfully');
 
           setSelectedRowKeys([]);
 
@@ -879,7 +879,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
         } catch (error) {
 
-          message.error(error?.response?.data?.detail || 'Failed to ungroup orders');
+          message.error(error?.response?.data?.detail || 'Failed to ungroup Projects');
 
         } finally {
 
@@ -1418,7 +1418,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                             {!row.vendor_id && (
 
-                              <Tooltip title="Link Vendors (applies to all grouped orders)">
+                              <Tooltip title="Link Vendors (applies to all grouped projects)">
 
                                 <Button type="text" size="small" icon={<ShoppingCartOutlined />} className="text-purple-600 hover:bg-purple-50" onClick={() => handleOpenVendorSelect(row)} />
 
@@ -1426,7 +1426,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                             )}
 
-                            <Tooltip title="Quick Status Change (applies to all grouped orders)">
+                            <Tooltip title="Quick Status Change (applies to all grouped projects)">
 
                               <Button type="text" size="small" icon={<CheckCircleOutlined />} className="text-green-600 hover:bg-green-50" onClick={() => handleQuickStatusChange(row, 'purchase_request')} />
 
@@ -1438,7 +1438,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
                             </Tooltip>
 
-                            <Tooltip title="Delete Link (applies to all grouped orders)">
+                            <Tooltip title="Delete Link (applies to all grouped projects)">
 
                               <Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(row)} />
 
@@ -1516,7 +1516,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
               <p className="text-sm text-purple-800">
 
-                <strong>⚠️ Merged Orders:</strong> This status change will apply to ALL orders in this merge group.
+                <strong>⚠️ Merged Projects:</strong> This status change will apply to ALL projects in this merge group.
 
               </p>
 
@@ -1710,7 +1710,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
               <p className="text-sm text-purple-800">
 
-                <strong>⚠️ Merged Orders:</strong> This will link the selected vendors to ALL orders in this merge group.
+                <strong>⚠️ Merged Projects:</strong> This will link the selected vendors to ALL projects in this merge group.
 
               </p>
 

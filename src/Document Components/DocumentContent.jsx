@@ -1174,7 +1174,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     if (selectedNode.type === 'part-category') return `${selectedNode.partName} - ${selectedNode.category}`;
     if (selectedNode.type === 'part-ipid') return `${selectedNode.partName} - IPID`;
     if (selectedNode.type === 'operation-folder') return `Operation: ${selectedNode.operationName}`;
-    if (selectedNode.category === 'Reports') return `Reports - Order: ${selectedNode.orderId}`;
+    if (selectedNode.category === 'Reports') return `Reports - Project: ${selectedNode.orderId}`;
     if (selectedNode.type === 'machine-folder') return `${selectedNode.machineName} - ${selectedNode.folderName}`;
     if (selectedNode.type === 'machine') return `${selectedNode.machineName}`;
     if (selectedNode.type === 'general-folder') return selectedNode.folderName;
