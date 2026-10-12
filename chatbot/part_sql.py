@@ -15,9 +15,14 @@ PART_STOCK_QUERY_RE = re.compile(
 PART_MATERIAL_QUERY_RE = re.compile(
     r"\b(?:raw\s+)?materi[a-z]*\b.{0,50}\b(?:used|for|of|linked|this)\b.{0,30}\bpart\b|"
     r"\bpart\b.{0,50}\b(?:raw\s+)?materi[a-z]*\b|"
-    r"\bwhich\b.{0,30}\b(?:raw\s+)?materi[a-z]*\b.{0,30}\bpart\b",
+    r"\bwhich\b.{0,30}\b(?:raw\s+)?materi[a-z]*\b.{0,30}\bpart\b|"
+    # "which raw material used for 002" (part word omitted)
+    r"\b(?:raw\s+)?materi[a-z]*\b.{0,40}\b(?:used|for|of|linked)\b.{0,20}"
+    r"\b(?:PRT[\-_]?\d+|\d{2,4}|[A-Za-z]{1,6}[\-_]\d+)\b|"
+    r"\b(?:used|for|of)\b.{0,20}\b(?:PRT[\-_]?\d+|\d{2,4})\b.{0,20}\b(?:raw\s+)?materi[a-z]*\b",
     re.IGNORECASE,
 )
+
 
 THESE_PARTS_STOCK_RE = re.compile(
     r"\b(?:stock|inventory|quantity|level|available)\b.{0,30}\b(?:these|those|the|same)\s+parts?\b|"
@@ -34,7 +39,7 @@ PARTS_STOCK_FOR_ORDER_RE = re.compile(
 
 def is_part_stock_query(question: str) -> bool:
     q = question or ""
-    if PART_MATERIAL_QUERY_RE.search(q):
+    if is_part_material_query(q):
         return False
     return bool(PART_STOCK_QUERY_RE.search(q))
 
@@ -44,6 +49,12 @@ def is_part_material_query(question: str) -> bool:
     if PART_MATERIAL_QUERY_RE.search(q):
         return True
     if re.search(r"\bpart\b", q, re.I) and re.search(r"\b(?:raw|materi\w*)\b", q, re.I):
+        return True
+    # Material + part-like code, even without the word "part"
+    if re.search(r"\b(?:raw|materi\w*)\b", q, re.I) and (
+        re.search(r"\bPRT[\-_]?\d+\b", q, re.I)
+        or re.search(r"\b(?:for|of|used)\s+(?:part\s+)?(\d{2,4}|[A-Za-z]{1,6}[\-_]\d+)\b", q, re.I)
+    ):
         return True
     return False
 
@@ -70,6 +81,8 @@ def extract_part_term(question: str) -> Optional[str]:
         r"\bfor\s+(?:this|that|the)\s+part\s+([A-Za-z0-9][\w\-/]+)\b",
         r"\bpart\s+([A-Za-z]{2,}[\-_]\d+)\b",
         r"\b(PRT[\-_]?\d+)\b",
+        # "used for 002" / "for 002" / "of 002"
+        r"\b(?:used\s+)?(?:for|of)\s+(?:part\s+)?(PRT[\-_]?\d+|\d{2,4}|[A-Za-z]{1,6}[\-_]\d+)\b",
     ]
     for pat in patterns:
         m = re.search(pat, q, re.IGNORECASE)
@@ -80,9 +93,15 @@ def extract_part_term(question: str) -> Optional[str]:
         "what", "is", "the", "current", "stock", "level", "for", "part", "of",
         "show", "get", "find", "quantity", "available", "inventory", "a", "an",
         "which", "raw", "material", "materials", "used", "this", "that", "linked",
+        "dimension", "dimensions", "length", "unit", "units", "how", "much",
     }
     for tok in re.findall(r"[A-Za-z0-9][\w\-/]*", q):
-        if tok.lower() in stop or len(tok) < 3:
+        if tok.lower() in stop:
+            continue
+        # Allow short numeric part nos like 002 / 02
+        if len(tok) < 2:
+            continue
+        if len(tok) < 3 and not re.search(r"\d", tok):
             continue
         if re.match(r"PRT[\-_]?\d+", tok, re.I):
             return tok.upper().replace("_", "-")
@@ -91,8 +110,46 @@ def extract_part_term(question: str) -> Optional[str]:
     return None
 
 
+def _part_match_sql(term: str, alias: str = "p") -> str:
+    """Match part_number tightly for short codes like 002; broader ILIKE for longer terms."""
+    safe = term.replace("'", "''")
+    if re.fullmatch(r"\d{1,4}", term.strip()):
+        return f"""(
+            UPPER({alias}.part_number) = UPPER('{safe}')
+            OR UPPER(REPLACE({alias}.part_number, '_', '-')) IN (
+                UPPER('PRT-{safe}'), UPPER('PRT{safe}')
+            )
+        )"""
+    return f"""(
+        {alias}.part_number ILIKE '%{safe}%'
+        OR {alias}.part_name ILIKE '%{safe}%'
+    )"""
+
+
+def _stock_dimensions_sql(rms_alias: str = "rms", fallback: Optional[str] = None) -> str:
+    fb = fallback or "NULL"
+    return f"""
+               CASE
+                 WHEN {rms_alias}.diameter IS NOT NULL
+                   THEN CONCAT('Dia ', {rms_alias}.diameter, ' x ',
+                               COALESCE({rms_alias}.length::text, '?'), 'mm')
+                 WHEN {rms_alias}.outer_diameter IS NOT NULL
+                   THEN CONCAT('Dia ', {rms_alias}.outer_diameter, '/',
+                               COALESCE({rms_alias}.inner_diameter::text, '?'),
+                               ' x ', COALESCE({rms_alias}.length::text, '?'), 'mm')
+                 WHEN {rms_alias}.breadth IS NOT NULL OR {rms_alias}.height IS NOT NULL
+                   THEN CONCAT(COALESCE({rms_alias}.breadth::text, '?'), ' x ',
+                               COALESCE({rms_alias}.height::text, '?'), ' x ',
+                               COALESCE({rms_alias}.length::text, '?'), 'mm')
+                 ELSE {fb}
+               END AS stock_dimensions
+    """.strip()
+
+
 def part_stock_by_term_sql(term: str, limit: int = 50) -> str:
     safe = term.replace("'", "''")
+    match = _part_match_sql(term)
+    dims = _stock_dimensions_sql("rms")
     return f"""
         SELECT p.part_name,
                p.part_number,
@@ -103,27 +160,50 @@ def part_stock_by_term_sql(term: str, limit: int = 50) -> str:
                rms.form_type,
                rms.process_type,
                rms.diameter,
-               rms.length,
+               rms.breadth,
+               rms.height,
+               rms.length AS stock_length_mm,
+               rms.inner_diameter,
+               rms.outer_diameter,
+               {dims},
                rms.quantity AS material_stock_qty,
                rms.available_quantity,
                rms.allocated_quantity,
                rms.status AS stock_status,
-               ru.remaining_length AS bar_remaining_mm
+               ru.id AS unit_id,
+               ru.total_length AS unit_total_length_mm,
+               ru.remaining_length AS unit_remaining_length_mm,
+               ru.status AS unit_status,
+               usage.length_used_mm
         FROM oms.parts p
         LEFT JOIN oms.products pr ON pr.id = p.product_id
         LEFT JOIN inventory.raw_materials rm ON rm.id = p.raw_material_id
-        LEFT JOIN inventory.raw_material_stock rms ON rms.material_id = rm.id
-        LEFT JOIN inventory.raw_material_units ru ON ru.stock_id = rms.id
-        WHERE (p.part_number ILIKE '%{safe}%' OR p.part_name ILIKE '%{safe}%')
+        LEFT JOIN inventory.raw_material_units linked_unit ON linked_unit.id = p.raw_material_unit_id
+        LEFT JOIN inventory.raw_material_stock rms ON (
+            (p.raw_material_unit_id IS NOT NULL AND rms.id = linked_unit.stock_id)
+            OR (p.raw_material_unit_id IS NULL AND rms.material_id = p.raw_material_id)
+        )
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(u.used_length), 0) AS length_used_mm,
+                   (ARRAY_AGG(u.raw_material_unit_id ORDER BY u.used_length DESC NULLS LAST))[1]
+                     AS preferred_unit_id
+            FROM inventory.raw_material_usage u
+            WHERE u.part_id = p.id
+        ) usage ON TRUE
+        LEFT JOIN inventory.raw_material_units ru ON ru.id = COALESCE(
+            p.raw_material_unit_id, usage.preferred_unit_id
+        )
+        WHERE {match}
           AND COALESCE(p.recycle_bin, false) = false
-        ORDER BY p.part_number, rms.form_type, ru.id
+        ORDER BY p.part_number, rms.id NULLS LAST
         LIMIT {limit}
     """.strip()
 
 
-def part_raw_material_sql(term: str, limit: int = 20) -> str:
-    """Raw material for a part: BOM link + PDF extraction + planned material."""
-    safe = term.replace("'", "''")
+def part_raw_material_sql(term: str, limit: int = 50) -> str:
+    """Raw material for a part: BOM + extracted/planned + stock dims + unit + used length."""
+    match = _part_match_sql(term)
+    dims = _stock_dimensions_sql("rms", fallback="COALESCE(ded.stock_size, NULL)")
     return f"""
         SELECT p.part_number,
                p.part_name,
@@ -138,7 +218,23 @@ def part_raw_material_sql(term: str, limit: int = 20) -> str:
                ded.planned_diameter,
                ded.planned_length,
                ded.planned_breadth,
-               ded.planned_height
+               ded.planned_height,
+               rms.form_type AS stock_form,
+               rms.diameter,
+               rms.breadth,
+               rms.height,
+               rms.length AS stock_length_mm,
+               rms.inner_diameter,
+               rms.outer_diameter,
+               {dims},
+               rms.quantity AS stock_qty,
+               rms.available_quantity,
+               rms.status AS stock_status,
+               ru.id AS unit_id,
+               ru.total_length AS unit_total_length_mm,
+               ru.remaining_length AS unit_remaining_length_mm,
+               ru.status AS unit_status,
+               usage.length_used_mm
         FROM oms.parts p
         LEFT JOIN oms.products pr ON pr.id = p.product_id
         LEFT JOIN inventory.raw_materials rm ON rm.id = p.raw_material_id
@@ -152,9 +248,27 @@ def part_raw_material_sql(term: str, limit: int = 20) -> str:
             LIMIT 1
         ) ded ON TRUE
         LEFT JOIN inventory.raw_materials prm ON prm.id = ded.planned_raw_material_id
-        WHERE (p.part_number ILIKE '%{safe}%' OR p.part_name ILIKE '%{safe}%')
+        LEFT JOIN inventory.raw_material_units linked_unit ON linked_unit.id = p.raw_material_unit_id
+        LEFT JOIN inventory.raw_material_stock rms ON (
+            (p.raw_material_unit_id IS NOT NULL AND rms.id = linked_unit.stock_id)
+            OR (
+              p.raw_material_unit_id IS NULL
+              AND rms.material_id = COALESCE(p.raw_material_id, ded.planned_raw_material_id)
+            )
+        )
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(u.used_length), 0) AS length_used_mm,
+                   (ARRAY_AGG(u.raw_material_unit_id ORDER BY u.used_length DESC NULLS LAST))[1]
+                     AS preferred_unit_id
+            FROM inventory.raw_material_usage u
+            WHERE u.part_id = p.id
+        ) usage ON TRUE
+        LEFT JOIN inventory.raw_material_units ru ON ru.id = COALESCE(
+            p.raw_material_unit_id, usage.preferred_unit_id
+        )
+        WHERE {match}
           AND COALESCE(p.recycle_bin, false) = false
-        ORDER BY p.part_number
+        ORDER BY p.part_number, rms.id NULLS LAST
         LIMIT {limit}
     """.strip()
 

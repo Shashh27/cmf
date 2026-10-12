@@ -216,11 +216,23 @@ GREETING_RE = re.compile(
 
 
 def normalize_question(question: str) -> str:
-    return re.sub(r"\s+", " ", (question or "").strip())
+    # Strip BOM / zero-width / smart punctuation that break greeting detection
+    q = (question or "")
+    q = q.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    q = q.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
+    return re.sub(r"\s+", " ", q.strip())
 
 
 def is_greeting_only(question: str) -> bool:
-    return bool(GREETING_RE.match(normalize_question(question)))
+    q = normalize_question(question)
+    if GREETING_RE.match(q):
+        return True
+    # Bare short hellos (emoji / trailing punctuation)
+    return bool(re.fullmatch(
+        r"(hi|hii|hiii|hello|hey|yo|bro|hola|namaste)[\s!.,🙏😊👋]*",
+        q,
+        re.I,
+    ))
 
 
 def build_scope_guidance(question: str, ctx: Optional[UserContext] = None) -> Optional[Dict[str, Any]]:
@@ -759,195 +771,34 @@ class ChatService:
             self.history.save(session_id, question, guidance["answer"])
             return guidance
 
-        clf = None
+        # Primary path: LangGraph agent (understand → SQL tools → one answer)
+        from chatbot.agent.graph import run_chat_graph
 
-        sql, matched = try_user_scoped_query(question, ctx)
-        fast_path = matched
-
-        if not matched:
-            sql, matched = try_order_query(question)
-            fast_path = matched
-
-        if not matched:
-            sql, matched = try_machines_for_order_query(question)
-            fast_path = matched
-
-        if not matched:
-            sql, matched = try_quick_pattern(question)
-            fast_path = matched
-
-        if not matched:
-            sql, matched = try_part_material_query(question)
-            fast_path = matched
-
-        if not matched:
-            ctx_hist = extract_context_from_history(hist)
-            if ctx_hist.order_ref:
-                sql, matched = try_these_parts_stock_query(question, ctx_hist.order_ref)
-                fast_path = matched
-
-        if not matched:
-            sql, matched = try_part_stock_query(question)
-            fast_path = matched
-
-        if not matched:
-            sql, matched = try_tool_query(question)
-            fast_path = matched
-
-        if not matched:
-            sql, matched = try_material_query(question)
-            fast_path = matched
-            if matched and needs_classification(question):
-                clf = classify_question(question)
-                if clf.confidence >= 0.65 and clf.intent not in ("materials", "inventory", "unknown"):
-                    alt_sql, alt_matched = route_by_classification(question, clf)
-                    if alt_matched:
-                        sql, matched = alt_sql, True
-                elif clf.confidence < 0.5 or clf.intent == "unknown":
-                    return clarify_response(question, session_id, self.history, ctx, clf)
-
-        if not matched:
-            sql, matched = try_intent_query(question)
-            fast_path = matched
-            if matched and needs_classification(question):
-                clf = classify_question(question)
-                if clf.confidence < 0.55:
-                    return clarify_response(question, session_id, self.history, ctx, clf)
-                alt_sql, alt_matched = route_by_classification(question, clf)
-                if alt_matched and clf.confidence >= 0.65:
-                    sql, matched = alt_sql, True
-
-        # Fast path — pattern/intent matched: run SQL immediately, skip LLM entirely
-        if fast_path and sql:
-            data, err = execute_sql(sql)
-            if err:
-                return make_error_response(
-                    f"Database query failed. {err}",
-                    sql=sql,
-                )
-            if not data:
-                alt_sql, alt_data = try_schema_driven_query(question, clf)
-                if alt_data:
-                    return finish_response(
-                        question, alt_sql, alt_data, session_id,
-                        history=self.history, ctx=ctx,
-                    )
-                return no_data_response(question, session_id, self.history, ctx)
-            sql, data, _ = apply_result_validation(question, sql, data, clf)
-            if not data:
-                alt_sql, alt_data = try_schema_driven_query(question, clf)
-                if alt_data:
-                    return finish_response(
-                        question, alt_sql, alt_data, session_id,
-                        history=self.history, ctx=ctx,
-                    )
-                return no_data_response(question, session_id, self.history, ctx)
-            return finish_response(
-                question, sql, data, session_id, history=self.history, ctx=ctx,
-            )
-
-        data: List[Dict] = []
-        used_broad = False
-
-        if not matched:
-            # Gibberish / no CMF keywords — instant reply, never call LLM
-            if not has_cmf_signal(question) and not is_groq_enabled():
-                return no_data_response(question, session_id, self.history, ctx)
-
-            if clf is None:
-                clf = classify_question(question)
-            if is_off_topic_classification(clf):
-                return clarify_response(question, session_id, self.history, ctx, clf)
-            if clf.confidence >= 0.65:
-                sql, matched = route_by_classification(question, clf)
-                if matched:
-                    data, err = execute_sql(sql)
-                    if not err and data:
-                        return finish_response(
-                            question, sql, data, session_id,
-                            history=self.history, ctx=ctx,
-                        )
-            if clf.confidence < 0.5 or clf.intent == "unknown":
-                return clarify_response(question, session_id, self.history, ctx, clf)
-
-            alt_sql, alt_data = try_schema_driven_query(question, clf)
-            if alt_data:
-                return finish_response(
-                    question, alt_sql, alt_data, session_id,
-                    history=self.history, ctx=ctx,
-                )
-
-            broad_sql, broad_data = run_broad_search(question)
-            if broad_data:
-                return finish_response(
-                    question, broad_sql, broad_data, session_id,
-                    broad=True, history=self.history, ctx=ctx,
-                )
-
-            hist = self.history.get(session_id)
-            try:
-                raw = invoke_llm(question, hist, ctx)
-            except TimeoutError as e:
-                broad_sql, broad_data = run_broad_search(question)
-                if broad_data:
-                    return finish_response(
-                        question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history, ctx=ctx,
-                    )
-                return make_error_response(str(e))
-            except Exception:
-                broad_sql, broad_data = run_broad_search(question)
-                if broad_data:
-                    return finish_response(
-                        question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history, ctx=ctx,
-                    )
-                return make_error_response(
-                    "Groq API is not responding. Check GROQ_API_KEY and rate limits at console.groq.com."
-                    if is_groq_enabled()
-                    else "The chatbot model is not available right now. "
-                    "Please check whether Ollama is running and the configured model is installed."
-                )
-
-            if raw == "CANNOT_ANSWER":
-                broad_sql, broad_data = run_broad_search(question)
-                if broad_data:
-                    return finish_response(
-                        question, broad_sql, broad_data, session_id,
-                        broad=True, history=self.history, ctx=ctx,
-                    )
-                return no_data_response(question, session_id, self.history, ctx)
-
-            sql = SQLValidator.extract(raw)
-
-        if not data:
-            data, err = execute_sql(sql)
-            if err:
-                broad_sql, broad_data = run_broad_search(question)
-                if broad_data:
-                    sql, data, used_broad = broad_sql, broad_data, True
-                else:
-                    return make_error_response(
-                        f"Database query failed. {err}\n\n"
-                        "Try asking with a sale order number, part name, machine, or material name.",
-                        sql=sql,
-                    )
-
-        if not used_broad:
-            sql, data, _ = maybe_retry_with_fallback(question, sql, data)
-
-        if not data and not used_broad:
-            broad_sql, broad_data = run_broad_search(question)
-            if broad_data:
-                sql, data, used_broad = broad_sql, broad_data, True
-
-        if not data:
-            return no_data_response(question, session_id, self.history, ctx)
-
-        return finish_response(
-            question, sql, data, session_id,
-            broad=used_broad, history=self.history, ctx=ctx,
+        result = run_chat_graph(
+            question,
+            session_id=session_id,
+            history=hist,
+            ctx=ctx,
+            execute_fn=execute_sql,
         )
+        answer = result.get("answer") or ""
+        sql = result.get("sql") or ""
+        data = result.get("data") or []
+        suggestions = result.get("suggestions") or get_role_suggestions(ctx)[:3]
+        self.history.save(session_id, question, answer, data=data)
+        return {
+            "answer": answer,
+            "sql": sql,
+            "data": data,
+            "suggestions": suggestions,
+            "display_columns": result.get("display_columns") or (
+                list(data[0].keys()) if data else []
+            ),
+            "column_labels": result.get("column_labels")
+            or result.get("labels")
+            or {},
+            "display_domain": result.get("display_domain"),
+        }
 
 
 # ══════════════════════════════════════════════════════════════════════════════

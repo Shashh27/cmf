@@ -217,6 +217,18 @@ def get_compact_live_schema(intents: Optional[List[str]] = None) -> str:
     return "\n".join(lines)
 
 
+def build_agent_schema_block(max_chars: int = 12000) -> str:
+    """Full-app static + live schema text for the chatbot agent system prompt."""
+    try:
+        live = get_compact_live_schema()
+        text = (STATIC_SCHEMA_CONTEXT or "").strip()
+        if live:
+            text = f"{text}\n{live}"
+        return text[:max_chars]
+    except Exception:
+        return "Use inspect_schema for live PostgreSQL columns across all CMF schemas."
+
+
 def build_system_prompt(question: str, intent_hints: str = "") -> str:
     live = get_compact_live_schema()
     return (

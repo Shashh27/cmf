@@ -146,12 +146,71 @@ def try_tool_query(question: str) -> Tuple[Optional[str], bool]:
     if is_scheduled_tools_query(question):
         return TOOLS_FOR_SCHEDULED_OPERATIONS_SQL, True
 
+    issues_sql, issues_ok = try_tool_issues_query(question)
+    if issues_ok:
+        return issues_sql, True
+
     q = (question or "").lower()
     if re.search(
-        r"\b(?:list|show)\s+(?:all\s+)?tools?\b|\btools?\s*list\b|\blist\s+(?:all\s+)?tools?\b|"
+        r"\b(?:list|show|give|get)\s+(?:me\s+)?(?:all\s+)?tools?\b|"
+        r"\btools?\s*list\b|"
         r"^(?:tools?|list\s+tools?|show\s+tools?)\s*$",
         q,
     ):
+        # Avoid matching "tool issues"
+        if re.search(r"\bissues?\b", q):
+            return tool_issues_list_sql(), True
         return all_tools_sql(), True
 
     return None, False
+
+
+TOOL_ISSUES_SELECT = """
+    SELECT ti.id AS issue_no,
+           tl.item_description AS tool_name,
+           tl.range AS tool_range,
+           tl.identification_code,
+           o.sale_order_number AS project,
+           COALESCE(p.part_name, '') AS part,
+           p.part_number,
+           CASE
+             WHEN op.operation_name IS NULL THEN NULL
+             WHEN op.operation_number IS NULL THEN op.operation_name
+             ELSE CONCAT(op.operation_name, ' #', op.operation_number)
+           END AS operation,
+           u.user_name AS issue_raised_by,
+           ti.created_at AS issue_raised_at,
+           ti.tool_issue_qty AS issue_qty,
+           ti.issue_category,
+           ti.description,
+           ti.status
+    FROM inventory.tool_issues ti
+    LEFT JOIN inventory.tools_list tl ON tl.id = ti.tool_id
+    LEFT JOIN inventory.inventory_requests ir ON ir.id = ti.request_id
+    LEFT JOIN oms.orders o ON o.id = ir.project_id
+    LEFT JOIN oms.parts p ON p.id = ir.part_id
+    LEFT JOIN oms.operations op ON op.id = ir.operation_id
+    LEFT JOIN accesscontrol.access_users u ON u.id = ti.operator_id
+"""
+
+
+def tool_issues_list_sql(limit: int = 50) -> str:
+    return f"""
+        {TOOL_ISSUES_SELECT}
+        ORDER BY ti.created_at DESC NULLS LAST
+        LIMIT {limit}
+    """.strip()
+
+
+def is_tool_issues_query(question: str) -> bool:
+    q = (question or "").lower()
+    return bool(
+        re.search(r"\btool\s*issues?\b|\bissues?\s+(?:list|of\s+tools?|for\s+tools?)\b", q)
+        or re.search(r"\b(?:list|show|give|get)\b.{0,20}\btool\s*issues?\b", q)
+    )
+
+
+def try_tool_issues_query(question: str) -> Tuple[Optional[str], bool]:
+    if not is_tool_issues_query(question):
+        return None, False
+    return tool_issues_list_sql(), True
