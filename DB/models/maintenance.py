@@ -98,3 +98,18 @@ class Note(Base):
     machine = relationship("Machine")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
+
+
+class NoteAttachment(Base):
+    __tablename__ = "note_attachments"
+    __table_args__ = {"schema": "maintenance"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    note_id = Column(Integer, ForeignKey("maintenance.notes.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    minio_url = Column(String, nullable=False)
+    uploaded_at = Column(DateTime(timezone=False), default=get_ist_time, nullable=False)
+
+    note = relationship("Note")

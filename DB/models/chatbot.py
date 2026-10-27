@@ -16,6 +16,18 @@ class ChatResponse(BaseModel):
     sql: str = Field(..., description="Generated SQL query")
     data: List[Dict[str, Any]] = Field(default_factory=list, description="Query results as list of dictionaries")
     suggestions: List[str] = Field(default_factory=list, description="Suggested follow-up questions")
+    display_columns: List[str] = Field(
+        default_factory=list,
+        description="Ordered column keys for the chatbot table (from column agent)",
+    )
+    column_labels: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional display labels for column keys",
+    )
+    display_domain: Optional[str] = Field(
+        None,
+        description="Module domain used for column planning (order, tool_issue, …)",
+    )
 
 
 class ChatMessage(BaseModel):

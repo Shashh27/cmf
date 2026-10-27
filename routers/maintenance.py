@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from DB.database import get_db
-from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel, Note as NoteModel, get_ist_time
+from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel, Note as NoteModel, NoteAttachment as NoteAttachmentModel, get_ist_time
 from DB.models.configuration import Machine as MachineModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel, Part as PartModel, Operation as OperationModel, Product as ProductModel
@@ -22,9 +22,14 @@ from DB.schemas.maintenance import (
     HelpSupportUpdate,
     Note as NoteSchema,
     NoteCreate,
+    NoteUpdate,
     NoteReview,
     NoteAcknowledge,
+    NoteAttachment as NoteAttachmentSchema,
+    NoteAttachmentCreate,
 )
+from DB.minio_client import get_minio_client
+import uuid
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -640,6 +645,33 @@ def get_note(id: int, db: Session = Depends(get_db)):
     return _serialize_note(obj, db)
 
 
+@router.put("/notes/{id}", response_model=NoteSchema)
+def update_note(id: int, payload: NoteUpdate, db: Session = Depends(get_db)):
+    obj = db.query(NoteModel).filter(NoteModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if (obj.status or "").lower() != "pending":
+        raise HTTPException(status_code=400, detail="Can only edit pending notes")
+    data = payload.dict(exclude_unset=True)
+    for field, value in data.items():
+        setattr(obj, field, value)
+    db.commit()
+    db.refresh(obj)
+    return _serialize_note(obj, db)
+
+
+@router.delete("/notes/{id}")
+def delete_note(id: int, db: Session = Depends(get_db)):
+    obj = db.query(NoteModel).filter(NoteModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if (obj.status or "").lower() != "pending":
+        raise HTTPException(status_code=400, detail="Can only delete pending notes")
+    db.delete(obj)
+    db.commit()
+    return {"message": "Note deleted"}
+
+
 @router.put("/notes/{id}/review", response_model=NoteSchema)
 def review_note(id: int, payload: NoteReview, db: Session = Depends(get_db)):
     obj = db.query(NoteModel).filter(NoteModel.id == id).first()
@@ -699,3 +731,100 @@ def acknowledge_note(id: int, payload: NoteAcknowledge, db: Session = Depends(ge
     db.commit()
     db.refresh(obj)
     return _serialize_note(obj, db)
+
+
+# =======================
+# Note Attachment Endpoints
+# =======================
+@router.post("/notes/{note_id}/attachments", response_model=NoteAttachmentSchema)
+def upload_note_attachment(
+    note_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    note = db.query(NoteModel).filter(NoteModel.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    # Determine content type
+    content_type = file.content_type or "application/octet-stream"
+
+    # Generate unique object name
+    file_extension = file.filename.split(".")[-1] if "." in file.filename else ""
+    object_name = f"note_attachments/{note_id}/{uuid.uuid4()}.{file_extension}"
+
+    # Read file content
+    file_content = file.file.read()
+
+    # Upload to MinIO
+    minio_client = get_minio_client()
+    import io
+    file_stream = io.BytesIO(file_content)
+    minio_url = minio_client.upload_file(
+        file_data=file_stream,
+        object_name=object_name,
+        content_type=content_type,
+    )
+
+    # Save to database
+    attachment = NoteAttachmentModel(
+        note_id=note_id,
+        file_name=file.filename,
+        file_type=content_type,
+        file_size=len(file_content),
+        minio_url=minio_url,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    return {
+        "id": attachment.id,
+        "note_id": attachment.note_id,
+        "file_name": attachment.file_name,
+        "file_type": attachment.file_type,
+        "file_size": attachment.file_size,
+        "minio_url": attachment.minio_url,
+        "uploaded_at": attachment.uploaded_at,
+    }
+
+
+@router.get("/notes/{note_id}/attachments", response_model=List[NoteAttachmentSchema])
+def list_note_attachments(note_id: int, db: Session = Depends(get_db)):
+    note = db.query(NoteModel).filter(NoteModel.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    attachments = db.query(NoteAttachmentModel).filter(NoteAttachmentModel.note_id == note_id).all()
+    return [
+        {
+            "id": att.id,
+            "note_id": att.note_id,
+            "file_name": att.file_name,
+            "file_type": att.file_type,
+            "file_size": att.file_size,
+            "minio_url": att.minio_url,
+            "uploaded_at": att.uploaded_at,
+        }
+        for att in attachments
+    ]
+
+
+@router.delete("/notes/attachments/{attachment_id}")
+def delete_note_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    attachment = db.query(NoteAttachmentModel).filter(NoteAttachmentModel.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    # Delete from MinIO
+    try:
+        minio_client = get_minio_client()
+        object_name = attachment.minio_url.split("/")[-1]
+        minio_client.delete_file(object_name)
+    except Exception as e:
+        print(f"Error deleting from MinIO: {e}")
+
+    # Delete from database
+    db.delete(attachment)
+    db.commit()
+    return {"message": "Attachment deleted"}
