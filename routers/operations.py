@@ -670,20 +670,43 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
             detail=f"Operation with id {operation_id} not found"
         )
 
-    # Check if part is scheduled (status is "active")
+    update_data = operation.model_dump(exclude_unset=True)
+    machine_only_change = set(update_data.keys()) == {"machine_id"}
+
+    # A scheduled part can still change machine while this operation is pending.
+    # In-progress or completed operations stay locked. Other edits stay blocked.
     if db_operation.part_id:
         schedule_status = db.execute(
             text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
             {"pid": db_operation.part_id}
         ).fetchone()
-        
-        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+
+        part_is_active = bool(
+            schedule_status and schedule_status[0] and str(schedule_status[0]).lower() == "active"
+        )
+        if part_is_active and machine_only_change:
+            log_rows = db.execute(
+                text(
+                    """
+                    SELECT LOWER(COALESCE(status, '')) AS status,
+                           LOWER(COALESCE(operator_status, '')) AS operator_status
+                    FROM scheduling.production_logs
+                    WHERE operation_id = :op_id
+                    """
+                ),
+                {"op_id": operation_id},
+            ).fetchall()
+            locked = {"inprogress", "in_progress", "in progress", "completed", "complete"}
+            if any((row[0] in locked) or (row[1] in locked) for row in log_rows):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Machine cannot be changed because this operation is in progress or completed.",
+                )
+        elif part_is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Sorry, this operation cannot be added/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
             )
-
-    update_data = operation.model_dump(exclude_unset=True)
 
     # Capture old values before updating
     old_values = {}
