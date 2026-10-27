@@ -22,46 +22,74 @@ const useChatStore = create((set) => ({
   messages: [],
   loading: false,
   sessionId: uuidv4(),
+  inFlight: false,
 
   addUser: (content) =>
     set((s) => ({ messages: [...s.messages, { role: 'user', content }] })),
 
   startBot: () =>
     set((s) => ({
-      messages: [...s.messages, { role: 'bot', content: '', sql: '', data: [], streaming: true }],
+      inFlight: true,
+      loading: true,
+      messages: [
+        ...s.messages,
+        {
+          id: uuidv4(),
+          role: 'bot',
+          content: '',
+          sql: '',
+          data: [],
+          streaming: true,
+        },
+      ],
     })),
 
-  finalise: (answer, sql, data, suggestions) =>
+  finalise: (answer, sql, data, suggestions, displayColumns, columnLabels) =>
     set((s) => {
       const msgs = [...s.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.streaming) {
-        msgs[msgs.length - 1] = {
-          role: 'bot',
+      // Finalise the streaming bot bubble (not "whatever is last" after races)
+      let idx = -1;
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        if (msgs[i]?.streaming && msgs[i]?.role === 'bot') {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        msgs[idx] = {
+          ...msgs[idx],
           content: answer,
           sql,
           data,
           suggestions,
+          displayColumns: displayColumns || [],
+          columnLabels: columnLabels || {},
           streaming: false,
         };
       }
-      return { messages: msgs, loading: false };
+      return { messages: msgs, loading: false, inFlight: false };
     }),
 
   setError: (msg) =>
     set((s) => {
       const msgs = [...s.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.streaming) {
-        msgs[msgs.length - 1] = {
-          role: 'bot',
+      let idx = -1;
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        if (msgs[i]?.streaming && msgs[i]?.role === 'bot') {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        msgs[idx] = {
+          ...msgs[idx],
           content: msg,
           sql: '',
           data: [],
           streaming: false,
         };
       }
-      return { messages: msgs, loading: false };
+      return { messages: msgs, loading: false, inFlight: false };
     }),
 
   setLoading: (v) => set({ loading: v }),
@@ -72,10 +100,10 @@ const useChatStore = create((set) => ({
       if (msgs[msgs.length - 1]?.streaming) {
         msgs.pop();
       }
-      return { messages: msgs, loading: false };
+      return { messages: msgs, loading: false, inFlight: false };
     }),
 
-  clear: () => set({ messages: [], sessionId: uuidv4(), loading: false }),
+  clear: () => set({ messages: [], sessionId: uuidv4(), loading: false, inFlight: false }),
 }));
 
 function flattenPrompts(apiPrompts, categories, dbPrompts, rolePrompts) {
@@ -126,7 +154,13 @@ function BotMessage({ msg, onSuggestionClick, showFollowUps }) {
           <ReactMarkdown components={mdComponents}>{summary}</ReactMarkdown>
         </div>
       )}
-      {!msg.streaming && hasData && <DataTable data={msg.data} />}
+      {!msg.streaming && hasData && (
+        <DataTable
+          data={msg.data}
+          columns={msg.displayColumns}
+          labels={msg.columnLabels}
+        />
+      )}
       {!msg.streaming && showFollowUps && (
         <FollowUpSuggestions
           suggestions={msg.suggestions}
@@ -325,16 +359,19 @@ export default function ChatPanel() {
   }, [store]);
 
   const send = useCallback(async (q) => {
-    if (!q?.trim() || loading) return;
+    if (!q?.trim()) return;
+    // Use live store — avoid stale `loading` closure causing double sends
+    const state = useChatStore.getState();
+    if (state.loading || state.inFlight) return;
+
     userStoppedRef.current = false;
     setInput('');
     store.addUser(q);
-    store.setLoading(true);
     store.startBot();
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const timer = setTimeout(() => ctrl.abort(), 60000);
 
     try {
       const token = getAccessToken();
@@ -363,7 +400,14 @@ export default function ChatPanel() {
       }
 
       const p = await res.json();
-      store.finalise(p.answer, p.sql, p.data, p.suggestions);
+      store.finalise(
+        p.answer,
+        p.sql,
+        p.data,
+        p.suggestions,
+        p.display_columns,
+        p.column_labels,
+      );
     } catch (e) {
       if (e.name === 'AbortError') {
         if (userStoppedRef.current) {
@@ -379,9 +423,9 @@ export default function ChatPanel() {
       }
     } finally {
       clearTimeout(timer);
-      store.setLoading(false);
+      useChatStore.setState({ loading: false, inFlight: false });
     }
-  }, [loading, sessionId, store]);
+  }, [sessionId, store]);
 
   const handleClear = useCallback(async () => {
     abortRef.current?.abort();

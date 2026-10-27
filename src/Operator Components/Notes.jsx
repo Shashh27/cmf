@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Card, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message, Popconfirm, Upload } from 'antd';
+import { PlusOutlined, ReloadOutlined, SearchOutlined, EditOutlined, DeleteOutlined, UploadOutlined, FileOutlined, EyeOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { API_BASE_URL } from '../Config/auth.js';
 import { authFetch, readStoredUser } from '../api/client.js';
 
+const { RangePicker } = DatePicker;
 const { Text } = Typography;
 const { TextArea } = Input;
+const { Dragger } = Upload;
 
 const PAGE_SIZE = 10;
 
@@ -150,6 +153,14 @@ const OperatorNotes = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [machineFilter, setMachineFilter] = useState([]);
+  const [dateRange, setDateRange] = useState(null);
+  const [editingNote, setEditingNote] = useState(null);
+  const [fileList, setFileList] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentsModalOpen, setAttachmentsModalOpen] = useState(false);
+  const [selectedNoteAttachments, setSelectedNoteAttachments] = useState([]);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   const operatorId = resolveUserId(user);
 
@@ -176,12 +187,26 @@ const OperatorNotes = () => {
   }, []);
 
   const openNotes = () => {
+    setEditingNote(null);
     form.setFieldsValue(blankForm);
+    setOpen(true);
+  };
+
+  const openEditNote = (note) => {
+    setEditingNote(note);
+    form.setFieldsValue({
+      project_name: note.project_name || '',
+      order_no: note.order_no || '',
+      part_name: note.part_name || '',
+      part_no: note.part_no || '',
+      description: note.description || '',
+    });
     setOpen(true);
   };
 
   const closeNotes = () => {
     setOpen(false);
+    setEditingNote(null);
     form.resetFields();
   };
 
@@ -192,38 +217,172 @@ const OperatorNotes = () => {
     }
     setSubmitting(true);
     try {
-      const response = await authFetch(`${API_BASE_URL}/maintenance/notes`, {
-        method: 'POST',
+      const isEdit = editingNote !== null;
+      const url = isEdit ? `${API_BASE_URL}/maintenance/notes/${editingNote.id}` : `${API_BASE_URL}/maintenance/notes`;
+      const method = isEdit ? 'PUT' : 'POST';
+      const body = isEdit
+        ? {
+            order_no: values.order_no || null,
+            project_name: values.project_name || null,
+            part_no: values.part_no || null,
+            part_name: values.part_name || null,
+            description: values.description,
+          }
+        : {
+            operator_id: operatorId,
+            machine_id: resolveMachineId(),
+            order_no: values.order_no || null,
+            project_name: values.project_name || null,
+            part_no: values.part_no || null,
+            part_name: values.part_name || null,
+            description: values.description,
+          };
+
+      const response = await authFetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({
-          operator_id: operatorId,
-          machine_id: resolveMachineId(),
-          order_no: values.order_no || null,
-          project_name: values.project_name || null,
-          part_no: values.part_no || null,
-          part_name: values.part_name || null,
-          description: values.description,
-        }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         message.error(await readError(response));
         return;
       }
-      message.success('Note sent to the supervisor');
+
+      const noteData = await response.json();
+      const noteId = isEdit ? editingNote.id : noteData.id;
+
+      // Upload files if any
+      if (fileList.length > 0) {
+        const uploadPromises = fileList.map(async (file) => {
+          const formData = new FormData();
+          formData.append('file', file.originFileObj);
+
+          const uploadResponse = await authFetch(`${API_BASE_URL}/maintenance/notes/${noteId}/attachments`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!uploadResponse.ok) {
+            throw new Error(await readError(uploadResponse));
+          }
+
+          return uploadResponse.json();
+        });
+
+        try {
+          await Promise.all(uploadPromises);
+        } catch (error) {
+          message.error(error.message || 'Failed to upload some files');
+        }
+      }
+
+      message.success(isEdit ? 'Note updated successfully' : 'Note sent to the supervisor');
       closeNotes();
       setPage(1);
       await loadNotes();
     } catch {
-      message.error('Failed to send note');
+      message.error(isEdit ? 'Failed to update note' : 'Failed to send note');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDelete = async (noteId) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/maintenance/notes/${noteId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      message.success('Note deleted successfully');
+      setPage(1);
+      await loadNotes();
+    } catch {
+      message.error('Failed to delete note');
+    }
+  };
+
+  const handleUpload = async (noteId) => {
+    if (fileList.length === 0) {
+      message.error('Please select files to upload');
+      return;
+    }
+
+    setUploading(true);
+    const uploadPromises = fileList.map(async (file) => {
+      const formData = new FormData();
+      formData.append('file', file.originFileObj);
+
+      const response = await authFetch(`${API_BASE_URL}/maintenance/notes/${noteId}/attachments`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+
+      return response.json();
+    });
+
+    try {
+      await Promise.all(uploadPromises);
+      message.success('Files uploaded successfully');
+      setFileList([]);
+      await loadNotes();
+    } catch (error) {
+      message.error(error.message || 'Failed to upload files');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const loadAttachments = async (noteId) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/maintenance/notes/${noteId}/attachments`);
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      setSelectedNoteAttachments(await response.json());
+      setAttachmentsModalOpen(true);
+    } catch {
+      message.error('Failed to load attachments');
+    }
+  };
+
+  const deleteAttachment = async (attachmentId) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/maintenance/notes/attachments/${attachmentId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      message.success('Attachment deleted');
+      setSelectedNoteAttachments(selectedNoteAttachments.filter((att) => att.id !== attachmentId));
+    } catch {
+      message.error('Failed to delete attachment');
+    }
+  };
+
+  const openPreview = (attachment) => {
+    setPreviewFile(attachment);
+    setPreviewModalOpen(true);
   };
 
   const filteredNotes = useMemo(() => {
     const query = search.trim().toLowerCase();
     return notes.filter((note) => {
       if (machineFilter.length > 0 && !machineFilter.includes(note.machine_id)) return false;
+      if (dateRange && dateRange.length === 2) {
+        const noteDate = dayjs(note.created_at);
+        const [startDate, endDate] = dateRange;
+        if (noteDate.isBefore(startDate, 'day') || noteDate.isAfter(endDate, 'day')) return false;
+      }
       if (!query) return true;
       return [
         note.machine_name,
@@ -238,7 +397,7 @@ const OperatorNotes = () => {
         note.remark,
       ].some((value) => String(value || '').toLowerCase().includes(query));
     });
-  }, [notes, search, machineFilter]);
+  }, [notes, search, machineFilter, dateRange]);
 
   const machineOptions = useMemo(() => {
     const machineMap = new Map();
@@ -335,6 +494,52 @@ const OperatorNotes = () => {
       sorter: (a, b) => new Date(a.reviewed_at || 0) - new Date(b.reviewed_at || 0),
       render: formatWhen,
     },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 180,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space size="small">
+          {record.status === 'pending' && (
+            <>
+              <Tooltip title="Edit">
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => openEditNote(record)}
+                />
+              </Tooltip>
+              <Popconfirm
+                title="Delete this note?"
+                description="Are you sure you want to delete this note?"
+                onConfirm={() => handleDelete(record.id)}
+                okText="Yes"
+                cancelText="No"
+              >
+                <Tooltip title="Delete">
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    size="small"
+                  />
+                </Tooltip>
+              </Popconfirm>
+            </>
+          )}
+          <Tooltip title="View Attachments">
+            <Button
+              type="text"
+              icon={<FileOutlined />}
+              size="small"
+              onClick={() => loadAttachments(record.id)}
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
   ];
 
   return (
@@ -370,6 +575,16 @@ const OperatorNotes = () => {
               options={machineOptions}
               filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
             />
+            <RangePicker
+              allowClear
+              placeholder={['From date', 'To date']}
+              value={dateRange}
+              onChange={(value) => {
+                setDateRange(value);
+                setPage(1);
+              }}
+              style={{ width: 260 }}
+            />
           </Space>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => loadNotes()} loading={loading} />
@@ -390,7 +605,7 @@ const OperatorNotes = () => {
             onChange: (nextPage) => setPage(nextPage),
           }}
           tableLayout="fixed"
-          scroll={{ x: 1300 }}
+          scroll={{ x: 1500 }}
           components={{
             header: {
               cell: (props) => (
@@ -405,7 +620,7 @@ const OperatorNotes = () => {
 
       <Modal
         open={open}
-        title="Notes"
+        title={editingNote ? 'Edit Note' : 'Notes'}
         onCancel={closeNotes}
         footer={null}
         width={720}
@@ -431,6 +646,21 @@ const OperatorNotes = () => {
           <Form.Item name="description" label="Description" rules={[{ required: true, message: 'Enter a description' }]}>
             <FreshTextArea rows={4} placeholder="Describe the work you want the supervisor to review" />
           </Form.Item>
+          <Form.Item label="Attachments (PDF, Images, Videos)">
+            <Dragger
+              multiple
+              fileList={fileList}
+              onChange={({ fileList }) => setFileList(fileList)}
+              beforeUpload={() => false}
+              accept=".pdf,.jpg,.jpeg,.png,.gif,.mp4,.mov,.avi"
+            >
+              <p className="ant-upload-drag-icon">
+                <UploadOutlined />
+              </p>
+              <p className="ant-upload-text">Click or drag files to upload</p>
+              <p className="ant-upload-hint">Support for PDF, images, and videos</p>
+            </Dragger>
+          </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={closeNotes}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={submitting}>
@@ -438,6 +668,96 @@ const OperatorNotes = () => {
             </Button>
           </div>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Attachments"
+        open={attachmentsModalOpen}
+        onCancel={() => setAttachmentsModalOpen(false)}
+        footer={null}
+        width={600}
+      >
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {selectedNoteAttachments.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#999' }}>No attachments</p>
+          ) : (
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              {selectedNoteAttachments.map((attachment) => (
+                <Card
+                  key={attachment.id}
+                  size="small"
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
+                  <Space>
+                    <FileOutlined />
+                    <Text>{attachment.file_name}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      ({(attachment.file_size / 1024).toFixed(1)} KB)
+                    </Text>
+                  </Space>
+                  <Space>
+                    <Tooltip title="Preview">
+                      <Button
+                        type="text"
+                        icon={<EyeOutlined />}
+                        size="small"
+                        onClick={() => openPreview(attachment)}
+                      />
+                    </Tooltip>
+                    <Button
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      size="small"
+                      onClick={() => deleteAttachment(attachment.id)}
+                    />
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title={previewFile?.file_name || 'Preview'}
+        open={previewModalOpen}
+        onCancel={() => setPreviewModalOpen(false)}
+        footer={[
+          <Button key="download" type="primary" href={previewFile?.minio_url} target="_blank" rel="noopener noreferrer">
+            Download
+          </Button>,
+          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
+            Close
+          </Button>,
+        ]}
+        width={800}
+      >
+        {previewFile && (
+          <div style={{ textAlign: 'center' }}>
+            {previewFile.file_type.startsWith('image/') ? (
+              <img
+                src={previewFile.minio_url}
+                alt={previewFile.file_name}
+                style={{ maxWidth: '100%', maxHeight: '60vh' }}
+              />
+            ) : previewFile.file_type.startsWith('video/') ? (
+              <video
+                src={previewFile.minio_url}
+                controls
+                style={{ maxWidth: '100%', maxHeight: '60vh' }}
+              />
+            ) : previewFile.file_type === 'application/pdf' ? (
+              <iframe
+                src={previewFile.minio_url}
+                style={{ width: '100%', height: '60vh', border: 'none' }}
+                title={previewFile.file_name}
+              />
+            ) : (
+              <p>Preview not available for this file type. Please download to view.</p>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

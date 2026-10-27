@@ -16,7 +16,7 @@ export default defineConfig({
     // Optional chatbot proxy (Config/chatbot.js calls backend directly with JWT).
     proxy: {
       '/api/chatbot': {
-        target: 'http://172.18.7.86:3000',
+        target: 'http://172.18.7.91:3000',
         changeOrigin: true,
         ws: true,
         configure: (proxy) => {
