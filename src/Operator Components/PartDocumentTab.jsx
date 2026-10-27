@@ -8,6 +8,16 @@ import ModelViewer3D from './ModelViewer3D';
 import OperationChecklist from './OperationChecklist';
 import { api } from '../api/client.js';
 import DocumentPreviewer from './Document Components/DocumentPreviewer';
+import {
+  activateUnitWiseJob,
+  submitUnitWiseJob,
+} from '../PPS Components/scheduling/jobs/machineJobsApi';
+import {
+  getJobOperationId,
+  getJobRemainingQty,
+  getJobTotalQty,
+  isUnitWiseJob,
+} from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
 
 
 const { TabPane } = Tabs;
@@ -29,7 +39,19 @@ const getAvailableToolQuantity = (record, pendingQtyByToolId = {}) => {
   return Math.max(0, getBaseToolQuantity(record) - pending);
 };
 
-const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0, productionStats: propStats, onProductionSubmit }) => {
+const resolveMachineId = (explicitId) => {
+  if (explicitId != null) return explicitId;
+  try {
+    const stored = localStorage.getItem('selectedMachine');
+    if (!stored) return null;
+    const m = JSON.parse(stored);
+    return m?.id ?? m?.machine_id ?? m?.machineId ?? m?.machine?.id ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0, productionStats: propStats, onProductionSubmit, machineId }) => {
   const [loading, setLoading] = useState(false);
   const [partData, setPartData] = useState(null);
   const [selectedOperation, setSelectedOperation] = useState(null);
@@ -478,14 +500,15 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     {
       title: 'Part Qty', key: 'part_qty',
       render: (record) => {
-        // Total qty comes from the hierarchical API response
-        const totalQty = selectedJob?.total_quantity || record.total_quantity || record.total_qty || record.quantity || selectedJob?.quantity || 0;
+        const totalQty = isUnitWiseJob(selectedJob)
+          ? getJobTotalQty(selectedJob)
+          : (selectedJob?.total_quantity || record.total_quantity || record.total_qty || record.quantity || selectedJob?.quantity || 0);
 
-        // ✅ Completed = sum of approved_quantity from production-logs API
         const completedQty = effectiveStats.totalApproved || 0;
-
-        // ✅ Remaining to close = only approved_quantity closes the order
-        const remainingQty = effectiveStats.remainingToClose ?? Math.max(0, totalQty - completedQty);
+        const remainingQty = getJobRemainingQty(
+          selectedJob,
+          { ...effectiveStats, remainingToClose: isUnitWiseJob(selectedJob) ? undefined : effectiveStats.remainingToClose },
+        );
         const reworkDue = effectiveStats.reworkDue || 0;
         const rejectDue = effectiveStats.rejectDue || 0;
 
@@ -494,6 +517,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             <div><Text type="secondary">Total:</Text> <strong>{totalQty}</strong></div>
             <div><Text type="secondary">Approved:</Text> <strong style={{ color: '#52c41a' }}>{completedQty}</strong></div>
             <div><Text type="secondary">Remaining:</Text> <strong style={{ color: '#1677FF' }}>{remainingQty}</strong></div>
+            {isUnitWiseJob(selectedJob) && selectedJob?.unit_from != null && (
+              <div><Text type="secondary">Units:</Text> <strong>{selectedJob.unit_from}–{selectedJob.unit_to}</strong></div>
+            )}
             {reworkDue > 0 && (
               <div style={{ color: '#FA8C16', marginTop: 2 }}>
                 ↻ Rework: {reworkDue}
@@ -588,9 +614,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       render: (record) => {
         // Check if operation is completed by status OR by production quota
         const isCompletedByStatus = [selectedJob?.status, selectedJob?.operation_status].some(s => s?.toString().toUpperCase() === 'COMPLETED');
-        const totalQuantity = selectedJob?.total_quantity || selectedJob?.quantity || 0;
+        const totalQuantity = getJobTotalQty(selectedJob);
+        const remainingForQuota = getJobRemainingQty(selectedJob, {
+          ...effectiveStats,
+          remainingToClose: isUnitWiseJob(selectedJob) ? undefined : effectiveStats.remainingToClose,
+        });
         const isCompletedByQuota = totalQuantity > 0 && (
-          effectiveStats.remainingToClose === 0 ||
+          remainingForQuota === 0 ||
           effectiveStats.totalApproved >= totalQuantity
         );
         const isCompleted = isCompletedByStatus || isCompletedByQuota;
@@ -811,7 +841,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   };
 
   const handleActivate = async (operation) => {
-    const opId = operation.operation_id || operation.id;
+    const opId = getJobOperationId(selectedJob) || operation.operation_id || operation.id;
     if (!opId) {
       notification.error({ message: 'Activation Failed', description: 'No operation ID found for this job.' });
       return;
@@ -830,29 +860,48 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setActivating(true);
     try {
-      const response = await axios.post(
-        `${SCHEDULING_API_BASE_URL}/scheduling/operation-status/${opId}/activate?operator_id=${operatorId}`,
-        {}
-      );
-
-      if (response.status === 200 || response.status === 201) {
-        setJustActivated(true);
-        setSessionActivationTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
-
-        notification.success({
-          message: 'Operation Activated',
-          description: 'Status Updated. Production log is now enabled.',
+      if (isUnitWiseJob(selectedJob)) {
+        const selectedMachineId = resolveMachineId(machineId);
+        if (!selectedMachineId) {
+          notification.error({ message: 'Activation Failed', description: 'No machine selected for this unit-wise job.' });
+          return;
+        }
+        if (selectedJob.unit_from == null || selectedJob.unit_to == null) {
+          notification.error({ message: 'Activation Failed', description: 'Unit range is missing for this job card.' });
+          return;
+        }
+        await activateUnitWiseJob(selectedMachineId, {
+          operator_id: operatorId,
+          operation_id: Number(opId),
+          unit_from: Number(selectedJob.unit_from),
+          unit_to: Number(selectedJob.unit_to),
         });
-
-        onActivate(operation);
-        setIsActivateModalVisible(false);
-        setOperationToActivate(null);
+      } else {
+        const response = await axios.post(
+          `${SCHEDULING_API_BASE_URL}/scheduling/operation-status/${opId}/activate?operator_id=${operatorId}`,
+          {}
+        );
+        if (!(response.status === 200 || response.status === 201)) {
+          throw new Error('Failed to activate operation.');
+        }
       }
+
+      setJustActivated(true);
+      setSessionActivationTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
+
+      notification.success({
+        message: 'Operation Activated',
+        description: 'Status Updated. Production log is now enabled.',
+      });
+
+      onActivate(operation);
+      setIsActivateModalVisible(false);
+      setOperationToActivate(null);
     } catch (error) {
       console.error('Error activating operation:', error);
       notification.error({
         message: 'Activation Failed',
-        description: error.response?.data?.detail || 'Failed to activate operation.',
+        description: error.response?.data?.detail || error.message || 'Failed to activate operation.',
       });
     } finally {
       setActivating(false);
@@ -880,7 +929,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       return;
     }
 
-    let operationId = selectedJob.id || selectedJob.operation_id || selectedJob.job_id || selectedJob.schedule_id;
+    const operationId = getJobOperationId(selectedJob)
+      || completingOp.operation_id
+      || completingOp.id;
     let operatorId = null;
     
     const storedUser = localStorage.getItem('user');
@@ -901,30 +952,47 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setCompleteLoading(true);
     try {
-      const payload = {
-        notes: values.notes || '',
-        produced_quantity: producedQty,
-        rework_submit_quantity: reworkSubmitQty,
-      };
-
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.ok) {
-        message.success('Production log submitted successfully!');
-        setIsCompleteModalVisible(false);
-        completeForm.resetFields();
-        if (onProductionSubmit) onProductionSubmit();
+      if (isUnitWiseJob(selectedJob)) {
+        const selectedMachineId = resolveMachineId(machineId);
+        if (!selectedMachineId) {
+          message.error('No machine selected for this unit-wise job.');
+          setCompleteLoading(false);
+          return;
+        }
+        await submitUnitWiseJob(selectedMachineId, {
+          operation_id: Number(operationId),
+          unit_from: Number(selectedJob.unit_from),
+          unit_to: Number(selectedJob.unit_to),
+          produced_quantity: producedQty,
+          rework_submit_quantity: reworkSubmitQty,
+          notes: values.notes || '',
+        });
       } else {
-        const errorData = await response.json();
-        message.error(`Failed to submit production log: ${errorData.detail || 'Unknown error'}`);
+        const payload = {
+          notes: values.notes || '',
+          produced_quantity: producedQty,
+          rework_submit_quantity: reworkSubmitQty,
+        };
+
+        const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Unknown error');
+        }
       }
+
+      message.success('Production log submitted successfully!');
+      setIsCompleteModalVisible(false);
+      completeForm.resetFields();
+      if (onProductionSubmit) onProductionSubmit();
     } catch (error) {
       console.error('Error submitting production log:', error);
-      message.error('Failed to submit production log. Please try again.');
+      message.error(`Failed to submit production log: ${error.message || 'Please try again.'}`);
     } finally {
       setCompleteLoading(false);
     }
@@ -1408,7 +1476,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             marginBottom: 16,
           }}>
             {[
-              { label: 'Remaining to close', value: effectiveStats.remainingToClose ?? '-', color: '#1677FF' },
+              { label: 'Remaining to close', value: getJobRemainingQty(selectedJob, {
+                ...effectiveStats,
+                remainingToClose: isUnitWiseJob(selectedJob) ? undefined : effectiveStats.remainingToClose,
+              }), color: '#1677FF' },
               { label: 'Rework due', value: effectiveStats.reworkDue || 0, color: '#FA8C16' },
               { label: 'Reject due', value: effectiveStats.rejectDue || 0, color: '#FF4D4F' },
             ].map(({ label, value, color }) => (

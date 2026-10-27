@@ -1,7 +1,7 @@
 import moment from 'moment';
 
-export const generateDistinctColors = (count) => {
-  const base = [
+export const generateDistinctColors = (count, basePalette = null) => {
+  const base = basePalette || [
     '#1890ff', '#13c2c2', '#52c41a', '#faad14', '#f5222d',
     '#722ed1', '#eb2f96', '#fa8c16', '#a0d911', '#fadb14',
     '#2f54eb', '#fa541c', '#08979c', '#389e0d', '#9254de',
@@ -14,18 +14,71 @@ export const generateDistinctColors = (count) => {
   return colors;
 };
 
+/** Distinct parts across the whole Gantt: red → blue → green, then the rest. */
+const PART_WITHIN_ORDER_PALETTE = [
+  '#f5222d', '#1890ff', '#52c41a', '#faad14', '#722ed1',
+  '#eb2f96', '#13c2c2', '#fa8c16', '#2f54eb', '#a0d911',
+  '#fa541c', '#08979c', '#389e0d', '#9254de', '#fadb14',
+];
+
+const toColorEntry = (hex) => ({
+  backgroundColor: hex,
+  borderColor: hex,
+  hoverColor: `${hex}80`,
+});
+
 export const getComponentColors = (operations) => {
-  const uniqueOrders = [...new Set(operations.map(op => op.production_order))];
-  const colors = generateDistinctColors(uniqueOrders.length);
+  const uniqueOrders = [...new Set(
+    (operations || [])
+      .map(op => (op.production_order != null ? String(op.production_order) : ''))
+      .filter(Boolean)
+  )];
+  const colors = generateDistinctColors(Math.max(uniqueOrders.length, 1));
   return uniqueOrders.reduce((acc, order, i) => {
-    acc[order] = {
-      backgroundColor: colors[i],
-      borderColor: colors[i],
-      hoverColor: colors[i] + '80',
-    };
+    acc[order] = toColorEntry(colors[i]);
     return acc;
   }, {});
 };
+
+/** Stable key for a part bar under an order (unit-wise coloring). */
+export const orderPartColorKey = (order, part) => `${String(order || '')}::${String(part || '')}`;
+
+/**
+ * Unit-wise: colors keyed by order::part.
+ * One palette for every distinct part on the Gantt (not restarted per order),
+ * so the same part stays one color on every machine, operation, and unit.
+ */
+export const getPartColors = (operations) => {
+  const byOrder = {};
+  const allParts = new Set();
+  (operations || []).forEach((op) => {
+    const order = op.production_order != null ? String(op.production_order) : '';
+    const part = op.component != null ? String(op.component) : '';
+    if (!order || !part) return;
+    if (!byOrder[order]) byOrder[order] = new Set();
+    byOrder[order].add(part);
+    allParts.add(part);
+  });
+
+  const parts = [...allParts].sort((a, b) => a.localeCompare(b));
+  const palette = generateDistinctColors(Math.max(parts.length, 1), PART_WITHIN_ORDER_PALETTE);
+  const colorByPart = {};
+  parts.forEach((part, i) => {
+    colorByPart[part] = toColorEntry(palette[i]);
+  });
+
+  const acc = {};
+  Object.keys(byOrder).forEach((order) => {
+    byOrder[order].forEach((part) => {
+      acc[orderPartColorKey(order, part)] = colorByPart[part];
+    });
+  });
+  return acc;
+};
+
+export const getScheduleBarColors = (operations, colorBy = 'order') => (
+  colorBy === 'part' ? getPartColors(operations) : getComponentColors(operations)
+);
 
 export const getTimeAxisScale = (v) => ({ year: 'month', month: 'day', week: 'minute', day: 'minute' }[v] || 'minute');
 export const getTimeAxisStep = (v) => ({ year: 1, month: 1, week: 30, day: 30 }[v] || 30);
@@ -302,7 +355,7 @@ export const filterScheduledOperations = (operations, filters) => {
   });
 };
 
-export const buildTimelineStyleSheet = (colors) => `
+export const buildTimelineStyleSheet = (colors, { classPrefix = 'order' } = {}) => `
   .scheduling-gantt-root {
     position: relative;
     contain: layout style;
@@ -334,35 +387,58 @@ export const buildTimelineStyleSheet = (colors) => `
   .machine-with-ops    { font-weight:500; }
   .vis-time-axis .vis-text.vis-major { white-space:nowrap; font-weight:600; }
   .vis-time-axis .vis-text.vis-minor { white-space:nowrap; }
-  ${Object.entries(colors).map(([po, c]) => `
-    .order-${po.replace(/[^a-zA-Z0-9]/g, '-')} { background-color:${c.backgroundColor}!important; border-color:${c.borderColor}!important; }
-    .order-${po.replace(/[^a-zA-Z0-9]/g, '-')}:hover { background-color:${c.hoverColor}!important; }
-  `).join('')}
+  ${Object.entries(colors || {}).map(([key, c]) => {
+    const safe = String(key || 'UNIT').replace(/[^a-zA-Z0-9]/g, '-');
+    return `
+    .${classPrefix}-${safe} { background-color:${c.backgroundColor}!important; border-color:${c.borderColor}!important; }
+    .${classPrefix}-${safe}:hover { background-color:${c.hoverColor}!important; }
+  `;
+  }).join('')}
 `;
 
-export const buildTimelineItems = (operations, colors, shiftConfigs) => {
+export const buildTimelineItems = (operations, colors, shiftConfigs, { colorBy = 'order' } = {}) => {
   const resolver = createShiftWindowResolver(shiftConfigs);
+  const fallbackColor = {
+    backgroundColor: '#1677ff',
+    borderColor: '#1677ff',
+    hoverColor: '#1677ff80',
+  };
+  const classPrefix = colorBy === 'part' ? 'part' : 'order';
   return operations.map((op) => {
-    const orderClass = `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`;
+    const productionOrder = String(op.production_order || 'UNIT');
+    const partKey = String(op.component || productionOrder);
+    const colorKey = colorBy === 'part'
+      ? orderPartColorKey(productionOrder, partKey)
+      : productionOrder;
+    const colorClass = `${classPrefix}-${colorKey.replace(/[^a-zA-Z0-9]/g, '-')}`;
     const zeroProgressClass = isZeroProgressShiftEndBlock(op, shiftConfigs, resolver)
       ? 'zero-progress-shift-end'
       : '';
+    const unitLabel = op.unit_index
+      ? `U-${String(op.unit_index).padStart(3, '0')}`
+      : null;
+    const titleLine = unitLabel || op.component || 'Unit';
+    const subLine = unitLabel
+      ? `${op.component || ''} · ${productionOrder} · Op ${op.operation_number || ''}`
+      : `${productionOrder} · ${op.description || ''}`;
     const stableId = [
       op.machineId,
-      op.production_order,
+      productionOrder,
       op.component,
       op.operation_number,
+      op.unit_index ?? '',
       op.start_time,
     ].join('::');
+    const color = colors[colorKey] || fallbackColor;
     return {
       id: stableId,
       group: op.machineId,
-      content: `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.component}</div><div style="font-size:10px;opacity:0.85;">${op.production_order} · ${op.description}</div></div>`,
+      content: `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${titleLine}</div><div style="font-size:10px;opacity:0.85;">${subLine}</div></div>`,
       start: new Date(op.start_time),
       end: new Date(op.end_time),
-      className: [orderClass, zeroProgressClass].filter(Boolean).join(' '),
-      operation: op,
-      style: `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
+      className: [colorClass, zeroProgressClass].filter(Boolean).join(' '),
+      operation: { ...op, production_order: productionOrder },
+      style: `background-color:${color.backgroundColor};border-color:${color.borderColor};color:white;border-radius:4px;`,
     };
   });
 };
@@ -420,4 +496,70 @@ export const buildTooltipTemplate = (shiftConfigs) => {
     ${zeroProgressNote}
   </div>`;
   };
+};
+
+/**
+ * Legend structure for unit-wise: each order → palette of its scheduled parts.
+ */
+export const getUnitWiseOrderPalettes = (operations, partColors = null) => {
+  const colors = partColors || getPartColors(operations);
+  const byOrder = {};
+  (operations || []).forEach((op) => {
+    const order = op.production_order != null ? String(op.production_order) : '';
+    const part = op.component != null ? String(op.component) : '';
+    if (!order || !part) return;
+    if (!byOrder[order]) byOrder[order] = new Map();
+    const key = orderPartColorKey(order, part);
+    const entry = byOrder[order].get(part) || {
+      part,
+      part_name: op.part_name || '',
+      unitIds: new Set(),
+      color: colors[key] || toColorEntry('#1677ff'),
+    };
+    if (op.unit_index != null) entry.unitIds.add(Number(op.unit_index));
+    if (op.part_name && !entry.part_name) entry.part_name = op.part_name;
+    byOrder[order].set(part, entry);
+  });
+
+  return Object.keys(byOrder)
+    .sort((a, b) => a.localeCompare(b))
+    .map((order) => ({
+      order,
+      parts: [...byOrder[order].values()]
+        .sort((a, b) => a.part.localeCompare(b.part))
+        .map(({ part, part_name, unitIds, color }) => ({
+          part,
+          part_name,
+          quantity: unitIds.size || 0,
+          color,
+        })),
+    }));
+};
+
+/**
+ * Map unit-wise schedule items to timeline operations format.
+ */
+export const mapUnitWiseItemsToOperations = (items, machines) => {
+  const machineMap = new Map();
+  (machines || []).forEach((m) => {
+    machineMap.set(m.id, m.name || `Machine ${m.id}`);
+  });
+  
+  return (items || []).map((item) => ({
+    id: item.id,
+    machineId: item.machine_id,
+    machineName: machineMap.get(item.machine_id) || `Machine ${item.machine_id}`,
+    production_order: item.order_number || `Order ${item.order_id}`,
+    component: item.part_number || `Part ${item.part_id}`,
+    part_name: item.part_name,
+    operation_number: item.operation_number,
+    description: item.operation_name || `Operation ${item.operation_id}`,
+    start_time: item.start_time,
+    end_time: item.end_time,
+    quantity: item.quantity || 0,
+    remaining_quantity: item.remaining_quantity || 0,
+    unit_from: item.unit_from,
+    unit_to: item.unit_to,
+    unit_index: item.unit_index ?? item.unit_no ?? item.unit_number ?? null,
+  }));
 };

@@ -579,6 +579,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`}>Assets Availability</Link> },
         { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`}>Capacity Planning</Link> },
         { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
+        { key: `${prefix}/pps/unit-scheduling`, label: <Link to={`${prefix}/pps/unit-scheduling`}>Unit Scheduling</Link> },
       ],
     },
     {
@@ -778,6 +779,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
           { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
           { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
+          { key: `${prefix}/pps/unit-scheduling`, label: <Link to={`${prefix}/pps/unit-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Unit Scheduling</Link> },
         ],
       },
       {

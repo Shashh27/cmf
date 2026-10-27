@@ -67,6 +67,8 @@ import AdminRecyclebin from "./Pages/Recyclebin";
 
 import PPS from "./Pages/PPS";
 
+import UnitwiseScheduling from "./PPS Components/UnitwiseScheduling";
+
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
 
@@ -266,6 +268,10 @@ function App() {
 
 
 
+          <Route path="/admin/pps/unit-scheduling" element={<UnitwiseScheduling />} />
+
+
+
 
 
 
@@ -429,6 +435,7 @@ function App() {
           <Route path="/manufacturing_coordinator/pps/capacity-planning" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps/machine-scheduling" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps/process-planning" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps/unit-scheduling" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring" element={<Navigate to="/manufacturing_coordinator/product-monitoring/live-monitoring" replace />} />
           <Route path="/manufacturing_coordinator/product-monitoring/live-monitoring" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/oee-overview" element={<ManufacturingCoordinator />} />

@@ -1,10 +1,38 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker, Tooltip } from "antd";
-import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined, LinkOutlined } from "@ant-design/icons";
+import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
+import { NotebookPen } from "lucide-react";
+
+const RobotArm = ({ size = 16, color = "currentColor" }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M3 20h8" />
+    <path d="M7 20V11" />
+    <circle cx="7" cy="8.5" r="2.5" />
+    <path d="M9.2 7.2 15 5l3.5 3.2" />
+    <path d="M18.5 8.2v3.3" />
+    <path d="M16.2 11.5h4.6" />
+    <path d="M16.2 13.4h4.6" />
+  </svg>
+);
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import dayjs from "dayjs";
 import axios from "axios";
 import { api } from '../api/client.js';
+import RebuildToolbar from './scheduling/controls/RebuildToolbar.jsx';
+import QtyMachineAllocationPanel from './scheduling/allocations/QtyMachineAllocationPanel.jsx';
+import { rebuildUnitWiseSchedule } from './scheduling/api/unitWiseApi.js';
+import { fetchQtyMachineAllocations } from './scheduling/api/qtyAllocationApi.js';
 
 const getApiErrorMessage = (error, fallback = "Failed updating parts") => {
   const data = error?.response?.data;
@@ -29,6 +57,31 @@ const isPartCompleted = (partOpDetails, partId) => {
   if (String(message).toLowerCase() === "completed") return true;
   const ops = getPartOperations(partOpDetails, partId);
   return ops.length > 0 && ops.every(op => String(op.operation_status || "").toLowerCase() === "completed");
+};
+
+const assignmentModeStorageKey = (partId, operationId) =>
+  `pps-assignment-mode:${partId}:${operationId}`;
+
+const readStoredAssignmentMode = (partId, operationId) => {
+  try {
+    const raw = sessionStorage.getItem(assignmentModeStorageKey(partId, operationId));
+    if (raw === 'auto' || raw === 'process_plan' || raw === 'manual') return raw;
+  } catch { /* ignore */ }
+  return null;
+};
+
+const storeAssignmentMode = (partId, operationId, mode) => {
+  try {
+    sessionStorage.setItem(assignmentModeStorageKey(partId, operationId), mode);
+  } catch { /* ignore */ }
+};
+
+const normalizeAssignmentMode = (value) => {
+  const mode = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (mode === 'manual' || mode === 'manual_qty_split' || mode === 'qty_split') return 'manual';
+  if (mode === 'process_plan' || mode === 'pin' || mode === 'as_per_process_plan') return 'process_plan';
+  if (mode === 'auto') return 'auto';
+  return null;
 };
 
 const formatPartLabel = (data, partId) => {
@@ -61,16 +114,110 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
   const [partOpDetails, setPartOpDetails] = useState({});
   const [partOpLoading, setPartOpLoading] = useState({});
-  const [operationStatus, setOperationStatus] = useState({});
-  const [operationStatusLoading, setOperationStatusLoading] = useState({});
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [inhouseSearchText, setInhouseSearchText] = useState('');
+
+  // Assignment mode state for scheduling
+  const [assignmentMode, setAssignmentMode] = useState('auto');
+  const [pinPreferred, setPinPreferred] = useState(false);
+  const [preferredWorkcenterId, setPreferredWorkcenterId] = useState(null);
+  const [preferredMachineId, setPreferredMachineId] = useState(null);
+  const [allocPartId, setAllocPartId] = useState(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildStatusMessage, setRebuildStatusMessage] = useState(null);
+  const [rebuildErrorMessage, setRebuildErrorMessage] = useState(null);
+  const [workcenters, setWorkcenters] = useState([]);
+  const [machines, setMachines] = useState([]);
+
+  // Handle rebuild schedule using unit-wise API
+  const handleRebuildSchedule = async () => {
+    setRebuilding(true);
+    setRebuildStatusMessage(null);
+    setRebuildErrorMessage(null);
+    try {
+      const data = await rebuildUnitWiseSchedule({
+        optimizer: 'greedy',
+        assignmentMode,
+        pinPreferred: assignmentMode === 'pin',
+        preferredMachineId: assignmentMode === 'pin' ? preferredMachineId : null,
+        preferredWorkcenterId: assignmentMode === 'pin' ? preferredWorkcenterId : null,
+        partId: assignmentMode === 'manual' && allocPartId ? allocPartId : undefined,
+      });
+
+      const modeLabel =
+        assignmentMode === 'manual'
+          ? 'manual qty→machine'
+          : assignmentMode === 'pin'
+            ? 'pin preferred'
+            : 'WC earliest-free / auto qty split';
+      setRebuildStatusMessage(`Schedule rebuilt successfully · ${modeLabel}`);
+      message.success(`Schedule rebuilt successfully · ${modeLabel}`);
+    } catch (e) {
+      console.error(e);
+      const msg = e.message || 'Rebuild failed';
+      setRebuildErrorMessage(msg);
+      message.error(msg);
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
+  // Fetch workcenters and machines for assignment mode using unit-wise API
+  useEffect(() => {
+    const fetchWorkcentersAndMachines = async () => {
+      try {
+        const mRes = await fetch(`${SCHEDULING_API_BASE_URL}/machines/with-work-center`);
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          const formatted = (Array.isArray(mData) ? mData : []).map((m) => ({
+            id: m.id,
+            name: m.make && m.model ? `(${m.make}) ${m.model}` : m.make || m.model || `Machine-${m.id}`,
+            type: m.type || null,
+            workcenter_id: m.workcenter_id ?? m.work_center_id ?? null,
+            work_center_id: m.work_center_id ?? m.workcenter_id ?? null,
+            work_center: m.work_center,
+          }));
+          setMachines(formatted);
+
+          // Derive workcenters from machines with actual names
+          const wcMap = new Map();
+          formatted.forEach((m) => {
+            const wcId = m.workcenter_id;
+            const wc = m.work_center;
+            if (wcId != null && !wcMap.has(wcId)) {
+              wcMap.set(wcId, {
+                id: wcId,
+                name: wc?.work_center_name || wc?.name || `Workcenter ${wcId}`,
+                work_center_name: wc?.work_center_name || wc?.name || `Workcenter ${wcId}`,
+              });
+            }
+          });
+          setWorkcenters(Array.from(wcMap.values()));
+        }
+      } catch (e) {
+        console.error('Failed to fetch workcenters/machines:', e);
+      }
+    };
+    fetchWorkcentersAndMachines();
+  }, []);
 
   const [machineLinkOpen, setMachineLinkOpen] = useState(false);
   const [machineLinkLoading, setMachineLinkLoading] = useState(false);
   const [machineLinkSaving, setMachineLinkSaving] = useState(false);
   const [machineLinkPartId, setMachineLinkPartId] = useState(null);
   const [machineLinkOp, setMachineLinkOp] = useState(null); // enriched op from /operations/{id}
+  const [machineLinkAssignmentMode, setMachineLinkAssignmentMode] = useState('auto');
+  const [machineLinkPinPreferred, setMachineLinkPinPreferred] = useState(false);
+  const [machineLinkPreferredWorkcenterId, setMachineLinkPreferredWorkcenterId] = useState(null);
+  const [machineLinkPreferredMachineId, setMachineLinkPreferredMachineId] = useState(null);
+  const [machineLinkRebuilding, setMachineLinkRebuilding] = useState(false);
+  const [machineLinkStatusMessage, setMachineLinkStatusMessage] = useState(null);
+  const [machineLinkErrorMessage, setMachineLinkErrorMessage] = useState(null);
+  const [changeMachineOpen, setChangeMachineOpen] = useState(false);
+  const [changeMachineLoading, setChangeMachineLoading] = useState(false);
+  const [changeMachineSaving, setChangeMachineSaving] = useState(false);
+  const [changeMachinePartId, setChangeMachinePartId] = useState(null);
+  const [changeMachineOp, setChangeMachineOp] = useState(null);
   const [workcenterMachines, setWorkcenterMachines] = useState([]);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
 
@@ -83,7 +230,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       try {
         const res = await api.get(`/orders/`);
         setOrders(res.data || []);
-      } catch {}
+      } catch { }
       setOrdersLoading(false);
     };
     fetchOrders();
@@ -114,7 +261,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     try {
       const res = await api.get(`/orders/${id}/hierarchical`);
       setOrderDetails(res.data || null);
-    } catch {}
+    } catch { }
     setDetailsLoading(false);
   };
 
@@ -130,7 +277,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
         setOrderSummary(data);
         setIsActive(data.status === "active");
       }
-    } catch {}
+    } catch { }
   };
 
   // ================================
@@ -143,7 +290,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       if (res.status === 200) {
         setOrderPartsMetadata(res.data);
       }
-    } catch {}
+    } catch { }
   };
 
   // ================================
@@ -155,25 +302,28 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     setPartOpLoading(prev => ({ ...prev, [partId]: true }));
     try {
-      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
-      if (res.status === 200) {
+      let data = null;
+      try {
+        const res = await axios.get(
+          `${SCHEDULING_API_BASE_URL}/scheduling/unit-wise/part-operation-details/${selectedOrderId}/${partId}`
+        );
+        if (res.status === 200) data = res.data;
+      } catch {
+        const res = await axios.get(
+          `${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`
+        );
+        if (res.status === 200) data = res.data;
+      }
+      if (data) {
         setPartOpDetails(prev => ({
           ...prev,
           [partId]: {
-            operations: res.data.operations || [],
-            message: res.data.message || "",
+            operations: data.operations || [],
+            message: data.message || "",
+            planned_start_time: data.planned_start_time,
+            planned_end_time: data.planned_end_time,
           },
         }));
-
-        // Fetch operation status for each unique operation in the response
-        const operations = res.data.operations || [];
-        const uniqueOperationIds = [...new Set(operations.map(op => op.operation_id))];
-        
-        uniqueOperationIds.forEach(operationId => {
-          if (operationId && !operationStatus[operationId]) {
-            fetchOperationStatus(operationId);
-          }
-        });
       }
     } catch {
       // ignore
@@ -187,11 +337,16 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setMachineLinkSaving(false);
     setMachineLinkPartId(null);
     setMachineLinkOp(null);
-    setWorkcenterMachines([]);
-    setSelectedMachineId(null);
+    setMachineLinkAssignmentMode('auto');
+    setMachineLinkPinPreferred(false);
+    setMachineLinkPreferredWorkcenterId(null);
+    setMachineLinkPreferredMachineId(null);
+    setMachineLinkRebuilding(false);
+    setMachineLinkStatusMessage(null);
+    setMachineLinkErrorMessage(null);
   };
 
-  const openMachineLinkModal = async (opRow, partId) => {
+  const openMachineLinkModal = async (opRow, partId, partRecord) => {
     const operationId = opRow?.operation_id;
     if (!operationId) {
       message.warning("Operation id missing");
@@ -200,13 +355,124 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setMachineLinkOpen(true);
     setMachineLinkLoading(true);
     setMachineLinkPartId(partId);
-    setMachineLinkOp(null);
+    setMachineLinkPinPreferred(false);
+    setMachineLinkPreferredWorkcenterId(null);
+    setMachineLinkPreferredMachineId(null);
+    setMachineLinkStatusMessage(null);
+    setMachineLinkErrorMessage(null);
+    
+    // Set initial operation info from table row immediately
+    setMachineLinkOp({
+      operation_id: operationId,
+      operation: opRow.operation,
+      part_number: partRecord?.part_number || opRow.part_number,
+      part_name: partRecord?.part_name || opRow.part_name,
+    });
+
+    try {
+      const [opRes, allocData] = await Promise.all([
+        api.get(`/operations/${operationId}`),
+        fetchQtyMachineAllocations(partId, selectedOrderId).catch(() => null),
+      ]);
+      const op = opRes.data;
+      // Merge API response with original operation_id and part info to ensure correct filtering
+      setMachineLinkOp({ 
+        ...op, 
+        operation_id: operationId, 
+        part_number: partRecord?.part_number || opRow.part_number,
+        part_name: partRecord?.part_name || opRow.part_name,
+        operation: opRow.operation 
+      });
+
+      const storedMode = readStoredAssignmentMode(partId, operationId);
+      const rowMode = normalizeAssignmentMode(
+        opRow.assignment_mode || opRow.assignmentMode || allocData?.assignment_mode
+      );
+      const allocations = allocData?.allocations || [];
+      const hasManualAlloc = allocations.some(
+        (a) => Number(a.operation_id) === Number(operationId)
+      ) || (
+        allocations.length > 0
+        && getPartOperations(partOpDetails, partId).filter(
+          (op) => Number(op.operation_id) === Number(operationId)
+        ).length > 1
+      );
+      const nextMode = storedMode || rowMode || (hasManualAlloc ? 'manual' : 'auto');
+      setMachineLinkAssignmentMode(nextMode);
+      setMachineLinkPinPreferred(nextMode === 'process_plan');
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to load operation details"));
+      closeMachineLinkModal();
+    } finally {
+      setMachineLinkLoading(false);
+    }
+  };
+
+  const handleMachineLinkRebuild = async () => {
+    setMachineLinkRebuilding(true);
+    setMachineLinkStatusMessage(null);
+    setMachineLinkErrorMessage(null);
+    try {
+      const data = await rebuildUnitWiseSchedule({
+        optimizer: 'greedy',
+        assignmentMode: machineLinkAssignmentMode,
+        pinPreferred: machineLinkAssignmentMode === 'process_plan',
+        partId: machineLinkPartId || undefined,
+        operationId: machineLinkOp?.operation_id,
+      });
+
+      const modeLabel =
+        machineLinkAssignmentMode === 'manual'
+          ? 'manual qty→machine'
+          : machineLinkAssignmentMode === 'process_plan'
+            ? 'as per process plan'
+            : 'WC earliest-free / auto qty split';
+      if (machineLinkPartId && machineLinkOp?.operation_id) {
+        storeAssignmentMode(machineLinkPartId, machineLinkOp.operation_id, machineLinkAssignmentMode);
+      }
+      setMachineLinkStatusMessage(`Schedule rebuilt successfully · ${modeLabel}`);
+      message.success(`Schedule rebuilt successfully · ${modeLabel}`);
+
+      // Refresh operation details
+      if (machineLinkPartId) {
+        await fetchPartOperationDetails(machineLinkPartId, true);
+      }
+    } catch (e) {
+      console.error(e);
+      const msg = e.message || 'Rebuild failed';
+      setMachineLinkErrorMessage(msg);
+      message.error(msg);
+    } finally {
+      setMachineLinkRebuilding(false);
+    }
+  };
+
+  const closeChangeMachineModal = () => {
+    setChangeMachineOpen(false);
+    setChangeMachineLoading(false);
+    setChangeMachineSaving(false);
+    setChangeMachinePartId(null);
+    setChangeMachineOp(null);
+    setWorkcenterMachines([]);
+    setSelectedMachineId(null);
+  };
+
+  const openChangeMachineModal = async (opRow, partId) => {
+    const operationId = opRow?.operation_id;
+    if (!operationId) {
+      message.warning("Operation id missing");
+      return;
+    }
+    setChangeMachineOpen(true);
+    setChangeMachineLoading(true);
+    setChangeMachinePartId(partId);
+    setChangeMachineOp(null);
     setWorkcenterMachines([]);
     setSelectedMachineId(null);
     try {
       const opRes = await api.get(`/operations/${operationId}`);
       const op = opRes.data;
-      setMachineLinkOp(op);
+      setChangeMachineOp(op);
       setSelectedMachineId(op?.machine_id ?? null);
       if (op?.workcenter_id) {
         const mRes = await api.get(`/machines/workcenter/${op.workcenter_id}`);
@@ -216,58 +482,37 @@ const ProcessPlanning = ({ initialOrderId }) => {
       }
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to load machine linking details"));
-      closeMachineLinkModal();
+      closeChangeMachineModal();
     } finally {
-      setMachineLinkLoading(false);
+      setChangeMachineLoading(false);
     }
   };
 
-  const saveMachineLink = async () => {
-    if (!machineLinkOp?.id) return;
+  const saveChangeMachine = async () => {
+    if (!changeMachineOp?.id) return;
     if (!selectedMachineId) {
       message.warning("Please select a machine");
       return;
     }
-    setMachineLinkSaving(true);
+    setChangeMachineSaving(true);
     try {
-      await api.put(`/operations/${machineLinkOp.id}`, { machine_id: selectedMachineId });
+      await api.put(`/operations/${changeMachineOp.id}`, { machine_id: selectedMachineId });
       message.success("Machine updated successfully");
-      const partId = machineLinkPartId;
-      closeMachineLinkModal();
+      const partId = changeMachinePartId;
+      closeChangeMachineModal();
       if (partId) await fetchPartOperationDetails(partId, true);
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to update machine"));
     } finally {
-      setMachineLinkSaving(false);
+      setChangeMachineSaving(false);
     }
   };
 
   const machineOptionLabel = (m) => m?.make || m?.model || `Machine ${m?.id}`;
 
-  const getOpRuntimeStatus = (operationId) => {
-    const statusData = operationStatus[operationId];
-    return String(statusData?.status || statusData?.operation_status || "").toLowerCase().replace(/\s+/g, "");
-  };
-
-  const canChangeMachine = (operationId) => {
-    if (!operationId || operationStatusLoading[operationId]) return false;
-    return getOpRuntimeStatus(operationId) === "pending";
-  };
-
-  const fetchOperationStatus = async (operationId) => {
-    if (!operationId) return;
-    if (operationStatus[operationId]) return;
-
-    setOperationStatusLoading(prev => ({ ...prev, [operationId]: true }));
-    try {
-      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/status-summary`);
-      if (res.status === 200) {
-        setOperationStatus(prev => ({ ...prev, [operationId]: res.data }));
-      }
-    } catch {
-      // ignore
-    }
-    setOperationStatusLoading(prev => ({ ...prev, [operationId]: false }));
+  const canChangeMachine = (opRow) => {
+    const status = String(opRow?.operation_status || "pending").toLowerCase().replace(/\s+/g, "");
+    return status === "pending";
   };
 
   // ================================
@@ -282,7 +527,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
         .filter(p => p.status === "active")
         .map(p => p.part_id);
       setActiveIds(ids);
-    } catch {}
+    } catch { }
   };
 
   // When order selected
@@ -334,7 +579,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const getAssemblyNamesForPart = (partId) => {
     const h = orderDetails?.product_hierarchy || {};
     const assemblyNames = [];
-    
+
     // Check direct parts first
     if (Array.isArray(h.direct_parts)) {
       const directPartFound = h.direct_parts.some(p => p.part?.id === partId || p.id === partId);
@@ -342,21 +587,21 @@ const ProcessPlanning = ({ initialOrderId }) => {
         assemblyNames.push('Direct Parts');
       }
     }
-    
+
     // Enhanced walk function that tracks assembly hierarchy
     const walk = (assemblies, parentPath = []) => {
       if (!Array.isArray(assemblies)) return;
       assemblies.forEach(a => {
         // Get the current assembly name from the nested structure
         const currentAssembly = a.assembly || {};
-        const currentAssemblyName = currentAssembly.assembly_name || currentAssembly.name || 
-                                  currentAssembly.assembly || currentAssembly.part_name || 
-                                  currentAssembly.product_name || currentAssembly.display_name || 
-                                  currentAssembly.title || currentAssembly.label || currentAssembly.description;
-        
+        const currentAssemblyName = currentAssembly.assembly_name || currentAssembly.name ||
+          currentAssembly.assembly || currentAssembly.part_name ||
+          currentAssembly.product_name || currentAssembly.display_name ||
+          currentAssembly.title || currentAssembly.label || currentAssembly.description;
+
         // Build the full path for this assembly
         const currentPath = currentAssemblyName ? [...parentPath, currentAssemblyName] : parentPath;
-        
+
         // Check parts in this assembly
         if (Array.isArray(a.parts)) {
           const partFound = a.parts.some(p => p.part?.id === partId || p.id === partId);
@@ -369,24 +614,24 @@ const ProcessPlanning = ({ initialOrderId }) => {
             }
           }
         }
-        
+
         // Recursively check subassemblies
         if (Array.isArray(a.subassemblies)) {
           walk(a.subassemblies, currentPath);
         }
       });
     };
-    
+
     walk(h.assemblies);
-    
+
     // If still no assembly names found, try a comprehensive search
     if (assemblyNames.length === 0) {
       const comprehensiveSearch = (obj, currentPath = []) => {
         if (!obj || typeof obj !== 'object') return;
-        
+
         Object.keys(obj).forEach(key => {
           const value = obj[key];
-          
+
           // Check if this is a parts array
           if (key === 'parts' && Array.isArray(value)) {
             const partFound = value.some(p => p.part?.id === partId || p.id === partId);
@@ -395,10 +640,10 @@ const ProcessPlanning = ({ initialOrderId }) => {
             }
           } else if (key === 'assembly' && typeof value === 'object' && value !== null) {
             // Found an assembly object, extract its name and continue searching
-            const assemblyName = value.assembly_name || value.name || value.assembly || 
-                                value.part_name || value.product_name || value.display_name || 
-                                value.title || value.label || value.description;
-            
+            const assemblyName = value.assembly_name || value.name || value.assembly ||
+              value.part_name || value.product_name || value.display_name ||
+              value.title || value.label || value.description;
+
             if (assemblyName) {
               const newPath = [...currentPath, assemblyName];
               // Continue searching in the parent object
@@ -415,10 +660,10 @@ const ProcessPlanning = ({ initialOrderId }) => {
           }
         });
       };
-      
+
       comprehensiveSearch(h);
     }
-    
+
     // Return a comma-separated string, not an array
     return assemblyNames.length > 0 ? assemblyNames.join(', ') : '-';
   };
@@ -437,7 +682,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   // Fetch all part operation details for in-house parts to get start/end times
   useEffect(() => {
     if (!selectedOrderId || inHouseParts.length === 0) return;
-    
+
     inHouseParts.forEach(part => {
       if (!partOpDetails[part.id]) {
         fetchPartOperationDetails(part.id);
@@ -558,7 +803,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       const data = res.data;
       const isActivation = String(next).toLowerCase() === "active";
-      
+
       if (data && data.message) {
         const msg = data.message.toLowerCase();
         // Check if it's a failure message even with 200 OK
@@ -661,7 +906,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       // Check for specific error messages in responses
       const errorMessages = [];
       const successMessages = [];
-      
+
       responses.forEach((response, index) => {
         const data = response.data;
         const partId = selectedInIds[index];
@@ -946,7 +1191,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   // ================================
   const filteredInHouseParts = useMemo(() => {
     if (!inhouseSearchText) return inHouseParts;
-    
+
     const searchLower = inhouseSearchText.toLowerCase();
     return inHouseParts.filter(part => {
       return (
@@ -1032,7 +1277,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 ["Inactive Parts", summary.inactiveParts],
                 ["Total In-House Parts", summary.totalInHousePartsCount],
                 ["Total Outsource Parts", summary.totalOutsourceParts],
-                
+
               ].map(([label, value], idx) => (
                 <React.Fragment key={idx}>
                   <div
@@ -1070,7 +1315,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
                   style={{ width: 300 }}
                   allowClear
                 />
-                <Button type="primary" onClick={showPartStatusPopup}>Update Status</Button>
+                <Space>
+                  <Button type="primary" onClick={showPartStatusPopup}>Update Status</Button>
+                </Space>
               </div>
 
               <Table
@@ -1119,76 +1366,87 @@ const ProcessPlanning = ({ initialOrderId }) => {
                     ),
                   expandedRowRender: (record) => {
                     const rawData = getPartOperations(partOpDetails, record.id);
-                    
-                    // Grouping logic: same operation ID and name
-                    const groupedData = [];
-                    const groups = {};
-
-                    rawData.forEach(op => {
+                    const operationBuckets = new Map();
+                    rawData.forEach((op) => {
                       const key = `${op.operation_id}-${op.operation}`;
-                      if (!groups[key]) {
-                        groups[key] = { ...op };
-                        groupedData.push(groups[key]);
-                      } else {
-                        // Update start/end times with min/max
-                        if (op.planned_start_time && (!groups[key].planned_start_time || dayjs(op.planned_start_time).isBefore(dayjs(groups[key].planned_start_time)))) {
-                          groups[key].planned_start_time = op.planned_start_time;
-                        }
-                        if (op.planned_end_time && (!groups[key].planned_end_time || dayjs(op.planned_end_time).isAfter(dayjs(groups[key].planned_end_time)))) {
-                          groups[key].planned_end_time = op.planned_end_time;
-                        }
-                      }
+                      if (!operationBuckets.has(key)) operationBuckets.set(key, []);
+                      operationBuckets.get(key).push(op);
+                    });
+                    const tableRows = [];
+                    operationBuckets.forEach((ops) => {
+                      ops.forEach((op, index) => {
+                        const bandQty = op.quantity != null
+                          ? op.quantity
+                          : (op.unit_from != null && op.unit_to != null
+                            ? Number(op.unit_to) - Number(op.unit_from) + 1
+                            : null);
+                        tableRows.push({
+                          ...op,
+                          rowKey: `${op.operation_id}-${op.machine_id ?? op.machine ?? 'machine'}-${op.unit_from ?? index}`,
+                          opRowSpan: index === 0 ? ops.length : 0,
+                          bandQty,
+                        });
+                      });
+                    });
+
+                    const spanCell = (row) => ({
+                      rowSpan: row.opRowSpan,
+                      style: { verticalAlign: 'middle', background: row.opRowSpan > 1 || row.opRowSpan === 0 ? '#f7f8ff' : undefined },
                     });
 
                     const loading = partOpLoading[record.id];
                     const columns = [
-                      { title: "Operation Name", dataIndex: "operation" },
+                      {
+                        title: "Operation Name",
+                        dataIndex: "operation",
+                        onCell: spanCell,
+                      },
                       {
                         title: "Machine Name",
                         dataIndex: "machine",
                         render: (text) => text || "-",
                       },
                       {
+                        title: "Qty",
+                        dataIndex: "bandQty",
+                        width: 90,
+                        render: (qty, row) => {
+                          if (qty == null || Number.isNaN(qty)) return "-";
+                          if (row.unit_from != null && row.unit_to != null) {
+                            return `${qty} (${row.unit_from}–${row.unit_to})`;
+                          }
+                          return qty;
+                        },
+                      },
+                      {
                         title: "Start Time",
                         dataIndex: "planned_start_time",
-                        render: (_, record) => {
-                          const statusData = operationStatus[record.operation_id];
-                          if (operationStatusLoading[record.operation_id]) {
-                            return <Spin size="small" />;
-                          }
-                          const time = statusData?.start_time;
-                          return time ? dayjs(time).format("DD-MM-YYYY, HH:mm") : "-";
-                        }
+                        render: (_, opRow) => (
+                          opRow.planned_start_time
+                            ? dayjs(opRow.planned_start_time).format("DD-MM-YYYY, HH:mm")
+                            : "-"
+                        )
                       },
                       {
                         title: "End Time",
                         dataIndex: "planned_end_time",
-                        render: (_, record) => {
-                          const statusData = operationStatus[record.operation_id];
-                          if (operationStatusLoading[record.operation_id]) {
-                            return <Spin size="small" />;
-                          }
-                          const time = statusData?.end_time;
-                          return time ? dayjs(time).format("DD-MM-YYYY, HH:mm") : "-";
-                        }
+                        render: (_, opRow) => (
+                          opRow.planned_end_time
+                            ? dayjs(opRow.planned_end_time).format("DD-MM-YYYY, HH:mm")
+                            : "-"
+                        )
                       },
-                       {
+                      {
                         title: "Operation Status",
                         key: "operation_status",
-                        render: (_, record) => {
-                          const statusData = operationStatus[record.operation_id];
-                          if (operationStatusLoading[record.operation_id]) {
-                            return <Spin size="small" />;
-                          }
-                          if (!statusData) {
-                            return "-";
-                          }
-                          // Use status from the API response (or fallback to operation_status)
-                          const status = statusData.status || statusData.operation_status;
-                          const color = status === "completed" ? "green" : 
-                                       status === "inprogress" ? "blue" : 
-                                       status === "pending" ? "orange" : "default";
-                          return <Tag color={color}>{status?.toUpperCase() || "-"}</Tag>;
+                        onCell: spanCell,
+                        render: (_, opRow) => {
+                          const status = opRow.operation_status;
+                          if (!status) return "-";
+                          const color = status === "completed" ? "green" :
+                            status === "inprogress" ? "blue" :
+                              status === "pending" ? "orange" : "default";
+                          return <Tag color={color}>{String(status).toUpperCase()}</Tag>;
                         }
                       },
                       {
@@ -1196,33 +1454,52 @@ const ProcessPlanning = ({ initialOrderId }) => {
                         key: "action",
                         align: "center",
                         fixed: "right",
-                        width: 72,
+                        width: 96,
+                        onCell: spanCell,
                         render: (_, opRow) => {
-                          const linkEnabled = canChangeMachine(opRow.operation_id);
+                          const linkEnabled = canChangeMachine(opRow);
+                          const iconColor = linkEnabled ? "#1677ff" : "#bfbfbf";
                           return (
-                            <Tooltip
-                              title={
-                                linkEnabled
-                                  ? "Change machine"
-                                  : "Machine cannot be changed"
-                              }
-                            >
-                              <Button
-                                type="text"
-                                size="small"
-                                disabled={!linkEnabled}
-                                icon={
-                                  <LinkOutlined
-                                    style={{ color: linkEnabled ? "#1677ff" : "#bfbfbf" }}
-                                  />
+                            <Space size={0}>
+                              <Tooltip
+                                title={
+                                  linkEnabled
+                                    ? "Change Schedule Plan"
+                                    : "Plan cannot be changed"
                                 }
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!linkEnabled) return;
-                                  openMachineLinkModal(opRow, record.id);
-                                }}
-                              />
-                            </Tooltip>
+                              >
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  disabled={!linkEnabled}
+                                  icon={<NotebookPen size={16} color={iconColor} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!linkEnabled) return;
+                                    openMachineLinkModal(opRow, record.id, record);
+                                  }}
+                                />
+                              </Tooltip>
+                              <Tooltip
+                                title={
+                                  linkEnabled
+                                    ? "Change machine"
+                                    : "Machine can be changed only when operation status is Pending"
+                                }
+                              >
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  disabled={!linkEnabled}
+                                  icon={<RobotArm size={16} color={iconColor} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!linkEnabled) return;
+                                    openChangeMachineModal(opRow, record.id);
+                                  }}
+                                />
+                              </Tooltip>
+                            </Space>
                           );
                         },
                       },
@@ -1230,11 +1507,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
                     return (
                       <Table
                         columns={columns}
-                        dataSource={groupedData}
+                        dataSource={tableRows}
                         pagination={false}
                         loading={loading}
                         size="small"
-                        rowKey={(op) => `${op.operation_id}-${op.operation}`}
+                        rowKey="rowKey"
                       />
                     );
                   },
@@ -1260,29 +1537,79 @@ const ProcessPlanning = ({ initialOrderId }) => {
       <Modal
         title={
           <Space>
-            <LinkOutlined />
-            <span>Machine-WorkCenter Linking</span>
+            <NotebookPen size={16} />
+            <span>Operation Assignment Mode</span>
           </Space>
         }
         open={machineLinkOpen}
         onCancel={closeMachineLinkModal}
         destroyOnClose
+        width={800}
+        footer={null}
+      >
+        {machineLinkLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin />
+          </div>
+        ) : (
+          <div>
+            <div style={{ marginBottom: 12, padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
+              <div><strong>Operation No:</strong> {machineLinkOp?.operation || '-'}</div>
+              <div><strong>Part No:</strong> {machineLinkOp?.part_number || '-'}</div>
+            </div>
+
+            <RebuildToolbar
+              rebuilding={machineLinkRebuilding}
+              onRebuild={handleMachineLinkRebuild}
+              statusMessage={machineLinkStatusMessage}
+              errorMessage={machineLinkErrorMessage}
+              assignmentMode={machineLinkAssignmentMode}
+              onAssignmentModeChange={setMachineLinkAssignmentMode}
+              pinPreferred={machineLinkPinPreferred}
+              onPinPreferredChange={setMachineLinkPinPreferred}
+              showPartFilter={false}
+            />
+
+            {machineLinkAssignmentMode === 'manual' && (
+              <div style={{ marginTop: 16 }}>
+                <QtyMachineAllocationPanel
+                  selectedPartId={machineLinkPartId}
+                  selectedOperationId={machineLinkOp?.operation_id}
+                  onPartChange={() => { }}
+                  visible
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          <Space>
+            <RobotArm size={16} />
+            <span>Machine-WorkCenter Linking</span>
+          </Space>
+        }
+        open={changeMachineOpen}
+        onCancel={closeChangeMachineModal}
+        destroyOnClose
         footer={[
-          <Button key="cancel" onClick={closeMachineLinkModal}>
+          <Button key="cancel" onClick={closeChangeMachineModal}>
             Cancel
           </Button>,
           <Button
             key="save"
             type="primary"
-            loading={machineLinkSaving}
-            disabled={machineLinkLoading || !selectedMachineId || !machineLinkOp?.workcenter_id}
-            onClick={saveMachineLink}
+            loading={changeMachineSaving}
+            disabled={changeMachineLoading || !selectedMachineId || !changeMachineOp?.workcenter_id}
+            onClick={saveChangeMachine}
           >
             Save Changes
           </Button>,
         ]}
       >
-        {machineLinkLoading ? (
+        {changeMachineLoading ? (
           <div style={{ textAlign: "center", padding: 24 }}>
             <Spin />
           </div>
@@ -1303,7 +1630,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                   Operation Number
                 </Typography.Text>
                 <div style={{ fontWeight: 600 }}>
-                  {machineLinkOp?.operation_number || "-"}
+                  {changeMachineOp?.operation_number || "-"}
                 </div>
               </div>
               <div>
@@ -1311,7 +1638,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                   work centre
                 </Typography.Text>
                 <div style={{ fontWeight: 600 }}>
-                  {machineLinkOp?.work_center_name || machineLinkOp?.workcenter_id || "-"}
+                  {changeMachineOp?.work_center_name || changeMachineOp?.workcenter_id || "-"}
                 </div>
               </div>
             </div>
@@ -1324,11 +1651,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 showSearch
                 allowClear
                 placeholder={
-                  machineLinkOp?.workcenter_id
+                  changeMachineOp?.workcenter_id
                     ? "Search / select machine"
                     : "No workcenter on this operation"
                 }
-                disabled={!machineLinkOp?.workcenter_id}
+                disabled={!changeMachineOp?.workcenter_id}
                 value={selectedMachineId}
                 onChange={setSelectedMachineId}
                 style={{ width: "100%", marginTop: 8 }}

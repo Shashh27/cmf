@@ -9,7 +9,7 @@ import {
   buildTimelineLabelFormatters,
   buildTimelineStyleSheet,
   buildTooltipTemplate,
-  getComponentColors,
+  getScheduleBarColors,
   getFilteredOperationsWindow,
   getHiddenDatesRange,
   getTimeAxisScale,
@@ -70,6 +70,7 @@ const SchedulingGanttTimeline = forwardRef(({
   dateRange = null,
   viewType = 'week',
   minHeight = 300,
+  colorBy = 'order',
 }, ref) => {
   const rootRef = useRef(null);
   const containerRef = useRef(null);
@@ -94,9 +95,10 @@ const SchedulingGanttTimeline = forwardRef(({
   const deferredOperations = useDeferredValue(scheduledOperations);
 
   const colors = useMemo(
-    () => getComponentColors(scheduledOperations),
-    [scheduledOperations]
+    () => getScheduleBarColors(scheduledOperations, colorBy),
+    [scheduledOperations, colorBy]
   );
+  const colorClassPrefix = colorBy === 'part' ? 'part' : 'order';
 
   const timelinePayload = useMemo(() => {
     const operations = filterScheduledOperations(deferredOperations, {
@@ -122,7 +124,7 @@ const SchedulingGanttTimeline = forwardRef(({
 
     return {
       operations,
-      items: buildTimelineItems(operations, colors, shiftConfigs),
+      items: buildTimelineItems(operations, colors, shiftConfigs, { colorBy }),
       groups: groupsArr,
       displayWindow,
       hiddenDates,
@@ -146,6 +148,7 @@ const SchedulingGanttTimeline = forwardRef(({
     dateRange,
     viewType,
     colors,
+    colorBy,
     minHeight,
   ]);
 
@@ -192,8 +195,8 @@ const SchedulingGanttTimeline = forwardRef(({
     try {
       setIsSyncing(true);
 
-      const signature = Object.keys(colors).sort().join('|');
-      const css = buildTimelineStyleSheet(colors);
+      const signature = `${colorClassPrefix}|${Object.keys(colors).sort().join('|')}`;
+      const css = buildTimelineStyleSheet(colors, { classPrefix: colorClassPrefix });
       if (styleSignatureRef.current !== signature || !styleElementRef.current) {
         if (styleElementRef.current) {
           styleElementRef.current.textContent = css;
@@ -284,7 +287,7 @@ const SchedulingGanttTimeline = forwardRef(({
       message.error('Timeline failed: ' + err.message);
       setIsSyncing(false);
     }
-  }, [bindInteractionHandlers, colors, viewType]);
+  }, [bindInteractionHandlers, colors, colorClassPrefix, viewType]);
 
   useEffect(() => {
     let cancelled = false;

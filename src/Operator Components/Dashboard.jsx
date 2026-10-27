@@ -10,6 +10,13 @@ import { API_BASE_URL } from '../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
 import { authFetch } from '../api/client.js';
+import {
+  getJobOperationId,
+  getJobRemainingQty,
+  getJobStatsKey,
+  getJobTotalQty,
+  logsForJob,
+} from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -258,8 +265,7 @@ const Dashboard = () => {
         if (storedActivation) {
           setIsActivated(JSON.parse(storedActivation));
         }
-        const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        fetchReworkData(operationId);
+        fetchReworkData(job);
         if (job.sale_order_id) {
           fetchOrderDetails(job.sale_order_id);
         }
@@ -305,7 +311,13 @@ const Dashboard = () => {
     }
   };
 
-  const fetchReworkData = async (operationId) => {
+  const fetchReworkData = async (jobOrOperationId) => {
+    const job = jobOrOperationId && typeof jobOrOperationId === 'object'
+      ? jobOrOperationId
+      : selectedJob;
+    const operationId = job
+      ? getJobOperationId(job)
+      : jobOrOperationId;
     if (!operationId) {
       setProductionStats({ ...EMPTY_PRODUCTION_STATS });
       return;
@@ -313,8 +325,11 @@ const Dashboard = () => {
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const logs = await response.json();
+        const logs = logsForJob(await response.json(), job);
         const stats = buildProductionStatsFromLogs(logs);
+        if (job) {
+          stats.remainingToClose = getJobRemainingQty(job, stats);
+        }
         setProductionStats(stats);
 
         const opStatus = stats.operatorStatus?.toString().toUpperCase();
@@ -334,21 +349,22 @@ const Dashboard = () => {
     if (!ops || ops.length === 0) return;
     const results = await Promise.allSettled(
       ops.map(async (job) => {
-        const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        if (!opId) return { opId: null, totalApproved: 0, operatorStatus: null };
+        const statsKey = getJobStatsKey(job);
+        const opId = getJobOperationId(job);
+        if (!statsKey || !opId) return { opId: null, totalApproved: 0, operatorStatus: null };
         try {
           const r = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!r.ok) return { opId, totalApproved: 0, operatorStatus: null };
-          const logs = await r.json();
+          if (!r.ok) return { opId: statsKey, totalApproved: 0, operatorStatus: null };
+          const logs = logsForJob(await r.json(), job);
           const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
           const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
           const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
           const activationTime = sortedLogs.length > 0 && sortedLogs[0].from_date && sortedLogs[0].from_time
             ? `${sortedLogs[0].from_date} ${sortedLogs[0].from_time}`
             : null;
-          return { opId, totalApproved, operatorStatus, activationTime };
+          return { opId: statsKey, totalApproved, operatorStatus, activationTime };
         } catch {
-          return { opId, totalApproved: 0, operatorStatus: null, activationTime: null };
+          return { opId: statsKey, totalApproved: 0, operatorStatus: null, activationTime: null };
         }
       })
     );
@@ -601,9 +617,8 @@ const Dashboard = () => {
 
   const handleProductionSubmit = (submittedQuantity) => {
     setCompletedQuantity(prev => prev + submittedQuantity);
-    const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
-    if (operationId) {
-      fetchReworkData(operationId);
+    if (selectedJob) {
+      fetchReworkData(selectedJob);
     }
   };
 
@@ -631,9 +646,9 @@ const Dashboard = () => {
     return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const plannedQty = selectedJob?.planned_quantity ?? selectedJob?.quantity ?? 0;
+  const plannedQty = getJobTotalQty(selectedJob);
   const completedQty = productionStats?.totalApproved ?? 0;
-  const remainingQty = Math.max(0, plannedQty - completedQty);
+  const remainingQty = getJobRemainingQty(selectedJob, productionStats);
 
   return (
     <div style={{ padding: '16px', background: 'transparent', overflowX: 'hidden' }}>
@@ -865,6 +880,7 @@ const Dashboard = () => {
             completedQuantity={completedQuantity}
             productionStats={productionStats}
             onProductionSubmit={handleProductionSubmit}
+            machineId={machineId}
           />
         </Col>
       </Row>
@@ -897,8 +913,7 @@ const Dashboard = () => {
           });
           setIsActivated(isJobActivated);
           setShowSelectJob(false);
-          const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
-          fetchReworkData(operationId);
+          fetchReworkData(job);
           if (job.sale_order_id) {
             fetchOrderDetails(job.sale_order_id);
           }

@@ -3,6 +3,14 @@ import { Drawer, Card, Select, Button, Tag, Typography, Row, Col, Space, Empty, 
 import { CalendarOutlined, BuildOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
+import {
+  getJobOperationId,
+  getJobRemainingQty,
+  getJobStatsKey,
+  getJobTotalQty,
+  isUnitWiseJob,
+  logsForJob,
+} from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -72,14 +80,40 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(
-        `${SCHEDULING_API_BASE_URL}/scheduling/machine-operations/${machineId || 1}`
-      );
-      if (response.status === 200) {
-        const ops = response.data.operations || [];
-        setJobs(ops);
-        fetchStatsForJobs(ops);
-      }
+      const machineKey = machineId || 1;
+      const [opsResult, unitResult] = await Promise.allSettled([
+        axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/machine-operations/${machineKey}`),
+        axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/unit-wise/machine-jobs/${machineKey}`),
+      ]);
+
+      const ops = opsResult.status === 'fulfilled'
+        ? (opsResult.value.data?.operations || [])
+        : [];
+      const unitJobs = unitResult.status === 'fulfilled'
+        ? (unitResult.value.data?.jobs || [])
+        : [];
+
+      const unitCards = unitJobs.map((job) => {
+        const bandQty = (job.unit_from != null && job.unit_to != null)
+          ? Number(job.unit_to) - Number(job.unit_from) + 1
+          : Number(job.quantity || 0);
+        return {
+          ...job,
+          is_unit_wise: true,
+          schedule_id: `unit-${job.order_id}-${job.part_id}-${job.operation_id}-${job.unit_from}-${job.unit_to}`,
+          sale_order_number: job.order_number,
+          sale_order_id: job.order_id,
+          quantity: bandQty,
+          total_quantity: bandQty,
+          planned_start_time: job.planned_start,
+          planned_end_time: job.planned_end,
+          total_operations: 1,
+        };
+      });
+
+      const combined = [...ops, ...unitCards];
+      setJobs(combined);
+      fetchStatsForJobs(combined);
     } catch (error) {
       console.error('Error fetching jobs:', error);
     } finally {
@@ -90,21 +124,22 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   const fetchStatsForJobs = async (ops) => {
     const results = await Promise.allSettled(
       ops.map(async (job) => {
-        const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        if (!opId) return { opId: null, totalApproved: 0, operatorStatus: null };
+        const statsKey = getJobStatsKey(job);
+        const opId = getJobOperationId(job);
+        if (!statsKey || !opId) return { opId: null, totalApproved: 0, totalProduced: 0, operatorStatus: null };
         try {
           const res = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!res.ok) return { opId, totalApproved: 0, operatorStatus: null };
-          const logs = await res.json();
-          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
-          
-          // Get operator_status from latest log
-          const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          if (!res.ok) return { opId: statsKey, totalApproved: 0, totalProduced: 0, operatorStatus: null };
+          const scopedLogs = logsForJob(await res.json(), job);
+          const totalApproved = scopedLogs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+          const totalProduced = scopedLogs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
+
+          const sortedLogs = [...scopedLogs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
           const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
 
-          return { opId, totalApproved, operatorStatus };
+          return { opId: statsKey, totalApproved, totalProduced, operatorStatus };
         } catch {
-          return { opId, totalApproved: 0, operatorStatus: null };
+          return { opId: statsKey, totalApproved: 0, totalProduced: 0, operatorStatus: null };
         }
       })
     );
@@ -113,6 +148,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
       if (r.status === 'fulfilled' && r.value.opId != null) {
         map[r.value.opId] = {
           totalApproved: r.value.totalApproved,
+          totalProduced: r.value.totalProduced,
           operatorStatus: r.value.operatorStatus
         };
       }
@@ -124,10 +160,8 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
     const status = (job.operation_status || job.status || '').toUpperCase();
     const isCompletedByStatus = status === 'COMPLETED';
     
-    // Check if completed by production quota
-    const totalQuantity = job.total_quantity || job.quantity || 0;
-    const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-    const stats = jobStatsMap[opId] || {};
+    const totalQuantity = getJobTotalQty(job);
+    const stats = jobStatsMap[getJobStatsKey(job)] || {};
     const approvedQuantity = stats.totalApproved || 0;
     const isCompletedByQuota = totalQuantity > 0 && approvedQuantity >= totalQuantity;
     
@@ -135,8 +169,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   };
 
   const isJobInProgress = (job) => {
-    const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-    const stats = jobStatsMap[opId] || {};
+    const stats = jobStatsMap[getJobStatsKey(job)] || {};
     const logStatus = (stats.operatorStatus || '').toUpperCase();
     const isLogInProgress = logStatus === 'INPROGRESS' || logStatus === 'IN-PROGRESS' || logStatus === 'IN PROGRESS';
 
@@ -152,19 +185,6 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
     const priorityB = b.priority || 999;
     return priorityA - priorityB;
   });
-
-  // The ONE job that is currently unlocked — determined from the full list,
-  // completely independent of any active filters.
-  const firstAvailableJob = allJobsSorted.find(job => !isJobCompleted(job, jobStatsMap));
-  const firstAvailableScheduleId = firstAvailableJob?.schedule_id ?? null;
-
-  // Cards stay selectable so operators can still open a job and view its documents.
-  // Activation is controlled separately inside the job details panel.
-  const isJobCardEnabled = (job) => {
-    if (isJobCompleted(job, jobStatsMap)) return false;
-    if (firstAvailableScheduleId == null) return false;
-    return job.schedule_id === firstAvailableScheduleId;
-  };
 
   // ─── Apply filters for display only ─────────────────────────────────────────
   const filteredJobs = allJobsSorted.filter(job => {
@@ -282,9 +302,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
             {filteredJobs.map((job) => {
               const isSelected  = isSameJob(job, currentSelectedJob);
-              const isEnabled   = isJobCardEnabled(job);
               const isCompleted = isJobCompleted(job, jobStatsMap);
-              const isBlocked   = !isCompleted && !isEnabled;
               const hasBlockReason = job.blocked_by && job.blocked_by.length > 0;
               const cardHighlightStyle = getCardHighlightStyle(isCompleted, isSelected);
 
@@ -311,17 +329,17 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       </Text>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      {job.is_unit_wise && (
+                        <Tag color="purple" style={{ borderRadius: 4, margin: 0 }}>
+                          Unit wise
+                        </Tag>
+                      )}
                       <Tag
                         color={isCompleted ? 'green' : (isJobInProgress(job) ? 'processing' : 'blue')}
                         style={{ borderRadius: 4, margin: 0 }}
                       >
                         {isCompleted ? 'Completed' : (isJobInProgress(job) ? 'In Progress' : `Priority ${job.priority || 'N/A'}`)}
                       </Tag>
-                      {isBlocked && (
-                        <Tag color="orange" style={{ borderRadius: 4, margin: 0, fontSize: 11 }}>
-                          Cannot activate
-                        </Tag>
-                      )}
                     </div>
                   </div>
 
@@ -333,7 +351,11 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       </div>
                       <div>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Quantity</Text>
-                        <Text strong>{job.total_quantity || 0}</Text>
+                        <Text strong>
+                          {isUnitWiseJob(job) && job.unit_from != null
+                            ? `${getJobTotalQty(job)} (units ${job.unit_from}–${job.unit_to})`
+                            : getJobTotalQty(job)}
+                        </Text>
                       </div>
                     </Col>
                     <Col span={12}>
@@ -344,13 +366,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       <div>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Remaining</Text>
                         <Text strong>
-                          {(() => {
-                            const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-                            const stats = jobStatsMap[opId] || {};
-                            const approved = stats.totalApproved ?? 0;
-                            const total = job.total_quantity || 0;
-                            return `${Math.max(0, total - approved)}`;
-                          })()}
+                          {getJobRemainingQty(job, jobStatsMap[getJobStatsKey(job)] || {})}
                         </Text>
                       </div>
                     </Col>
@@ -366,9 +382,6 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       borderRadius: 6,
                       marginBottom: 12 
                     }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <Text strong style={{ color: '#fa8c16', fontSize: 13 }}>Cannot activate</Text>
-                      </div>
                       <Text style={{ color: '#8c4a00', fontSize: 12, lineHeight: 1.4 }}>
                         {job.block_reason || 'Prior operation(s) must be completed first.'}
                       </Text>
