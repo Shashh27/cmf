@@ -25,26 +25,32 @@ for Op20's full remaining block).
 Scheduling rules (greedy):
   - Part order: oms.order_part_priorities (active, priority > 0)
   - Part earliest start: scheduling.part_schedule_status.start_date (activation)
-  - No closed production yet: planned_schedule_items can floor op starts
-    only for units not yet advanced by an upstream op (never before activation).
+  - No closed production yet: the live rescheduling_items start floors op
+    starts, and planned_schedule_items is used only when that live row is
+    missing. The floor applies only to units not yet advanced by an upstream
+    op (never before activation).
   - Fully completed / partial upstream op: each unit's ready time is THAT
     unit's end on the predecessor.
-  - After partial complete: first remaining unit floored to same-op continuity
-    (actual end); later remaining units use earliest-free WC machine and may
-    run in parallel (qty-wise split) when UNIT_WISE_PIN_PREFERRED=false.
+  - After partial complete: a closed job card holds only the machine that
+    closed it. The next remaining unit on that machine starts at or after
+    that card's to_time. A unit on another machine starts from its predecessor
+    ready time and that machine's own free time. With no per-machine card,
+    the rescheduling handoff still floors the first remaining unit.
   - Setup: charge setup on a machine the first time that (part, op) lands on
     it in this plan. Skip setup only for the same machine continuing the same
     (part, op) run, or for rework slots. Do NOT skip setup for unit 2+ merely
     because unit 1 already ran the op on a different WC sibling.
-  - Machine pick (test bed): default earliest available in workcenter.
-    Set UNIT_WISE_PIN_PREFERRED=true to hard-pin routing / live preferred.
+  - Machine pick: per (part, operation) assignment_mode stored on
+    unit_schedule_items. Default process_plan (hard-pin routing machine).
+    auto = earliest-free in the work centre. manual = saved qty bands.
   - Rework with approved=0 and a closed job card: remaining starts at
     max(ready, machine free, actual_end, now)
   - Shifts / OFF: SchedulerEngine + ShiftHoursConfiguration
 
 Phase 2:
   - Shift placement uses ShiftHoursConfiguration via SchedulerEngine
-  - Per-machine OT: only machines with operator assignment get NEXT/OT shifts
+  - OT: no machine assignments → whole shop uses the day's full window (incl. NEXT);
+    any assignment → only those machines get OT, others stay on GENERAL
   - Mid-shift breakdown splits segments (resume at MachineStatus.available_to)
   - Prefer machine from active job / rescheduling / operation.machine_id
     only when UNIT_WISE_PIN_PREFERRED=true
@@ -62,6 +68,7 @@ from datetime import datetime, timedelta, time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from time_utils import now_ist, to_naive_ist
@@ -74,6 +81,7 @@ from DB.models.scheduling import (
     ProductionLog,
     Rescheduling,
     UnitScheduleItem,
+    PartOperationQtyMachineAllocation,
     PlannedScheduleItem,
 )
 from production_log_helpers import (
@@ -456,27 +464,37 @@ def _freeze_active_machines(
 
 
 def _populate_other_parts_machine_free(
-    db: Session, machine_free: Dict[int, datetime], scope_part_ids: Set[int]
+    db: Session,
+    machine_free: Dict[int, datetime],
+    scope_part_ids: Set[int],
+    ignore_part_ids: Optional[Set[int]] = None,
 ) -> None:
     """
     Ensure machines respect end times of existing scheduled items for parts
     outside the current rebuild scope.
+
+    ignore_part_ids are lower-priority parts this rebuild is allowed to
+    place ahead of. Their old bars must not block the part being planned.
     """
     if not scope_part_ids:
         return
 
+    outside = [UnitScheduleItem.part_id.notin_(scope_part_ids)]
+    if ignore_part_ids:
+        outside.append(UnitScheduleItem.part_id.notin_(ignore_part_ids))
     subq = (
         db.query(
             UnitScheduleItem.part_id,
             func.max(UnitScheduleItem.schedule_version).label("max_version"),
         )
-        .filter(UnitScheduleItem.part_id.notin_(scope_part_ids))
+        .filter(*outside)
         .group_by(UnitScheduleItem.part_id)
         .subquery()
     )
 
     rows = (
         db.query(
+            UnitScheduleItem.operation_id,
             UnitScheduleItem.machine_id,
             func.max(UnitScheduleItem.end_time).label("max_end"),
         )
@@ -488,11 +506,16 @@ def _populate_other_parts_machine_free(
             ),
         )
         .filter(UnitScheduleItem.machine_id.isnot(None))
-        .group_by(UnitScheduleItem.machine_id)
+        .group_by(UnitScheduleItem.operation_id, UnitScheduleItem.machine_id)
         .all()
     )
 
-    for mid, max_end in rows:
+    closed_ops = _closed_operation_ids(
+        db, {int(op_id) for op_id, _, _ in rows if op_id is not None}
+    )
+    for op_id, mid, max_end in rows:
+        if op_id is not None and int(op_id) in closed_ops:
+            continue
         if mid and max_end:
             dt = _strip_tz(max_end)
             if dt:
@@ -533,6 +556,71 @@ def _actual_end_for_operation(db: Session, operation_id: int) -> Optional[dateti
         except Exception:
             continue
     return best
+
+
+def _closed_end_by_machine(db: Session, operation_id: int) -> Dict[int, datetime]:
+    """Latest closed to_time on this operation, one entry per machine.
+
+    A card with no machine_id is omitted here. The operation-wide latest end
+    still comes from _actual_end_for_operation.
+    """
+    logs = (
+        db.query(ProductionLog)
+        .filter(
+            ProductionLog.operation_id == operation_id,
+            ProductionLog.to_date.isnot(None),
+            ProductionLog.to_time.isnot(None),
+            ProductionLog.machine_id.isnot(None),
+        )
+        .all()
+    )
+    ends: Dict[int, datetime] = {}
+    for log in logs:
+        try:
+            dt = _strip_tz(datetime.combine(log.to_date, log.to_time))
+        except Exception:
+            continue
+        if dt is None or log.machine_id is None:
+            continue
+        machine_id = int(log.machine_id)
+        current = ends.get(machine_id)
+        if current is None or dt > current:
+            ends[machine_id] = dt
+    return ends
+
+
+def _apply_closed_card_continuity(
+    *,
+    machine_free: Dict[int, datetime],
+    unit_ready: Dict[int, datetime],
+    remaining_set: Set[int],
+    closed_by_machine: Dict[int, datetime],
+    completed_run_end: Optional[datetime],
+    part_pin: bool,
+    preferred_id: Optional[int],
+) -> None:
+    """Hold each closed card on the machine that finished it.
+
+    When at least one card names a machine, do not push that end onto the
+    lowest remaining unit index. A unit on another machine keeps its
+    predecessor ready time. With no per-machine card, the batch handoff
+    still floors the first remaining unit, and a hard pin holds the
+    preferred machine.
+    """
+    for machine_id, end in closed_by_machine.items():
+        existing = machine_free.get(int(machine_id))
+        if existing is None or end > existing:
+            machine_free[int(machine_id)] = end
+    if closed_by_machine:
+        return
+    if completed_run_end is None or not remaining_set:
+        return
+    first_remaining = min(remaining_set)
+    unit_ready[first_remaining] = max(unit_ready[first_remaining], completed_run_end)
+    if part_pin and preferred_id is not None:
+        existing = machine_free.get(preferred_id)
+        if existing is None or completed_run_end > existing:
+            machine_free[preferred_id] = completed_run_end
 
 
 def _rescheduling_completed_handoff(
@@ -662,6 +750,90 @@ def _unit_ends_from_full_plan_rows(
     return ends
 
 
+def _log_approved_finish(log) -> Optional[datetime]:
+    """Finish time of one reviewed log. Unreviewed or open logs do not hand off."""
+    approved = getattr(log, "approved_quantity", None)
+    if approved is None or int(approved) <= 0:
+        return None
+    if getattr(log, "user_id", None) is None:
+        return None
+    to_date = getattr(log, "to_date", None)
+    to_time = getattr(log, "to_time", None)
+    if to_date is None or to_time is None:
+        return None
+    try:
+        return _strip_tz(datetime.combine(to_date, to_time))
+    except Exception:
+        return None
+
+
+def _stamp_approved_units(logs, bands, qty: int) -> Dict[int, datetime]:
+    """
+    Map each reviewed log onto unit indexes.
+
+    One log has one to_time, so every unit it approves is ready at that time.
+    An earlier log keeps the low end of its machine band. A later log on the
+    same machine takes only the next free units and does not move the earlier ones.
+    """
+    by_machine: Dict[int, List[int]] = {}
+    for band in sorted(bands, key=lambda item: (int(item["machine_id"]), int(item["unit_from"]))):
+        machine_id = int(band["machine_id"])
+        by_machine.setdefault(machine_id, [])
+        for unit in range(int(band["unit_from"]), int(band["unit_to"]) + 1):
+            if 1 <= unit <= qty and unit not in by_machine[machine_id]:
+                by_machine[machine_id].append(unit)
+
+    ends: Dict[int, datetime] = {}
+    used: Set[int] = set()
+    ordered = sorted(logs, key=lambda log: int(getattr(log, "id", 0) or 0))
+    for log in ordered:
+        finish = _log_approved_finish(log)
+        if finish is None:
+            continue
+        approved = int(log.approved_quantity)
+        machine_id = getattr(log, "machine_id", None)
+        if machine_id is not None and int(machine_id) in by_machine:
+            source = by_machine[int(machine_id)]
+        elif not by_machine:
+            source = list(range(1, qty + 1))
+        else:
+            continue
+        taken = [unit for unit in source if unit not in used][:approved]
+        for unit in taken:
+            ends[unit] = finish
+            used.add(unit)
+    return ends
+
+
+def _approved_unit_ready_times(
+    db: Session, operation_id: int, order_id: Optional[int], qty: int
+) -> Dict[int, datetime]:
+    """Next-op ready time per unit from the production log that approved it."""
+    raw_logs = (
+        db.query(ProductionLog)
+        .filter(ProductionLog.operation_id == operation_id)
+        .order_by(ProductionLog.id.asc())
+        .all()
+    )
+    logs = [log for log in raw_logs if _log_approved_finish(log) is not None]
+    if not logs:
+        return {}
+
+    query = db.query(PartOperationQtyMachineAllocation).filter(
+        PartOperationQtyMachineAllocation.operation_id == operation_id
+    )
+    if order_id is not None:
+        query = query.filter(PartOperationQtyMachineAllocation.order_id == order_id)
+    bands = [
+        {"machine_id": row.machine_id, "unit_from": row.unit_from, "unit_to": row.unit_to}
+        for row in query.all()
+        if getattr(row, "machine_id", None) is not None
+        and getattr(row, "unit_from", None) is not None
+        and getattr(row, "unit_to", None) is not None
+    ]
+    return _stamp_approved_units(logs, bands, qty)
+
+
 def _per_unit_operation_ends(
     db: Session,
     operation: Operation,
@@ -721,6 +893,11 @@ def _per_unit_operation_ends(
             for u, t in walked.items():
                 ends.setdefault(u, t)
         ends[n] = completed_run_end
+
+    # A reviewed production log replaces the batch plan for the units it approved.
+    # Every unit on that log shares its to_time. Later logs do not move earlier units.
+    for unit, finish in _approved_unit_ready_times(db, operation.id, order_id, qty).items():
+        ends[unit] = finish
     return ends
 
 
@@ -736,6 +913,82 @@ def _planned_start_for_operation(db: Session, operation_id: int) -> Optional[dat
         .first()
     )
     return _strip_tz(row.planned_start_time) if row else None
+
+
+def _virgin_op_floor(
+    db: Session, operation_id: int, order_id: Optional[int] = None
+) -> Optional[datetime]:
+    """
+    Earliest start for an operation that has not been produced yet.
+
+    The live rescheduling_items start wins. planned_schedule_items is only
+    the fallback when the live plan has no row for this operation.
+    """
+    query = db.query(Rescheduling).filter(
+        Rescheduling.operation_id == operation_id,
+        Rescheduling.start_time.isnot(None),
+        Rescheduling.status.in_(("scheduled", "rescheduled")),
+    )
+    if order_id is not None:
+        query = query.filter(Rescheduling.order_id == order_id)
+    row = query.order_by(Rescheduling.start_time.asc(), Rescheduling.id.asc()).first()
+    if row is not None and row.start_time is not None:
+        return _strip_tz(row.start_time)
+    return _planned_start_for_operation(db, operation_id)
+
+
+def _closed_operation_ids(db: Session, operation_ids: Set[int]) -> Set[int]:
+    """Operations whose approved quantity already covers the part quantity."""
+    if not operation_ids:
+        return set()
+    try:
+        approved = (
+            db.query(
+                ProductionLog.operation_id.label("operation_id"),
+                func.coalesce(func.sum(ProductionLog.approved_quantity), 0).label("approved"),
+            )
+            .filter(
+                ProductionLog.operation_id.in_(list(operation_ids)),
+                ProductionLog.approved_quantity.isnot(None),
+            )
+            .group_by(ProductionLog.operation_id)
+            .subquery()
+        )
+        rows = (
+            db.query(Operation.id)
+            .join(Part, Part.id == Operation.part_id)
+            .outerjoin(approved, approved.c.operation_id == Operation.id)
+            .filter(
+                Operation.id.in_(list(operation_ids)),
+                Part.qty.isnot(None),
+                Part.qty > 0,
+                func.coalesce(approved.c.approved, 0) >= Part.qty,
+            )
+            .all()
+        )
+    except OperationalError:
+        logger.warning(
+            "Could not read approved quantities while checking closed operations",
+            extra={"event": "unit_wise_closed_ops_unavailable"},
+        )
+        return set()
+    return {int(operation_id) for (operation_id,) in rows}
+
+
+def drop_closed_operation_unit_rows(db: Session, operation_id: int) -> int:
+    """
+    Remove unit bars for an operation that is already fully approved.
+
+    Partial work stays. A later unit rebuild still plans any remaining units.
+    """
+    if int(operation_id) not in _closed_operation_ids(db, {int(operation_id)}):
+        return 0
+    deleted = (
+        db.query(UnitScheduleItem)
+        .filter(UnitScheduleItem.operation_id == operation_id)
+        .delete(synchronize_session=False)
+    )
+    return int(deleted or 0)
 
 
 def _schedulable_operations(db: Session, part_id: int) -> List[Operation]:
@@ -878,6 +1131,228 @@ def _part_activation_start(engine, activation: Optional[datetime], now: datetime
         return _snap_to_shift_start(base)
 
 
+def _priority_by_part(db: Session) -> Dict[int, int]:
+    """Active order_part_priorities. A lower number is more urgent. Missing parts are not listed."""
+    rows = (
+        db.query(OrderPartPriority.part_id, OrderPartPriority.priority)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .all()
+    )
+    return {int(part_id): int(priority) for part_id, priority in rows}
+
+
+def _part_ids_to_displace(
+    focal_priority: int,
+    priority_by_part: Dict[int, int],
+    booked_part_ids: Set[int],
+    focal_ids: Set[int],
+) -> List[int]:
+    """
+    Lower-priority parts (higher number) that already have bars on a machine
+    the part being rebuilt used. More urgent of those parts come first.
+    """
+    displaced = []
+    for part_id in booked_part_ids:
+        if part_id in focal_ids:
+            continue
+        priority = int(priority_by_part.get(part_id, 999))
+        if priority > int(focal_priority):
+            displaced.append(int(part_id))
+    displaced.sort(key=lambda part_id: (int(priority_by_part.get(part_id, 999)), part_id))
+    return displaced
+
+
+def _parts_with_rows_on_machines(
+    db: Session, machine_ids: Set[int], exclude_part_ids: Set[int]
+) -> Set[int]:
+    """Parts whose latest unit schedule uses one of these machines."""
+    if not machine_ids:
+        return set()
+    subq = (
+        db.query(
+            UnitScheduleItem.part_id,
+            func.max(UnitScheduleItem.schedule_version).label("max_version"),
+        )
+        .group_by(UnitScheduleItem.part_id)
+        .subquery()
+    )
+    query = (
+        db.query(UnitScheduleItem.part_id)
+        .join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
+        .filter(UnitScheduleItem.machine_id.in_(list(machine_ids)))
+    )
+    if exclude_part_ids:
+        query = query.filter(UnitScheduleItem.part_id.notin_(list(exclude_part_ids)))
+    return {int(part_id) for (part_id,) in query.distinct().all()}
+
+
+VALID_ASSIGNMENT_MODES = ("auto", "process_plan", "manual")
+DEFAULT_ASSIGNMENT_MODE = "process_plan"
+
+
+def _normalize_assignment_mode(
+    raw: Optional[str], default: str = DEFAULT_ASSIGNMENT_MODE
+) -> str:
+    mode = (raw or "").lower().strip()
+    if mode in VALID_ASSIGNMENT_MODES:
+        return mode
+    fallback = (default or DEFAULT_ASSIGNMENT_MODE).lower().strip()
+    return fallback if fallback in VALID_ASSIGNMENT_MODES else DEFAULT_ASSIGNMENT_MODE
+
+
+def _normalize_operation_assignment_modes(
+    raw: Optional[Dict[Any, Any]],
+) -> Dict[int, str]:
+    """Coerce {operation_id: mode} keys to int. Invalid modes are dropped."""
+    if not raw:
+        return {}
+    out: Dict[int, str] = {}
+    for key, value in raw.items():
+        try:
+            op_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        mode = (value or "").lower().strip() if isinstance(value, str) else ""
+        if mode in VALID_ASSIGNMENT_MODES:
+            out[op_id] = mode
+    return out
+
+
+def _resolve_part_plan(
+    part_id: int,
+    assignment_mode: Optional[str],
+    assignment_mode_by_part: Optional[Dict[int, str]],
+    pin_preferred: bool,
+) -> Tuple[str, bool]:
+    """
+    Mode and hard-pin for one part.
+
+    Kept for callers that still pass a part-wide map. New planning uses
+    _resolve_operation_plan. A per-part map keeps manual / process_plan / auto.
+    Without that map, the rebuild default is process_plan (not auto).
+    """
+    if assignment_mode_by_part is not None:
+        raw = (assignment_mode_by_part.get(part_id) or DEFAULT_ASSIGNMENT_MODE)
+        mode = _normalize_assignment_mode(raw)
+        return mode, mode == "process_plan"
+    if assignment_mode:
+        mode = _normalize_assignment_mode(assignment_mode)
+        return mode, bool(pin_preferred)
+    return (assignment_mode or "auto"), bool(pin_preferred)
+
+
+def _resolve_operation_plan(
+    part_id: int,
+    operation_id: int,
+    *,
+    stored_by_operation: Optional[Dict[Tuple[int, int], str]] = None,
+    overrides: Optional[Dict[int, str]] = None,
+    assignment_mode_by_part: Optional[Dict[int, str]] = None,
+    default_mode: Optional[str] = None,
+) -> Tuple[str, bool]:
+    """
+    Mode and hard-pin for one operation.
+
+    override > stored (part, op) > part-wide map > part-level default > process_plan.
+    process_plan hard-pins the routing machine; auto/manual do not.
+    """
+    raw = None
+    if overrides and operation_id in overrides:
+        raw = overrides[operation_id]
+    elif stored_by_operation and (part_id, operation_id) in stored_by_operation:
+        raw = stored_by_operation[(part_id, operation_id)]
+    elif assignment_mode_by_part and part_id in assignment_mode_by_part:
+        raw = assignment_mode_by_part[part_id]
+    elif default_mode:
+        raw = default_mode
+    mode = _normalize_assignment_mode(raw)
+    return mode, mode == "process_plan"
+
+
+def _latest_assignment_mode_by_part(db: Session, part_ids: List[int]) -> Dict[int, str]:
+    """Mode stored on each part's latest unit_schedule_items rows. Missing parts are omitted."""
+    if not part_ids:
+        return {}
+    subq = (
+        db.query(
+            UnitScheduleItem.part_id,
+            func.max(UnitScheduleItem.schedule_version).label("max_version"),
+        )
+        .filter(UnitScheduleItem.part_id.in_(part_ids))
+        .group_by(UnitScheduleItem.part_id)
+        .subquery()
+    )
+    rows = (
+        db.query(UnitScheduleItem.part_id, UnitScheduleItem.assignment_mode)
+        .join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
+        .all()
+    )
+    modes: Dict[int, str] = {}
+    for part_id, mode in rows:
+        if part_id in modes or not mode:
+            continue
+        raw = str(mode).lower().strip()
+        if raw in VALID_ASSIGNMENT_MODES:
+            modes[int(part_id)] = raw
+    return modes
+
+
+def _latest_assignment_mode_by_operation(
+    db: Session, part_ids: List[int]
+) -> Dict[Tuple[int, int], str]:
+    """Latest assignment_mode per (part_id, operation_id). Missing ops are omitted."""
+    if not part_ids:
+        return {}
+    subq = (
+        db.query(
+            UnitScheduleItem.part_id,
+            func.max(UnitScheduleItem.schedule_version).label("max_version"),
+        )
+        .filter(UnitScheduleItem.part_id.in_(part_ids))
+        .group_by(UnitScheduleItem.part_id)
+        .subquery()
+    )
+    rows = (
+        db.query(
+            UnitScheduleItem.part_id,
+            UnitScheduleItem.operation_id,
+            UnitScheduleItem.assignment_mode,
+        )
+        .join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
+        .all()
+    )
+    modes: Dict[Tuple[int, int], str] = {}
+    for part_id, operation_id, mode in rows:
+        key = (int(part_id), int(operation_id))
+        if key in modes or not mode:
+            continue
+        raw = str(mode).lower().strip()
+        if raw in VALID_ASSIGNMENT_MODES:
+            modes[key] = raw
+    return modes
+
+
 def simulate_unit_plan(
     db: Session,
     scope: List[Dict[str, Any]],
@@ -889,6 +1364,11 @@ def simulate_unit_plan(
     source: str = "greedy",
     pin_preferred: Optional[bool] = None,
     preferred_machine_id: Optional[int] = None,
+    assignment_mode: Optional[str] = None,
+    assignment_mode_by_part: Optional[Dict[int, str]] = None,
+    assignment_mode_by_operation: Optional[Dict[Tuple[int, int], str]] = None,
+    operation_assignment_modes: Optional[Dict[int, str]] = None,
+    suppress_other_part_ids: Optional[Set[int]] = None,
 ) -> Dict[str, Any]:
     """
     Build in-memory unit segments for scope without writing to DB.
@@ -899,11 +1379,19 @@ def simulate_unit_plan(
       When False, earliest-free WC (qty-wise split). None → server default false.
     preferred_machine_id: when pin_preferred, force this machine for ops whose
       workcenter contains it (batch all remaining units onto that spindle).
+    assignment_mode: part-level default only for ops with no stored mode and
+      no override. Per-operation mode is stored on unit_schedule_items.
+    assignment_mode_by_operation: latest stored mode keyed (part_id, operation_id).
+    operation_assignment_modes: rebuild overrides keyed by operation_id.
     """
     unit_order_by_part = unit_order_by_part or {}
     machine_by_slot = machine_by_slot or {}
+    operation_assignment_modes = _normalize_operation_assignment_modes(
+        operation_assignment_modes
+    )
+    assignment_mode_by_operation = assignment_mode_by_operation or {}
     if pin_preferred is None:
-        pin_preferred = os.getenv("UNIT_WISE_PIN_PREFERRED", "false").lower() in (
+        pin_preferred = os.getenv("UNIT_WISE_PIN_PREFERRED", "true").lower() in (
             "1",
             "true",
             "yes",
@@ -918,7 +1406,12 @@ def simulate_unit_plan(
     machine_cache: Dict[int, Machine] = {}
     _freeze_active_machines(db, machine_free, now)
     scope_part_ids = {item["part"].id for item in scope if item.get("part")}
-    _populate_other_parts_machine_free(db, machine_free, scope_part_ids)
+    _populate_other_parts_machine_free(
+        db,
+        machine_free,
+        scope_part_ids,
+        ignore_part_ids=suppress_other_part_ids,
+    )
 
     segments_out: List[Dict[str, Any]] = []
 
@@ -937,7 +1430,6 @@ def simulate_unit_plan(
         # Ensure all unit indexes present exactly once
         missing = [u for u in range(1, qty + 1) if u not in order_units]
         order_units = [u for u in order_units if 1 <= u <= qty] + missing
-
         unit_ready: Dict[int, datetime] = {u: part_start for u in range(1, qty + 1)}
         # Units that failed placement on an upstream op must not appear downstream
         blocked_units: Set[int] = set()
@@ -957,13 +1449,21 @@ def simulate_unit_plan(
                 approved=approved,
                 actual_end=actual_end,
             )
-            planned_start = _planned_start_for_operation(db, operation.id)
+            floor_start = _virgin_op_floor(db, operation.id, order_id=order.id)
             rework_due = _rework_due_for_operation(db, operation.id, qty, approved)
             machines = _machines_for_workcenter(db, operation.workcenter_id)
+            op_mode, op_pin = _resolve_operation_plan(
+                part.id,
+                operation.id,
+                stored_by_operation=assignment_mode_by_operation,
+                overrides=operation_assignment_modes,
+                assignment_mode_by_part=assignment_mode_by_part,
+                default_mode=assignment_mode,
+            )
             preferred_id = _preferred_machine_id(db, operation, order.id)
             # Frontend Intelligent Scheduler: explicit machine pin for this WC
             if (
-                pin_preferred
+                op_pin
                 and preferred_machine_id is not None
                 and any(m.id == preferred_machine_id for m in machines)
             ):
@@ -1020,14 +1520,15 @@ def simulate_unit_plan(
                         unit_ready[u] = completed_run_end
                         pipeline_advanced.add(u)
 
-            # Virgin planned floor ONLY for units not yet advanced by upstream
-            # placement/completion. Applying batch planned_start to all units
-            # forces Op N+1 unit 1 to wait for Op N unit N (batch behaviour).
-            if planned_start is not None and approved == 0 and completed_run_end is None:
+            # Virgin floor ONLY for units not yet advanced by upstream
+            # placement/completion. The floor is the live reschedule start
+            # (planned_schedule_items only when that row is missing). Applying
+            # it to every unit forces Op N+1 unit 1 to wait for Op N unit N.
+            if floor_start is not None and approved == 0 and completed_run_end is None:
                 for u in range(1, qty + 1):
                     if u in pipeline_advanced:
                         continue
-                    unit_ready[u] = max(unit_ready[u], planned_start)
+                    unit_ready[u] = max(unit_ready[u], floor_start)
 
             remaining_to_close = max(0, qty - approved)
             # Remaining units approved+1..qty. With soft WC pick they may run
@@ -1038,20 +1539,17 @@ def simulate_unit_plan(
                 for u in range(max(1, qty - rework_due + 1), qty + 1):
                     remaining_set.add(u)
 
-            # First remaining unit: same-op continuity (actual end), not batch
-            # cascade. Later units pick earliest-free WC machines and may run
-            # in parallel (qty-wise split) when pin_preferred is false.
-            if completed_run_end is not None and remaining_set:
-                first_remaining = min(remaining_set)
-                unit_ready[first_remaining] = max(
-                    unit_ready[first_remaining], completed_run_end
-                )
-                # Only hard-pin path anchors the preferred machine clock;
-                # soft pick must leave other WC machines free for parallel units.
-                if pin_preferred and preferred_id is not None:
-                    existing = machine_free.get(preferred_id)
-                    if existing is None or completed_run_end > existing:
-                        machine_free[preferred_id] = completed_run_end
+            # A closed card holds only its own machine. The batch handoff
+            # still floors the first remaining unit when no card names a machine.
+            _apply_closed_card_continuity(
+                machine_free=machine_free,
+                unit_ready=unit_ready,
+                remaining_set=remaining_set,
+                closed_by_machine=_closed_end_by_machine(db, operation.id),
+                completed_run_end=completed_run_end,
+                part_pin=op_pin,
+                preferred_id=preferred_id,
+            )
 
             remaining_units = [
                 u for u in order_units if u in remaining_set and u not in blocked_units
@@ -1069,11 +1567,22 @@ def simulate_unit_plan(
 
             for rem_i, u in enumerate(remaining_units):
                 slot_key = (part.id, operation.id, u)
-                override_mid = machine_by_slot.get(slot_key)
+                override_mid = (
+                    machine_by_slot.get(slot_key) if op_mode == "manual" else None
+                )
 
+                # Explicit slot map (manual qty→machine) always wins when valid.
                 machine = None
-                if override_mid is not None and not pin_preferred:
+                if override_mid is not None:
                     machine = next((m for m in machines if m.id == override_mid), None)
+                    if machine is None:
+                        logger.warning(
+                            "machine_by_slot machine %s not in WC for part=%s op=%s unit=%s",
+                            override_mid,
+                            part.id,
+                            operation.id,
+                            u,
+                        )
                 if machine is None:
                     machine = _pick_machine(
                         machines,
@@ -1081,7 +1590,7 @@ def simulate_unit_plan(
                         unit_ready[u],
                         preferred_id=preferred_id,
                         engine=engine,
-                        hard_pin=pin_preferred,
+                        hard_pin=op_pin,
                     )
                 if machine is None:
                     blocked_units.add(u)
@@ -1124,14 +1633,17 @@ def simulate_unit_plan(
                             "order_number": order.sale_order_number,
                             "part_id": part.id,
                             "part_number": part.part_number,
+                            "part_name": part.part_name,
                             "unit_index": u,
                             "operation_id": operation.id,
                             "operation_number": str(operation.operation_number),
+                            "operation_name": operation.operation_name,
                             "machine_id": machine.id,
                             "start_time": seg_start,
                             "end_time": seg_end,
                             "status": "unit_scheduled",
                             "source": source,
+                            "assignment_mode": op_mode,
                         }
                     )
 
@@ -1155,6 +1667,21 @@ def simulate_unit_plan(
     }
 
 
+def rebuild_unit_schedule_after_priority_swap(db: Session) -> Dict[str, Any]:
+    """
+    Replan every active part once, in priority order, keeping each part's mode.
+
+    Called only after the production dynamic_reschedule has already committed.
+    Writes unit_schedule_items only.
+    """
+    return rebuild_unit_schedule(
+        db,
+        commit=True,
+        optimizer="greedy",
+        preserve_part_modes=True,
+    )
+
+
 def rebuild_unit_schedule(
     db: Session,
     part_id: Optional[int] = None,
@@ -1166,19 +1693,44 @@ def rebuild_unit_schedule(
     ga_overrides: Optional[Dict[str, Any]] = None,
     pin_preferred: Optional[bool] = None,
     preferred_machine_id: Optional[int] = None,
+    assignment_mode: Optional[str] = None,
+    machine_by_slot: Optional[Dict[Tuple[int, int, int], int]] = None,
+    preserve_part_modes: bool = False,
+    operation_assignment_modes: Optional[Dict[int, str]] = None,
 ) -> Dict[str, Any]:
     """
     Delete existing unit rows for scope and insert a fresh plan.
 
-    pin_preferred / preferred_machine_id come from the Intelligent Scheduler UI
-    (replace UNIT_WISE_PIN_PREFERRED env for shop demos).
+    assignment_mode is only the default for operations with no stored mode
+    and no override. Per-operation modes live on unit_schedule_items.
+    operation_assignment_modes: optional {operation_id: mode} overrides.
+    pin_preferred / preferred_machine_id remain for backward compatibility.
     """
     # Always allow rebuild from API / Intelligent Scheduler (env gate removed).
+    overrides = _normalize_operation_assignment_modes(operation_assignment_modes)
+    mode = (assignment_mode or "").lower().strip() if assignment_mode else None
+    if mode and mode not in VALID_ASSIGNMENT_MODES:
+        mode = None
+    # Part-level mode no longer pins every operation. Per-op resolve does.
+    if mode == "manual" or "manual" in overrides.values():
+        pin_preferred = False
+        preferred_machine_id = None
+    elif mode == "process_plan":
+        preferred_machine_id = None  # Use routing's machine_id, not UI-selected
+    elif mode == "auto":
+        pin_preferred = False
+
     opt = (optimizer or os.getenv("UNIT_WISE_OPTIMIZER", "greedy") or "greedy").lower()
     # All GA-mode aliases use NSGA-II
     if opt not in ("greedy", "nsga2", "ga", "ga_research"):
         opt = "greedy"
     use_nsga2 = opt in ("nsga2", "ga", "ga_research")
+
+    if (mode == "manual" or "manual" in overrides.values()) and use_nsga2:
+        raise ValueError(
+            'assignment_mode="manual" requires optimizer="greedy" '
+            "(GA does not honor qty→machine allocations yet)."
+        )
 
     scope = _load_active_scope(db, part_id=part_id, order_id=order_id)
     if not scope:
@@ -1231,6 +1783,35 @@ def rebuild_unit_schedule(
         engine = SchedulerEngine(db)
         now = now_ist()
 
+        slot_map = machine_by_slot
+        stored_by_op = _latest_assignment_mode_by_operation(db, part_ids)
+        if preserve_part_modes:
+            # Read before delete. Shop-wide plan keeps each operation's mode.
+            use_nsga2 = False
+            opt = "greedy"
+            pin_preferred = False
+            preferred_machine_id = None
+            overrides = {}
+        stored_modes = set(stored_by_op.values())
+        override_modes = set(overrides.values())
+        mixed_or_manual = (
+            "manual" in stored_modes
+            or "manual" in override_modes
+            or len(stored_modes | override_modes | ({mode} if mode else set())) > 1
+        )
+        if mixed_or_manual:
+            use_nsga2 = False
+            opt = "greedy"
+        if slot_map is None and (
+            mode == "manual"
+            or "manual" in stored_modes
+            or "manual" in override_modes
+        ):
+            from intelligent_scheduler.service import load_machine_by_slot_for_parts
+
+            slot_map = load_machine_by_slot_for_parts(db, part_ids)
+        slot_map = slot_map or {}
+
         if use_nsga2:
             from unit_wise_ga_research import optimize_unit_plan_research
 
@@ -1244,18 +1825,71 @@ def rebuild_unit_schedule(
                 config_overrides=ga_overrides,
                 pin_preferred=pin_preferred,
                 preferred_machine_id=preferred_machine_id,
+                assignment_mode=mode or DEFAULT_ASSIGNMENT_MODE,
             )
             ga_meta = plan.get("ga") or {}
         else:
-            plan = simulate_unit_plan(
-                db,
-                scope,
+            plan_kwargs = dict(
                 engine=engine,
                 now=now,
                 source="greedy",
-                pin_preferred=pin_preferred,
+                pin_preferred=False,
                 preferred_machine_id=preferred_machine_id,
+                machine_by_slot=slot_map if slot_map else None,
+                assignment_mode=mode,
+                assignment_mode_by_part=None,
+                assignment_mode_by_operation=stored_by_op,
+                operation_assignment_modes=overrides or None,
             )
+            if part_id is not None and not preserve_part_modes:
+                priorities = _priority_by_part(db)
+                focal_ids = {int(item["part"].id) for item in scope}
+                focal_priority = min(int(item.get("priority") or 999) for item in scope)
+                lower_ids = {
+                    pid
+                    for pid, pri in priorities.items()
+                    if pid not in focal_ids and int(pri) > focal_priority
+                }
+                probe = simulate_unit_plan(
+                    db,
+                    scope,
+                    suppress_other_part_ids=lower_ids or None,
+                    **plan_kwargs,
+                )
+                machines_used = {
+                    int(seg["machine_id"])
+                    for seg in (probe.get("segments") or [])
+                    if seg.get("machine_id") is not None
+                }
+                booked = _parts_with_rows_on_machines(db, machines_used, focal_ids)
+                for pid in booked:
+                    priorities.setdefault(pid, 999)
+                displace_ids = _part_ids_to_displace(
+                    focal_priority, priorities, booked, focal_ids
+                )
+                by_id = {
+                    int(item["part"].id): item for item in _load_active_scope(db)
+                } if displace_ids else {}
+                displaced_items = [by_id[pid] for pid in displace_ids if pid in by_id]
+                if displaced_items:
+                    scope = list(scope) + displaced_items
+                    part_ids = [int(item["part"].id) for item in scope]
+                    stored_by_op = _latest_assignment_mode_by_operation(db, part_ids)
+                    from intelligent_scheduler.service import (
+                        load_machine_by_slot_for_parts,
+                    )
+
+                    slot_map = {
+                        **(slot_map or {}),
+                        **load_machine_by_slot_for_parts(db, part_ids),
+                    }
+                    plan_kwargs["machine_by_slot"] = slot_map if slot_map else None
+                    plan_kwargs["assignment_mode_by_operation"] = stored_by_op
+                    plan = simulate_unit_plan(db, scope, **plan_kwargs)
+                else:
+                    plan = probe
+            else:
+                plan = simulate_unit_plan(db, scope, **plan_kwargs)
 
         max_ver = db.query(func.max(UnitScheduleItem.schedule_version)).scalar() or 0
         version = int(max_ver) + 1
@@ -1282,6 +1916,7 @@ def rebuild_unit_schedule(
                     status=seg.get("status") or "unit_scheduled",
                     schedule_version=version,
                     source=seg.get("source") or opt,
+                    assignment_mode=seg.get("assignment_mode") or mode or DEFAULT_ASSIGNMENT_MODE,
                 )
             )
 
@@ -1385,8 +2020,14 @@ def list_unit_schedule(
     order_id: Optional[int] = None,
     machine_id: Optional[int] = None,
     latest_only: bool = True,
-) -> List[UnitScheduleItem]:
-    q = db.query(UnitScheduleItem)
+) -> List[Tuple[UnitScheduleItem, Optional[str], Optional[str]]]:
+    q = db.query(
+        UnitScheduleItem,
+        Part.part_name,
+        Operation.operation_name,
+    ).join(Part, Part.id == UnitScheduleItem.part_id).join(
+        Operation, Operation.id == UnitScheduleItem.operation_id
+    )
     if part_id is not None and part_id > 0:
         q = q.filter(UnitScheduleItem.part_id == part_id)
     if order_id is not None and order_id > 0:
@@ -1425,16 +2066,18 @@ def list_unit_schedule(
     )
 
 
-def unit_item_to_dict(row: UnitScheduleItem) -> Dict[str, Any]:
+def unit_item_to_dict(row: UnitScheduleItem, part_name: Optional[str] = None, operation_name: Optional[str] = None) -> Dict[str, Any]:
     return {
         "id": row.id,
         "order_id": row.order_id,
         "order_number": row.order_number,
         "part_id": row.part_id,
         "part_number": row.part_number,
+        "part_name": part_name,
         "unit_index": row.unit_index,
         "operation_id": row.operation_id,
         "operation_number": row.operation_number,
+        "operation_name": operation_name,
         "machine_id": row.machine_id,
         "start_time": row.start_time.isoformat() if row.start_time else None,
         "end_time": row.end_time.isoformat() if row.end_time else None,

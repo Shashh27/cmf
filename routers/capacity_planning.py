@@ -6,12 +6,14 @@ from time_utils import now_ist
 import calendar
 
 from DB.database import get_db
+from scheduling_modes import get_shop_plan
 from DB.models.scheduling import (
     MachineStatus,
     ShiftHoursConfiguration,
     EfficiencyFactor,
     PlannedScheduleItem,
     Rescheduling,
+    UnitScheduleItem,
 )
 from DB.models.configuration import Machine
 
@@ -61,6 +63,74 @@ def _clip_hours(seg_start: datetime, seg_end: datetime, win_start: datetime, win
     return (end - start).total_seconds() / 3600.0
 
 
+def _planned_utilized_hours(
+    db: Session,
+    start_dt: datetime,
+    end_dt: datetime,
+    machine_id: Optional[int] = None,
+) -> Dict[int, float]:
+    plan_q = db.query(PlannedScheduleItem).filter(
+        PlannedScheduleItem.machine_id.isnot(None),
+        PlannedScheduleItem.planned_start_time.isnot(None),
+        PlannedScheduleItem.planned_end_time.isnot(None),
+        PlannedScheduleItem.planned_start_time < end_dt,
+        PlannedScheduleItem.planned_end_time > start_dt,
+    )
+    if machine_id is not None:
+        plan_q = plan_q.filter(PlannedScheduleItem.machine_id == machine_id)
+    by_machine: Dict[int, float] = {}
+    for item in plan_q.all():
+        hours = _clip_hours(
+            item.planned_start_time, item.planned_end_time, start_dt, end_dt
+        )
+        if hours <= 0 or item.machine_id is None:
+            continue
+        by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
+    return by_machine
+
+
+def _unit_wise_utilized_hours(
+    db: Session,
+    start_dt: datetime,
+    end_dt: datetime,
+    machine_id: Optional[int] = None,
+) -> Dict[int, float]:
+    from sqlalchemy import and_, func
+
+    subq = (
+        db.query(
+            UnitScheduleItem.part_id,
+            func.max(UnitScheduleItem.schedule_version).label("max_version"),
+        )
+        .group_by(UnitScheduleItem.part_id)
+        .subquery()
+    )
+    q = (
+        db.query(UnitScheduleItem)
+        .join(
+            subq,
+            and_(
+                UnitScheduleItem.part_id == subq.c.part_id,
+                UnitScheduleItem.schedule_version == subq.c.max_version,
+            ),
+        )
+        .filter(
+            UnitScheduleItem.machine_id.isnot(None),
+            UnitScheduleItem.start_time < end_dt,
+            UnitScheduleItem.end_time > start_dt,
+        )
+    )
+    if machine_id is not None:
+        q = q.filter(UnitScheduleItem.machine_id == machine_id)
+    by_machine: Dict[int, float] = {}
+    for item in q.all():
+        hours = _clip_hours(item.start_time, item.end_time, start_dt, end_dt)
+        if hours <= 0 or item.machine_id is None:
+            continue
+        by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
+    return by_machine
+
+
 def _load_utilized_hours_by_machine(
     db: Session,
     start_dt: datetime,
@@ -68,11 +138,15 @@ def _load_utilized_hours_by_machine(
     machine_id: Optional[int] = None,
 ) -> Tuple[Dict[int, float], str]:
     """
-    Prefer dynamic schedule (rescheduling_items) so capacity tracks production-log
-    updates. Fall back to planned_schedule_items when dynamic has no rows yet.
-
-    Returns (machine_id -> utilized_hours, source_label).
+    Follow the live shop plan. Batch uses rescheduling_items (then planned).
+    Unit-wise uses the latest unit_schedule_items (then planned).
     """
+    if get_shop_plan(db) == "unit_wise":
+        unit_hours = _unit_wise_utilized_hours(db, start_dt, end_dt, machine_id)
+        if unit_hours:
+            return unit_hours, "unit_wise"
+        return _planned_utilized_hours(db, start_dt, end_dt, machine_id), "planned"
+
     dyn_q = db.query(Rescheduling).filter(
         Rescheduling.machine_id.isnot(None),
         Rescheduling.status.in_(("scheduled", "rescheduled")),
@@ -92,25 +166,7 @@ def _load_utilized_hours_by_machine(
             by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
         return by_machine, "dynamic"
 
-    plan_q = db.query(PlannedScheduleItem).filter(
-        PlannedScheduleItem.machine_id.isnot(None),
-        PlannedScheduleItem.planned_start_time.isnot(None),
-        PlannedScheduleItem.planned_end_time.isnot(None),
-        PlannedScheduleItem.planned_start_time < end_dt,
-        PlannedScheduleItem.planned_end_time > start_dt,
-    )
-    if machine_id is not None:
-        plan_q = plan_q.filter(PlannedScheduleItem.machine_id == machine_id)
-    planned_items = plan_q.all()
-
-    for item in planned_items:
-        hours = _clip_hours(
-            item.planned_start_time, item.planned_end_time, start_dt, end_dt
-        )
-        if hours <= 0 or item.machine_id is None:
-            continue
-        by_machine[item.machine_id] = by_machine.get(item.machine_id, 0.0) + hours
-    return by_machine, "planned"
+    return _planned_utilized_hours(db, start_dt, end_dt, machine_id), "planned"
 
 
 @router.get("/machine-utilization", response_model=List[MachineUtilization])

@@ -76,7 +76,7 @@ from unit_wise_scheduler import (
     _machines_for_workcenter,
     _pick_machine,
     _place_within_shifts_engine,
-    _planned_start_for_operation,
+    _virgin_op_floor,
     _preferred_machine_id,
     _rework_due_for_operation,
     _schedulable_operations,
@@ -455,10 +455,13 @@ def decode_activity_priority(
     now: datetime,
     pin_preferred: bool,
     source: str = "nsga2",
+    assignment_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Priority-list decode: repeatedly schedule the first precedence-feasible
     activity in permutation order (semi-active).
+
+    assignment_mode: 'auto' | 'process_plan' | 'manual' - stored in unit_schedule_items
     """
     act_by_id = {a.id: a for a in activities}
     if not activities:
@@ -492,19 +495,22 @@ def decode_activity_priority(
         for operation in _schedulable_operations(db, part.id):
             approved = int(total_approved_for_operation(db, operation.id) or 0)
             actual_end = _actual_end_for_operation(db, operation.id)
-            planned_start = _planned_start_for_operation(db, operation.id)
+            order = item.get("order")
+            floor_start = _virgin_op_floor(
+                db, operation.id, order_id=getattr(order, "id", None)
+            )
             # Apply completion time to ALL units:
             # 1. If production logs exist, use actual end time from production logs
-            # 2. If no production logs (production not started), use planned start time
+            # 2. If no production logs (production not started), use the live
+            #    reschedule start, or planned_schedule_items when that is missing
             # 3. If neither exists, keep current unit_ready value
             if actual_end is not None:
                 # Production has started - cascade from actual completion time
                 for u in range(1, qty + 1):
                     unit_ready[(part.id, u)] = actual_end
-            elif planned_start is not None:
-                # Production not started - use planned start time
+            elif floor_start is not None:
                 for u in range(1, qty + 1):
-                    unit_ready[(part.id, u)] = max(unit_ready[(part.id, u)], planned_start)
+                    unit_ready[(part.id, u)] = max(unit_ready[(part.id, u)], floor_start)
 
     # Shop-floor: if an op already has approved qty, the preferred/live machine
     # is already set up — seed context so the first remaining unit there skips
@@ -625,6 +631,7 @@ def decode_activity_priority(
                         "end_time": seg_end,
                         "status": "unit_scheduled",
                         "source": source,
+                        "assignment_mode": assignment_mode or "auto",
                         "is_setup": (not skip_setup) and first_seg,
                         "part_priority": act.part_priority,
                     }
@@ -1101,6 +1108,7 @@ def run_single_nsga2(
     cfg: Nsga2Config,
     rng: random.Random,
     debug: bool = False,
+    assignment_mode: Optional[str] = None,
 ) -> Tuple[List[Individual], List[float], Dict[str, Any]]:
     """Run single NSGA-II optimization. Returns (pareto_front, convergence, best_plan)."""
     n = len(activities)
@@ -1124,7 +1132,7 @@ def run_single_nsga2(
         unique_objectives_set: set = set()
 
     def evaluate(ind: Individual) -> Individual:
-        nonlocal eval_cache
+        nonlocal eval_cache, assignment_mode
         if debug:
             nonlocal total_evaluations, cache_hits, cache_misses, total_decode_time  # type: ignore[misc]
             nonlocal unique_chromosomes_set, unique_objectives_set  # type: ignore[misc]
@@ -1159,6 +1167,7 @@ def run_single_nsga2(
             now=now,
             pin_preferred=cfg.pin_preferred,
             source="nsga2",
+            assignment_mode=assignment_mode or "auto",
         )
 
         if debug:
@@ -1343,11 +1352,13 @@ def optimize_unit_plan_research(
     debug: bool = False,
     pin_preferred: Optional[bool] = None,
     preferred_machine_id: Optional[int] = None,
+    assignment_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Multi-run NSGA-II optimizer with Policy Engine for final schedule selection.
 
     pin_preferred / preferred_machine_id: forwarded from Intelligent Scheduler UI.
+    assignment_mode: 'auto' | 'process_plan' | 'manual' - stored in unit_schedule_items
     """
     cfg = Nsga2Config.from_env(config_overrides)
     if pin_preferred is not None:
@@ -1363,6 +1374,7 @@ def optimize_unit_plan_research(
         source="greedy",
         pin_preferred=pin_preferred,
         preferred_machine_id=preferred_machine_id,
+        assignment_mode=assignment_mode or "auto",
     )
     due_by_order = {
         item["order"].id: getattr(item["order"], "due_date", None) for item in scope
@@ -1450,6 +1462,7 @@ def optimize_unit_plan_research(
                 cfg=cfg,
                 rng=rng,
                 debug=debug,
+                assignment_mode=assignment_mode,
             )
             if debug and "_perf_metrics" in plan:
                 all_perf_metrics_debug.append(plan.pop("_perf_metrics"))

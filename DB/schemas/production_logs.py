@@ -122,6 +122,12 @@ class ProductionLogResponse(ProductionLogBase):
         True,
         description="True when the log is still open for first review (user_id is null)",
     )
+    is_unit_wise: bool = Field(
+        False,
+        description="True when this log belongs to a unit-wise job card",
+    )
+    unit_from: Optional[int] = Field(None, description="First unit index on a unit-wise card")
+    unit_to: Optional[int] = Field(None, description="Last unit index on a unit-wise card")
 
     class Config:
         from_attributes = True

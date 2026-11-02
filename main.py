@@ -21,6 +21,8 @@ from routers import (
     order_tracking,
     unit_wise,
 )
+from intelligent_scheduler.router import router as intelligent_scheduler_router
+from intelligent_scheduler.job_cards_router import router as intelligent_scheduler_job_cards_router
 
 
 logging.basicConfig(
@@ -69,6 +71,8 @@ app.include_router(operator_leaves.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(order_tracking.router, prefix="/api/v1")
 app.include_router(unit_wise.router, prefix="/api/v1")
+app.include_router(intelligent_scheduler_router, prefix="/api/v1")
+app.include_router(intelligent_scheduler_job_cards_router, prefix="/api/v1")
 # app.include_router(machine_scheduling_engine_router, prefix="/api/v1")
 
 

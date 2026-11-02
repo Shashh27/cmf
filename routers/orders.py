@@ -319,7 +319,18 @@ def get_all_part_priorities(db: Session = Depends(get_db)):
     (status='active' and priority > 0). Completed parts remain in
     order_part_priorities with status='completed' and priority=0 but
     are omitted from this listing.
+
+    Parts whose schedulable operations are already fully approved are
+    closed here, so a finished part does not stay in the queue until
+    another review is saved.
     """
+    from production_log_helpers import close_fully_approved_active_parts
+
+    try:
+        close_fully_approved_active_parts(db)
+    except Exception:
+        db.rollback()
+
     priorities = (
         db.query(OrderPartPriority)
         .filter(
