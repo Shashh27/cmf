@@ -69,6 +69,10 @@ class UnitWiseRebuildRequest(BaseModel):
             "or process_plan if none is stored."
         ),
     )
+    manufacturing_coordinator_id: Optional[int] = Field(
+        None,
+        description="Rebuild only sale orders assigned to this manufacturing coordinator.",
+    )
     # Frontend Intelligent Scheduler controls (replace ENV knobs)
     pin_preferred: Optional[bool] = Field(
         None,
@@ -170,6 +174,7 @@ def rebuild_unit_wise_schedule(
             preferred_machine_id=body.preferred_machine_id,
             assignment_mode=assignment_mode,
             operation_assignment_modes=cleaned_op_modes or None,
+            manufacturing_coordinator_id=body.manufacturing_coordinator_id,
         )
         logger.info(
             "Unit-wise rebuild API",
@@ -246,16 +251,25 @@ def get_unit_wise_schedule(
     order_id: Optional[int] = Query(None),
     machine_id: Optional[int] = Query(None),
     latest_only: bool = Query(True),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     """List unit-wise schedule segments (default: latest schedule_version)."""
     _require_enabled()
+    order_ids = None
+    if manufacturing_coordinator_id is not None:
+        from production_log_helpers import get_order_ids_for_manufacturing_coordinator
+
+        order_ids = get_order_ids_for_manufacturing_coordinator(
+            db, int(manufacturing_coordinator_id)
+        )
     rows = list_unit_schedule(
         db,
         part_id=part_id,
         order_id=order_id,
         machine_id=machine_id,
         latest_only=latest_only,
+        order_ids=order_ids,
     )
     items = [unit_item_to_dict(r[0], r[1], r[2]) for r in rows]
     version = max((i["schedule_version"] for i in items if i.get("schedule_version") is not None), default=None)

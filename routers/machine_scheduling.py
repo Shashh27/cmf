@@ -3706,11 +3706,13 @@ def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
 @router.get("/orders-by-project-coordinator")
 def get_orders_by_project_coordinator(
     project_coordinator_id: Optional[int] = None,
+    manufacturing_coordinator_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     """
     Get orders grouped by project coordinator.
     If project_coordinator_id is provided, returns only orders for that coordinator.
+    If manufacturing_coordinator_id is provided, returns only orders assigned to that MC.
     """
     from DB.models.access_control import AccessUser
     from DB.models.configuration import Customer
@@ -3720,6 +3722,8 @@ def get_orders_by_project_coordinator(
     
     if project_coordinator_id is not None:
         query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+    if manufacturing_coordinator_id is not None:
+        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
     
     orders = query.all()
     

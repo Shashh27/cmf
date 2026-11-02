@@ -1059,7 +1059,10 @@ def _pick_machine(
 
 
 def _load_active_scope(
-    db: Session, part_id: Optional[int] = None, order_id: Optional[int] = None
+    db: Session,
+    part_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    manufacturing_coordinator_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Active IN-House parts with order + priority.
@@ -1088,6 +1091,15 @@ def _load_active_scope(
         q = q.filter(Part.id == part_id)
     if order_id is not None and order_id > 0:
         q = q.filter(Order.id == order_id)
+    if manufacturing_coordinator_id is not None:
+        from production_log_helpers import get_order_ids_for_manufacturing_coordinator
+
+        mc_order_ids = get_order_ids_for_manufacturing_coordinator(
+            db, int(manufacturing_coordinator_id)
+        )
+        if not mc_order_ids:
+            return []
+        q = q.filter(Order.id.in_(mc_order_ids))
 
     rows = q.all()
     scope: List[Dict[str, Any]] = []
@@ -1697,6 +1709,7 @@ def rebuild_unit_schedule(
     machine_by_slot: Optional[Dict[Tuple[int, int, int], int]] = None,
     preserve_part_modes: bool = False,
     operation_assignment_modes: Optional[Dict[int, str]] = None,
+    manufacturing_coordinator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Delete existing unit rows for scope and insert a fresh plan.
@@ -1732,7 +1745,12 @@ def rebuild_unit_schedule(
             "(GA does not honor qty→machine allocations yet)."
         )
 
-    scope = _load_active_scope(db, part_id=part_id, order_id=order_id)
+    scope = _load_active_scope(
+        db,
+        part_id=part_id,
+        order_id=order_id,
+        manufacturing_coordinator_id=manufacturing_coordinator_id,
+    )
     if not scope:
         # No active parts to plan — still drop stale unit-wise rows so a full
         # deactivate + rebuild does not leave orphan Gantt bars in the DB.
@@ -1741,6 +1759,23 @@ def rebuild_unit_schedule(
             clear_q = clear_q.filter(UnitScheduleItem.part_id == part_id)
         elif order_id is not None:
             clear_q = clear_q.filter(UnitScheduleItem.order_id == order_id)
+        elif manufacturing_coordinator_id is not None:
+            from production_log_helpers import get_order_ids_for_manufacturing_coordinator
+
+            mc_order_ids = get_order_ids_for_manufacturing_coordinator(
+                db, int(manufacturing_coordinator_id)
+            )
+            if not mc_order_ids:
+                return {
+                    "success": True,
+                    "message": "No orders are assigned to this manufacturing coordinator.",
+                    "rows_inserted": 0,
+                    "rows_cleared": 0,
+                    "schedule_version": None,
+                    "parts": 0,
+                    "optimizer": "nsga2" if use_nsga2 else "greedy",
+                }
+            clear_q = clear_q.filter(UnitScheduleItem.order_id.in_(mc_order_ids))
         cleared = clear_q.delete(synchronize_session=False)
         if commit:
             db.commit()
@@ -1868,7 +1903,10 @@ def rebuild_unit_schedule(
                     focal_priority, priorities, booked, focal_ids
                 )
                 by_id = {
-                    int(item["part"].id): item for item in _load_active_scope(db)
+                    int(item["part"].id): item
+                    for item in _load_active_scope(
+                        db, manufacturing_coordinator_id=manufacturing_coordinator_id
+                    )
                 } if displace_ids else {}
                 displaced_items = [by_id[pid] for pid in displace_ids if pid in by_id]
                 if displaced_items:
@@ -2020,6 +2058,7 @@ def list_unit_schedule(
     order_id: Optional[int] = None,
     machine_id: Optional[int] = None,
     latest_only: bool = True,
+    order_ids: Optional[List[int]] = None,
 ) -> List[Tuple[UnitScheduleItem, Optional[str], Optional[str]]]:
     q = db.query(
         UnitScheduleItem,
@@ -2032,6 +2071,10 @@ def list_unit_schedule(
         q = q.filter(UnitScheduleItem.part_id == part_id)
     if order_id is not None and order_id > 0:
         q = q.filter(UnitScheduleItem.order_id == order_id)
+    if order_ids is not None:
+        if not order_ids:
+            return []
+        q = q.filter(UnitScheduleItem.order_id.in_(order_ids))
     if machine_id is not None and machine_id > 0:
         q = q.filter(UnitScheduleItem.machine_id == machine_id)
 
@@ -2045,6 +2088,8 @@ def list_unit_schedule(
             ver_q = ver_q.filter(UnitScheduleItem.part_id == part_id)
         if order_id is not None and order_id > 0:
             ver_q = ver_q.filter(UnitScheduleItem.order_id == order_id)
+        if order_ids is not None:
+            ver_q = ver_q.filter(UnitScheduleItem.order_id.in_(order_ids))
         if machine_id is not None and machine_id > 0:
             ver_q = ver_q.filter(UnitScheduleItem.machine_id == machine_id)
         subq = ver_q.group_by(UnitScheduleItem.part_id).subquery()
