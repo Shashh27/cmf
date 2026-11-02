@@ -1,7 +1,7 @@
 """Unit-wise schedule API — NSGA-II + Policy Engine."""
 
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -53,20 +53,36 @@ class UnitWiseRebuildRequest(BaseModel):
     population: Optional[int] = Field(None, ge=4, le=200, description="NSGA-II population size")
     generations: Optional[int] = Field(None, ge=1, le=500, description="NSGA-II generations")
     runs: Optional[int] = Field(None, ge=1, le=10, description="Independent NSGA-II runs")
+    assignment_mode: Optional[str] = Field(
+        None,
+        description=(
+            "Default only for operations with no stored mode and no override. "
+            "auto = WC earliest-free; process_plan = hard-pin routing machine; "
+            "manual = use saved qty→machine allocations (greedy only)."
+        ),
+    )
+    operation_assignment_modes: Optional[Dict[int, str]] = Field(
+        None,
+        description=(
+            "Per-operation assignment_mode. Keys are operation_id. "
+            "Only listed operations change; others keep the stored mode, "
+            "or process_plan if none is stored."
+        ),
+    )
     # Frontend Intelligent Scheduler controls (replace ENV knobs)
     pin_preferred: Optional[bool] = Field(
         None,
         description=(
             "true = hard-pin preferred machine (batch qty on one machine, no WC split). "
             "false = earliest-free WC machine (qty-wise split). "
-            "Omit to use server default."
+            "Omit to use server default. Prefer assignment_mode when available."
         ),
     )
     preferred_machine_id: Optional[int] = Field(
         None,
         description=(
-            "When pin_preferred=true, force this machine for ops whose workcenter "
-            "contains it (all remaining units on that machine)."
+            "Legacy parameter. No longer used by Intelligent Scheduler UI. "
+            "Use assignment_mode='process_plan' to respect routing machine_id."
         ),
     )
     preferred_workcenter_id: Optional[int] = Field(
@@ -101,8 +117,33 @@ def rebuild_unit_wise_schedule(
     Set `debug=true` to include optimizer profiling metrics (dev mode).
     """
     _require_enabled()
+    from scheduling_modes import get_shop_plan
+
+    if get_shop_plan(db) != "unit_wise":
+        raise HTTPException(
+            403,
+            "Shop floor follows batch. Unit-wise rebuild is locked.",
+        )
     body = body or UnitWiseRebuildRequest()
     optimizer = (body.optimizer or "greedy").lower().strip()
+    assignment_mode = (body.assignment_mode or "").lower().strip() or None
+    if assignment_mode and assignment_mode not in ("auto", "process_plan", "manual"):
+        raise HTTPException(
+            400, 'assignment_mode must be "auto", "process_plan", or "manual"'
+        )
+    op_modes = body.operation_assignment_modes or {}
+    cleaned_op_modes: Dict[int, str] = {}
+    for op_id, raw_mode in op_modes.items():
+        mode_val = (raw_mode or "").lower().strip()
+        if mode_val not in ("auto", "process_plan", "manual"):
+            raise HTTPException(
+                400,
+                f'operation_assignment_modes[{op_id}] must be "auto", '
+                '"process_plan", or "manual"',
+            )
+        cleaned_op_modes[int(op_id)] = mode_val
+    if assignment_mode == "manual" or "manual" in cleaned_op_modes.values():
+        optimizer = "greedy"
     if optimizer not in ("greedy", "nsga2", "ga", "ga_research"):
         raise HTTPException(400, 'optimizer must be "greedy" or "nsga2"')
     policy = (body.policy or "balanced").lower().strip()
@@ -127,6 +168,8 @@ def rebuild_unit_wise_schedule(
             ga_overrides=ga_overrides or None,
             pin_preferred=body.pin_preferred,
             preferred_machine_id=body.preferred_machine_id,
+            assignment_mode=assignment_mode,
+            operation_assignment_modes=cleaned_op_modes or None,
         )
         logger.info(
             "Unit-wise rebuild API",
@@ -134,6 +177,7 @@ def rebuild_unit_wise_schedule(
                 "event": "unit_wise_rebuild_api",
                 "part_id": body.part_id,
                 "order_id": body.order_id,
+                "assignment_mode": assignment_mode,
                 "optimizer": result.get("optimizer"),
                 "policy": result.get("policy"),
                 "selected": result.get("selected"),
@@ -145,6 +189,9 @@ def rebuild_unit_wise_schedule(
             },
         )
         return result
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         db.rollback()
         logger.exception(
@@ -210,7 +257,7 @@ def get_unit_wise_schedule(
         machine_id=machine_id,
         latest_only=latest_only,
     )
-    items = [unit_item_to_dict(r) for r in rows]
+    items = [unit_item_to_dict(r[0], r[1], r[2]) for r in rows]
     version = max((i["schedule_version"] for i in items if i.get("schedule_version") is not None), default=None)
     sources = sorted({str(i.get("source") or "greedy") for i in items})
     return {
@@ -229,7 +276,7 @@ def get_unit_wise_for_machine(machine_id: int, db: Session = Depends(get_db)):
     return {
         "machine_id": machine_id,
         "total": len(rows),
-        "items": [unit_item_to_dict(r) for r in rows],
+        "items": [unit_item_to_dict(r[0], r[1], r[2]) for r in rows],
     }
 
 
@@ -240,5 +287,5 @@ def get_unit_wise_for_part(part_id: int, db: Session = Depends(get_db)):
     return {
         "part_id": part_id,
         "total": len(rows),
-        "items": [unit_item_to_dict(r) for r in rows],
+        "items": [unit_item_to_dict(r[0], r[1], r[2]) for r in rows],
     }

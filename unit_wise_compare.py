@@ -874,18 +874,19 @@ def compare_part_schedules(db: Session, part_id: int) -> Dict[str, Any]:
 
     batch = _batch_rows_for_part(db, part_id)
     unit_rows = list_unit_schedule(db, part_id=part_id, latest_only=True)
+    unit_row_objects = [r[0] for r in unit_rows] if unit_rows else []
     ops = _schedulable_ops(db, part_id)
-    order = _resolve_order(db, batch, unit_rows)
+    order = _resolve_order(db, batch, unit_row_objects)
     due_date = order.due_date if order else None
     order_date = order.order_date if order else None
     qty = part.qty
 
     unit_span = _span_metrics(
-        [(r.start_time, r.end_time) for r in unit_rows], engine=engine
+        [(r[0].start_time, r[0].end_time) for r in unit_rows], engine=engine
     )
-    unit_flow = _unit_flow_waiting_metrics(unit_rows, due_date, engine=engine)
+    unit_flow = _unit_flow_waiting_metrics(unit_row_objects, due_date, engine=engine)
     unit_load = _machine_load_metrics(
-        [(r.machine_id, r.start_time, r.end_time) for r in unit_rows],
+        [(r[0].machine_id, r[0].start_time, r[0].end_time) for r in unit_rows],
         engine=engine,
     )
     unit_agg = _aggregate_machine_metrics(unit_load)
@@ -896,10 +897,10 @@ def compare_part_schedules(db: Session, part_id: int) -> Dict[str, Any]:
         **unit_agg,
         "machines": sorted(unit_load.keys()),
         "operations": sorted(
-            {str(r.operation_number) for r in unit_rows}, key=_op_sort_key
+            {str(r[0].operation_number) for r in unit_rows}, key=_op_sort_key
         ),
-        "schedule_version": unit_rows[0].schedule_version if unit_rows else None,
-        "source": unit_rows[0].source if unit_rows else None,
+        "schedule_version": unit_row_objects[0].schedule_version if unit_row_objects else None,
+        "source": unit_row_objects[0].source if unit_row_objects else None,
         "units_for_throughput": unit_units,
         "throughput_units_per_hour": _throughput(
             unit_units, unit_span.get("makespan_hours")

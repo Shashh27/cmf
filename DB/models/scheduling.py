@@ -295,6 +295,8 @@ class ProductionLog(Base):
     operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
     user_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
     machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=True)
+    unit_from = Column(Integer, nullable=True)
+    unit_to = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
     remarks = Column(Text, nullable=True)
     from_date = Column(DATE)
@@ -391,5 +393,41 @@ class UnitScheduleItem(Base):
     status = Column(String, nullable=False, default="unit_scheduled")
     schedule_version = Column(Integer, nullable=False, default=1)
     source = Column(String, nullable=False, default="greedy")
+    assignment_mode = Column(String, nullable=False, default="auto")
     created_at = Column(DateTime, nullable=False, default=func.now())
 
+
+# =======================
+# Manual qty → machine bands (Intelligent Scheduler)
+# =======================
+class PartOperationQtyMachineAllocation(Base):
+    """
+    Coordinator-defined quantity bands for an operation within one work center.
+    Example: units 1–5 → machine A, units 6–10 → machine B.
+    Used by unit-wise rebuild via machine_by_slot; does not affect job cards.
+    """
+    __tablename__ = "part_operation_qty_machine_allocations"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True, index=True)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False, index=True)
+    unit_from = Column(Integer, nullable=False)
+    unit_to = Column(Integer, nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+class ShopSchedulePlan(Base):
+    """One live shop-floor engine for the whole factory: batch or unit_wise."""
+
+    __tablename__ = "shop_schedule_plan"
+    __table_args__ = {"schema": "scheduling"}
+
+    id = Column(Integer, primary_key=True, index=True)
+    engine = Column(String, nullable=False, default="batch")
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, nullable=True)

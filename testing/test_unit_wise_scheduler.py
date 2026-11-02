@@ -7,11 +7,62 @@ from unittest.mock import MagicMock, patch
 from unit_wise_scheduler import (
     _duration,
     _op_number_key,
+    _part_ids_to_displace,
     _pick_machine,
     _place_within_shifts,
+    _resolve_operation_plan,
+    _resolve_part_plan,
     _snap_to_shift_start,
     unit_wise_enabled,
 )
+
+
+class TestDisplaceLowerPriority:
+    def test_only_lower_priority_parts_on_the_machine_move(self):
+        priorities = {24: 7, 26: 8, 10: 1}
+        displaced = _part_ids_to_displace(7, priorities, {26, 10, 24}, {24})
+        assert displaced == [26]
+
+
+class TestPartPlanMode:
+    def test_per_part_map_keeps_each_mode(self):
+        modes = {1: "manual", 2: "process_plan", 3: "auto"}
+        assert _resolve_part_plan(1, "auto", modes, False) == ("manual", False)
+        assert _resolve_part_plan(2, "auto", modes, False) == ("process_plan", True)
+        assert _resolve_part_plan(3, "manual", modes, True) == ("auto", False)
+
+    def test_single_mode_rebuild_uses_the_shared_pin(self):
+        assert _resolve_part_plan(1, "process_plan", None, True) == ("process_plan", True)
+        assert _resolve_part_plan(1, "auto", None, False) == ("auto", False)
+
+
+class TestOperationPlanMode:
+    def test_default_is_process_plan(self):
+        mode, pin = _resolve_operation_plan(24, 17)
+        assert mode == "process_plan"
+        assert pin is True
+
+    def test_override_only_changes_that_operation(self):
+        stored = {(24, 17): "process_plan", (24, 18): "process_plan"}
+        overrides = {17: "auto"}
+        assert _resolve_operation_plan(
+            24, 17, stored_by_operation=stored, overrides=overrides
+        ) == ("auto", False)
+        assert _resolve_operation_plan(
+            24, 18, stored_by_operation=stored, overrides=overrides
+        ) == ("process_plan", True)
+
+    def test_stored_mode_beats_part_level_default(self):
+        stored = {(24, 18): "auto"}
+        assert _resolve_operation_plan(
+            24, 18, stored_by_operation=stored, default_mode="process_plan"
+        ) == ("auto", False)
+        assert _resolve_operation_plan(
+            24, 17, stored_by_operation=stored, default_mode="process_plan"
+        ) == ("process_plan", True)
+
+    def test_part_level_default_only_fills_missing_ops(self):
+        assert _resolve_operation_plan(24, 17, default_mode="auto") == ("auto", False)
 
 
 class TestUnitWiseHelpers:
@@ -177,9 +228,10 @@ class TestListUnitScheduleMultiVersion:
         results = list_unit_schedule(db, machine_id=35, latest_only=True)
         # Both TP-32 (v1) and BR-6205 (v2) should be returned, but NOT item2_old (v1)
         assert len(results) == 2
-        part_ids = {r.part_id for r in results}
+        # Results are now tuples (row, part_name, operation_name)
+        part_ids = {r[0].part_id for r in results}
         assert part_ids == {1660, 1666}
-        versions = {r.part_id: r.schedule_version for r in results}
+        versions = {r[0].part_id: r[0].schedule_version for r in results}
         assert versions == {1660: 1, 1666: 2}
 
     def test_populate_other_parts_machine_free(self):
@@ -214,6 +266,47 @@ class TestListUnitScheduleMultiVersion:
         # Machine 35 should be occupied until 17:00 due to Part 1660
         assert 35 in machine_free
         assert machine_free[35] == datetime(2026, 7, 29, 17, 0)
+
+    def test_closed_operation_does_not_block_machine(self):
+        from DB.models.scheduling import UnitScheduleItem
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from unittest.mock import patch
+        from unit_wise_scheduler import _populate_other_parts_machine_free
+
+        engine = create_engine("sqlite:///:memory:")
+
+        @event.listens_for(engine, "connect")
+        def db_connect(dbapi_con, con_record):
+            dbapi_con.execute("ATTACH DATABASE ':memory:' AS scheduling")
+
+        UnitScheduleItem.__table__.create(bind=engine)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+        db.add(
+            UnitScheduleItem(
+                order_id=189,
+                order_number="17218ILP004",
+                part_id=1660,
+                part_number="TP-32",
+                unit_index=1,
+                operation_id=532,
+                operation_number="10",
+                machine_id=35,
+                start_time=datetime(2026, 7, 29, 14, 36),
+                end_time=datetime(2032, 9, 28, 11, 8),
+                schedule_version=1,
+                source="greedy",
+            )
+        )
+        db.commit()
+
+        machine_free = {}
+        with patch(
+            "unit_wise_scheduler._closed_operation_ids", return_value={532}
+        ):
+            _populate_other_parts_machine_free(db, machine_free, {1666})
+        assert machine_free == {}
 
 
 class TestActualEndAfterJobCard:
@@ -268,6 +361,87 @@ class TestActualEndAfterJobCard:
         from unit_wise_scheduler import _snap_to_shift_start
 
         assert _snap_to_shift_start(start_candidate) == datetime(2026, 8, 6, 8, 30, 0)
+
+
+class TestClosedCardHoldsItsMachine:
+    """A closed card must not delay the next unit on a different machine."""
+
+    def test_latest_end_is_kept_per_machine(self):
+        from unit_wise_scheduler import _closed_end_by_machine
+
+        earlier = SimpleNamespace(
+            machine_id=15,
+            to_date=datetime(2026, 10, 16).date(),
+            to_time=datetime(2026, 10, 16, 9, 0).time(),
+        )
+        machine_a = SimpleNamespace(
+            machine_id=15,
+            to_date=datetime(2026, 10, 16).date(),
+            to_time=time(11, 7, 40, 866391),
+        )
+        machine_b = SimpleNamespace(
+            machine_id=16,
+            to_date=datetime(2026, 10, 16).date(),
+            to_time=datetime(2026, 10, 16, 10, 0).time(),
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = [
+            earlier,
+            machine_a,
+            machine_b,
+        ]
+
+        ends = _closed_end_by_machine(db, 18)
+
+        assert ends[15] == datetime(2026, 10, 16, 11, 7, 40, 866391)
+        assert ends[16] == datetime(2026, 10, 16, 10, 0)
+
+    def test_other_machine_unit_keeps_its_predecessor_ready_time(self):
+        from unit_wise_scheduler import _apply_closed_card_continuity
+
+        card_end = datetime(2026, 10, 16, 11, 7, 40, 866391)
+        predecessor = datetime(2026, 10, 16, 10, 30)
+        machine_free = {16: datetime(2026, 10, 16, 10, 0)}
+        unit_ready = {9: predecessor, 11: datetime(2026, 10, 16, 10, 0)}
+
+        _apply_closed_card_continuity(
+            machine_free=machine_free,
+            unit_ready=unit_ready,
+            remaining_set={9, 11},
+            closed_by_machine={15: card_end},
+            completed_run_end=card_end,
+            part_pin=False,
+            preferred_id=None,
+        )
+
+        start_on_16 = max(unit_ready[9], machine_free[16])
+        start_on_15 = max(unit_ready[11], machine_free[15])
+        assert unit_ready[9] == predecessor
+        assert start_on_16 == predecessor
+        assert start_on_16 != card_end
+        assert machine_free[15] == card_end
+        assert start_on_15 == card_end
+
+    def test_no_machine_on_card_still_floors_first_remaining_unit(self):
+        from unit_wise_scheduler import _apply_closed_card_continuity
+
+        handoff = datetime(2026, 10, 16, 12, 0)
+        machine_free = {}
+        unit_ready = {9: datetime(2026, 10, 16, 10, 0), 10: datetime(2026, 10, 16, 10, 0)}
+
+        _apply_closed_card_continuity(
+            machine_free=machine_free,
+            unit_ready=unit_ready,
+            remaining_set={9, 10},
+            closed_by_machine={},
+            completed_run_end=handoff,
+            part_pin=True,
+            preferred_id=15,
+        )
+
+        assert unit_ready[9] == handoff
+        assert unit_ready[10] == datetime(2026, 10, 16, 10, 0)
+        assert machine_free[15] == handoff
 
 
 class TestReschedulingCompletedHandoff:
@@ -444,6 +618,74 @@ class TestUnitWisePerUnitPipeline:
         # Unit 1 of next op is ready at unit 1's end — not the batch remaining start
         assert ends[1] == datetime(2026, 8, 10, 13, 7, 51)
 
+    def test_reviewed_log_stamps_every_approved_unit_at_to_time(self):
+        from datetime import time as dtime
+        from DB.models.scheduling import PartOperationQtyMachineAllocation, ProductionLog, Rescheduling
+        from unit_wise_scheduler import _per_unit_operation_ends, _stamp_approved_units
+
+        first = SimpleNamespace(
+            id=514,
+            user_id=30,
+            machine_id=22,
+            approved_quantity=2,
+            to_date=datetime(2026, 10, 12).date(),
+            to_time=dtime(15, 45, 38),
+        )
+        later = SimpleNamespace(
+            id=520,
+            user_id=30,
+            machine_id=22,
+            approved_quantity=1,
+            to_date=datetime(2026, 10, 13).date(),
+            to_time=dtime(11, 5, 0),
+        )
+        bands = [{"machine_id": 22, "unit_from": 1, "unit_to": 3}]
+        stamped = _stamp_approved_units([later, first], bands, 10)
+        assert stamped[1] == datetime(2026, 10, 12, 15, 45, 38)
+        assert stamped[2] == datetime(2026, 10, 12, 15, 45, 38)
+        assert stamped[3] == datetime(2026, 10, 13, 11, 5, 0)
+
+        old_plan = SimpleNamespace(
+            start_time=datetime(2026, 10, 12, 11, 9, 51),
+            end_time=datetime(2026, 10, 12, 15, 9, 51),
+            remaining_qty=0,
+            completed_qty=0,
+            total_qty=10,
+            id=1,
+        )
+
+        def query_router(model):
+            q = MagicMock()
+            q.filter.return_value = q
+            q.order_by.return_value = q
+            if model is ProductionLog:
+                q.all.return_value = [first]
+                return q
+            if model is PartOperationQtyMachineAllocation:
+                q.all.return_value = [
+                    SimpleNamespace(machine_id=22, unit_from=1, unit_to=3)
+                ]
+                return q
+            if model is Rescheduling:
+                q.all.return_value = [old_plan]
+                return q
+            q.all.return_value = []
+            return q
+
+        db = MagicMock()
+        db.query.side_effect = query_router
+        op = SimpleNamespace(id=17, setup_time=dtime(0, 0, 0), cycle_time=dtime(0, 30, 0))
+        ends = _per_unit_operation_ends(
+            db,
+            op,
+            order_id=32,
+            qty=10,
+            approved=2,
+            completed_run_end=datetime(2026, 10, 12, 15, 45, 38),
+        )
+        assert ends[1] == datetime(2026, 10, 12, 15, 45, 38)
+        assert ends[2] == datetime(2026, 10, 12, 15, 45, 38)
+
     def test_completed_run_end_falls_back_to_rescheduling_when_no_to_time(self):
         from DB.models.scheduling import ProductionLog, Rescheduling
         from unit_wise_scheduler import _completed_run_end
@@ -556,6 +798,35 @@ class TestPipelineAndPredecessorHandoff:
         # Unit 1 keeps its own Op10 end — does NOT wait for Unit 2 / batch plan
         assert unit_ready[1] == u1_after_op10
 
+    def test_virgin_floor_uses_live_reschedule_before_planned(self):
+        from unittest.mock import MagicMock, patch
+        from unit_wise_scheduler import _virgin_op_floor
+
+        live = datetime(2028, 9, 19, 8, 30)
+        planned = datetime(2032, 6, 17, 14, 28)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(
+            start_time=live
+        )
+        with patch(
+            "unit_wise_scheduler._planned_start_for_operation", return_value=planned
+        ) as planned_lookup:
+            assert _virgin_op_floor(db, 1229, order_id=119) == live
+            planned_lookup.assert_not_called()
+
+    def test_virgin_floor_falls_back_to_planned_when_live_row_missing(self):
+        from unittest.mock import MagicMock, patch
+        from unit_wise_scheduler import _virgin_op_floor
+
+        planned = datetime(2026, 12, 9, 8, 30)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.order_by.return_value.first.return_value = None
+        with patch(
+            "unit_wise_scheduler._planned_start_for_operation", return_value=planned
+        ) as planned_lookup:
+            assert _virgin_op_floor(db, 1222, order_id=119) == planned
+            planned_lookup.assert_called_once_with(db, 1222)
+
     def test_fully_completed_pred_replaces_ready_not_max(self):
         """Swap case: older ancestor ended later; immediate pred end must win."""
         qty = 10
@@ -660,29 +931,59 @@ class TestBreakdownAndShiftRules:
         total = sum((e - s).total_seconds() for s, e in segs)
         assert total == timedelta(hours=4).total_seconds()
 
-    def test_unassigned_machine_shift_window_general_only(self):
-        from algorithm import SchedulerEngine
-
+    def _ot_day_config(self):
         general = SimpleNamespace(shift_code="GENERAL", shift_start=time(8, 30), shift_end=time(17, 0))
         next_shift = SimpleNamespace(shift_code="NEXT", shift_start=time(17, 0), shift_end=time(21, 0))
-        cfg = SimpleNamespace(
-            date=datetime(2026, 7, 24).date(),
+        return SimpleNamespace(
+            id=266,
+            date=datetime(2026, 9, 23).date(),
             working_day=True,
             number_of_shifts=2,
             shift_timings=[general, next_shift],
         )
 
+    def test_no_assignments_shop_floor_uses_full_ot_window(self):
+        from algorithm import SchedulerEngine
+
+        cfg = self._ot_day_config()
         db = MagicMock()
         db.query.return_value.filter.return_value.first.side_effect = [
-            cfg,  # ShiftHoursConfiguration
-            None,  # no machine assignment
+            cfg,   # ShiftHoursConfiguration
+            None,  # no machine-operator assignments for the day
+        ]
+        engine = SchedulerEngine(db)
+        when = datetime(2026, 9, 23, 10, 0)
+        start, end = engine._shift_window(when, machine_id=99)
+        assert (start, end) == (time(8, 30), time(21, 0))
+        db.query.return_value.filter.return_value.first.side_effect = [cfg, None]
+        start, end = engine._shift_window(when)
+        assert (start, end) == (time(8, 30), time(21, 0))
+
+    def test_assigned_day_limits_ot_to_assigned_machines(self):
+        from algorithm import SchedulerEngine
+
+        cfg = self._ot_day_config()
+        db = MagicMock()
+        # config, day has an assignment, config again inside machine lookup
+        db.query.return_value.filter.return_value.first.side_effect = [
+            cfg,
+            SimpleNamespace(id=1),
+            cfg,
         ]
         db.query.return_value.filter.return_value.all.return_value = []
 
         engine = SchedulerEngine(db)
-        start, end = engine._shift_window(datetime(2026, 7, 24, 10, 0), machine_id=99)
-        assert start == time(8, 30)
-        assert end == time(17, 0)
+        start, end = engine._shift_window(datetime(2026, 9, 23, 10, 0), machine_id=99)
+        assert (start, end) == (time(8, 30), time(17, 0))
+
+        db.query.return_value.filter.return_value.first.side_effect = [
+            cfg,
+            SimpleNamespace(id=1),
+            cfg,
+        ]
+        db.query.return_value.filter.return_value.all.return_value = [SimpleNamespace(id=5)]
+        start, end = engine._shift_window(datetime(2026, 9, 23, 10, 0), machine_id=13)
+        assert (start, end) == (time(8, 30), time(21, 0))
 
 
 

@@ -10,7 +10,6 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     ToolWithPart as ToolWithPartModel
 )
-from DB.models.scheduling import PartScheduleStatus
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
 
 router = APIRouter(
@@ -23,19 +22,9 @@ _ACTIVE_MACHINE_CHANGE_BLOCKED = (
     "please inactivate the job to change the machine"
 )
 
-
-def _part_has_active_schedule(db: Session, part_id: int) -> bool:
-    if not part_id:
-        return False
-    return (
-        db.query(PartScheduleStatus.id)
-        .filter(
-            PartScheduleStatus.part_id == part_id,
-            PartScheduleStatus.status == "active",
-        )
-        .first()
-        is not None
-    )
+_OPERATION_IN_PROGRESS_BLOCKED = (
+    "cannot change machine when operation is in progress or completed"
+)
 
 
 @router.post("/", response_model=Operation, status_code=status.HTTP_201_CREATED)
@@ -76,7 +65,13 @@ def get_operations_by_part(part_id: int, db: Session = Depends(get_db)):
 
 @router.put("/{operation_id}", response_model=Operation)
 def update_operation(operation_id: int, operation: OperationUpdate, db: Session = Depends(get_db)):
-    """Update an operation"""
+    """
+    Update an operation.
+
+    Machine changes are allowed if the operation hasn't started production yet
+    (latest production log status is "pending" or no log exists).
+    Machine changes are blocked if the operation is in progress or completed.
+    """
     db_operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not db_operation:
         raise HTTPException(
@@ -86,10 +81,17 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
 
     update_data = operation.model_dump(exclude_unset=True)
     if "machine_id" in update_data and update_data["machine_id"] != db_operation.machine_id:
-        if _part_has_active_schedule(db, db_operation.part_id):
+        # Check if this specific operation has started production
+        # Block machine change only if latest log status is "inprogress" or "completed"
+        from DB.models.scheduling import ProductionLog
+        latest_log = db.query(ProductionLog).filter(
+            ProductionLog.operation_id == operation_id
+        ).order_by(ProductionLog.created_at.desc()).first()
+
+        if latest_log and latest_log.status in ("inprogress", "completed"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=_ACTIVE_MACHINE_CHANGE_BLOCKED,
+                detail=_OPERATION_IN_PROGRESS_BLOCKED,
             )
 
     for field, value in update_data.items():

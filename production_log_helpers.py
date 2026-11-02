@@ -1,5 +1,6 @@
 """Helpers for production log review (supervisor or manufacturing coordinator)."""
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Query, Session
 from DB.models import AccessUser, ProductionLog
 
 REVIEWER_ROLES = ("supervisor", "manufacturing_coordinator")
+_ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050
+logger = logging.getLogger(__name__)
 
 
 def validate_production_log_reviewer(db: Session, user_id: Optional[int]) -> AccessUser:
@@ -98,6 +101,41 @@ def total_approved_for_operation(db: Session, operation_id: int) -> int:
 def remaining_to_close(total_quantity: int, total_approved: int) -> int:
     """Units still required before the operation is fully approved."""
     return max(0, int(total_quantity) - int(total_approved))
+
+
+def close_fully_approved_operation_logs(db: Session, operation_id: int) -> int:
+    """
+    When approved quantity covers the part quantity, mark every submitted log
+    for that operation completed.
+
+    A partial review (approve some, rework or reject the rest) leaves that log
+    as inprogress. The follow-up log can later close the operation, and the
+    earlier log must not stay inprogress.
+    """
+    from DB.models.oms import Operation, Part
+
+    operation = db.query(Operation).filter(Operation.id == operation_id).first()
+    if operation is None:
+        return 0
+    part = db.query(Part).filter(Part.id == operation.part_id).first()
+    qty = int(part.qty or 0) if part is not None else 0
+    if qty <= 0:
+        return 0
+    db.flush()
+    if int(total_approved_for_operation(db, operation_id)) < qty:
+        return 0
+    logs = (
+        db.query(ProductionLog)
+        .filter(
+            ProductionLog.operation_id == operation_id,
+            ProductionLog.operator_status == "completed",
+            ProductionLog.status != "completed",
+        )
+        .all()
+    )
+    for log in logs:
+        log.status = "completed"
+    return len(logs)
 
 
 def _operation_number_int(operation_number: Any) -> Optional[int]:
@@ -236,6 +274,171 @@ def revert_completed_parts_if_logs_cleared(db: Session, part_ids: set) -> None:
 
     if changed:
         db.commit()
+
+
+def all_schedulable_operations_fully_approved(db: Session, part_id: int) -> bool:
+    """True when every schedulable operation of the part is fully approved."""
+    from DB.models.oms import Operation, Part
+
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if part is None:
+        return False
+    qty = int(part.qty or 0)
+    if qty <= 0:
+        return False
+    ops = db.query(Operation).filter(Operation.part_id == part_id).all()
+    schedulable = [op for op in ops if is_schedulable_operation(db, op)]
+    if not schedulable:
+        return False
+    return all(
+        remaining_to_close(qty, total_approved_for_operation(db, op.id)) == 0
+        for op in schedulable
+    )
+
+
+def mark_part_completed_if_all_operations_approved(
+    db: Session, part_id: Optional[int]
+) -> bool:
+    """
+    When remaining_to_close is 0 on every schedulable operation, close the part
+    the same way batch review does: OrderPartPriority.priority=0 status=completed,
+    remaining active parts re-numbered, PartScheduleStatus.status=completed.
+    """
+    if not part_id:
+        return False
+    try:
+        if not all_schedulable_operations_fully_approved(db, part_id):
+            return False
+
+        from DB.models.oms import OrderPartPriority
+        from DB.models.scheduling import PartScheduleStatus
+
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY},
+        )
+
+        changed = False
+        sale_order_ids = set()
+        priority_rows = (
+            db.query(OrderPartPriority)
+            .filter(
+                OrderPartPriority.part_id == part_id,
+                OrderPartPriority.status == "active",
+            )
+            .all()
+        )
+        for priority_record in priority_rows:
+            sale_order_ids.add(priority_record.order_id)
+            priority_record.status = "completed"
+            priority_record.priority = 0
+            changed = True
+
+        if priority_rows:
+            db.flush()
+            active_rows = (
+                db.query(OrderPartPriority)
+                .filter(
+                    OrderPartPriority.status == "active",
+                    OrderPartPriority.priority > 0,
+                )
+                .order_by(
+                    OrderPartPriority.priority.asc(),
+                    OrderPartPriority.id.asc(),
+                )
+                .all()
+            )
+            for i, row in enumerate(active_rows, start=1):
+                row.priority = i
+
+        pps_query = db.query(PartScheduleStatus).filter(
+            PartScheduleStatus.part_id == part_id,
+            PartScheduleStatus.status == "active",
+        )
+        if sale_order_ids:
+            pps_query = pps_query.filter(
+                PartScheduleStatus.sale_order_id.in_(list(sale_order_ids))
+            )
+        pps_rows = pps_query.all()
+        now = now_ist()
+        for pps_record in pps_rows:
+            pps_record.status = "completed"
+            pps_record.updated_at = now
+            pps_record.start_date = None
+            changed = True
+
+        if not changed:
+            return False
+
+        db.commit()
+        logger.info(
+            "Part marked completed",
+            extra={
+                "event": "part_marked_completed",
+                "part_id": part_id,
+                "order_ids": sorted(sale_order_ids),
+            },
+        )
+        return True
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception(
+            "Part close-out failed",
+            extra={"event": "part_marked_completed_failed", "part_id": part_id},
+        )
+        return False
+
+
+def close_fully_approved_active_parts(db: Session) -> List[int]:
+    """
+    Close active priority rows whose schedulable operations are already fully approved.
+
+    Review close-out runs only when a log is saved. A part that was already
+    approved stays in the live queue until this runs. Parts with any open
+    schedulable operation are left alone.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT opp.part_id
+            FROM oms.order_part_priorities opp
+            JOIN oms.parts p ON p.id = opp.part_id
+            WHERE opp.status = 'active'
+              AND opp.priority > 0
+              AND COALESCE(p.qty, 0) > 0
+              AND EXISTS (
+                SELECT 1
+                FROM oms.operations o
+                JOIN configuration.work_centers wc ON wc.id = o.workcenter_id
+                WHERE o.part_id = p.id
+                  AND wc.is_schedulable IS TRUE
+                  AND wc.work_center_name <> 'Default'
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM oms.operations o
+                JOIN configuration.work_centers wc ON wc.id = o.workcenter_id
+                WHERE o.part_id = p.id
+                  AND wc.is_schedulable IS TRUE
+                  AND wc.work_center_name <> 'Default'
+                  AND COALESCE((
+                    SELECT SUM(pl.approved_quantity)
+                    FROM scheduling.production_logs pl
+                    WHERE pl.operation_id = o.id
+                      AND pl.approved_quantity IS NOT NULL
+                  ), 0) < p.qty
+              )
+            """
+        )
+    ).fetchall()
+    closed: List[int] = []
+    for (part_id,) in rows:
+        if mark_part_completed_if_all_operations_approved(db, int(part_id)):
+            closed.append(int(part_id))
+    return closed
 
 
 def get_latest_reviewed_log(
@@ -393,8 +596,12 @@ def prior_operation_blocks_activation(
 ) -> Optional[str]:
     """
     Block activate when the immediate schedulable predecessor has not released
-    any approved quantity yet (or out-source not delivered), or when the predecessor
-    has unreviewed production logs awaiting reviewer action.
+    any approved quantity yet (or out-source not delivered).
+
+    Parallel work is allowed: Downstream operations can be activated even if
+    the previous operation has unreviewed logs, as long as at least 1 unit
+    is approved for handoff. This enables operators on different machines
+    to work simultaneously on approved partial quantities.
     """
     predecessor = get_immediate_predecessor_operation(db, operation_id)
     if predecessor is None:
@@ -423,14 +630,11 @@ def prior_operation_blocks_activation(
             )
         return None
 
-    # Check if predecessor has unreviewed production logs
-    if operation_has_unreviewed_production_log(db, predecessor.id):
-        return (
-            f"Cannot activate — prior operation {predecessor.operation_number} "
-            f"({predecessor.operation_name}) has production logs awaiting review "
-            f"by a supervisor or manufacturing_coordinator. Please wait until the reviewer "
-            f"has reviewed and updated the production log."
-        )
+    # Removed unreviewed production log check to allow parallel work
+    # when partial quantities are approved and downstreamed
+    # Operators can now activate job cards for downstream operations
+    # even if the previous operation has unreviewed logs, as long as
+    # at least 1 unit is approved for handoff
 
     upstream_approved = total_approved_for_operation(db, predecessor.id)
     if upstream_approved < 1:
@@ -519,29 +723,6 @@ def operation_has_unreviewed_production_log(db: Session, operation_id: int) -> b
     return count > 0
 
 
-def machine_has_unreviewed_production_log(db: Session, machine_id: int) -> bool:
-    """
-    True when any operation on the machine has a production log awaiting reviewer action.
-    Used to block all job cards on a machine when any one has unreviewed logs.
-    """
-    count = (
-        db.execute(
-            text(
-                """
-                SELECT COUNT(*) FROM scheduling.production_logs
-                WHERE machine_id = :machine_id AND (
-                    operator_status = 'inprogress'
-                    OR (operator_status = 'completed' AND status = 'pending')
-                )
-                """
-            ),
-            {"machine_id": machine_id},
-        ).scalar()
-        or 0
-    )
-    return count > 0
-
-
 def pending_reviewer_log_block_message(
     action: str = "activate job card or submit production log",
 ) -> str:
@@ -551,19 +732,6 @@ def pending_reviewer_log_block_message(
         f"(supervisor or manufacturing_coordinator). Please wait until the reviewer "
         f"has reviewed and updated the production log."
     )
-
-
-def get_machine_pending_reviewer_log_block_reason(
-    db: Session, machine_id: int, action: str = "activate job card"
-) -> Optional[str]:
-    """Block reason when any operation on the machine has an unreviewed production log, else None."""
-    if machine_has_unreviewed_production_log(db, machine_id):
-        return (
-            f"Cannot {action}. Previous job card log status is yet to be updated by reviewer "
-            f"(supervisor or manufacturing_coordinator). Please wait until the reviewer "
-            f"has reviewed and updated the production log."
-        )
-    return None
 
 
 def get_pending_reviewer_log_block_reason(
@@ -764,8 +932,16 @@ def get_operator_activation_block_reason(
     Return a human-readable reason when the operator cannot start a new run,
     or None when activation is allowed from a production-log perspective.
 
-    Blocks only while a log awaits reviewer action or production is fully approved.
-    Operator acknowledgement of reviewer feedback is optional and does not gate activation.
+    Blocks when:
+    - Out-source predecessor is not delivered
+    - Prior operation has no approved quantity (at least 1 unit must be approved)
+    - Operation has unreviewed production logs (current operation)
+    - Production is fully approved (no remaining quantity to produce)
+
+    Parallel work is allowed: Downstream operations can be activated even if
+    the previous operation has unreviewed logs, as long as at least 1 unit
+    is approved for handoff. This enables operators on different machines
+    to work simultaneously on approved partial quantities.
     """
     prior_block = prior_operation_blocks_activation(db, operation_id)
     if prior_block:
@@ -797,11 +973,29 @@ def get_operator_activation_block_reason(
     return None
 
 
+def machine_dict_for_log(db: Session, log, operation=None) -> Optional[Dict[str, Any]]:
+    """Prefer the log's machine (unit-wise card) over operation.machine_id."""
+    from DB.models.configuration import Machine
+
+    machine_id = getattr(log, "machine_id", None)
+    if machine_id is None and operation is not None:
+        machine_id = getattr(operation, "machine_id", None)
+    if machine_id is None:
+        return None
+    machine = db.query(Machine).filter(Machine.id == int(machine_id)).first()
+    if machine is None:
+        return None
+    return {"id": machine.id, "make": machine.make, "model": machine.model}
+
+
 def production_log_response_dict(
     db_log: ProductionLog,
     work_due: Optional[Dict[str, int]] = None,
 ) -> dict:
+    from scheduling_modes import log_engine, unit_range_from_log
+
     locked = db_log.user_id is not None
+    unit_range = unit_range_from_log(db_log)
     payload = {
         "id": db_log.id,
         "operation_id": db_log.operation_id,
@@ -830,6 +1024,9 @@ def production_log_response_dict(
         # True once any valid reviewer approved — status update must stay disabled
         "review_locked": locked,
         "can_review": not locked,
+        "is_unit_wise": log_engine(db_log) == "unit_wise",
+        "unit_from": unit_range[0] if unit_range else None,
+        "unit_to": unit_range[1] if unit_range else None,
     }
     if work_due is not None:
         payload.update(work_due_dict(work_due))

@@ -257,51 +257,69 @@ class SchedulerEngine:
         # Dedicated work on a non-working day is allowed by selecting shifts.
         return bool(cfg.working_day or (cfg.number_of_shifts and cfg.number_of_shifts > 0))
 
+    @staticmethod
+    def _timing_bounds(timings) -> Tuple[time, time]:
+        starts = [st.shift_start for st in timings]
+        ends = [st.shift_end for st in timings]
+        return min(starts), max(ends)
+
+    def _day_has_machine_assignment(self, shift_config_id: int) -> bool:
+        """True when any machine on this day was explicitly pinned to OT/shifts."""
+        row = (
+            self.db.query(MachineOperatorShiftAssignment.id)
+            .filter(MachineOperatorShiftAssignment.shift_config_id == shift_config_id)
+            .first()
+        )
+        return row is not None
+
     def _shift_window(self, dt: datetime, machine_id: Optional[int] = None, operator_id: Optional[int] = None) -> Tuple[time, time]:
         """
-        Returns shift start/end times for a date, considering machine-operator assignments.
-        Priority:
-          1) Assigned shifts for machine-operator (if both provided)
-          2) Assigned shifts for machine (if only machine provided)
-          3) If no assignments on this machine: GENERAL shift only (no OT/NEXT)
-          4) Fallback to default GENERAL shift
+        Shift start/end for a date.
+
+        When the day includes a shift beyond GENERAL (NEXT / OT) and nobody
+        assigned machines, the whole shop floor uses that full window.
+        When any machine-operator assignment exists for the day, only those
+        machines get the full window; every other machine stays on GENERAL.
         """
         cfg = (
             self.db.query(ShiftHoursConfiguration)
             .filter(ShiftHoursConfiguration.date == dt.date())
             .first()
         )
-        
+
         if cfg and cfg.shift_timings:
-            # Check if we have machine-operator or machine-only assignments
+            extended = any(
+                getattr(st, "shift_code", None) != "GENERAL" for st in cfg.shift_timings
+            )
+            cfg_id = getattr(cfg, "id", None)
+            any_assignment = (
+                extended
+                and cfg_id is not None
+                and self._day_has_machine_assignment(cfg_id)
+            )
+
+            # No pins: calendar OT applies to every machine.
+            if extended and not any_assignment:
+                return self._timing_bounds(cfg.shift_timings)
+
             assigned_timings = []
-            
             if machine_id and operator_id:
-                assigned_timings = self._get_assigned_shifts_for_machine_operator(machine_id, operator_id, dt)
+                assigned_timings = self._get_assigned_shifts_for_machine_operator(
+                    machine_id, operator_id, dt
+                )
             elif machine_id:
                 assigned_timings = self._get_assigned_shifts_for_machine(machine_id, dt)
-            
+
             if assigned_timings:
-                # Use assigned timings (may include OT)
-                starts = [st.shift_start for st in assigned_timings]
-                ends = [st.shift_end for st in assigned_timings]
-                return min(starts), max(ends)
-            else:
-                # No operator assignment on this machine: GENERAL only (no OT/NEXT).
-                # OT/NEXT is allowed only when the machine has an assignment row.
-                allowed_shifts = [
-                    st for st in cfg.shift_timings if st.shift_code == "GENERAL"
-                ]
-                if allowed_shifts:
-                    starts = [st.shift_start for st in allowed_shifts]
-                    ends = [st.shift_end for st in allowed_shifts]
-                    return min(starts), max(ends)
-        
-        # Fallback
-        n = cfg.number_of_shifts if (cfg and cfg.number_of_shifts) else 1
-        shift_start = DEFAULT_SHIFT_START
-        shift_end = DEFAULT_SHIFT_END
-        return shift_start, shift_end
+                return self._timing_bounds(assigned_timings)
+
+            general = [
+                st for st in cfg.shift_timings if st.shift_code == "GENERAL"
+            ]
+            if general:
+                return self._timing_bounds(general)
+
+        return DEFAULT_SHIFT_START, DEFAULT_SHIFT_END
 
     def _shift_start_dt(self, dt: datetime, machine_id: Optional[int] = None, operator_id: Optional[int] = None) -> datetime:
         shift_start, _ = self._shift_window(dt, machine_id, operator_id)
@@ -1005,14 +1023,36 @@ class SchedulerEngine:
     #  Schedule management                                                 #
     # ------------------------------------------------------------------ #
 
+    def _completed_op_cursor(self, operation_id: int, planned_end: datetime) -> datetime:
+        """
+        When the next operation of a finished part may start.
+
+        Uses the latest production-log finish. The old planned end is only
+        a fallback when the log has no to_date/to_time. This value is not
+        written as a planned bar.
+        """
+        try:
+            rows = self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).all()
+            candidates = [
+                datetime.combine(r.to_date, r.to_time)
+                for r in rows if r.to_date and r.to_time
+            ]
+            if candidates:
+                return max(candidates)
+        except Exception as e:
+            print(f"[ERROR] _completed_op_cursor op={operation_id}: {e}")
+        return planned_end
+
     def _clear_existing_schedule(self) -> None:
         """
         Delete PlannedScheduleItem rows first (FK → ScheduleHistory),
         then ScheduleHistory rows.
 
-        Completed operations (all production logs done, remaining=0) are
-        snapshotted before deletion and re-inserted in generate_schedule()
-        under the new ScheduleHistory so they remain visible in the plan.
+        Completed operations are snapshotted in memory so the next
+        operation of the same part can start after the real finish time.
+        Those rows are not written back into the new plan.
         """
         try:
             # ── Identify completed operation IDs ─────────────────────────── #
@@ -1032,7 +1072,7 @@ class SchedulerEngine:
                 if remaining_zero:
                     completed_op_ids.add(item.operation_id)
 
-            # ── Snapshot completed rows (schedule_history_id assigned later) #
+            # ── Snapshot completed rows for the next-op cursor only ──────── #
             self._preserved_planned_items = [
                 {
                     'part_id':            item.part_id,
@@ -1057,7 +1097,8 @@ class SchedulerEngine:
             self.db.commit()
             print(
                 f"[SCHEDULE] Cleared schedule; "
-                f"{len(self._preserved_planned_items)} completed-op rows preserved."
+                f"{len(self._preserved_planned_items)} completed-op row(s) "
+                f"kept for cascade only."
             )
         except Exception as e:
             print(f"[ERROR] _clear_existing_schedule: {e}")
@@ -1243,11 +1284,7 @@ class SchedulerEngine:
                     remaining_qty_zero = any(log.remaining_quantity_to_be_produced == 0 for log in production_logs)
  
                     if remaining_qty_zero:
-                        # Skip this operation, it's already completed
-                        skipped_parts.append(
-                            f"Part {part_data['part_number']} (order {order['sale_order_number']}): "
-                            f"Operation {operation.operation_number} is already completed — skipped."
-                        )
+                        # Finished work stays off the plan. Do not report it as a skip.
                         continue
                     
                     global_ops_queue.append({
@@ -1271,18 +1308,27 @@ class SchedulerEngine:
             # part_id -> last operation end time for that part
             part_last_end_time: Dict[int, datetime] = {}
             
-            # Initialize part_last_end_time with planned end times of completed operations
-            # This ensures cascading works correctly when previous ops are completed
+            # Completed ops are not planned again. Remember when each one
+            # actually finished so the next operation of that part waits.
+            latest_planned_by_op: Dict[int, datetime] = {}
+            part_by_op: Dict[int, int] = {}
             for preserved_item in self._preserved_planned_items:
-                part_id = preserved_item['part_id']
+                op_id = preserved_item['operation_id']
+                part_by_op[op_id] = preserved_item['part_id']
                 planned_end = preserved_item['planned_end_time']
-                if part_id in part_last_end_time:
-                    # Keep the latest end time
-                    if planned_end > part_last_end_time[part_id]:
-                        part_last_end_time[part_id] = planned_end
-                else:
-                    part_last_end_time[part_id] = planned_end
-                print(f"[DEBUG] Initialized part_last_end_time for part {part_id}: {planned_end}")
+                existing_end = latest_planned_by_op.get(op_id)
+                if existing_end is None or planned_end > existing_end:
+                    latest_planned_by_op[op_id] = planned_end
+
+            for op_id, planned_end in latest_planned_by_op.items():
+                cursor = self._completed_op_cursor(op_id, planned_end)
+                part_id = part_by_op[op_id]
+                if part_id not in part_last_end_time or cursor > part_last_end_time[part_id]:
+                    part_last_end_time[part_id] = cursor
+                print(
+                    f"[DEBUG] Initialized part_last_end_time for part {part_id} "
+                    f"from completed op {op_id}: {cursor}"
+                )
             
             # Track which parts have been scheduled (for reporting)
             scheduled_part_ids: set = set()
@@ -1433,18 +1479,8 @@ class SchedulerEngine:
             if all_items:
                 self.db.add_all(all_items)
 
-            # Re-insert preserved completed-operation rows under new history
-            preserved = getattr(self, '_preserved_planned_items', [])
-            if preserved:
-                self.db.add_all([
-                    PlannedScheduleItem(
-                        schedule_history_id = history_id,
-                        **d
-                    )
-                    for d in preserved
-                ])
-                print(f"[SCHEDULE] Re-inserted {len(preserved)} preserved completed-op planned items.")
-
+            # Completed operations stay on production logs. They are not
+            # copied back into planned_schedule_items.
             self.db.commit()
             
 

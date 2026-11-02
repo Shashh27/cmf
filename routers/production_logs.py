@@ -1,6 +1,7 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import status as http_status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -22,6 +23,7 @@ from DB.schemas import (
     ProductionLogBulkDelete,
 )
 from DB.schemas.production_logs import ProductionLogReviewAlert
+from scheduling_modes import require_batch_scheduling, require_submit_engine
 from production_log_helpers import (
     REVIEWER_ROLES,
     apply_manufacturing_coordinator_scope,
@@ -33,9 +35,12 @@ from production_log_helpers import (
     pending_reviewer_log_block_message,
     production_log_response_for_operation,
     production_log_response_dict,
+    machine_dict_for_log,
     remaining_to_close,
     resolve_order_for_operation_part,
     revert_completed_parts_if_logs_cleared,
+    close_fully_approved_operation_logs,
+    mark_part_completed_if_all_operations_approved,
     reviewer_user_dict,
     total_approved_for_operation,
     validate_operator_submit,
@@ -57,7 +62,7 @@ def _revert_completed_parts_to_inactive_if_logs_cleared(db: Session, part_ids: s
 
 # CRUD endpoints
 
-@router.post("/", response_model=ProductionLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ProductionLogResponse, status_code=http_status.HTTP_201_CREATED)
 def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db)):
     from sqlalchemy import text
     from DB.models.oms import Operation, Part
@@ -66,7 +71,7 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
     operation = db.query(Operation).filter(Operation.id == log.operation_id).first()
     if not operation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {log.operation_id} not found"
         )
 
@@ -74,7 +79,7 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
     part = db.query(Part).filter(Part.id == operation.part_id).first()
     if not part:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Part associated with operation {log.operation_id} not found"
         )
 
@@ -84,7 +89,7 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
     operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
     if not operator:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operator with id {log.operator_id} not found"
         )
 
@@ -94,7 +99,7 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
     # Check if production is already complete (based on approved quantity)
     if total_approved >= total_quantity:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}. No more production allowed."
         )
     
@@ -157,7 +162,7 @@ def get_all_production_logs(
     """
     if reviewer_role and reviewer_role not in REVIEWER_ROLES:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"reviewer_role must be one of: {', '.join(REVIEWER_ROLES)}",
         )
 
@@ -286,15 +291,9 @@ def get_all_production_logs(
 
             response.operation = operation_data
 
-            # Get machine details using the machine model
-            if operation.machine_id:
-                machine = db.query(Machine).filter(Machine.id == operation.machine_id).first()
-                if machine:
-                    response.machine = {
-                        "id": machine.id,
-                        "make": machine.make,
-                        "model": machine.model
-                    }
+            machine = machine_dict_for_log(db, log, operation)
+            if machine:
+                response.machine = machine
 
         # Add operator details
         if operator:
@@ -334,7 +333,7 @@ def get_production_log_review_alerts(
     """
     if for_role not in REVIEWER_ROLES:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"for_role must be one of: {', '.join(REVIEWER_ROLES)}",
         )
 
@@ -428,7 +427,7 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
     log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
     if not log:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
 
@@ -514,15 +513,9 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
 
         response.operation = operation_data
 
-        # Get machine details using the machine model
-        if operation.machine_id:
-            machine = db.query(Machine).filter(Machine.id == operation.machine_id).first()
-            if machine:
-                response.machine = {
-                    "id": machine.id,
-                    "make": machine.make,
-                    "model": machine.model
-                }
+        machine = machine_dict_for_log(db, log, operation)
+        if machine:
+            response.machine = machine
 
     # Add operator details
     if operator:
@@ -548,7 +541,7 @@ def update_production_log(
     db_log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
     if not db_log:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
 
@@ -559,7 +552,7 @@ def update_production_log(
         operation = db.query(Operation).filter(Operation.id == update_data["operation_id"]).first()
         if not operation:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Operation with id {update_data['operation_id']} not found"
             )
 
@@ -567,7 +560,7 @@ def update_production_log(
         operator = db.query(AccessUser).filter(AccessUser.id == update_data["operator_id"]).first()
         if not operator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Operator with id {update_data['operator_id']} not found"
             )
 
@@ -581,12 +574,12 @@ def update_production_log(
     db.refresh(db_log)
     return db_log
 
-@router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{log_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 def delete_production_log(log_id: int, db: Session = Depends(get_db)):
     db_log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
     if not db_log:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
     
@@ -606,7 +599,7 @@ def delete_production_log(log_id: int, db: Session = Depends(get_db)):
     return None
 
 
-@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/", status_code=http_status.HTTP_204_NO_CONTENT)
 def bulk_delete_production_logs(
     bulk_delete: ProductionLogBulkDelete = ProductionLogBulkDelete(),
     db: Session = Depends(get_db)
@@ -623,7 +616,7 @@ def bulk_delete_production_logs(
         
         if not logs_to_delete:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="No production logs found with the provided IDs"
             )
     else:
@@ -632,7 +625,7 @@ def bulk_delete_production_logs(
         
         if not logs_to_delete:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="No production logs found to delete"
             )
     
@@ -665,10 +658,14 @@ def _reschedule_after_production_review(log_id: int, operation_id: int) -> None:
     because the request session is closed when the response is sent.
     """
     from algorithm import dynamic_reschedule
-    from DB.models.oms import Operation, OrderPartPriority
-    from DB.models.scheduling import PartScheduleStatus, Rescheduling
-    from sqlalchemy import text as sa_text
-    from unit_wise_scheduler import rebuild_unit_schedule, unit_wise_enabled
+    from DB.models.oms import Operation
+    from DB.models.scheduling import Rescheduling
+    from scheduling_modes import get_shop_plan
+    from unit_wise_scheduler import (
+        drop_closed_operation_unit_rows,
+        rebuild_unit_schedule,
+        unit_wise_enabled,
+    )
 
     db = SessionLocal()
     try:
@@ -684,6 +681,7 @@ def _reschedule_after_production_review(log_id: int, operation_id: int) -> None:
             if operation:
                 part_id = operation.part_id
 
+        shop_plan = get_shop_plan(db)
         dynamic_reschedule(
             db,
             triggered_by_part_id=None,
@@ -700,8 +698,36 @@ def _reschedule_after_production_review(log_id: int, operation_id: int) -> None:
             },
         )
 
+        removed_unit_rows = 0
         try:
-            if unit_wise_enabled():
+            removed_unit_rows = drop_closed_operation_unit_rows(db, operation_id)
+            if removed_unit_rows:
+                db.commit()
+                logger.info(
+                    "Removed unit bars for a fully approved operation",
+                    extra={
+                        "event": "unit_wise_closed_rows_removed",
+                        "operation_id": operation_id,
+                        "part_id": part_id,
+                        "rows_deleted": removed_unit_rows,
+                    },
+                )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            logger.exception(
+                "Failed to remove unit bars for a fully approved operation",
+                extra={
+                    "event": "unit_wise_closed_rows_remove_failed",
+                    "operation_id": operation_id,
+                    "part_id": part_id,
+                },
+            )
+
+        try:
+            if shop_plan == "unit_wise" and unit_wise_enabled():
                 uw = rebuild_unit_schedule(
                     db,
                     part_id=part_id,
@@ -732,74 +758,7 @@ def _reschedule_after_production_review(log_id: int, operation_id: int) -> None:
             )
 
         if part_id:
-            op_ids = [
-                row[0] for row in db.query(Operation.id)
-                .filter(Operation.part_id == part_id).all()
-            ]
-            if op_ids:
-                completed_count_row = db.execute(
-                    sa_text("""
-                        SELECT COUNT(DISTINCT operation_id)
-                        FROM scheduling.production_logs
-                        WHERE operation_id = ANY(:op_ids)
-                          AND status = 'completed'
-                    """),
-                    {"op_ids": op_ids},
-                ).fetchone()
-                completed_count = completed_count_row[0] if completed_count_row else 0
-
-                if completed_count == len(op_ids):
-                    _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050
-                    db.execute(
-                        sa_text("SELECT pg_advisory_xact_lock(:key)"),
-                        {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY},
-                    )
-
-                    priority_record = db.query(OrderPartPriority).filter(
-                        OrderPartPriority.part_id == part_id,
-                        OrderPartPriority.status == "active",
-                    ).first()
-                    if priority_record:
-                        sale_order_id_for_part = priority_record.order_id
-                        priority_record.status = "completed"
-                        priority_record.priority = 0
-                        db.flush()
-
-                        active_rows = (
-                            db.query(OrderPartPriority)
-                            .filter(
-                                OrderPartPriority.status == "active",
-                                OrderPartPriority.priority > 0,
-                            )
-                            .order_by(
-                                OrderPartPriority.priority.asc(),
-                                OrderPartPriority.id.asc(),
-                            )
-                            .all()
-                        )
-                        for i, row in enumerate(active_rows, start=1):
-                            row.priority = i
-
-                        pps_record = db.query(PartScheduleStatus).filter(
-                            PartScheduleStatus.sale_order_id == sale_order_id_for_part,
-                            PartScheduleStatus.part_id == part_id,
-                        ).first()
-                        if pps_record:
-                            pps_record.status = "completed"
-                            pps_record.updated_at = now_ist()
-                            pps_record.start_date = None
-
-                        db.commit()
-                        logger.info(
-                            "Part marked completed",
-                            extra={
-                                "event": "part_marked_completed",
-                                "part_id": part_id,
-                                "order_id": sale_order_id_for_part,
-                                "completed_operations": len(op_ids),
-                                "remaining_active_parts": len(active_rows),
-                            },
-                        )
+            mark_part_completed_if_all_operations_approved(db, part_id)
     except Exception:
         try:
             db.rollback()
@@ -830,7 +789,7 @@ def update_production_log_status(
     db_log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
     if not db_log:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
 
@@ -840,7 +799,7 @@ def update_production_log_status(
     # Prevent changing status from completed to any other status
     if db_log.status == "completed" and status_update.status != "completed":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot change status from 'completed' to '{status_update.status}'. Once a production log is marked as completed, its status cannot be changed."
         )
     
@@ -895,7 +854,7 @@ def update_production_log_status(
     if status_update.status == "completed":
         if approved_qty != total_presented:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"For 'completed' status, approved quantity ({approved_qty}) must equal "
                     f"total presented ({total_presented} = "
@@ -908,7 +867,7 @@ def update_production_log_status(
     else:
         if total_assigned != total_presented:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"Total of approved ({approved_qty}) + rework ({rework_qty}) + "
                     f"rejected ({rejected_qty}) must equal total presented "
@@ -942,7 +901,7 @@ def update_production_log_status(
                 },
             )
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"Cannot approve {approved_qty} unit(s). Only "
                     f"{max_approvable} unit(s) are released from prior "
@@ -965,6 +924,7 @@ def update_production_log_status(
     # Determine the status
     if remaining_to_produce <= 0:
         db_log.status = "completed"
+        close_fully_approved_operation_logs(db, db_log.operation_id)
     elif rework_qty > 0 or rejected_qty > 0:
         db_log.status = "inprogress"
     else:
@@ -1020,6 +980,10 @@ def update_production_log_status(
         **production_log_response_for_operation(db, db_log, total_quantity)
     )
 
+    # Close the part here. The background reschedule can fail or be killed
+    # on reload, and that used to leave a fully approved part still active.
+    if operation is not None and operation.part_id:
+        mark_part_completed_if_all_operations_approved(db, operation.part_id)
 
     # Re-plan remaining work off the request thread. A full factory
     # reschedule here is what made Swagger sit on LOADING for minutes;
@@ -1054,7 +1018,7 @@ def get_production_logs_by_operator(
     operator = db.query(AccessUser).filter(AccessUser.id == operator_id).first()
     if not operator:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operator with id {operator_id} not found"
         )
     
@@ -1086,7 +1050,7 @@ def get_production_logs_by_operation(
     operation = db.query(Operation).filter(Operation.id == operation_id).first()
     if not operation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
 
@@ -1117,6 +1081,8 @@ def submit_production_log(
     produced_quantity       = new units manufactured (first run or reject replacement)
     rework_submit_quantity  = same parts reworked (NOT new order production)
     """
+    require_batch_scheduling(db)
+    require_submit_engine(db, "batch", operation_id=operation_id)
     from sqlalchemy.exc import OperationalError, ProgrammingError
     from DB.models.oms import Part, Operation
 
@@ -1142,13 +1108,13 @@ def submit_production_log(
                     },
                 )
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail=pending_reviewer_log_block_message(
                         "submit production log"
                     ),
                 )
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=(
                     f"No active production log found for operation {operation_id}. "
                     f"Please activate the job card first."
@@ -1158,14 +1124,14 @@ def submit_production_log(
         operation = db.query(Operation).filter(Operation.id == operation_id).first()
         if not operation:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Operation with id {operation_id} not found"
             )
 
         part = db.query(Part).filter(Part.id == operation.part_id).first()
         if not part:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Part associated with operation {operation_id} not found"
             )
 
@@ -1174,7 +1140,7 @@ def submit_production_log(
 
         if total_approved >= total_quantity:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}."
             )
 
@@ -1248,14 +1214,14 @@ def submit_production_log(
         err = str(e).lower()
         if "operator_rework_quantity" in err:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=(
                     "Database is missing column operator_rework_quantity. "
                     "Run: python migrations/add_operator_rework_quantity.py then restart the server."
                 ),
             ) from e
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error while submitting production log: {e}",
         ) from e
     except Exception as e:
@@ -1268,7 +1234,7 @@ def submit_production_log(
             },
         )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit production log: {e}",
         ) from e
 
@@ -1286,7 +1252,7 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
     operation = db.query(Operation).filter(Operation.id == operation_id).first()
     if not operation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
     
@@ -1455,13 +1421,13 @@ def acknowledge_production_log(
     
     if not db_log:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
     
     if operator_id and db_log.operator_id != operator_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Only the operator who created this log can acknowledge it"
         )
     
@@ -1469,26 +1435,26 @@ def acknowledge_production_log(
         validate_production_log_reviewer(db, user_id)
         if db_log.user_id and db_log.user_id != user_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only the reviewer who approved this log can acknowledge it"
             )
     
     if not operator_id and not user_id:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Either operator_id or user_id must be provided"
         )
     
     if operator_id:
         if db_log.status not in ["completed", "rework", "rejected", "inprogress"]:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Operator can only acknowledge logs with status 'completed', 'rework', 'rejected', or 'inprogress'"
             )
     elif user_id:
         if db_log.status not in ["pending", "completed", "rework", "rejected", "inprogress"]:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Reviewer can only acknowledge logs with status 'pending', 'completed', 'rework', 'rejected', or 'inprogress'"
             )
     
