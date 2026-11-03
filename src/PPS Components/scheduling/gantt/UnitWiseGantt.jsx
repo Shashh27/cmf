@@ -95,7 +95,7 @@ export default function UnitWiseGantt({
   selectedComponents,
   selectedProductionOrders,
   dateRange,
-  viewType,
+  viewType = 'day',
   onToggleOrder,
   onTogglePart,
 }) {

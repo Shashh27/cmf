@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Layout, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
+import { Layout, Button, Select, DatePicker, Tooltip, message, Modal, Spin } from 'antd';
 import {
   CONTROL_BAR_MOTION,
   LEGEND_CHIP_MOTION,
@@ -8,12 +8,13 @@ import {
 } from './schedulingTimelineMotion.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
-import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import { getComponentColors } from './schedulingTimelineUtils.js';
 import { api } from '../../api/client.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig.js';
+import { ShopPlanActualNote } from '../../PPS Components/scheduling/controls/ShopPlanPicker.jsx';
 import useLenis from '../../hooks/useLenis.js';
 
 const { Content } = Layout;
@@ -62,7 +63,6 @@ const ActualScheduling = () => {
     component_status: {},
   });
 
-  const [viewType, setViewType] = useState('week');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [selectedComponents, setSelectedComponents] = useState([]);
@@ -73,11 +73,7 @@ const ActualScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
-  const [skippedData, setSkippedData] = useState({
-    skipped_orders: [],
-    skipped_parts: [],
-    parts_without_operations: []
-  });
+  const [scheduleLoading, setScheduleLoading] = useState(true);
   const [shiftConfigs, setShiftConfigs] = useState([]);
 
   const timelineRef = useRef(null);
@@ -90,6 +86,7 @@ const ActualScheduling = () => {
   );
 
   const fetchSchedule = async () => {
+    setScheduleLoading(true);
     try {
       const mcId = getCurrentManufacturingCoordinatorId();
       const url = mcId
@@ -126,6 +123,7 @@ const ActualScheduling = () => {
       });
       setScheduleData(prev => ({ ...prev, scheduled_operations: ops }));
     } catch (e) { console.error(e); }
+    finally { setScheduleLoading(false); }
   };
 
   const handleUpdateSchedule = async () => {
@@ -136,14 +134,8 @@ const ActualScheduling = () => {
         headers: { 'accept': 'application/json' },
       });
       if (res.ok) {
-        const data = await res.json();
         setUpdateModalOpen(false);
         message.success('Schedule updated');
-        setSkippedData({
-          skipped_orders: data.skipped_orders || [],
-          skipped_parts: data.skipped_parts || [],
-          parts_without_operations: data.parts_without_operations || []
-        });
         await fetchSchedule();
       } else {
         const err = await res.text().catch(() => '');
@@ -185,9 +177,18 @@ const ActualScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const res = await api.get('/orders/');
-        const data = res.data;
-        setOrders(Array.isArray(data) ? data : []);
+        const mcId = getCurrentManufacturingCoordinatorId();
+        const q = mcId ? `?manufacturing_coordinator_id=${mcId}` : '';
+        const res = await fetch(
+          `${SCHEDULING_API_BASE_URL}/scheduling/orders-by-project-coordinator${q}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const rows = Array.isArray(data?.orders) ? data.orders : [];
+        setOrders(rows.map((o) => ({
+          ...o,
+          id: o.order_id ?? o.id,
+        })));
       } catch (e) { console.error(e); }
     };
     fetchMachines();
@@ -250,24 +251,12 @@ const ActualScheduling = () => {
     const start = moment(win.start);
     const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
+    const span = Math.max(end.diff(start), 60 * 1000);
     timelineRef.current.setWindow(
-      start.clone().add(delta, unit).toDate(),
-      end.clone().add(delta, unit).toDate(),
+      start.clone().add(delta * span, 'ms').toDate(),
+      end.clone().add(delta * span, 'ms').toDate(),
       { animation: getWindowAnimation(scheduleData.scheduled_operations.length) }
     );
-  };
-
-  const handleViewTypeChange = (v) => {
-    setViewType(v);
-    if (!dateRange) {
-      const r = getTimeRange(v, null, scheduleData);
-      if (timelineRef.current) {
-        timelineRef.current.setWindow(r.start, r.end, {
-          animation: getWindowAnimation(scheduleData.scheduled_operations.length),
-        });
-      }
-    }
   };
 
   const handleRefresh = () => {
@@ -283,16 +272,11 @@ const ActualScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
+        <ShopPlanActualNote />
         <motion.div
           {...CONTROL_BAR_MOTION}
           style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
         >
-          <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-            <Option value="day">Daily</Option>
-            <Option value="week">Weekly</Option>
-            <Option value="month">Monthly</Option>
-            <Option value="year">Yearly</Option>
-          </Select>
 
           <DatePicker.RangePicker
             size="small"
@@ -379,33 +363,11 @@ const ActualScheduling = () => {
           <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
         </motion.div>
 
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
-                <span style={{ color: '#666' }}>
-                  {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
-                <span style={{ color: '#666' }}>
-                  {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
-                <span style={{ color: '#666' }}>
-                  {skippedData.parts_without_operations.length > 0
-                    ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
-                    : 'No parts without operations'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
+        <Spin
+          spinning={updateScheduleLoading || scheduleLoading}
+          tip={updateScheduleLoading ? "Updating schedule, please wait" : "Loading schedule, please wait"}
+          size="large"
+        >
         <div>
           <div
             style={{
@@ -427,10 +389,10 @@ const ActualScheduling = () => {
               selectedComponents={selectedComponents}
               selectedProductionOrders={selectedProductionOrders}
               dateRange={dateRange}
-              viewType={viewType}
             />
           </div>
         </div>
+        </Spin>
 
         <AnimatePresence>
           {Object.keys(componentColors).length > 0 && (
@@ -502,9 +464,16 @@ const ActualScheduling = () => {
           closable={!updateScheduleLoading}
           maskClosable={!updateScheduleLoading}
         >
-          <p style={{ margin: 0 }}>
-            Do you want to update the actual schedule? Please wait while we update the schedule.
-          </p>
+          {updateScheduleLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <Spin />
+              <span>Updating schedule, please wait</span>
+            </div>
+          ) : (
+            <p style={{ margin: 0 }}>
+              Do you want to update the actual schedule?
+            </p>
+          )}
         </Modal>
       </Content>
     </Layout>

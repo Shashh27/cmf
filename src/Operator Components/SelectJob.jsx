@@ -1,19 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Drawer, Card, Select, Button, Tag, Typography, Row, Col, Space, Empty, Spin } from 'antd';
+import { Drawer, Card, Select, Button, Tag, Typography, Row, Col, Space, Empty, Spin, Radio, message } from 'antd';
 import { CalendarOutlined, BuildOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import {
-  getJobOperationId,
   getJobRemainingQty,
-  getJobStatsKey,
   getJobTotalQty,
+  isJobReviewCompleted,
+  isJobReviewInProgress,
+  jobStatusLabel,
   isUnitWiseJob,
-  logsForJob,
 } from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
+import {
+  canSwitchSchedule,
+  fetchSchedulingModes,
+  jobAllowedOnSchedule,
+  jobFilterEngines,
+  persistScheduleMode,
+  readPersistedScheduleMode,
+  resolveScheduleMode,
+} from '../PPS Components/scheduling/api/schedulingModesApi';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
+
+const formatJobDateTime = (value) => {
+  if (!value) return 'N/A';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'N/A';
+  return `${d.toLocaleDateString('en-GB').replace(/\//g, '-')}, ${d.toLocaleTimeString('en-GB')}`;
+};
 
 const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   const [jobs, setJobs] = useState([]);
@@ -23,7 +39,17 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
   const [orderFilter, setOrderFilter] = useState(null);
   const [machineName, setMachineName] = useState('');
   const [machineId, setMachineId] = useState(null);
-  const [jobStatsMap, setJobStatsMap] = useState({});
+  const [schedulingModes, setSchedulingModes] = useState({
+    shop_plan: 'batch',
+    batch_scheduling: true,
+    unit_wise_scheduling: false,
+  });
+  const [scheduleMode, setScheduleMode] = useState(
+    () => resolveScheduleMode(
+      { shop_plan: 'batch', batch_scheduling: true, unit_wise_scheduling: false },
+      readPersistedScheduleMode()
+    )
+  );
 
   useEffect(() => {
     const stored = localStorage.getItem('selectedMachine');
@@ -77,107 +103,93 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
     };
   };
 
-  const fetchJobs = async () => {
+  const mapUnitCards = (unitJobs) => (unitJobs || []).map((job) => {
+    const bandQty = (job.unit_from != null && job.unit_to != null)
+      ? Number(job.unit_to) - Number(job.unit_from) + 1
+      : Number(job.quantity || 0);
+    return {
+      ...job,
+      is_unit_wise: true,
+      schedule_id: `unit-${job.order_id}-${job.part_id}-${job.operation_id}-${job.unit_from}-${job.unit_to}`,
+      sale_order_number: job.order_number,
+      sale_order_id: job.order_id,
+      quantity: bandQty,
+      total_quantity: bandQty,
+      planned_start_time: job.planned_start,
+      planned_end_time: job.planned_end,
+      total_operations: 1,
+    };
+  });
+
+  const fetchJobs = async (forcedMode = null) => {
     setLoading(true);
     try {
       const machineKey = machineId || 1;
-      const [opsResult, unitResult] = await Promise.allSettled([
-        axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/machine-operations/${machineKey}`),
-        axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/unit-wise/machine-jobs/${machineKey}`),
-      ]);
+      const modes = await fetchSchedulingModes({ machineId: machineKey, force: true }).catch(() => ({
+        shop_plan: 'batch',
+        batch_scheduling: true,
+        unit_wise_scheduling: false,
+        toggle_allowed: true,
+        part_engines: {},
+        machine_part_engines: {},
+      }));
+      setSchedulingModes(modes);
+      let mode = forcedMode || resolveScheduleMode(modes, readPersistedScheduleMode());
+      if (modes.in_progress_engine) {
+        mode = modes.in_progress_engine;
+        persistScheduleMode(mode);
+      }
+      setScheduleMode(mode);
 
-      const ops = opsResult.status === 'fulfilled'
-        ? (opsResult.value.data?.operations || [])
-        : [];
-      const unitJobs = unitResult.status === 'fulfilled'
-        ? (unitResult.value.data?.jobs || [])
-        : [];
+      if (!mode) {
+        setJobs([]);
+        return;
+      }
 
-      const unitCards = unitJobs.map((job) => {
-        const bandQty = (job.unit_from != null && job.unit_to != null)
-          ? Number(job.unit_to) - Number(job.unit_from) + 1
-          : Number(job.quantity || 0);
-        return {
-          ...job,
-          is_unit_wise: true,
-          schedule_id: `unit-${job.order_id}-${job.part_id}-${job.operation_id}-${job.unit_from}-${job.unit_to}`,
-          sale_order_number: job.order_number,
-          sale_order_id: job.order_id,
-          quantity: bandQty,
-          total_quantity: bandQty,
-          planned_start_time: job.planned_start,
-          planned_end_time: job.planned_end,
-          total_operations: 1,
-        };
-      });
+      const partEngines = jobFilterEngines(modes);
+      const keepJob = (job) => jobAllowedOnSchedule(job, mode, partEngines);
 
-      const combined = [...ops, ...unitCards];
-      setJobs(combined);
-      fetchStatsForJobs(combined);
+      if (mode === 'unit_wise') {
+        const res = await axios.get(
+          `${SCHEDULING_API_BASE_URL}/scheduling/unit-wise/machine-jobs/${machineKey}`
+        );
+        const next = mapUnitCards(res.data?.jobs || []).filter(keepJob);
+        setJobs(next);
+        return;
+      }
+
+      const res = await axios.get(
+        `${SCHEDULING_API_BASE_URL}/scheduling/machine-operations/${machineKey}`
+      );
+      const next = (res.data?.operations || []).map((job) => ({
+        ...job,
+        is_unit_wise: false,
+      })).filter(keepJob);
+      setJobs(next);
     } catch (error) {
       console.error('Error fetching jobs:', error);
+      setJobs([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchStatsForJobs = async (ops) => {
-    const results = await Promise.allSettled(
-      ops.map(async (job) => {
-        const statsKey = getJobStatsKey(job);
-        const opId = getJobOperationId(job);
-        if (!statsKey || !opId) return { opId: null, totalApproved: 0, totalProduced: 0, operatorStatus: null };
-        try {
-          const res = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!res.ok) return { opId: statsKey, totalApproved: 0, totalProduced: 0, operatorStatus: null };
-          const scopedLogs = logsForJob(await res.json(), job);
-          const totalApproved = scopedLogs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
-          const totalProduced = scopedLogs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
-
-          const sortedLogs = [...scopedLogs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-          const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
-
-          return { opId: statsKey, totalApproved, totalProduced, operatorStatus };
-        } catch {
-          return { opId: statsKey, totalApproved: 0, totalProduced: 0, operatorStatus: null };
-        }
-      })
-    );
-    const map = {};
-    results.forEach((r) => {
-      if (r.status === 'fulfilled' && r.value.opId != null) {
-        map[r.value.opId] = {
-          totalApproved: r.value.totalApproved,
-          totalProduced: r.value.totalProduced,
-          operatorStatus: r.value.operatorStatus
-        };
-      }
-    });
-    setJobStatsMap(map);
+  const handleScheduleModeChange = (mode) => {
+    if (!canSwitchSchedule(schedulingModes)) {
+      message.warning(
+        schedulingModes.toggle_lock_reason
+        || 'Finish or submit the open job card before switching schedule.'
+      );
+      return;
+    }
+    persistScheduleMode(mode);
+    setScheduleMode(mode);
+    fetchJobs(mode);
   };
 
-  const isJobCompleted = (job, jobStatsMap) => {
-    const status = (job.operation_status || job.status || '').toUpperCase();
-    const isCompletedByStatus = status === 'COMPLETED';
-    
-    const totalQuantity = getJobTotalQty(job);
-    const stats = jobStatsMap[getJobStatsKey(job)] || {};
-    const approvedQuantity = stats.totalApproved || 0;
-    const isCompletedByQuota = totalQuantity > 0 && approvedQuantity >= totalQuantity;
-    
-    return isCompletedByStatus || isCompletedByQuota;
-  };
+  const isJobCompleted = (job) => isJobReviewCompleted(job);
 
-  const isJobInProgress = (job) => {
-    const stats = jobStatsMap[getJobStatsKey(job)] || {};
-    const logStatus = (stats.operatorStatus || '').toUpperCase();
-    const isLogInProgress = logStatus === 'INPROGRESS' || logStatus === 'IN-PROGRESS' || logStatus === 'IN PROGRESS';
-
-    const status = (job.operation_status || job.status || '').toUpperCase();
-    const isBasicInProgress = status === 'INPROGRESS' || status === 'IN-PROGRESS' || status === 'IN PROGRESS';
-
-    return isLogInProgress || isBasicInProgress;
-  };
+  const isJobInProgress = (job) => isJobReviewInProgress(job);
 
   // ─── Sort ALL jobs by priority first (source of truth for lock order) ───────
   const allJobsSorted = [...jobs].sort((a, b) => {
@@ -236,6 +248,46 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
             </div>
             <Text strong style={{ color: '#1677FF' }}>Jobs</Text>
           </div>
+
+          {schedulingModes.shop_plan && (
+            <Tag color={scheduleMode === 'unit_wise' ? 'purple' : 'blue'}>
+              {scheduleMode === 'unit_wise'
+                ? 'Shop floor follows unit-wise'
+                : 'Shop floor follows batch'}
+            </Tag>
+          )}
+          {!schedulingModes.shop_plan && schedulingModes.batch_scheduling && schedulingModes.unit_wise_scheduling && (
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                Schedule
+              </Text>
+              <Radio.Group
+                value={scheduleMode}
+                onChange={(e) => handleScheduleModeChange(e.target.value)}
+                optionType="button"
+                buttonStyle="solid"
+                disabled={!canSwitchSchedule(schedulingModes)}
+                options={[
+                  { label: 'Unit-wise', value: 'unit_wise' },
+                  { label: 'Batch', value: 'batch' },
+                ]}
+              />
+              {!canSwitchSchedule(schedulingModes) && schedulingModes.toggle_lock_reason && (
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                  {schedulingModes.toggle_lock_reason}
+                </Text>
+              )}
+            </div>
+          )}
+          {!schedulingModes.shop_plan && scheduleMode === 'unit_wise' && !schedulingModes.batch_scheduling && (
+            <Tag color="purple">Unit-wise schedule</Tag>
+          )}
+          {!schedulingModes.shop_plan && scheduleMode === 'batch' && !schedulingModes.unit_wise_scheduling && (
+            <Tag color="blue">Batch schedule</Tag>
+          )}
+          {!scheduleMode && (
+            <Empty description="No live schedule is enabled for this shop floor." />
+          )}
 
           <div>
             <Text strong style={{ fontSize: 16 }}>{filteredJobs.length} jobs available</Text>
@@ -302,22 +354,27 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
             {filteredJobs.map((job) => {
               const isSelected  = isSameJob(job, currentSelectedJob);
-              const isCompleted = isJobCompleted(job, jobStatsMap);
+              const isCompleted = isJobCompleted(job);
               const hasBlockReason = job.blocked_by && job.blocked_by.length > 0;
               const cardHighlightStyle = getCardHighlightStyle(isCompleted, isSelected);
 
               return (
                 <Card
                   key={job.schedule_id}
-                  hoverable
+                  hoverable={!isCompleted}
                   style={{
                     borderRadius: 12,
                     transition: 'all 0.2s ease',
-                    cursor: 'pointer',
+                    cursor: isCompleted ? 'not-allowed' : 'pointer',
+                    opacity: isCompleted ? 0.85 : 1,
+                    pointerEvents: isCompleted ? 'none' : 'auto',
                     ...cardHighlightStyle,
                   }}
                   bodyStyle={{ padding: 16 }}
-                  onClick={() => onSelectJob(job)}
+                  onClick={() => {
+                    if (isCompleted) return;
+                    onSelectJob(job);
+                  }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div>
@@ -334,11 +391,14 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                           Unit wise
                         </Tag>
                       )}
+                      <Tag color="blue" style={{ borderRadius: 4, margin: 0 }}>
+                        Priority {job.priority ?? 'N/A'}
+                      </Tag>
                       <Tag
-                        color={isCompleted ? 'green' : (isJobInProgress(job) ? 'processing' : 'blue')}
+                        color={isCompleted ? 'green' : (isJobInProgress(job) ? 'processing' : 'default')}
                         style={{ borderRadius: 4, margin: 0 }}
                       >
-                        {isCompleted ? 'Completed' : (isJobInProgress(job) ? 'In Progress' : `Priority ${job.priority || 'N/A'}`)}
+                        {jobStatusLabel(job)}
                       </Tag>
                     </div>
                   </div>
@@ -366,7 +426,7 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       <div>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Remaining</Text>
                         <Text strong>
-                          {getJobRemainingQty(job, jobStatsMap[getJobStatsKey(job)] || {})}
+                          {getJobRemainingQty(job)}
                         </Text>
                       </div>
                     </Col>
@@ -393,17 +453,13 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <CalendarOutlined style={{ color: '#52c41a' }} />
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Start: {job.planned_start_time
-                            ? (() => { const d = new Date(job.planned_start_time); return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })()
-                            : 'N/A'}
+                          Start: {formatJobDateTime(job.planned_start_time)}
                         </Text>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <CalendarOutlined style={{ color: '#f5222d' }} />
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          End: {job.planned_end_time
-                            ? (() => { const d = new Date(job.planned_end_time); return d.toLocaleString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })()
-                            : 'N/A'}
+                          End: {formatJobDateTime(job.planned_end_time)}
                         </Text>
                       </div>
                     </Space>

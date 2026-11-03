@@ -250,7 +250,7 @@ const PartsPriority = () => {
   const openSwapModal = (sourcePart, targetPartId = null, dragContext = null) => {
     setSwapModal({
       open: true,
-      phase: "select",
+      phase: dragContext ? "simulating" : "select",
       sourcePart,
       targetPartId,
       simResult: null,
@@ -878,9 +878,10 @@ const PartsPriority = () => {
 
         {/* ── loading: simulating ── */}
         {isSimulating && (
-          <div style={{ padding: "44px 0", textAlign: "center" }}>
-            <Lottie animationData={loadingAnim} loop autoplay style={{ width: 120, height: 40, margin: "0 auto" }} />
-            <div style={{ marginTop: 12, color: "#64748b", fontSize: 14 }}>Checking machine schedules, due dates, and production logs…</div>
+          <div style={{ padding: "48px 0" }}>
+            <Spin spinning tip="Simulating part priorities" size="large">
+              <div style={{ minHeight: 140 }} />
+            </Spin>
           </div>
         )}
 

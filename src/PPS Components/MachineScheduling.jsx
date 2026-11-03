@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Layout, Button, Select, DatePicker, Tooltip, message, Modal, Tabs } from 'antd';
+import { Layout, Button, Select, DatePicker, Tooltip, message, Modal, Tabs, Spin } from 'antd';
 import {
   CONTROL_BAR_MOTION,
   LEGEND_CHIP_MOTION,
@@ -9,13 +9,16 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import ActualScheduling from './ActualScheduling.jsx';
 import SchedulingGanttTimeline from '../components/SchedulingGanttTimeline.jsx';
-import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import { getComponentColors } from './schedulingTimelineUtils.js';
 import { api } from '../api/client.js';
 import useLenis from '../hooks/useLenis.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
+import { fetchSchedulingModes, ppsUpdatePolicy } from './scheduling/api/schedulingModesApi.js';
+import OneScheduleInfoButton from './scheduling/controls/OneScheduleInfoButton.jsx';
+import ShopPlanPicker from './scheduling/controls/ShopPlanPicker.jsx';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -55,7 +58,6 @@ const MachineScheduling = () => {
     component_status: {},
   });
 
-  const [viewType, setViewType] = useState('week');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [selectedComponents, setSelectedComponents] = useState([]);
@@ -66,14 +68,11 @@ const MachineScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('machine-scheduling');
   const [actualRefreshKey, setActualRefreshKey] = useState(0);
-  const [skippedData, setSkippedData] = useState({
-    skipped_orders: [],
-    skipped_parts: [],
-    parts_without_operations: []
-  });
   const [shiftConfigs, setShiftConfigs] = useState([]);
+  const [ppsPolicy, setPpsPolicy] = useState({ planned: 'allow', actual: 'allow', message: null, confirmMessage: null });
 
   const timelineRef = useRef(null);
 
@@ -85,6 +84,7 @@ const MachineScheduling = () => {
   );
 
   const fetchSchedule = async () => {
+    setScheduleLoading(true);
     try {
       const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`);
       if (!res.ok) return;
@@ -117,6 +117,7 @@ const MachineScheduling = () => {
       });
       setScheduleData(prev => ({ ...prev, scheduled_operations: ops }));
     } catch (e) { console.error(e); }
+    finally { setScheduleLoading(false); }
   };
 
   const handleUpdateSchedule = async () => {
@@ -127,14 +128,8 @@ const MachineScheduling = () => {
         headers: { 'accept': 'application/json' },
       });
       if (res.ok) {
-        const data = await res.json();
         setUpdateModalOpen(false);
         message.success('Schedule generated');
-        setSkippedData({
-          skipped_orders: data.skipped_orders || [],
-          skipped_parts: data.skipped_parts || [],
-          parts_without_operations: data.parts_without_operations || []
-        });
         await fetchSchedule();
       } else {
         const err = await res.text().catch(() => '');
@@ -206,6 +201,12 @@ const MachineScheduling = () => {
     fetchShiftConfigs();
   }, []);
 
+  useEffect(() => {
+    fetchSchedulingModes({ force: true })
+      .then((modes) => setPpsPolicy(ppsUpdatePolicy(modes)))
+      .catch(() => {});
+  }, []);
+
   // ── Project selection → filter Gantt by that sale order ────
   const handleProjectChange = (orderId) => {
     setSelectedProjectId(orderId);
@@ -248,24 +249,12 @@ const MachineScheduling = () => {
     const start = moment(win.start);
     const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
+    const span = Math.max(end.diff(start), 60 * 1000);
     timelineRef.current.setWindow(
-      start.clone().add(delta, unit).toDate(),
-      end.clone().add(delta, unit).toDate(),
+      start.clone().add(delta * span, 'ms').toDate(),
+      end.clone().add(delta * span, 'ms').toDate(),
       { animation: getWindowAnimation(scheduleData.scheduled_operations.length) }
     );
-  };
-
-  const handleViewTypeChange = (v) => {
-    setViewType(v);
-    if (!dateRange) {
-      const r = getTimeRange(v, null, scheduleData);
-      if (timelineRef.current) {
-        timelineRef.current.setWindow(r.start, r.end, {
-          animation: getWindowAnimation(scheduleData.scheduled_operations.length),
-        });
-      }
-    }
   };
 
   const handleRefresh = () => {
@@ -282,6 +271,7 @@ const MachineScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
+        <ShopPlanPicker />
         <Tabs
           defaultActiveKey="machine-scheduling"
           activeKey={activeTab}
@@ -298,13 +288,6 @@ const MachineScheduling = () => {
               {...CONTROL_BAR_MOTION}
               style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
             >
-              <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-                <Option value="day">Daily</Option>
-                <Option value="week">Weekly</Option>
-                <Option value="month">Monthly</Option>
-                <Option value="year">Yearly</Option>
-              </Select>
-
               <DatePicker.RangePicker
                 size="small"
                 format="DD-MM-YYYY"
@@ -386,39 +369,30 @@ const MachineScheduling = () => {
               </Button.Group>
 
               <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-              <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
+              <Tooltip title={ppsPolicy.planned === 'block' ? ppsPolicy.message : undefined}>
+                <span>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<ReloadOutlined />}
+                    style={{ background: ppsPolicy.planned === 'block' ? undefined : '#1677ff' }}
+                    disabled={ppsPolicy.planned === 'block'}
+                    onClick={() => setUpdateModalOpen(true)}
+                  >
+                    Update
+                  </Button>
+                </span>
+              </Tooltip>
               <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
+              <OneScheduleInfoButton engine="batch" />
             </motion.div>
 
-            {/* Skipped Information Box */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
-                    <span style={{ color: '#666' }}>
-                      {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
-                    <span style={{ color: '#666' }}>
-                      {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
-                    <span style={{ color: '#666' }}>
-                      {skippedData.parts_without_operations.length > 0
-                        ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
-                        : 'No parts without operations'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Timeline */}
+            <Spin
+              spinning={updateScheduleLoading || scheduleLoading}
+              tip={updateScheduleLoading ? "Generating schedule, please wait" : "Loading schedule, please wait"}
+              size="large"
+            >
             <div>
               <div
                 style={{
@@ -440,10 +414,10 @@ const MachineScheduling = () => {
                   selectedComponents={selectedComponents}
                   selectedProductionOrders={selectedProductionOrders}
                   dateRange={dateRange}
-                  viewType={viewType}
                 />
               </div>
             </div>
+            </Spin>
 
             <AnimatePresence>
               {Object.keys(componentColors).length > 0 && (
@@ -517,9 +491,18 @@ const MachineScheduling = () => {
               closable={!updateScheduleLoading}
               maskClosable={!updateScheduleLoading}
             >
-              <p style={{ margin: 0 }}>
-                Do you want to generate a new schedule? Please wait while we generate the new schedule.
-              </p>
+              {updateScheduleLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+                  <Spin />
+                  <span>Generating schedule, please wait</span>
+                </div>
+              ) : (
+                <p style={{ margin: 0 }}>
+                  {ppsPolicy.planned === 'confirm' && ppsPolicy.confirmMessage
+                    ? ppsPolicy.confirmMessage
+                    : 'Do you want to generate a new schedule?'}
+                </p>
+              )}
             </Modal>
           </TabPane>
 

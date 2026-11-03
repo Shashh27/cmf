@@ -5,6 +5,7 @@
 import { SCHEDULING_API_BASE_URL } from '../../../Config/schedulingconfig.js';
 
 const UNIT_WISE_BASE = `${SCHEDULING_API_BASE_URL}/scheduling/unit-wise`;
+const UNIT_WISE_NOTES_RE = /unit-wise units\s+(\d+)\s*-\s*(\d+)/i;
 
 const apiError = (data, fallback) => {
   const detail = data?.detail;
@@ -20,23 +21,21 @@ export const isUnitWiseProductionLog = (log) => {
   if (log.is_unit_wise === true || log.unit_wise === true) return true;
   const source = String(log.source || log.log_source || log.schedule_type || '').toLowerCase();
   if (source.includes('unit')) return true;
+  if (UNIT_WISE_NOTES_RE.test(String(log.notes || ''))) return true;
   return log.unit_from != null || log.unit_to != null;
 };
 
+export const displayReviewerStatus = (log) => {
+  const status = String(log?.status || '').toLowerCase();
+  const operatorDone = String(log?.operator_status || '').toLowerCase() === 'completed';
+  if (operatorDone && log?.user_id == null && status === 'inprogress') return 'pending';
+  return status;
+};
+
 export async function fetchUnitWiseProductionLogs() {
-  try {
-    const res = await fetch(`${UNIT_WISE_BASE}/production-logs`, {
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return [];
-    const data = await res.json().catch(() => []);
-    const list = Array.isArray(data)
-      ? data
-      : (Array.isArray(data?.logs) ? data.logs : Array.isArray(data?.items) ? data.items : []);
-    return list.map((log) => ({ ...log, is_unit_wise: true }));
-  } catch {
-    return [];
-  }
+  // Unit-wise rows live on scheduling.production_logs and are returned by
+  // GET /production-logs/ (is_unit_wise, unit_from, unit_to).
+  return [];
 }
 
 export async function updateProductionLogReview(log, {

@@ -14,7 +14,7 @@ import autoTable from 'jspdf-autotable';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
 import {
-  fetchUnitWiseProductionLogs,
+  displayReviewerStatus,
   updateProductionLogReview,
 } from '../../PPS Components/scheduling/jobs/productionLogReviewApi';
 import cmtisLogo from '../../assets/cmtis.png';
@@ -128,18 +128,10 @@ const ProductionLog = () => {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, unitWiseLogs] = await Promise.all([
-        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`),
-        fetchUnitWiseProductionLogs(),
-      ]);
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`);
       if (!response.ok) throw new Error('Failed to fetch production logs');
       const batchLogs = await response.json();
-      const seen = new Set();
-      const allLogs = [...unitWiseLogs, ...(Array.isArray(batchLogs) ? batchLogs : [])].filter((log) => {
-        if (log?.id == null || seen.has(log.id)) return false;
-        seen.add(log.id);
-        return true;
-      });
+      const allLogs = Array.isArray(batchLogs) ? batchLogs : [];
 
       const visibleLogs = allLogs.filter(
         (log) => log.operator_status?.toLowerCase() !== 'inprogress' && hasLogSubmission(log)
@@ -897,8 +889,8 @@ const ProductionLog = () => {
         { text: 'Completed', value: 'completed' },
         { text: 'In Progress', value: 'inprogress' },
       ],
-      onFilter: (value, record) => record.status?.toLowerCase() === value,
-      render: (status) => getStatusTag(status),
+      onFilter: (value, record) => displayReviewerStatus(record) === value,
+      render: (_, record) => getStatusTag(displayReviewerStatus(record)),
     },
     {
       title: 'Actions',

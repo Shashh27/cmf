@@ -4,14 +4,14 @@
  * Displays the unit-wise schedule with order/part palette legend.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Layout, Button, Select, DatePicker, Tooltip, Modal, message } from 'antd';
+import { Layout, Button, Select, DatePicker, Tooltip, Modal, message, Spin } from 'antd';
 import {
   CONTROL_BAR_MOTION,
   getWindowAnimation,
 } from './schedulingTimelineMotion.js';
 import { motion } from 'framer-motion';
 import UnitWiseGantt from './scheduling/gantt/UnitWiseGantt.jsx';
-import { getTimeRange, mapUnitWiseItemsToOperations } from './schedulingTimelineUtils.js';
+import { mapUnitWiseItemsToOperations } from './schedulingTimelineUtils.js';
 import { api } from '../api/client.js';
 import {
   fetchMachines,
@@ -35,9 +35,23 @@ import {
 } from '@ant-design/icons';
 import moment from 'moment';
 import dayjs from 'dayjs';
+import OneScheduleInfoButton from './scheduling/controls/OneScheduleInfoButton.jsx';
+import { fetchShopPlan } from './scheduling/api/schedulingModesApi.js';
 
 const { Content } = Layout;
 const { Option } = Select;
+
+const manufacturingCoordinatorIdFromSession = () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+    const role = String(user?.role || '').toLowerCase().replace(/\s+/g, '_');
+    const onMcRoute = window.location.pathname.includes('/manufacturing_coordinator/');
+    if ((role === 'manufacturing_coordinator' || onMcRoute) && user?.id != null) return user.id;
+    return null;
+  } catch {
+    return null;
+  }
+};
 
 const UnitwiseScheduling = () => {
   const [scheduleData, setScheduleData] = useState({
@@ -46,7 +60,6 @@ const UnitwiseScheduling = () => {
     component_status: {},
   });
 
-  const [viewType, setViewType] = useState('week');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [selectedComponents, setSelectedComponents] = useState([]);
@@ -57,7 +70,11 @@ const UnitwiseScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
   const [shiftConfigs, setShiftConfigs] = useState([]);
+  const [shopPlan, setShopPlan] = useState(null);
+  const unitUpdateLocked = shopPlan !== 'unit_wise';
+  const manufacturingCoordinatorId = manufacturingCoordinatorIdFromSession();
 
   const timelineRef = useRef(null);
   const machinesRef = useRef([]);
@@ -65,8 +82,12 @@ const UnitwiseScheduling = () => {
   useLenis(true);
 
   const fetchSchedule = async (machineList = machinesRef.current) => {
+    setScheduleLoading(true);
     try {
-      const data = await fetchUnitWiseSchedule({ latestOnly: true });
+      const data = await fetchUnitWiseSchedule({
+        latestOnly: true,
+        manufacturingCoordinatorId,
+      });
       const items = Array.isArray(data?.items) ? data.items : [];
       setScheduleData((prev) => ({
         ...prev,
@@ -80,13 +101,24 @@ const UnitwiseScheduling = () => {
     } catch (e) {
       console.error(e);
       message.error(e.message || 'Failed to load unit-wise schedule');
+    } finally {
+      setScheduleLoading(false);
     }
   };
 
   const handleUpdateSchedule = async () => {
+    if (shopPlan !== 'unit_wise') {
+      message.warning('Shop floor follows batch. Unit-wise update is locked.');
+      setUpdateModalOpen(false);
+      return;
+    }
     setUpdateScheduleLoading(true);
     try {
-      await rebuildUnitWiseSchedule({ optimizer: 'greedy', assignmentMode: 'auto' });
+      await rebuildUnitWiseSchedule({
+        optimizer: 'greedy',
+        assignmentMode: 'auto',
+        manufacturingCoordinatorId,
+      });
       message.success('Schedule updated successfully');
       await fetchSchedule();
     } catch (e) {
@@ -99,11 +131,21 @@ const UnitwiseScheduling = () => {
   };
 
   useEffect(() => {
+    fetchShopPlan()
+      .then((data) => setShopPlan(data.engine === 'unit_wise' ? 'unit_wise' : 'batch'))
+      .catch(() => setShopPlan('batch'));
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         const [mList, orderList, shifts] = await Promise.all([
           fetchMachines().catch(() => []),
-          fetchOrders().catch(() => api.get('/orders').then((r) => r.data).catch(() => [])),
+          fetchOrders({ manufacturingCoordinatorId }).catch(() => (
+            manufacturingCoordinatorId
+              ? []
+              : api.get('/orders').then((r) => r.data).catch(() => [])
+          )),
           fetchShiftHours().catch(() => []),
         ]);
         const formatted = (mList || []).map((m) => {
@@ -126,6 +168,7 @@ const UnitwiseScheduling = () => {
         await fetchSchedule(formatted);
       } catch (e) {
         console.error(e);
+        setScheduleLoading(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,24 +212,12 @@ const UnitwiseScheduling = () => {
     const start = moment(win.start);
     const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
+    const span = Math.max(end.diff(start), 60 * 1000);
     timelineRef.current.setWindow(
-      start.clone().add(delta, unit).toDate(),
-      end.clone().add(delta, unit).toDate(),
+      start.clone().add(delta * span, 'ms').toDate(),
+      end.clone().add(delta * span, 'ms').toDate(),
       { animation: getWindowAnimation(scheduleData.scheduled_operations.length) }
     );
-  };
-
-  const handleViewTypeChange = (v) => {
-    setViewType(v);
-    if (!dateRange) {
-      const r = getTimeRange(v, null, scheduleData);
-      if (timelineRef.current) {
-        timelineRef.current.setWindow(r.start, r.end, {
-          animation: getWindowAnimation(scheduleData.scheduled_operations.length),
-        });
-      }
-    }
   };
 
   const handleRefresh = () => {
@@ -248,12 +279,6 @@ const UnitwiseScheduling = () => {
           {...CONTROL_BAR_MOTION}
           style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
         >
-          <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-            <Option value="day">Daily</Option>
-            <Option value="week">Weekly</Option>
-            <Option value="month">Monthly</Option>
-            <Option value="year">Yearly</Option>
-          </Select>
 
           <DatePicker.RangePicker
             size="small"
@@ -336,11 +361,30 @@ const UnitwiseScheduling = () => {
           </Button.Group>
 
           <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-          <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
+          <Tooltip title={unitUpdateLocked ? 'Shop floor follows batch. Unit-wise update is locked.' : undefined}>
+            <span>
+              <Button
+                size="small"
+                type="primary"
+                icon={<ReloadOutlined />}
+                style={{ background: unitUpdateLocked ? undefined : '#1677ff' }}
+                disabled={unitUpdateLocked}
+                onClick={() => setUpdateModalOpen(true)}
+              >
+                Update
+              </Button>
+            </span>
+          </Tooltip>
           <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
+          <OneScheduleInfoButton engine="unit_wise" />
         </motion.div>
 
         {/* Unit Wise Gantt */}
+        <Spin
+          spinning={updateScheduleLoading || scheduleLoading}
+          tip={updateScheduleLoading ? "Generating schedule, please wait" : "Loading schedule, please wait"}
+          size="large"
+        >
         <UnitWiseGantt
           timelineRef={timelineRef}
           scheduledOperations={scheduleData.scheduled_operations}
@@ -350,7 +394,6 @@ const UnitwiseScheduling = () => {
           selectedComponents={selectedComponents}
           selectedProductionOrders={selectedProductionOrders}
           dateRange={dateRange}
-          viewType={viewType}
           onToggleOrder={(po) =>
             setSelectedProductionOrders(prev =>
               prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
@@ -362,6 +405,7 @@ const UnitwiseScheduling = () => {
             )
           }
         />
+        </Spin>
 
         {/* Help Modal */}
         <Modal
