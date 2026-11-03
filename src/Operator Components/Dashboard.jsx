@@ -10,6 +10,15 @@ import { API_BASE_URL } from '../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
 import { authFetch } from '../api/client.js';
+import {
+  getJobOperationId,
+  getJobRemainingQty,
+  getJobTotalQty,
+  isJobReviewCompleted,
+  isJobReviewInProgress,
+  isUnitWiseJob,
+  logsForJob,
+} from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -29,18 +38,19 @@ const EMPTY_PRODUCTION_STATS = {
   latestRemarks: '',
   hasRework: false,
   reworkRemarks: '',
-  operatorStatus: null,
+  reviewStatus: null,
   activationTime: null,
   remainingToClose: null,
   reworkDue: 0,
   rejectDue: 0,
   reviewLocked: false,
+  awaitingReview: false,
 };
 
 const buildProductionStatsFromLogs = (logs) => {
   if (!logs?.length) return { ...EMPTY_PRODUCTION_STATS };
 
-  const sortedLogs = [...logs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const sortedLogs = [...logs].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
   const latestLog = sortedLogs[0];
   const totalProducedSum = logs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
   const totalReworkSum = logs.reduce((sum, log) => sum + (log.rework_quantity || 0), 0);
@@ -58,16 +68,19 @@ const buildProductionStatsFromLogs = (logs) => {
     latestRejected: latestLog.rejected_quantity || 0,
     latestOperatorRework: latestLog.operator_rework_quantity || 0,
     latestRemarks: latestLog.remarks || '',
-    hasRework: (latestLog.rework_due || 0) > 0 || (latestLog.reject_due || 0) > 0,
+    hasRework: Number(latestLog.rework_due || latestLog.rework_quantity || 0) > 0 || (latestLog.reject_due || 0) > 0,
     reworkRemarks: latestLog.remarks || '',
-    operatorStatus: latestLog.operator_status,
+    reviewStatus: latestLog.status,
     activationTime: latestLog.from_date && latestLog.from_time
       ? `${latestLog.from_date} ${latestLog.from_time}`
       : null,
     remainingToClose: latestLog.remaining_to_close ?? null,
-    reworkDue: latestLog.rework_due || 0,
+    reworkDue: Number(latestLog.rework_due || latestLog.rework_quantity || 0),
     rejectDue: latestLog.reject_due || 0,
     reviewLocked: Boolean(latestLog.review_locked),
+    awaitingReview: Boolean(
+      (latestLog.to_time || latestLog.to_date) && !latestLog.user_id && !latestLog.review_locked
+    ),
   };
 };
 
@@ -240,7 +253,6 @@ const Dashboard = () => {
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
   const [productionStats, setProductionStats] = useState({ ...EMPTY_PRODUCTION_STATS });
-  const [jobStatsMap, setJobStatsMap] = useState({});
   const [latestHelpReply, setLatestHelpReply] = useState(null);
 
   const [cachedAssignments, setCachedAssignments] = useState([]);
@@ -258,8 +270,7 @@ const Dashboard = () => {
         if (storedActivation) {
           setIsActivated(JSON.parse(storedActivation));
         }
-        const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        fetchReworkData(operationId);
+        fetchReworkData(job);
         if (job.sale_order_id) {
           fetchOrderDetails(job.sale_order_id);
         }
@@ -305,7 +316,13 @@ const Dashboard = () => {
     }
   };
 
-  const fetchReworkData = async (operationId) => {
+  const fetchReworkData = async (jobOrOperationId) => {
+    const job = jobOrOperationId && typeof jobOrOperationId === 'object'
+      ? jobOrOperationId
+      : selectedJob;
+    const operationId = job
+      ? getJobOperationId(job)
+      : jobOrOperationId;
     if (!operationId) {
       setProductionStats({ ...EMPTY_PRODUCTION_STATS });
       return;
@@ -313,12 +330,45 @@ const Dashboard = () => {
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const logs = await response.json();
+        const logs = logsForJob(await response.json(), job);
         const stats = buildProductionStatsFromLogs(logs);
+        if (job && isUnitWiseJob(job)) {
+          const bandQty = getJobTotalQty(job);
+          if (logs.length) {
+            stats.remainingToClose = Math.max(0, bandQty - Number(stats.totalApproved || 0));
+          } else {
+            stats.totalApproved = Number(job.approved_quantity ?? job.completed_quantity ?? 0);
+            stats.remainingToClose = getJobRemainingQty(job, stats);
+            stats.reviewStatus = job.status || null;
+          }
+          const closed = bandQty > 0 && Number(stats.remainingToClose) <= 0;
+          const latest = logs.length
+            ? [...logs].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0]
+            : null;
+          const reviewStatus = closed ? 'completed' : (latest?.status || job.status || 'pending');
+          setSelectedJob((prev) => {
+            if (!prev || getJobOperationId(prev) !== getJobOperationId(job)) return prev;
+            if (prev.unit_from != null && (Number(prev.unit_from) !== Number(job.unit_from)
+              || Number(prev.unit_to) !== Number(job.unit_to))) return prev;
+            const next = {
+              ...prev,
+              approved_quantity: stats.totalApproved,
+              completed_quantity: stats.totalApproved,
+              remaining_quantity: stats.remainingToClose,
+              status: reviewStatus,
+            };
+            localStorage.setItem('selectedJob', JSON.stringify(next));
+            return next;
+          });
+          const running = job.can_activate === false && isJobReviewInProgress({ status: reviewStatus }, stats);
+          setIsActivated(running);
+          localStorage.setItem('isActivated', JSON.stringify(running));
+        } else if (job) {
+          stats.remainingToClose = getJobRemainingQty(job, stats);
+        }
         setProductionStats(stats);
 
-        const opStatus = stats.operatorStatus?.toString().toUpperCase();
-        if (opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS') {
+        if (job && !isUnitWiseJob(job) && isJobReviewInProgress(job, stats)) {
           setIsActivated(true);
         }
       } else {
@@ -328,41 +378,6 @@ const Dashboard = () => {
       console.error('Error fetching production stats:', error);
       setProductionStats({ ...EMPTY_PRODUCTION_STATS });
     }
-  };
-
-  const fetchJobStatsMap = async (ops) => {
-    if (!ops || ops.length === 0) return;
-    const results = await Promise.allSettled(
-      ops.map(async (job) => {
-        const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        if (!opId) return { opId: null, totalApproved: 0, operatorStatus: null };
-        try {
-          const r = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!r.ok) return { opId, totalApproved: 0, operatorStatus: null };
-          const logs = await r.json();
-          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
-          const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-          const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
-          const activationTime = sortedLogs.length > 0 && sortedLogs[0].from_date && sortedLogs[0].from_time
-            ? `${sortedLogs[0].from_date} ${sortedLogs[0].from_time}`
-            : null;
-          return { opId, totalApproved, operatorStatus, activationTime };
-        } catch {
-          return { opId, totalApproved: 0, operatorStatus: null, activationTime: null };
-        }
-      })
-    );
-    const map = {};
-    results.forEach((r) => {
-      if (r.status === 'fulfilled' && r.value.opId != null) {
-        map[r.value.opId] = {
-          totalApproved: r.value.totalApproved,
-          operatorStatus: r.value.operatorStatus,
-          activationTime: r.value.activationTime
-        };
-      }
-    });
-    setJobStatsMap(map);
   };
 
   useEffect(() => {
@@ -601,9 +616,8 @@ const Dashboard = () => {
 
   const handleProductionSubmit = (submittedQuantity) => {
     setCompletedQuantity(prev => prev + submittedQuantity);
-    const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
-    if (operationId) {
-      fetchReworkData(operationId);
+    if (selectedJob) {
+      fetchReworkData(selectedJob);
     }
   };
 
@@ -631,9 +645,9 @@ const Dashboard = () => {
     return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const plannedQty = selectedJob?.planned_quantity ?? selectedJob?.quantity ?? 0;
+  const plannedQty = getJobTotalQty(selectedJob);
   const completedQty = productionStats?.totalApproved ?? 0;
-  const remainingQty = Math.max(0, plannedQty - completedQty);
+  const remainingQty = getJobRemainingQty(selectedJob, productionStats);
 
   return (
     <div style={{ padding: '16px', background: 'transparent', overflowX: 'hidden' }}>
@@ -755,9 +769,19 @@ const Dashboard = () => {
 
               {/* Status */}
               <div>
-                <Text style={{ color: '#94a3b8', fontSize: 12 }}>Status</Text>
+                <Text style={{ color: '#94a3b8', fontSize: 12 }}>Priority</Text>
+                <div style={{ fontWeight: 700, color: '#1677FF', fontSize: 14, marginTop: 4 }}>
+                  {selectedJob?.priority ?? 'N/A'}
+                </div>
                 <div style={{ marginTop: 6 }}>
-                  {isActivated ? (
+                  {isJobReviewCompleted(selectedJob, productionStats) ? (
+                    <Tag
+                      color="success"
+                      style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
+                    >
+                      Completed
+                    </Tag>
+                  ) : isJobReviewInProgress(selectedJob, productionStats) ? (
                     <Tag
                       color="processing"
                       style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
@@ -776,7 +800,7 @@ const Dashboard = () => {
                         background: '#fafafa',
                       }}
                     >
-                      Not Started
+                      Pending
                     </Tag>
                   )}
                 </div>
@@ -865,6 +889,7 @@ const Dashboard = () => {
             completedQuantity={completedQuantity}
             productionStats={productionStats}
             onProductionSubmit={handleProductionSubmit}
+            machineId={machineId}
           />
         </Col>
       </Row>
@@ -887,18 +912,12 @@ const Dashboard = () => {
         open={showSelectJob}
         onClose={() => setShowSelectJob(false)}
         currentSelectedJob={selectedJob}
-        jobStatsMap={jobStatsMap}
-        onJobsLoaded={fetchJobStatsMap}
         onSelectJob={(job) => {
           setSelectedJob(job);
-          const isJobActivated = [job.status, job.operation_status].some(s => {
-            const up = s?.toString().toUpperCase();
-            return up === 'INPROGRESS' || up === 'IN-PROGRESS' || up === 'IN PROGRESS';
-          });
+          const isJobActivated = job.can_activate === false && isJobReviewInProgress(job);
           setIsActivated(isJobActivated);
           setShowSelectJob(false);
-          const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
-          fetchReworkData(operationId);
+          fetchReworkData(job);
           if (job.sale_order_id) {
             fetchOrderDetails(job.sale_order_id);
           }

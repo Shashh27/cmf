@@ -5,6 +5,7 @@ import { SCHEDULING_API_BASE_URL } from "../../Config/schedulingconfig.js";
 import dayjs from "dayjs";
 import axios from "axios";
 import { api } from '../../api/client.js';
+import { fetchSchedulingModes } from '../../PPS Components/scheduling/api/schedulingModesApi.js';
 
 const getApiErrorMessage = (error, fallback = "Failed updating parts") => {
   const data = error?.response?.data;
@@ -42,7 +43,7 @@ const formatPartLabel = (data, partId) => {
 
 const ProcessPlanning = ({ initialOrderId }) => {
   const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [orderDetails, setOrderDetails] = useState(null);
@@ -155,7 +156,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     setPartOpLoading(prev => ({ ...prev, [partId]: true }));
     try {
-      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
+      const modes = await fetchSchedulingModes({ force: true }).catch(() => ({ shop_plan: 'batch' }));
+      const shopPlan = modes?.shop_plan === 'unit_wise' ? 'unit_wise' : 'batch';
+      const detailsPath = shopPlan === 'unit_wise'
+        ? 'unit-wise/part-operation-details'
+        : 'part-operation-details';
+      const res = await axios.get(
+        `${SCHEDULING_API_BASE_URL}/scheduling/${detailsPath}/${selectedOrderId}/${partId}`
+      );
       if (res.status === 200) {
         setPartOpDetails(prev => ({
           ...prev,
@@ -993,6 +1001,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
           />
         </Space>
       </Card>
+
+      {(ordersLoading || detailsLoading) && !orderDetails && (
+        <div style={{ marginTop: 24 }}>
+          <Spin spinning tip="Loading process plan, please wait" size="large">
+            <div style={{ minHeight: 240 }} />
+          </Spin>
+        </div>
+      )}
 
       {orderDetails && (
         <Card style={{ marginTop: 16 }}>

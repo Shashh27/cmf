@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 
 
 
@@ -43,17 +43,13 @@ import Configuration from "./Pages/Configuration";
 
 
 
-import Dashboard from "./Pages/Dashboard";
+const Dashboard = React.lazy(() => import("./Pages/Dashboard"));
 
-
-
-import ShopFloorDashboard from "./Pages/ShopFloorDashboard";
-
-
+const ShopFloorDashboard = React.lazy(() => import("./Pages/ShopFloorDashboard"));
 
 import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 
-import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
+const ProjectCoordinatorProductView = React.lazy(() => import("./ProjectCoordinator Components/ProjectCoordinatorProductView"));
 
 import ProjectCoordinatorPDM from "./ProjectCoordinator Components/PDM";
 
@@ -65,7 +61,9 @@ import PCNotifications from "./ProjectCoordinator Components/PCNotifications";
 
 import AdminRecyclebin from "./Pages/Recyclebin";
 
-import PPS from "./Pages/PPS";
+const PPS = React.lazy(() => import("./Pages/PPS"));
+
+const UnitwiseScheduling = React.lazy(() => import("./PPS Components/UnitwiseScheduling"));
 
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
@@ -97,6 +95,8 @@ import DocumentManagement from "./Pages/Document";
 
 import Notification from "./Pages/Notification";
 
+import RightNowJobs from "./Pages/RightNowJobs";
+
 
 
 import AccessControl from "./Pages/AccessControl";
@@ -108,11 +108,9 @@ import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 
 
 
-import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
+const ManufacturingCoordinator = React.lazy(() => import("./Pages/ManufacturingCoordinator"));
 
-
-
-import MCSShopFloorDashboard from "./ManufacturingCoordinator Components/ShopFloorDashboard";
+const MCSShopFloorDashboard = React.lazy(() => import("./ManufacturingCoordinator Components/ShopFloorDashboard"));
 import { EnergyMonitoring as MCEnergyMonitoring } from "./ManufacturingCoordinator Components/EMS";
 
 
@@ -159,9 +157,7 @@ function App() {
 
 
       <Layout>
-
-
-
+        <Suspense fallback={<div style={{ padding: 24, color: "#595959" }}>Loading…</div>}>
         <Routes>
 
 
@@ -266,6 +262,10 @@ function App() {
 
 
 
+          <Route path="/admin/pps/unit-scheduling" element={<UnitwiseScheduling />} />
+
+
+
 
 
 
@@ -336,7 +336,7 @@ function App() {
 
 
 
-          
+          <Route path="/admin/right-now-jobs" element={<RightNowJobs />} />
 
 
 
@@ -400,6 +400,10 @@ function App() {
 
           <Route path="/project_coordinator/notifications" element={<PCNotifications />} />
 
+          <Route path="/project_coordinator/urgent-jobs" element={<Navigate to="/project_coordinator/right-now-jobs" replace />} />
+
+          <Route path="/project_coordinator/right-now-jobs" element={<ProjectCoordinatorDashboard />} />
+
           <Route path="/project_coordinator/configuration" element={<ProjectCoordinatorDashboard />} />
 
 
@@ -429,6 +433,7 @@ function App() {
           <Route path="/manufacturing_coordinator/pps/capacity-planning" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps/machine-scheduling" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps/process-planning" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps/unit-scheduling" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring" element={<Navigate to="/manufacturing_coordinator/product-monitoring/live-monitoring" replace />} />
           <Route path="/manufacturing_coordinator/product-monitoring/live-monitoring" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/oee-overview" element={<ManufacturingCoordinator />} />
@@ -445,6 +450,7 @@ function App() {
           <Route path="/manufacturing_coordinator/inventory-management/overview-data" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/document-management" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/notification" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/right-now-jobs" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/access_control" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
 
@@ -460,6 +466,8 @@ function App() {
 
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
 
+          <Route path="/supervisor/right-now-jobs" element={<SupervisorDashboard />} />
+
           <Route path="/supervisor/notifications" element={<SupervisorNotifications />} />
 
           <Route path="/supervisor/assets-availability" element={<SupervisorDashboard />} />
@@ -468,7 +476,7 @@ function App() {
 
           <Route path="/supervisor/pokayoke-checklists" element={<SupervisorDashboard />} />
 
-          <Route path="/supervisor/notes" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/notes" element={<Navigate to="/supervisor/production_logs" replace />} />
 
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
 
@@ -527,11 +535,13 @@ function App() {
 
           <Route path="/operator/production-logs" element={<OperatorDashboard />} />
 
+          <Route path="/operator/right-now-jobs" element={<OperatorDashboard />} />
+
           <Route path="/operator/notifications" element={<OperatorDashboard />} />
 
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
 
-          <Route path="/operator/notes" element={<OperatorDashboard />} />
+          <Route path="/operator/notes" element={<Navigate to="/operator/dashboard" replace />} />
 
           <Route path="/operator/preventive-maintenance" element={<OperatorDashboard />} />
 
@@ -556,9 +566,7 @@ function App() {
 
 
         </Routes>
-
-
-
+        </Suspense>
       </Layout>
 
       {/* Chat Panel - only after login */}

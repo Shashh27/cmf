@@ -138,11 +138,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [productionResponse, pokayokeChecklistResponse, otResponse, notesResponse] = await Promise.all([
+      const [productionResponse, pokayokeChecklistResponse, otResponse, urgentResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
         authFetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
         fetch(`${SCHEDULING_API_BASE_URL}/notifications/operator/${operatorId}?unread_only=true&limit=50`),
-        authFetch(`${API_BASE_URL}/maintenance/notes?operator_id=${operatorId}`),
+        authFetch(`${API_BASE_URL}/urgent-job-indents/?operator_id=${operatorId}`),
       ]);
 
       let productionCount = 0;
@@ -182,11 +182,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         ).length;
       }
 
-      if (notesResponse.ok) {
-        const data = await notesResponse.json();
-        rightNowJobCount = (data || []).filter(
-          (note) => note.status && note.status !== 'pending' && !note.operator_ack
-        ).length;
+      if (urgentResponse.ok) {
+        const data = await urgentResponse.json();
+        rightNowJobCount = (data || []).filter((row) => (
+          ['assigned', 'accepted'].includes(String(row.status || '').toLowerCase()) && !row.operator_ack
+        )).length;
       }
 
       setNotificationCount(productionCount + pokayokeChecklistCount + otCount + rightNowJobCount);
@@ -235,10 +235,10 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      const [productionResponse, pokayokeChecklistResponse, notesResponse] = await Promise.all([
+      const [productionResponse, pokayokeChecklistResponse, urgentResponse] = await Promise.all([
         fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
         api.get(`/operation-checklists/submissions`).then((r) => ({ ok: true, json: async () => r.data })).catch(() => ({ ok: false })),
-        authFetch(`${API_BASE_URL}/maintenance/notes`).then((r) => ({ ok: r.ok, json: () => r.json() })).catch(() => ({ ok: false })),
+        authFetch(`${API_BASE_URL}/urgent-job-indents/?completed=true`),
       ]);
 
       let productionCount = 0;
@@ -261,9 +261,9 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         pokayokeChecklistCount = (data || []).filter((log) => !log.supervisor_ack_by).length;
       }
 
-      if (notesResponse.ok) {
-        const data = await notesResponse.json();
-        rightNowJobCount = (data || []).filter((note) => !note.supervisor_ack).length;
+      if (urgentResponse.ok) {
+        const data = await urgentResponse.json();
+        rightNowJobCount = (data || []).filter((row) => row.completed_at && !row.supervisor_ack).length;
       }
 
       setNotificationCount(productionCount + pokayokeChecklistCount + rightNowJobCount);
@@ -579,6 +579,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`}>Assets Availability</Link> },
         { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`}>Capacity Planning</Link> },
         { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
+        { key: `${prefix}/pps/unit-scheduling`, label: <Link to={`${prefix}/pps/unit-scheduling`}>Unit Scheduling</Link> },
       ],
     },
     {
@@ -621,6 +622,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <FileTextOutlined />,
     },
     {
+      key: `${prefix}/right-now-jobs`,
+      label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+      icon: <FormOutlined />,
+    },
+    {
       key: `${prefix}/notification`,
 
       label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
@@ -654,14 +660,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <DashboardOutlined />,
       },
       {
+        key: `${prefix}/right-now-jobs`,
+        label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        icon: <FormOutlined />,
+      },
+      {
         key: `${prefix}/preventive-maintenance`,
         label: <Link to={`${prefix}/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
         icon: <CarryOutOutlined />,
-      },
-      {
-        key: `${prefix}/notes`,
-        label: <Link to={`${prefix}/notes`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
-        icon: <FormOutlined />,
       },
       {
         key: `${prefix}/inspection-results`,
@@ -718,20 +724,27 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <SyncOutlined />,
       },
       {
+        key: `${prefix}/right-now-jobs`,
+        label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        icon: <FormOutlined />,
+      },
+      {
         key: `${prefix}/configuration`,
         label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
         icon: <SettingOutlined />,
       },
       {
         key: `${prefix}/notifications`,
+        title: collapsed ? 'Notifications' : null,
         label: (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
-              <Badge count={notificationCount} offset={[10, 0]}>
-                Notifications
-              </Badge>
-            </Link>
-          </div>
+          <Link
+            to={`${prefix}/notifications`}
+            onClick={() => setMobileDrawerOpen(false)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', overflow: 'visible' }}
+          >
+            <span>Notifications</span>
+            <Badge count={notificationCount} overflowCount={99} size="small" />
+          </Link>
         ),
         icon: <BellOutlined />,
       },
@@ -778,6 +791,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
           { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
           { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
+          { key: `${prefix}/pps/unit-scheduling`, label: <Link to={`${prefix}/pps/unit-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Unit Scheduling</Link> },
         ],
       },
       {
@@ -822,6 +836,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <FileTextOutlined />,
       },
       {
+        key: `${prefix}/right-now-jobs`,
+        label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        icon: <FormOutlined />,
+      },
+      {
         key: `${prefix}/notification`,
 
         label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
@@ -845,8 +864,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <FileTextOutlined />,
       },
       {
-        key: `${prefix}/notes`,
-        label: <Link to={`${prefix}/notes`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
+        key: `${prefix}/right-now-jobs`,
+        label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
         icon: <FormOutlined />,
       },
       {
@@ -958,7 +977,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
         selectedKeys={[selectedKey]}
 
-        style={{ borderRight: 0 }}
+        style={{ borderRight: 0, overflow: 'visible' }}
 
         items={items}
 
@@ -1088,7 +1107,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       style={{ 
 
-        overflow: 'auto', 
+        overflowY: 'auto',
+        overflowX: 'visible', 
 
         height: '100vh', 
 

@@ -13,6 +13,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
+import {
+  displayReviewerStatus,
+  updateProductionLogReview,
+} from '../../PPS Components/scheduling/jobs/productionLogReviewApi';
 import cmtisLogo from '../../assets/cmtis.png';
 
 const { Text } = Typography;
@@ -124,11 +128,10 @@ const ProductionLog = () => {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `${SCHEDULING_API_BASE_URL}/production-logs/`
-      );
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/`);
       if (!response.ok) throw new Error('Failed to fetch production logs');
-      const allLogs = await response.json();
+      const batchLogs = await response.json();
+      const allLogs = Array.isArray(batchLogs) ? batchLogs : [];
 
       const visibleLogs = allLogs.filter(
         (log) => log.operator_status?.toLowerCase() !== 'inprogress' && hasLogSubmission(log)
@@ -363,42 +366,39 @@ const ProductionLog = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${log.id}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const updated = await updateProductionLogReview(log, {
+        userId: mcId,
+        status: 'inprogress',
+        approved_quantity: totalApproved,
+        rework_quantity: totalRework,
+        rejected_quantity: totalRejected,
+        remarks: remark || '',
+        extraPayload: {
           status: 'inprogress',
           remarks: remark || null,
           approved_quantity: totalApproved,
           rework_quantity: totalRework,
           rejected_quantity: totalRejected,
-        }),
+        },
       });
-
-      if (response.ok) {
-        const updated = await response.json();
-        message.success(
-          updated.remaining_to_close === 0
-            ? 'Review saved — part order is complete'
-            : 'Quantities updated successfully'
-        );
-        setLogs(prev => prev.map(l => l.id === log.id
-          ? {
-            ...l,
-            ...updated,
-            planned_schedule_item: l.planned_schedule_item,
-            operator_name: l.operator_name,
-          }
-          : l
-        ));
-        closeUpdateModal();
-      } else {
-        const err = await response.json();
-        message.error(`Failed to update quantities: ${err.detail || 'Unknown error'}`);
-      }
+      message.success(
+        updated.remaining_to_close === 0
+          ? 'Review saved — part order is complete'
+          : 'Quantities updated successfully'
+      );
+      setLogs(prev => prev.map(l => l.id === log.id
+        ? {
+          ...l,
+          ...updated,
+          planned_schedule_item: l.planned_schedule_item,
+          operator_name: l.operator_name,
+        }
+        : l
+      ));
+      closeUpdateModal();
     } catch (error) {
       console.error('Error updating quantities:', error);
-      message.error('An error occurred while updating the quantities.');
+      message.error(`Failed to update quantities: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -437,23 +437,21 @@ const ProductionLog = () => {
     }
 
     try {
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/${log.id}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      await updateProductionLogReview(log, {
+        userId: mcId,
+        status: newStatus,
+        approved_quantity: payload.approved_quantity ?? (newStatus === 'completed' ? getTotalPresented(log) : 0),
+        rework_quantity: log.rework_quantity || 0,
+        rejected_quantity: log.rejected_quantity || 0,
+        remarks: remark || '',
+        extraPayload: payload,
       });
-
-      if (response.ok) {
-        message.success(`Status updated to '${newStatus}'.`);
-        setLogs(prev => prev.map(l => l.id === log.id ? { ...l, status: newStatus, remarks: remark || null } : l));
-        closeRemarkModal();
-      } else {
-        const err = await response.json();
-        message.error(`Failed to update status: ${err.detail || 'Unknown error'}`);
-      }
+      message.success(`Status updated to '${newStatus}'.`);
+      setLogs(prev => prev.map(l => l.id === log.id ? { ...l, status: newStatus, remarks: remark || null } : l));
+      closeRemarkModal();
     } catch (error) {
       console.error('Error updating status:', error);
-      message.error('An error occurred while updating the status.');
+      message.error(`Failed to update status: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -891,8 +889,8 @@ const ProductionLog = () => {
         { text: 'Completed', value: 'completed' },
         { text: 'In Progress', value: 'inprogress' },
       ],
-      onFilter: (value, record) => record.status?.toLowerCase() === value,
-      render: (status) => getStatusTag(status),
+      onFilter: (value, record) => displayReviewerStatus(record) === value,
+      render: (_, record) => getStatusTag(displayReviewerStatus(record)),
     },
     {
       title: 'Actions',

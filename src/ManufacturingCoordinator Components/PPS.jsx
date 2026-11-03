@@ -1,9 +1,11 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { useLocation } from "react-router-dom";
 import AssetsAvailability from "./PPS Components/AssetsAvailability";
 import CapacityPlanning from "./PPS Components/CapacityPlanning";
-import MachineScheduling from "./PPS Components/MachineScheduling";
 import ProcessPlanning from "./PPS Components/ProcessPlanning";
+
+const MachineScheduling = lazy(() => import("./PPS Components/MachineScheduling"));
+const UnitwiseScheduling = lazy(() => import("../PPS Components/UnitwiseScheduling"));
 
 const PPS = () => {
   const location = useLocation();
@@ -13,6 +15,7 @@ const PPS = () => {
     if (path.includes("/pps/assets-availability")) return <AssetsAvailability />;
     if (path.includes("/pps/capacity-planning")) return <CapacityPlanning />;
     if (path.includes("/pps/machine-scheduling")) return <MachineScheduling />;
+    if (path.includes("/pps/unit-scheduling")) return <UnitwiseScheduling />;
     if (path.includes("/pps/process-planning")) return <ProcessPlanning />;
     return <AssetsAvailability />;
   };
@@ -23,18 +26,22 @@ const PPS = () => {
       ? "Capacity Planning"
       : path.includes("/pps/machine-scheduling")
         ? "Machine Scheduling"
-        : path.includes("/pps/process-planning")
+        : path.includes("/pps/unit-scheduling")
+          ? "Unit Scheduling"
+          : path.includes("/pps/process-planning")
           ? "Process Planning"
           : "Production Planning System";
 
   return (
     <div style={{ padding: '24px', background: "#f5f5f5", minHeight: "100vh" }}>
-      {!path.includes("/pps/process-planning") && !path.includes("/pps/machine-scheduling") && !path.includes("/pps/assets-availability") && (
+      {!path.includes("/pps/process-planning") && !path.includes("/pps/machine-scheduling") && !path.includes("/pps/unit-scheduling") && !path.includes("/pps/assets-availability") && (
         <div style={{ marginBottom: "16px" }}>
           <h1 style={{ fontSize: "24px", fontWeight: 700 }}>{titleText}</h1>
         </div>
       )}
-      {renderContent()}
+      <Suspense fallback={<div style={{ padding: 24, color: "#595959" }}>Loading schedule…</div>}>
+        {renderContent()}
+      </Suspense>
     </div>
   );
 };

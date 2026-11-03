@@ -8,7 +8,7 @@ import {
 } from './schedulingTimelineMotion.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import SchedulingGanttTimeline from './SchedulingGanttTimeline.jsx';
-import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import { getComponentColors } from './schedulingTimelineUtils.js';
 import { api } from '../../api/client.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -62,7 +62,6 @@ const ActualScheduling = () => {
     component_status: {},
   });
 
-  const [viewType, setViewType] = useState('week');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [selectedComponents, setSelectedComponents] = useState([]);
@@ -220,24 +219,12 @@ const ActualScheduling = () => {
     const start = moment(win.start);
     const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
+    const span = Math.max(end.diff(start), 60 * 1000);
     timelineRef.current.setWindow(
-      start.clone().add(delta, unit).toDate(),
-      end.clone().add(delta, unit).toDate(),
+      start.clone().add(delta * span, 'ms').toDate(),
+      end.clone().add(delta * span, 'ms').toDate(),
       { animation: getWindowAnimation(scheduleData.scheduled_operations.length) }
     );
-  };
-
-  const handleViewTypeChange = (v) => {
-    setViewType(v);
-    if (!dateRange) {
-      const r = getTimeRange(v, null, scheduleData);
-      if (timelineRef.current) {
-        timelineRef.current.setWindow(r.start, r.end, {
-          animation: getWindowAnimation(scheduleData.scheduled_operations.length),
-        });
-      }
-    }
   };
 
   const handleRefresh = () => {
@@ -257,12 +244,6 @@ const ActualScheduling = () => {
           {...CONTROL_BAR_MOTION}
           style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
         >
-          <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-            <Option value="day">Daily</Option>
-            <Option value="week">Weekly</Option>
-            <Option value="month">Monthly</Option>
-            <Option value="year">Yearly</Option>
-          </Select>
 
           <DatePicker.RangePicker
             size="small"
@@ -396,7 +377,6 @@ const ActualScheduling = () => {
               selectedComponents={selectedComponents}
               selectedProductionOrders={selectedProductionOrders}
               dateRange={dateRange}
-              viewType={viewType}
             />
           </div>
         </div>
