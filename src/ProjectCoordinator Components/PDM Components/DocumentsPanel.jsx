@@ -309,8 +309,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     }
   };
 
-  const handleDownload = (id) => {
-    downloadWithAuth(`/documents/${id}/download`, `document-${id}`);
+  const handleDownload = (doc) => {
+    const filename = getDocumentDisplayName(doc) || doc.document_name || `document-${doc.id}`;
+    downloadWithAuth(`/documents/${doc.id}/download`, filename);
   };
 
   const handlePreview = (doc) => {
@@ -382,7 +383,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       previewDoc.source === 'part'
         ? `/documents/${previewDoc.doc.id}/download`
         : `/operation-documents/${previewDoc.doc.id}/download`;
-    downloadWithAuth(path, previewDoc.doc.document_name);
+    const filename = getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name;
+    downloadWithAuth(path, filename);
   };
 
   // ── Helper: compute next version string ────────────────────────────────
@@ -922,7 +924,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </Tooltip>
             <Tooltip title="Download">
               <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
-                onClick={() => handleDownload(cur.id)} />
+                onClick={() => handleDownload(cur)} />
             </Tooltip>
             <Tooltip title="Delete">
             <Popconfirm title="Delete Document" description="Delete this version? This cannot be undone."

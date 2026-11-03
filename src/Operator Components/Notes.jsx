@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message, Popconfirm, Upload } from 'antd';
-import { PlusOutlined, ReloadOutlined, SearchOutlined, EditOutlined, DeleteOutlined, UploadOutlined, FileOutlined, EyeOutlined } from '@ant-design/icons';
+import { Button, Card, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message, Popconfirm, Upload, Dropdown } from 'antd';
+import { PlusOutlined, ReloadOutlined, SearchOutlined, EditOutlined, DeleteOutlined, UploadOutlined, FileOutlined, EyeOutlined, DownloadOutlined, FileExcelOutlined, FilePdfOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { API_BASE_URL } from '../Config/auth.js';
 import { authFetch, readStoredUser } from '../api/client.js';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -374,6 +377,73 @@ const OperatorNotes = () => {
     setPreviewModalOpen(true);
   };
 
+  const exportToExcel = () => {
+    const data = filteredNotes.map((note, index) => ({
+      'Sl No': index + 1,
+      'Machine': note.machine_name || '-',
+      'Project Name': note.project_name || '-',
+      'Order No': note.order_no || '-',
+      'Part Name': note.part_name || '-',
+      'Part No': note.part_no || '-',
+      'Description': note.description || '-',
+      'Reviewed By': note.supervisor_name || '-',
+      'Remark': note.remark || '-',
+      'Status': statusLabel(note.status),
+      'Reviewed At': formatWhen(note.reviewed_at),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Notes');
+    XLSX.writeFile(wb, `operator_notes_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.xlsx`);
+    message.success('Excel exported successfully');
+  };
+
+  const exportToPDF = () => {
+    const doc = new jsPDF('l');
+    const data = filteredNotes.map((note, index) => [
+      index + 1,
+      note.machine_name || '-',
+      note.project_name || '-',
+      note.order_no || '-',
+      note.part_name || '-',
+      note.part_no || '-',
+      note.description || '-',
+      note.supervisor_name || '-',
+      note.remark || '-',
+      statusLabel(note.status),
+      formatWhen(note.reviewed_at),
+    ]);
+
+    autoTable(doc, {
+      head: [['Sl No', 'Machine', 'Project', 'Order No', 'Part Name', 'Part No', 'Description', 'Reviewed By', 'Remark', 'Status', 'Reviewed At']],
+      body: data,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 60 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 40 },
+        4: { cellWidth: 50 },
+        5: { cellWidth: 40 },
+        6: { cellWidth: 60 },
+        7: { cellWidth: 50 },
+        8: { cellWidth: 50 },
+        9: { cellWidth: 30 },
+        10: { cellWidth: 50 },
+      },
+      margin: { top: 20, left: 10, right: 10 },
+      didDrawPage: (data) => {
+        doc.setFontSize(12);
+        doc.text('Operator Notes', 14, 15);
+      },
+    });
+
+    doc.save(`operator_notes_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.pdf`);
+    message.success('PDF exported successfully');
+  };
+
   const filteredNotes = useMemo(() => {
     const query = search.trim().toLowerCase();
     return notes.filter((note) => {
@@ -588,6 +658,29 @@ const OperatorNotes = () => {
           </Space>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => loadNotes()} loading={loading} />
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'excel',
+                    label: 'Export to Excel',
+                    icon: <FileExcelOutlined />,
+                    onClick: exportToExcel,
+                  },
+                  {
+                    key: 'pdf',
+                    label: 'Export to PDF',
+                    icon: <FilePdfOutlined />,
+                    onClick: exportToPDF,
+                  },
+                ],
+              }}
+              disabled={filteredNotes.length === 0}
+            >
+              <Button icon={<DownloadOutlined />} disabled={filteredNotes.length === 0}>
+                Export
+              </Button>
+            </Dropdown>
             <Button type="primary" icon={<PlusOutlined />} onClick={openNotes}>
               Add Job
             </Button>

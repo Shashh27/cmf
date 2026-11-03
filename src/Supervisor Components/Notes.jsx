@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd';
-import { CheckOutlined, CloseOutlined, ReloadOutlined, SearchOutlined, FileOutlined, EyeOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Modal, Select, Space, Table, Tooltip, Typography, message, Dropdown } from 'antd';
+import { CheckOutlined, CloseOutlined, ReloadOutlined, SearchOutlined, FileOutlined, EyeOutlined, DownloadOutlined, FileExcelOutlined, FilePdfOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { API_BASE_URL } from '../Config/auth.js';
 import { authFetch, readStoredUser } from '../api/client.js';
+import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -191,6 +195,76 @@ const SupervisorNotes = () => {
   const openPreview = (attachment) => {
     setPreviewFile(attachment);
     setPreviewModalOpen(true);
+  };
+
+  const exportToExcel = () => {
+    const data = filteredNotes.map((note, index) => ({
+      'Sl No': index + 1,
+      'Operator': note.operator_name || `Operator #${note.operator_id}`,
+      'Machine': note.machine_name || '-',
+      'Project Name': note.project_name || '-',
+      'Order No': note.order_no || '-',
+      'Part Name': note.part_name || '-',
+      'Part No': note.part_no || '-',
+      'Description': note.description || '-',
+      'Submitted At': formatWhen(note.created_at),
+      'Remarks': note.remark || '-',
+      'Status': statusLabel(note.status),
+      'Reviewed At': formatWhen(note.reviewed_at),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Notes');
+    XLSX.writeFile(wb, `supervisor_notes_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.xlsx`);
+    message.success('Excel exported successfully');
+  };
+
+  const exportToPDF = () => {
+    const doc = new jsPDF('l');
+    const data = filteredNotes.map((note, index) => [
+      index + 1,
+      note.operator_name || `Operator #${note.operator_id}`,
+      note.machine_name || '-',
+      note.project_name || '-',
+      note.order_no || '-',
+      note.part_name || '-',
+      note.part_no || '-',
+      note.description || '-',
+      formatWhen(note.created_at),
+      note.remark || '-',
+      statusLabel(note.status),
+      formatWhen(note.reviewed_at),
+    ]);
+
+    autoTable(doc, {
+      head: [['Sl No', 'Operator', 'Machine', 'Project', 'Order No', 'Part Name', 'Part No', 'Description', 'Submitted At', 'Remarks', 'Status', 'Reviewed At']],
+      body: data,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 50 },
+        2: { cellWidth: 60 },
+        3: { cellWidth: 50 },
+        4: { cellWidth: 40 },
+        5: { cellWidth: 50 },
+        6: { cellWidth: 40 },
+        7: { cellWidth: 60 },
+        8: { cellWidth: 50 },
+        9: { cellWidth: 50 },
+        10: { cellWidth: 30 },
+        11: { cellWidth: 50 },
+      },
+      margin: { top: 20, left: 10, right: 10 },
+      didDrawPage: (data) => {
+        doc.setFontSize(12);
+        doc.text('Supervisor Notes', 14, 15);
+      },
+    });
+
+    doc.save(`supervisor_notes_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.pdf`);
+    message.success('PDF exported successfully');
   };
 
   const filteredNotes = useMemo(() => {
@@ -400,7 +474,32 @@ const SupervisorNotes = () => {
               filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
             />
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={loadNotes} loading={loading} />
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadNotes} loading={loading} />
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'excel',
+                    label: 'Export to Excel',
+                    icon: <FileExcelOutlined />,
+                    onClick: exportToExcel,
+                  },
+                  {
+                    key: 'pdf',
+                    label: 'Export to PDF',
+                    icon: <FilePdfOutlined />,
+                    onClick: exportToPDF,
+                  },
+                ],
+              }}
+              disabled={filteredNotes.length === 0}
+            >
+              <Button icon={<DownloadOutlined />} disabled={filteredNotes.length === 0}>
+                Export
+              </Button>
+            </Dropdown>
+          </Space>
         </div>
         <Table
           rowKey="id"

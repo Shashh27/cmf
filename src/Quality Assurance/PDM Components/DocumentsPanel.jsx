@@ -336,8 +336,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
-  const handleDownload = (id) => {
-    downloadWithAuth(`/documents/${id}/download`, `document-${id}`);
+  const handleDownload = (doc) => {
+    const filename = getDocumentDisplayName(doc) || doc.document_name || `document-${doc.id}`;
+    downloadWithAuth(`/documents/${doc.id}/download`, filename);
   };
 
   const isQualityDocument = (doc) =>
@@ -412,7 +413,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       previewDoc.source === 'part'
         ? `/documents/${previewDoc.doc.id}/download`
         : `/operation-documents/${previewDoc.doc.id}/download`;
-    downloadWithAuth(path, previewDoc.doc.document_name);
+    const filename = getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name;
+    downloadWithAuth(path, filename);
     closePreview();
   };
 
@@ -795,7 +797,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             {!readOnly && !qualityDoc && (
               <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
             )}
-            <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur.id)} /></Tooltip>
+            <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur)} /></Tooltip>
             {canMutateDoc && (
               <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
                 <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />

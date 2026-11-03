@@ -17,6 +17,7 @@ import {
   buildProductionStageTree,
 } from '../../utils/productionLogDisplay';
 import { api } from '../../api/client.js';
+import { isInHouseType } from '../../utils/partType';
 import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 import { useResizableColumns } from '../../hooks/useResizableColumns';
 
@@ -66,7 +67,9 @@ const OrderTracking = () => {
 
     const extractPartsFromAssembly = (assembly) => {
       assembly.parts?.forEach((pd) => {
+        if (!isInHouseType(pd.part.type_name)) return;
         const tp = trackingMap[pd.part.id];
+        const operations = (pd.operations || []).filter((op) => isInHouseType(op.part_type_name));
         parts.push({
           key: pd.part.id,
           part_id: pd.part.id,
@@ -77,9 +80,9 @@ const OrderTracking = () => {
           qty: pd.part.qty,
           status: tp?.status || 'Not Started',
           completion_percentage: tp?.completion_percentage || 0,
-          total_operations: tp?.total_operations || pd.operations?.length || 0,
+          total_operations: tp?.total_operations || operations.length,
           completed_operations: tp?.completed_operations || 0,
-          operations: pd.operations || [],
+          operations,
         });
       });
       assembly.subassemblies?.forEach((sub) => extractPartsFromAssembly(sub));
@@ -90,7 +93,9 @@ const OrderTracking = () => {
     });
 
     details.product_hierarchy.direct_parts?.forEach((pd) => {
+      if (!isInHouseType(pd.part.type_name)) return;
       const tp = trackingMap[pd.part.id];
+      const operations = (pd.operations || []).filter((op) => isInHouseType(op.part_type_name));
       parts.push({
         key: pd.part.id,
         part_id: pd.part.id,
@@ -101,9 +106,9 @@ const OrderTracking = () => {
         qty: pd.part.qty,
         status: tp?.status || 'Not Started',
         completion_percentage: tp?.completion_percentage || 0,
-        total_operations: tp?.total_operations || pd.operations?.length || 0,
+        total_operations: tp?.total_operations || operations.length,
         completed_operations: tp?.completed_operations || 0,
-        operations: pd.operations || [],
+        operations,
       });
     });
     return parts;
@@ -278,7 +283,7 @@ const OrderTracking = () => {
   const kpiItems = [
     {
       key: 'all',
-      label: 'Total Parts',
+      label: 'Inhouse Parts',
       value: totalParts,
       sub: `${orderCompletion}% project complete`,
       color: '#1677ff',
