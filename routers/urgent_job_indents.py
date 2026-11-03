@@ -23,6 +23,7 @@ from DB.schemas.maintenance import (
     UrgentJobIndentReview,
     UrgentJobIndentAssign,
     UrgentJobIndentAcknowledge,
+    UrgentJobIndentCompletionReview,
     UrgentJobIndentProgress,
 )
 
@@ -81,8 +82,17 @@ def _ensure_table(db: Session):
             ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP,
             ADD COLUMN IF NOT EXISTS supervisor_ack BOOLEAN NOT NULL DEFAULT FALSE,
             ADD COLUMN IF NOT EXISTS supervisor_ack_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS supervisor_decision VARCHAR,
+            ADD COLUMN IF NOT EXISTS supervisor_decision_remark TEXT,
+            ADD COLUMN IF NOT EXISTS supervisor_decision_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS supervisor_decision_by VARCHAR,
             ADD COLUMN IF NOT EXISTS mc_completion_ack BOOLEAN NOT NULL DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS mc_completion_ack_at TIMESTAMP
+            ADD COLUMN IF NOT EXISTS mc_completion_ack_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS mc_decision VARCHAR,
+            ADD COLUMN IF NOT EXISTS mc_decision_remark TEXT,
+            ADD COLUMN IF NOT EXISTS mc_decision_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS mc_decision_by VARCHAR,
+            ADD COLUMN IF NOT EXISTS from_name VARCHAR
         """
     ))
     db.execute(text(
@@ -208,8 +218,16 @@ def _serialize(obj: IndentModel, db: Session) -> dict:
         "completed_at": getattr(obj, "completed_at", None),
         "supervisor_ack": bool(getattr(obj, "supervisor_ack", False)),
         "supervisor_ack_at": getattr(obj, "supervisor_ack_at", None),
+        "supervisor_decision": getattr(obj, "supervisor_decision", None),
+        "supervisor_decision_remark": getattr(obj, "supervisor_decision_remark", None),
+        "supervisor_decision_at": getattr(obj, "supervisor_decision_at", None),
+        "supervisor_decision_by": getattr(obj, "supervisor_decision_by", None),
         "mc_completion_ack": bool(getattr(obj, "mc_completion_ack", False)),
         "mc_completion_ack_at": getattr(obj, "mc_completion_ack_at", None),
+        "mc_decision": getattr(obj, "mc_decision", None),
+        "mc_decision_remark": getattr(obj, "mc_decision_remark", None),
+        "mc_decision_at": getattr(obj, "mc_decision_at", None),
+        "mc_decision_by": getattr(obj, "mc_decision_by", None),
         "operator_ack": bool(obj.operator_ack),
         "operator_ack_at": obj.operator_ack_at,
         "mc_ack": bool(getattr(obj, "mc_ack", False)),
@@ -218,6 +236,7 @@ def _serialize(obj: IndentModel, db: Session) -> dict:
             _user_name(db, obj.mc_id) if getattr(obj, "mc_ack", False) else None
         ),
         "from_dept": obj.from_dept,
+        "from_name": getattr(obj, "from_name", None),
         "to_dept": obj.to_dept,
         "attachments": [_serialize_attachment(att) for att in attachments],
         "created_at": obj.created_at,
@@ -264,8 +283,10 @@ def create_indent(payload: UrgentJobIndentCreate, db: Session = Depends(get_db))
         operator_id = payload.created_by
         assigned_at = now
         reviewed_at = now
-        activated_at = now
-        completed_at = now
+        activated_at = payload.activated_at or now
+        completed_at = payload.completed_at or now
+        if completed_at < activated_at:
+            raise HTTPException(status_code=400, detail="Duration To must be after Duration From")
     elif payload.operator_id:
         if not payload.machine_id:
             raise HTTPException(status_code=400, detail="Operator and machine are required when assigning")
@@ -285,6 +306,7 @@ def create_indent(payload: UrgentJobIndentCreate, db: Session = Depends(get_db))
         operation_id=payload.operation_id,
         description=payload.description,
         from_dept=payload.from_dept,
+        from_name=payload.from_name,
         to_dept=payload.to_dept,
         operator_id=operator_id,
         workcenter_id=payload_workcenter_id,
@@ -464,12 +486,24 @@ def complete_indent(indent_id: int, payload: UrgentJobIndentProgress, db: Sessio
     return _serialize(obj, db)
 
 
+def _assert_editable_before_activation(obj: IndentModel, action: str = "edited") -> None:
+    status = (obj.status or "").lower()
+    if status == "rejected":
+        raise HTTPException(status_code=400, detail=f"Rejected jobs cannot be {action}")
+    if getattr(obj, "activated_at", None) or getattr(obj, "completed_at", None):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job cannot be {action} after the operator has activated it",
+        )
+    if status not in ("pending", "accepted", "assigned"):
+        raise HTTPException(status_code=400, detail=f"Only unactivated jobs can be {action}")
+
+
 @router.put("/{indent_id}", response_model=IndentSchema)
 def update_indent(indent_id: int, payload: UrgentJobIndentUpdate, db: Session = Depends(get_db)):
     _ensure_table(db)
     obj = _get_or_404(db, indent_id)
-    if (obj.status or "").lower() != "pending":
-        raise HTTPException(status_code=400, detail="Only pending jobs can be edited")
+    _assert_editable_before_activation(obj, "edited")
     if payload.description is not None:
         if not payload.description:
             raise HTTPException(status_code=400, detail="Description is required")
@@ -482,15 +516,28 @@ def update_indent(indent_id: int, payload: UrgentJobIndentUpdate, db: Session = 
         obj.from_dept = payload.from_dept
     if payload.to_dept is not None:
         obj.to_dept = payload.to_dept
-    if payload.operator_id is not None:
-        operator = db.query(AccessUserModel).filter(AccessUserModel.id == payload.operator_id).first()
-        if not operator:
-            raise HTTPException(status_code=404, detail="Operator not found")
-        obj.operator_id = payload.operator_id
-    if payload.workcenter_id is not None:
-        obj.workcenter_id = payload.workcenter_id
-    if payload.machine_id is not None:
-        obj.machine_id = payload.machine_id
+    next_operator_id = payload.operator_id if payload.operator_id is not None else obj.operator_id
+    next_machine_id = payload.machine_id if payload.machine_id is not None else obj.machine_id
+    next_workcenter_id = payload.workcenter_id if payload.workcenter_id is not None else obj.workcenter_id
+    if payload.operator_id is not None or payload.machine_id is not None or payload.workcenter_id is not None:
+        if next_operator_id and next_machine_id:
+            _machine, next_workcenter_id = _resolve_assignment(
+                db, next_operator_id, next_workcenter_id, next_machine_id
+            )
+        if payload.operator_id is not None:
+            operator = db.query(AccessUserModel).filter(AccessUserModel.id == payload.operator_id).first()
+            if not operator:
+                raise HTTPException(status_code=404, detail="Operator not found")
+            obj.operator_id = payload.operator_id
+        if payload.machine_id is not None:
+            obj.machine_id = payload.machine_id
+        if next_workcenter_id is not None:
+            obj.workcenter_id = next_workcenter_id
+        # Keep assigned/accepted jobs in assigned state when MC updates operator/machine
+        if (obj.status or "").lower() in ("accepted", "assigned") and obj.operator_id and obj.machine_id:
+            obj.status = "assigned"
+            if not obj.assigned_at:
+                obj.assigned_at = get_ist_time()
     db.commit()
     db.refresh(obj)
     return _serialize(obj, db)
@@ -500,12 +547,68 @@ def update_indent(indent_id: int, payload: UrgentJobIndentUpdate, db: Session = 
 def delete_indent(indent_id: int, db: Session = Depends(get_db)):
     _ensure_table(db)
     obj = _get_or_404(db, indent_id)
-    if (obj.status or "").lower() != "pending":
-        raise HTTPException(status_code=400, detail="Only pending jobs can be deleted")
+    _assert_editable_before_activation(obj, "deleted")
     db.query(AttachmentModel).filter(AttachmentModel.indent_id == indent_id).delete()
     db.delete(obj)
     db.commit()
     return {"ok": True}
+
+
+@router.put("/{indent_id}/completion-review", response_model=IndentSchema)
+def review_completion(indent_id: int, payload: UrgentJobIndentCompletionReview, db: Session = Depends(get_db)):
+    """Supervisor or MC approve/reject a completed work log (including operator-submitted logs)."""
+    _ensure_table(db)
+    obj = _get_or_404(db, indent_id)
+    if not obj.completed_at:
+        raise HTTPException(status_code=400, detail="This job is not completed yet")
+    if payload.status == "rejected" and not payload.remark:
+        raise HTTPException(status_code=400, detail="Remarks are required to reject")
+
+    user = db.query(AccessUserModel).filter(AccessUserModel.id == payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if getattr(obj, "supervisor_decision", None) or getattr(obj, "mc_decision", None):
+        raise HTTPException(status_code=400, detail="This log has already been reviewed")
+
+    now = get_ist_time()
+    if payload.as_role == "supervisor":
+        obj.supervisor_decision = payload.status
+        obj.supervisor_decision_remark = payload.remark
+        obj.supervisor_decision_at = now
+        obj.supervisor_decision_by = user.user_name
+        obj.supervisor_ack = True
+        obj.supervisor_ack_at = now
+        # One approval is enough — clear MC pending review as well
+        obj.mc_completion_ack = True
+        obj.mc_completion_ack_at = now
+        if obj.mc_id is None:
+            obj.mc_ack = True
+            obj.mc_ack_at = now
+            obj.mc_ack_by = user.user_name
+    else:
+        if obj.mc_id is not None and obj.mc_id != payload.user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the assigned manufacturing coordinator can review this completion",
+            )
+        obj.mc_decision = payload.status
+        obj.mc_decision_remark = payload.remark
+        obj.mc_decision_at = now
+        obj.mc_decision_by = user.user_name
+        obj.mc_completion_ack = True
+        obj.mc_completion_ack_at = now
+        obj.supervisor_ack = True
+        obj.supervisor_ack_at = now
+        # Operator-submitted logs (mc_id null) also clear the generic MC notification ack
+        if obj.mc_id is None:
+            obj.mc_ack = True
+            obj.mc_ack_at = now
+            obj.mc_ack_by = user.user_name
+
+    db.commit()
+    db.refresh(obj)
+    return _serialize(obj, db)
 
 
 @router.put("/{indent_id}/acknowledge", response_model=IndentSchema)
@@ -523,7 +626,7 @@ def acknowledge_indent(indent_id: int, payload: UrgentJobIndentAcknowledge, db: 
             db.refresh(obj)
         return _serialize(obj, db)
     if role == "mc_completion":
-        if obj.mc_id != payload.user_id:
+        if obj.mc_id is not None and obj.mc_id != payload.user_id:
             raise HTTPException(status_code=403, detail="Only the assigned manufacturing coordinator can acknowledge this completion")
         if not obj.completed_at:
             raise HTTPException(status_code=400, detail="This job is not completed yet")

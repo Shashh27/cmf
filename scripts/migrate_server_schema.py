@@ -352,8 +352,17 @@ ADD_COLUMNS = [
         ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP,
         ADD COLUMN IF NOT EXISTS supervisor_ack BOOLEAN NOT NULL DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS supervisor_ack_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS supervisor_decision VARCHAR,
+        ADD COLUMN IF NOT EXISTS supervisor_decision_remark TEXT,
+        ADD COLUMN IF NOT EXISTS supervisor_decision_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS supervisor_decision_by VARCHAR,
         ADD COLUMN IF NOT EXISTS mc_completion_ack BOOLEAN NOT NULL DEFAULT FALSE,
-        ADD COLUMN IF NOT EXISTS mc_completion_ack_at TIMESTAMP
+        ADD COLUMN IF NOT EXISTS mc_completion_ack_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS mc_decision VARCHAR,
+        ADD COLUMN IF NOT EXISTS mc_decision_remark TEXT,
+        ADD COLUMN IF NOT EXISTS mc_decision_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS mc_decision_by VARCHAR,
+        ADD COLUMN IF NOT EXISTS from_name VARCHAR
     """,
     "ALTER TABLE maintenance.urgent_job_indents ALTER COLUMN order_id DROP NOT NULL",
     """
