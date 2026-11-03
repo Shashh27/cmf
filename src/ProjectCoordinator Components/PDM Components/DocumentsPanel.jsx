@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
-  CheckCircleOutlined, CloseCircleOutlined
+  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from "@ant-design/icons";
 import { api } from '../../api/client.js';
 import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
@@ -13,9 +13,41 @@ import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
 import ModelViewer3D from "./ModelViewer3D";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
+
+const OperationDragLockContext = createContext(false);
+
+const SortableRow = (props) => {
+  const dragLocked = useContext(OperationDragLockContext);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: String(props['data-row-key']),
+    disabled: dragLocked,
+  });
+
+  const style = {
+    ...props.style,
+    transform: CSS.Transform.toString(transform && { x: 0, y: transform.y, scaleX: 1, scaleY: 1 }),
+    transition,
+    ...(isDragging ? { position: 'relative', zIndex: 9999, opacity: 0.8 } : {}),
+    cursor: dragLocked ? 'pointer' : 'grab',
+  };
+
+  return (
+    <tr
+      {...props}
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...(dragLocked ? {} : listeners)}
+      onClick={props.onClick}
+    />
+  );
+};
 
 async function downloadBlobWithAuth(path, filename) {
   const response = await api.get(path, { responseType: 'blob' });
@@ -113,22 +145,38 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
 };
 
 // ── FitTable ────────────────────────────────────────────────────────────────
-const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
+const FitTable = ({ columns, dataSource, scrollX = 'max-content', pagination, ...props }) => {
   const ref = useRef(null);
   const [scrollY, setScrollY] = useState(400);
+  const paginationOn = pagination != null && pagination !== false;
 
   useEffect(() => {
     const update = () => {
       if (!ref.current) return;
       const h = ref.current.clientHeight || 0;
-      setScrollY(Math.max(h - 40, 150));
+      const headerEl =
+        ref.current.querySelector('.ant-table-header') ||
+        ref.current.querySelector('.ant-table-thead');
+      const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 40;
+      const paginationEl = ref.current.querySelector('.ant-pagination');
+      const paginationH = paginationEl
+        ? Math.ceil(paginationEl.getBoundingClientRect().height) + 12
+        : (paginationOn ? 48 : 0);
+      setScrollY(Math.max(h - headerH - paginationH - 8, 150));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
     update();
+    const t1 = window.setTimeout(update, 80);
+    const t2 = window.setTimeout(update, 250);
     window.addEventListener('resize', update);
-    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
-  }, []);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [dataSource?.length, paginationOn]);
 
   const scroll = scrollX === false ? { y: scrollY } : { y: scrollY, x: scrollX };
 
@@ -137,7 +185,7 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
       <Table
         columns={columns}
         dataSource={dataSource}
-        pagination={false}
+        pagination={paginationOn ? pagination : false}
         scroll={scroll}
         size="small"
         {...props}
@@ -285,7 +333,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         api.get(`/operations/part/${selectedItem.id}`),
       ]);
       const docs = dR.data;
-      const ops = oR.data;
+      const ops = [...(oR.data || [])].sort(
+        (a, b) => Number(a.operation_number) - Number(b.operation_number)
+      );
       setDocuments(docs); setOperations(ops);
       if (onDocumentsLoaded) onDocumentsLoaded(docs);
       notifyBomDocsChanged();
@@ -665,8 +715,51 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     setImportOperations([]);
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+  const partIsActive = String(selectedItem?.schedule_status || '').toLowerCase() === 'active';
+
+  const onOperationDragEnd = async ({ active, over }) => {
+    if (partIsActive || !over || String(active.id) === String(over.id)) return;
+    const activeIndex = operations.findIndex((i) => String(i.id) === String(active.id));
+    const overIndex = operations.findIndex((i) => String(i.id) === String(over.id));
+    if (activeIndex < 0 || overIndex < 0) return;
+    const sourceOp = operations[activeIndex];
+    const targetOp = operations[overIndex];
+
+    Modal.confirm({
+      title: 'Confirm Reorder',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>Are you sure you want to swap these operations?</p>
+          <p><strong>{sourceOp.operation_name}</strong> (Op #{sourceOp.operation_number})</p>
+          <p>↔</p>
+          <p><strong>{targetOp.operation_name}</strong> (Op #{targetOp.operation_number})</p>
+        </div>
+      ),
+      okText: 'Yes, Swap',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          await api.post('/operations/swap', null, {
+            params: { op1_id: sourceOp.id, op2_id: targetOp.id },
+          });
+          message.success('Operations swapped successfully');
+          await fetchDocuments();
+        } catch (error) {
+          console.error('Error swapping operations:', error);
+          message.error(error?.response?.data?.detail || 'Failed to swap operations');
+          await fetchDocuments();
+        }
+      },
+    });
+  };
+
   // ── operations table columns ─────────────────────────────────────────────
   const operationsColumns = [
+    { key: 'sort', width: 30, render: () => <HolderOutlined style={{ cursor: partIsActive ? 'not-allowed' : 'grab', color: partIsActive ? '#cbd5e1' : '#999' }} /> },
     {
       title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
       render: (t, _, i) => <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">{String(t || i + 1).padStart(2, '0')}</Tag>
@@ -959,7 +1052,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">Click row to view</span>
+            <span className="text-xs text-slate-500">{partIsActive ? 'Part is active. Inactivate it to reorder operations.' : 'Drag rows to reorder operations'}</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <Button size="small" icon={<DownloadOutlined />} onClick={() => setShowReportModal(true)} disabled={!isPart || loading} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Download Report</span><span className="sm:hidden">Report</span>
@@ -967,17 +1060,31 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <FitTable
-              dataSource={operations}
-              columns={operationsColumns}
-              rowKey="id"
-              className="docs-ops-table"
-              locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-              onRow={(record) => ({
-                onClick: () => { setViewOperation(record); setIsViewModalOpen(true); },
-                style: { cursor: 'pointer' }
-              })}
-            />
+            <OperationDragLockContext.Provider value={partIsActive}>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOperationDragEnd}>
+                <SortableContext items={operations.map((i) => String(i.id))} strategy={verticalListSortingStrategy}>
+                  <FitTable
+                    dataSource={operations}
+                    columns={operationsColumns}
+                    rowKey={(r) => String(r?.id)}
+                    className="docs-ops-table"
+                    locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                    pagination={{
+                      defaultPageSize: 20,
+                      showSizeChanger: true,
+                      showTotal: (total) => `Total: ${total} operations`,
+                      pageSizeOptions: ['10', '20', '50', '100'],
+                      size: 'small',
+                      placement: ['bottomCenter'],
+                    }}
+                    components={{ body: { row: SortableRow } }}
+                    onRow={(record) => ({
+                      onClick: () => { setViewOperation(record); setIsViewModalOpen(true); },
+                    })}
+                  />
+                </SortableContext>
+              </DndContext>
+            </OperationDragLockContext.Provider>
           </div>
         </div>
       ),
@@ -1244,6 +1351,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         .docs-ebom-table .ant-table-thead>tr>th::before{display:none!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;}
+        .custom-fit-table.ant-table-wrapper,.custom-fit-table .ant-spin-nested-loading,.custom-fit-table .ant-spin-container{height:100%;min-height:0;}
+        .custom-fit-table .ant-spin-container{display:flex;flex-direction:column;}
+        .custom-fit-table .ant-table{flex:1 1 auto;min-height:0;height:auto;}
+        .custom-fit-table .ant-table-container{height:100%;display:flex;flex-direction:column;min-height:0;}
+        .custom-fit-table .ant-pagination{flex:0 0 auto;margin:8px 0 0!important;position:relative;z-index:2;}
         @media(max-width:640px){
           .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th,
           .docs-ebom-table .ant-table-tbody>tr>td,.docs-ebom-table .ant-table-thead>tr>th{padding:5px 6px!important;font-size:11px!important;}

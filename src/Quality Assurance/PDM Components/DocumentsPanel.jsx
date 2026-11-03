@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
@@ -32,10 +32,14 @@ async function downloadBlobWithAuth(path, filename) {
   URL.revokeObjectURL(blobUrl);
 }
 
+const OperationDragLockContext = createContext(false);
+
 // Custom sortable row component for drag-and-drop
 const SortableRow = (props) => {
+  const dragLocked = useContext(OperationDragLockContext);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: props['data-row-key'],
+    id: String(props['data-row-key']),
+    disabled: dragLocked,
   });
 
   const style = {
@@ -43,9 +47,18 @@ const SortableRow = (props) => {
     transform: CSS.Transform.toString(transform && { x: 0, y: transform.y, scaleX: 1, scaleY: 1 }),
     transition,
     ...(isDragging ? { position: 'relative', zIndex: 9999, opacity: 0.8 } : {}),
+    ...(dragLocked ? { cursor: 'default' } : {}),
   };
 
-  return <tr {...props} ref={setNodeRef} style={style} {...attributes} {...listeners} />;
+  return (
+    <tr
+      {...props}
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...(dragLocked ? {} : listeners)}
+    />
+  );
 };
 
 // ── OperationDocumentsList ──────────────────────────────────────────────────
@@ -119,9 +132,10 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
 };
 
 // ── FitTable ────────────────────────────────────────────────────────────────
-const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrollIgnored, ...props }) => {
+const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrollIgnored, pagination, ...props }) => {
   const ref = useRef(null);
   const [scrollY, setScrollY] = useState(200);
+  const paginationOn = pagination != null && pagination !== false;
 
   useEffect(() => {
     // Measure container and table header so body scroll height fits and last rows stay visible.
@@ -132,9 +146,13 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrol
         ref.current.querySelector('.ant-table-header') ||
         ref.current.querySelector('.ant-table-thead');
       const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 40;
+      const paginationEl = ref.current.querySelector('.ant-pagination');
+      const paginationH = paginationEl
+        ? Math.ceil(paginationEl.getBoundingClientRect().height) + 12
+        : (paginationOn ? 48 : 0);
       // Extra space so last rows (incl. quality docs) are fully visible when scrolled to end
-      const bottomPad = 48;
-      setScrollY(Math.max(Math.floor(containerH - headerH - bottomPad), 120));
+      const bottomPad = paginationOn ? 8 : 48;
+      setScrollY(Math.max(Math.floor(containerH - headerH - paginationH - bottomPad), 120));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
@@ -148,14 +166,14 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', scroll: _scrol
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
-  }, [dataSource?.length, columns?.length]);
+  }, [dataSource?.length, columns?.length, paginationOn]);
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden w-full relative h-full" ref={ref}>
       <Table
         columns={columns}
         dataSource={dataSource}
-        pagination={false}
+        pagination={paginationOn ? pagination : false}
         size="small"
         {...props}
         rowKey={(r) => String(r?.id)}
@@ -564,11 +582,15 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     await fetchDocuments(); setImportOperations([]);
   };
 
+  const partIsActive = String(selectedItem?.schedule_status || '').toLowerCase() === 'active';
+  const operationDragLocked = readOnly || partIsActive;
+
   const onOperationDragEnd = async ({ active, over }) => {
-    if (active.id !== over?.id) {
-      const activeIndex = operations.findIndex((i) => i.id === active.id);
-      const overIndex = operations.findIndex((i) => i.id === over?.id);
-      
+    if (operationDragLocked || !over || String(active.id) === String(over.id)) return;
+    const activeIndex = operations.findIndex((i) => String(i.id) === String(active.id));
+    const overIndex = operations.findIndex((i) => String(i.id) === String(over.id));
+    if (activeIndex < 0 || overIndex < 0) return;
+    {
       const sourceOp = operations[activeIndex];
       const targetOp = operations[overIndex];
       const sourceOpNumber = sourceOp.operation_number;
@@ -611,7 +633,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
 
   // ── operations table columns ───────────────────────────────────────────────
   const operationsColumns = [
-    { key: 'sort', width: 30, render: () => <HolderOutlined style={{ cursor: 'grab', color: '#999' }} /> },
+    { key: 'sort', width: 30, render: () => <HolderOutlined style={{ cursor: operationDragLocked ? 'not-allowed' : 'grab', color: operationDragLocked ? '#cbd5e1' : '#999' }} /> },
     { title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
       render: (t, _, i) => <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">{String(t || i + 1).padStart(2, '0')}</Tag> },
     { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'name', ellipsis: true, minWidth: 150,
@@ -816,7 +838,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">{readOnly ? 'View operations' : 'Drag rows to reorder operations'}</span>
+            <span className="text-xs text-slate-500">{readOnly ? 'View operations' : partIsActive ? 'Part is active. Inactivate it to reorder operations.' : 'Drag rows to reorder operations'}</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               {!readOnly && (
                 <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
@@ -835,8 +857,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
+            <OperationDragLockContext.Provider value={operationDragLocked}>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOperationDragEnd}>
-              <SortableContext items={operations.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={operations.map((i) => String(i.id))} strategy={verticalListSortingStrategy}>
                 <FitTable
                   dataSource={operations}
                   columns={operationsColumns}
@@ -845,7 +868,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                   bordered
                   locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
                   pagination={denseMode ? {
-                    pageSize: 20,
+                    defaultPageSize: 20,
                     showSizeChanger: true,
                     showTotal: (total) => `Total: ${total} operations`,
                     pageSizeOptions: ['10', '20', '50', '100'],
@@ -860,6 +883,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                 />
               </SortableContext>
             </DndContext>
+            </OperationDragLockContext.Provider>
           </div>
         </div>
       ),
@@ -882,7 +906,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               size="small"
               bordered
               pagination={denseMode ? {
-                pageSize: 20,
+                defaultPageSize: 20,
                 showSizeChanger: true,
                 showTotal: (total) => `Total: ${total} documents`,
                 pageSizeOptions: ['10', '20', '50', '100'],
@@ -987,9 +1011,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;padding-bottom:24px!important;scrollbar-gutter:stable;}
         .custom-fit-table .ant-table-tbody > tr:last-child > td{padding-bottom:12px!important;}
-        .custom-fit-table.ant-table-wrapper,.custom-fit-table .ant-spin-nested-loading,.custom-fit-table .ant-spin-container,.custom-fit-table .ant-table,.custom-fit-table .ant-table-container{height:100%;}
-        .custom-fit-table .ant-table-container{display:flex;flex-direction:column;min-height:0;}
+        .custom-fit-table.ant-table-wrapper,.custom-fit-table .ant-spin-nested-loading,.custom-fit-table .ant-spin-container{height:100%;min-height:0;}
+        .custom-fit-table .ant-spin-container{display:flex;flex-direction:column;}
+        .custom-fit-table .ant-table{flex:1 1 auto;min-height:0;height:auto;}
+        .custom-fit-table .ant-table-container{height:100%;display:flex;flex-direction:column;min-height:0;}
         .custom-fit-table .ant-table-body{flex:1;min-height:0;}
+        .custom-fit-table .ant-pagination{flex:0 0 auto;margin:8px 0 0!important;position:relative;z-index:2;}
         .ant-pagination-item{font-size:${denseMode ? '11px' : '12px'}!important;}
         .ant-pagination-total-text{font-size:${denseMode ? '11px' : '12px'}!important;}
         /* Blur operations table when modal is open */

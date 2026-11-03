@@ -16,6 +16,7 @@ import MCShopFloorDashboard from "../ManufacturingCoordinator Components/ShopFlo
 import MCDocument from "../ManufacturingCoordinator Components/Document";
 import MCNotification from "../ManufacturingCoordinator Components/Notification";
 import MCAccessControl from "../ManufacturingCoordinator Components/AccessControl";
+import MCUrgentJobs from "../ManufacturingCoordinator Components/UrgentJobs";
 
 const ManufacturingCoordinator = () => {
   const location = useLocation();
@@ -59,6 +60,9 @@ const ManufacturingCoordinator = () => {
   }
   if (path.startsWith("/manufacturing_coordinator/notification")) {
     return <MCNotification />;
+  }
+  if (path.startsWith("/manufacturing_coordinator/right-now-jobs")) {
+    return <MCUrgentJobs />;
   }
   if (path.startsWith("/manufacturing_coordinator/access_control")) {
     return <MCAccessControl />;

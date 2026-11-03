@@ -99,6 +99,8 @@ import DocumentManagement from "./Pages/Document";
 
 import Notification from "./Pages/Notification";
 
+import RightNowJobs from "./Pages/RightNowJobs";
+
 
 
 import AccessControl from "./Pages/AccessControl";
@@ -342,7 +344,7 @@ function App() {
 
 
 
-          
+          <Route path="/admin/right-now-jobs" element={<RightNowJobs />} />
 
 
 
@@ -406,6 +408,10 @@ function App() {
 
           <Route path="/project_coordinator/notifications" element={<PCNotifications />} />
 
+          <Route path="/project_coordinator/urgent-jobs" element={<Navigate to="/project_coordinator/right-now-jobs" replace />} />
+
+          <Route path="/project_coordinator/right-now-jobs" element={<ProjectCoordinatorDashboard />} />
+
           <Route path="/project_coordinator/configuration" element={<ProjectCoordinatorDashboard />} />
 
 
@@ -452,6 +458,7 @@ function App() {
           <Route path="/manufacturing_coordinator/inventory-management/overview-data" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/document-management" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/notification" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/right-now-jobs" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/access_control" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
 
@@ -467,6 +474,8 @@ function App() {
 
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
 
+          <Route path="/supervisor/right-now-jobs" element={<SupervisorDashboard />} />
+
           <Route path="/supervisor/notifications" element={<SupervisorNotifications />} />
 
           <Route path="/supervisor/assets-availability" element={<SupervisorDashboard />} />
@@ -475,7 +484,7 @@ function App() {
 
           <Route path="/supervisor/pokayoke-checklists" element={<SupervisorDashboard />} />
 
-          <Route path="/supervisor/notes" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/notes" element={<Navigate to="/supervisor/production_logs" replace />} />
 
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
 
@@ -534,11 +543,13 @@ function App() {
 
           <Route path="/operator/production-logs" element={<OperatorDashboard />} />
 
+          <Route path="/operator/right-now-jobs" element={<OperatorDashboard />} />
+
           <Route path="/operator/notifications" element={<OperatorDashboard />} />
 
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
 
-          <Route path="/operator/notes" element={<OperatorDashboard />} />
+          <Route path="/operator/notes" element={<Navigate to="/operator/dashboard" replace />} />
 
           <Route path="/operator/preventive-maintenance" element={<OperatorDashboard />} />
 

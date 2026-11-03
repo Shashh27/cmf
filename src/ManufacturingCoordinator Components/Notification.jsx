@@ -21,6 +21,7 @@ import {
   HistoryOutlined,
   CheckOutlined,
   ReloadOutlined,
+  FormOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -34,6 +35,7 @@ import ComponentIssuesNotifications from './Notification Components/ComponentIss
 import MachineCalibrationNotifications from './Notification Components/MachineCalibrationNotifications';
 import PokayokeOperationNotification from './Notification Components/PokayokeOperationNotification';
 import ProductionLogNotification from './Notification Components/ProductionLogNotification';
+import UrgentJobNotifications from './Notification Components/UrgentJobNotifications';
 import config from '../Config/config';
 import { filterOwnCreatedNotifications, getStoredUser } from '../utils/notificationFilters';
 import {
@@ -54,6 +56,7 @@ const TAB_KEYS = {
   calibrations: '5',
   pokayoke: '6',
   productionLogs: '7',
+  urgentJobs: '8',
 };
 
 const Notification = () => {
@@ -71,6 +74,7 @@ const Notification = () => {
     calibrations: 0,
     pokayoke: 0,
     productionLogs: 0,
+    urgentJobs: 0,
   });
   const [refreshKey, setRefreshKey] = useState(0);
   const [ackAllOpen, setAckAllOpen] = useState(false);
@@ -93,6 +97,7 @@ const Notification = () => {
       calibrations: setCount('calibrations'),
       pokayoke: setCount('pokayoke'),
       productionLogs: setCount('productionLogs'),
+      urgentJobs: setCount('urgentJobs'),
     }),
     [setCount],
   );
@@ -100,7 +105,7 @@ const Notification = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t && ['1', '2', '3', '4', '5', '6', '7'].includes(t)) setActiveKey(t);
+    if (t && ['1', '2', '3', '4', '5', '6', '7', '8'].includes(t)) setActiveKey(t);
   }, [location.search]);
 
   const dateParams = useCallback(() => {
@@ -123,9 +128,14 @@ const Notification = () => {
         `${config.API_BASE_URL}/component-issues-notifications/${qs ? `?${qs}` : ''}`,
         `${config.API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
       ];
-      const [orders, machines, tools, components, calibrations] = await Promise.all(
-        endpoints.map((url) => authFetch(url).then((r) => (r.ok ? r.json() : []))),
-      );
+      const userId = user?.id ?? user?.user_id;
+      const urgentUrl = userId
+        ? `${config.API_BASE_URL}/urgent-job-indents/?for_mc_id=${userId}`
+        : `${config.API_BASE_URL}/urgent-job-indents/`;
+      const [orders, machines, tools, components, calibrations, urgentJobs] = await Promise.all([
+        ...endpoints.map((url) => authFetch(url).then((r) => (r.ok ? r.json() : []))),
+        authFetch(urgentUrl).then((r) => (r.ok ? r.json() : [])),
+      ]);
       const visibleOrders = filterOwnCreatedNotifications(orders, user);
       const countPendingOrders = (notifications) => {
         if (!Array.isArray(notifications)) return 0;
@@ -146,6 +156,15 @@ const Notification = () => {
         tools: countPendingSimple(tools),
         components: countPendingSimple(components),
         calibrations: countPendingSimple(calibrations),
+        urgentJobs: Array.isArray(urgentJobs)
+          ? urgentJobs.filter((row) => {
+              const userId = user?.id ?? user?.user_id;
+              if (row.completed_at && Number(row.mc_id) === Number(userId)) return !row.mc_completion_ack;
+              if (row.mc_ack) return false;
+              if (Number(row.created_by) === Number(userId)) return false;
+              return row.mc_id == null || Number(row.created_by) !== Number(row.mc_id);
+            }).length
+          : 0,
       }));
     } catch {
       /* silent */
@@ -210,6 +229,7 @@ const Notification = () => {
         [TAB_KEYS.tools]: 'tools',
         [TAB_KEYS.components]: 'components',
         [TAB_KEYS.calibrations]: 'calibrations',
+        [TAB_KEYS.urgentJobs]: 'urgentJobs',
       };
       const coreKeys = Object.values(tabToKey);
       const scopes =
@@ -245,6 +265,31 @@ const Notification = () => {
             '/machine-calibration-notifications',
             await fetchTyped('/machine-calibration-notifications/'),
           );
+        } else if (key === 'urgentJobs') {
+          const user = getStoredUser();
+          const userId = user?.id ?? user?.user_id;
+          if (!userId) throw new Error('User information not found');
+          const itemsRes = await authFetch(`${config.API_BASE_URL}/urgent-job-indents/?for_mc_id=${userId}`);
+          const items = itemsRes.ok ? await itemsRes.json() : [];
+          const pending = (items || []).filter((row) => {
+            if (row.completed_at && Number(row.mc_id) === Number(userId)) return !row.mc_completion_ack;
+            if (row.mc_ack) return false;
+            if (Number(row.created_by) === Number(userId)) return false;
+            return row.mc_id == null || Number(row.created_by) !== Number(row.mc_id);
+          });
+          await Promise.all(
+            pending.map((row) =>
+              authFetch(`${config.API_BASE_URL}/urgent-job-indents/${row.id}/acknowledge`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  user_id: userId,
+                  as_role: row.completed_at && Number(row.mc_id) === Number(userId) ? 'mc_completion' : 'mc',
+                }),
+              }),
+            ),
+          );
+          total += pending.length;
         }
       }
       message.success(total ? `Acknowledged ${total} notification(s)` : 'No pending notifications to acknowledge');
@@ -267,6 +312,7 @@ const Notification = () => {
     [TAB_KEYS.calibrations]: 'Search machines...',
     [TAB_KEYS.pokayoke]: 'Search checklists...',
     [TAB_KEYS.productionLogs]: 'Search production logs...',
+    [TAB_KEYS.urgentJobs]: 'Search right now jobs...',
   }[activeKey] || 'Search...';
 
   const tabItems = [
@@ -358,6 +404,18 @@ const Notification = () => {
         </span>
       ),
       children: <ProductionLogNotification refreshKey={refreshKey} onCount={countSetters.productionLogs} />,
+    },
+    {
+      key: TAB_KEYS.urgentJobs,
+      label: (
+        <span>
+          <FormOutlined />{' '}
+          <Badge count={counts.urgentJobs} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+            <span>Right Now Jobs</span>
+          </Badge>
+        </span>
+      ),
+      children: <UrgentJobNotifications {...sharedProps} onCount={countSetters.urgentJobs} />,
     },
   ];
 
