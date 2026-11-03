@@ -544,12 +544,12 @@ def download_operation_document(document_id: int, db: Session = Depends(get_db))
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
         )
-    
+
     # Extract object name from URL
     # URL format: http://endpoint/bucket/object_name
     parsed_url = urlparse(document.document_url)
     path_parts = parsed_url.path.lstrip('/').split('/', 1)
-    
+
     if len(path_parts) < 2:
          # Try to see if it is just a path
          if not parsed_url.netloc and '/' in document.document_url:
@@ -565,19 +565,23 @@ def download_operation_document(document_id: int, db: Session = Depends(get_db))
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Invalid document URL format: {document.document_url}"
             )
-    
+
     bucket_name = path_parts[0]
     object_name = path_parts[1]
-    
+
     minio_client = get_minio_client()
-    
+
     try:
-        # Get object stream
+        # Get object data
         response = minio_client.client.get_object(bucket_name, object_name)
-        
+        file_data = response.read()
+
+        # Determine content type
+        content_type = get_content_type_from_detection(file_data, document.document_name)
+
         return StreamingResponse(
-            response,
-            media_type="application/octet-stream",
+            io.BytesIO(file_data),
+            media_type=content_type,
             headers={
                 "Content-Disposition": f'attachment; filename="{document.document_name}"'
             }

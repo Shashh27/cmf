@@ -51,6 +51,20 @@ def _is_in_progress_status(value: Optional[str]) -> bool:
     return normalized in ("in progress", "inprogress", "started")
 
 
+def _is_inhouse_type(type_name: Optional[str]) -> bool:
+    if not type_name:
+        return False
+    normalized = "".join(ch for ch in str(type_name).lower() if ch.isalnum())
+    return "inhouse" in normalized
+
+
+def _inhouse_operations(operations: List[Operation]) -> List[Operation]:
+    return [
+        op for op in operations
+        if _is_inhouse_type(op.part_type.type_name if op.part_type else None)
+    ]
+
+
 def _serialize_log_value(value: Any) -> Any:
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
@@ -71,7 +85,7 @@ def _fetch_production_logs_for_operations(
 ) -> Tuple[Dict[int, List[dict]], Dict[int, dict]]:
     """
     Load all production log columns for the given operations, sorted by stage (created_at ASC).
-    Operation status aggregates use the latest log snapshot for approved qty.
+    Approved qty is the sum of each stage row, so 5 + 5 completes a part qty of 10.
     """
     production_logs_map: Dict[int, List[dict]] = {}
     operation_final_status_map: Dict[int, dict] = {}
@@ -110,9 +124,9 @@ def _fetch_production_logs_for_operations(
             status_info["first_started"] = log_created_at
             status_info["operator_id"] = log.operator_id
 
+        status_info["total_approved"] += log.approved_quantity or 0
         if status_info["last_completed"] is None or log_created_at > status_info["last_completed"]:
             status_info["last_completed"] = log_created_at
-            status_info["total_approved"] = log.approved_quantity or 0
 
     return production_logs_map, operation_final_status_map
 
@@ -199,9 +213,12 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
         )
     
     # Fetch all parts for the order's product
-    parts = db.query(Part).options(
-        joinedload(Part.type)
-    ).filter(Part.product_id == order.product_id).all()
+    parts = [
+        part for part in db.query(Part).options(
+            joinedload(Part.type)
+        ).filter(Part.product_id == order.product_id).all()
+        if _is_inhouse_type(part.type.type_name if part.type else None)
+    ]
     
     if not parts:
         return OrderTrackingStatus(
@@ -219,12 +236,13 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
             parts=[]
         )
     
-    # Fetch all operations for all parts
+    # Fetch all in-house operations for all parts
     all_operations = []
     for part in parts:
-        part_operations = db.query(Operation).options(
-            joinedload(Operation.machine)
-        ).filter(Operation.part_id == part.id).all()
+        part_operations = _inhouse_operations(db.query(Operation).options(
+            joinedload(Operation.machine),
+            joinedload(Operation.part_type),
+        ).filter(Operation.part_id == part.id).all())
         all_operations.extend(part_operations)
     
     # Fetch all production logs for these operations
@@ -249,7 +267,9 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
     completed_parts_count = 0
     
     for part in parts:
-        part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+        part_operations = _inhouse_operations(db.query(Operation).options(
+            joinedload(Operation.part_type)
+        ).filter(Operation.part_id == part.id).all())
         
         operation_tracking_list = []
         completed_operations_count = 0
@@ -349,7 +369,12 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
         )
     
     # Fetch all parts for the order's product
-    parts = db.query(Part).filter(Part.product_id == order.product_id).all()
+    parts = [
+        part for part in db.query(Part).options(joinedload(Part.type)).filter(
+            Part.product_id == order.product_id
+        ).all()
+        if _is_inhouse_type(part.type.type_name if part.type else None)
+    ]
     
     if not parts:
         return OrderTrackingSummary(
@@ -365,9 +390,10 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
     # Fetch all operations for all parts
     all_operations = []
     for part in parts:
-        part_operations = db.query(Operation).options(
-            joinedload(Operation.machine)
-        ).filter(Operation.part_id == part.id).all()
+        part_operations = _inhouse_operations(db.query(Operation).options(
+            joinedload(Operation.machine),
+            joinedload(Operation.part_type),
+        ).filter(Operation.part_id == part.id).all())
         all_operations.extend(part_operations)
     
     # Get operation status logic
@@ -382,7 +408,9 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
     )
 
     for part in parts:
-        part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+        part_operations = _inhouse_operations(db.query(Operation).options(
+            joinedload(Operation.part_type)
+        ).filter(Operation.part_id == part.id).all())
         required_qty = part.qty or 0
         
         operation_tracking_list = []
@@ -498,16 +526,17 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
         joinedload(Part.type)
     ).filter(Part.id == part_id).first()
     
-    if not part:
+    if not part or not _is_inhouse_type(part.type.type_name if part.type else None):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
     
     # Fetch operations for the part
-    operations = db.query(Operation).options(
-        joinedload(Operation.machine)
-    ).filter(Operation.part_id == part.id).all()
+    operations = _inhouse_operations(db.query(Operation).options(
+        joinedload(Operation.machine),
+        joinedload(Operation.part_type),
+    ).filter(Operation.part_id == part.id).all())
     
     # Get operation status logic
     operation_ids = [op.id for op in operations]

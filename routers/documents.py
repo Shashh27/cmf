@@ -360,6 +360,15 @@ def detect_file_type_from_content(file_content: bytes, filename: str | None = No
         b'Workbook' in file_content[:2000]):
         return 'application/vnd.ms-excel'
     
+    # STEP and ASCII STL are valid UTF-8. Use the stored extension before the
+    # plain-text sniff, otherwise the browser saves them as .txt.
+    if filename:
+        ext = get_file_extension(filename)
+        if ext and ext not in ('.txt', '.csv'):
+            by_ext = get_content_type(filename)
+            if by_ext != 'application/octet-stream':
+                return by_ext
+
     # CSV files - check if content looks like comma-separated values
     try:
         text_content = file_content[:1000].decode('utf-8')
@@ -368,20 +377,13 @@ def detect_file_type_from_content(file_content: bytes, filename: str | None = No
             return 'text/csv'
     except UnicodeDecodeError:
         pass
-    
-    # TXT files - check if content is plain text
+
+    # TXT files - only when the name is not a known binary/CAD type
     try:
         file_content[:1000].decode('utf-8')
         return 'text/plain'
     except UnicodeDecodeError:
         pass
-
-    if filename:
-        ext = get_file_extension(filename)
-        if ext == '.stl':
-            return 'application/sla'
-        if ext in ['.step', '.stp']:
-            return 'application/step'
 
     return 'application/octet-stream'
 
