@@ -405,3 +405,157 @@ class NoteAttachment(NoteAttachmentBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Urgent Job Indent (PC -> MC -> Operator)
+# =======================
+class UrgentJobIndentAttachment(BaseModel):
+    id: int
+    indent_id: int
+    kind: str
+    file_name: str
+    file_type: str
+    file_size: int
+    minio_url: str
+    uploaded_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UrgentJobIndentCreate(BaseModel):
+    created_by: int
+    order_id: Optional[int] = None
+    project_no: Optional[str] = None
+    project_name: Optional[str] = None
+    part_id: Optional[int] = None
+    operation_id: Optional[int] = None
+    description: str
+    from_dept: Optional[str] = None
+    to_dept: Optional[str] = None
+    operator_id: Optional[int] = None
+    workcenter_id: Optional[int] = None
+    machine_id: Optional[int] = None
+    work_done: bool = False
+
+    @field_validator("description")
+    @classmethod
+    def require_description(cls, v: str):
+        if v is None or not str(v).strip():
+            raise ValueError("Description is required")
+        return str(v).strip()
+
+    @field_validator("from_dept", "to_dept", "project_no", "project_name")
+    @classmethod
+    def strip_dept(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
+class UrgentJobIndentReview(BaseModel):
+    mc_id: int
+    status: str
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+    workcenter_id: Optional[int] = None
+    machine_id: Optional[int] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str):
+        allowed = {"accepted", "rejected"}
+        vv = (v or "").strip().lower()
+        if vv not in allowed:
+            raise ValueError("status must be accepted or rejected")
+        return vv
+
+    @field_validator("remark")
+    @classmethod
+    def strip_remark(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
+class UrgentJobIndentAssign(BaseModel):
+    mc_id: int
+    operator_id: int
+    workcenter_id: Optional[int] = None
+    machine_id: int
+
+
+class UrgentJobIndentUpdate(BaseModel):
+    project_no: Optional[str] = None
+    project_name: Optional[str] = None
+    description: Optional[str] = None
+    from_dept: Optional[str] = None
+    to_dept: Optional[str] = None
+    operator_id: Optional[int] = None
+    workcenter_id: Optional[int] = None
+    machine_id: Optional[int] = None
+
+    @field_validator("description", "from_dept", "to_dept", "project_no", "project_name")
+    @classmethod
+    def strip_optional(cls, v: Optional[str]):
+        if v is None:
+            return None
+        text = str(v).strip()
+        return text or None
+
+
+class UrgentJobIndentAcknowledge(BaseModel):
+    user_id: int
+    as_role: Optional[str] = None
+
+
+class UrgentJobIndentProgress(BaseModel):
+    operator_id: int
+
+
+class UrgentJobIndent(BaseModel):
+    id: int
+    created_by: int
+    created_by_name: Optional[str] = None
+    order_id: Optional[int] = None
+    order_no: Optional[str] = None
+    project_name: Optional[str] = None
+    part_id: Optional[int] = None
+    part_no: Optional[str] = None
+    part_name: Optional[str] = None
+    operation_id: Optional[int] = None
+    operation_name: Optional[str] = None
+    description: str
+    status: str
+    mc_id: Optional[int] = None
+    mc_name: Optional[str] = None
+    mc_remark: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    workcenter_id: Optional[int] = None
+    workcenter_name: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
+    activated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    supervisor_ack: bool = False
+    supervisor_ack_at: Optional[datetime] = None
+    mc_completion_ack: bool = False
+    mc_completion_ack_at: Optional[datetime] = None
+    operator_ack: bool = False
+    operator_ack_at: Optional[datetime] = None
+    mc_ack: bool = False
+    mc_ack_at: Optional[datetime] = None
+    mc_ack_by: Optional[str] = None
+    from_dept: Optional[str] = None
+    to_dept: Optional[str] = None
+    attachments: List[UrgentJobIndentAttachment] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

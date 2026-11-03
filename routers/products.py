@@ -1005,7 +1005,12 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             text("SELECT part_id, status FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
             {"pids": tuple(part_ids)}
         ).fetchall()
-        part_schedule_status_map = {row[0]: row[1] for row in schedule_statuses}
+        part_schedule_status_map = {}
+        for pid, status_value in schedule_statuses:
+            current = part_schedule_status_map.get(pid)
+            if current is not None and str(current).lower() == "active":
+                continue
+            part_schedule_status_map[pid] = status_value
 
     # Get document acknowledgment status for all parts
     from DB.models.oms import Document as DocumentModel

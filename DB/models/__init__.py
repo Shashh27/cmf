@@ -46,6 +46,8 @@ from .maintenance import (
     ComponentIssue,
     HelpSupport,
     Note,
+    UrgentJobIndent,
+    UrgentJobIndentAttachment,
 )
 from .documents import (
     GeneralFolder,
@@ -98,6 +100,8 @@ __all__ = [
     "ComponentIssue",
     "HelpSupport",
     "Note",
+    "UrgentJobIndent",
+    "UrgentJobIndentAttachment",
     "GeneralFolder",
     "GeneralDocument",
     "MachineFolder",

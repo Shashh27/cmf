@@ -49,12 +49,16 @@ def _normalize_header(name: str) -> str:
 
 
 def _assert_part_not_schedule_active(part_id: int, db: Session) -> None:
-    """Check if part has active schedule status and raise error if so."""
-    schedule_status = db.execute(
-        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
-        {"pid": part_id}
+    """Block operation reordering while any schedule row for the part is active."""
+    active = db.execute(
+        text(
+            "SELECT 1 FROM scheduling.part_schedule_status "
+            "WHERE part_id = :pid AND lower(coalesce(status, '')) = 'active' "
+            "LIMIT 1"
+        ),
+        {"pid": part_id},
     ).fetchone()
-    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+    if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Sorry, operations cannot be swapped because this part is currently scheduled for production. To swap operations, please inactivate the part's schedule status first."
@@ -175,6 +179,79 @@ def _sanitize_multiline_text(value) -> Optional[str]:
     return text.strip() or None
 
 
+_OP_NUMBER_RE = re.compile(r"^\d{1,4}$")
+_DURATION_RE = re.compile(r"^\d{1,3}:\d{2}(?::\d{2})?$")
+
+
+def _looks_like_op_number(value) -> bool:
+    return bool(_OP_NUMBER_RE.match(_sanitize_singleline_text(value)))
+
+
+def _looks_like_duration(value) -> bool:
+    return bool(_DURATION_RE.match(_sanitize_singleline_text(value)))
+
+
+def _row_cells(row) -> list:
+    return list(row or [])
+
+
+def _table_matches_map(rows: list, header_map: Optional[dict]) -> bool:
+    """True when at least one row looks like an operation in these columns."""
+    if not header_map:
+        return False
+    num_idx = header_map.get("operation_number")
+    name_idx = header_map.get("operation_name")
+    if num_idx is None or name_idx is None:
+        return False
+    need = max(header_map.values())
+    for row in rows:
+        cells = _row_cells(row)
+        if len(cells) <= need:
+            continue
+        num = _sanitize_singleline_text(cells[num_idx])
+        name = _sanitize_singleline_text(cells[name_idx])
+        if _looks_like_op_number(num) and name and not _looks_like_op_number(name):
+            return True
+    return False
+
+
+def _infer_header_map(rows: list) -> Optional[dict]:
+    """Guess columns when a sheet continues without repeating the header."""
+    for row in rows:
+        cells = [_sanitize_singleline_text(c) for c in _row_cells(row)]
+        if not any(cells):
+            continue
+        num_idx = next((i for i, c in enumerate(cells) if _looks_like_op_number(c)), None)
+        if num_idx is None:
+            continue
+        name_idx = next(
+            (
+                i for i, c in enumerate(cells)
+                if i != num_idx and c and not _looks_like_duration(c) and not _looks_like_op_number(c)
+            ),
+            None,
+        )
+        if name_idx is None:
+            continue
+        mapping = {"operation_number": num_idx, "operation_name": name_idx}
+        time_cols = [i for i, c in enumerate(cells) if _looks_like_duration(c)]
+        if time_cols:
+            mapping["setup_time"] = time_cols[0]
+        if len(time_cols) > 1:
+            mapping["cycle_time"] = time_cols[1]
+        used = set(mapping.values())
+        text_cols = [
+            i for i, c in enumerate(cells)
+            if i not in used and c and not _looks_like_duration(c)
+        ]
+        if text_cols:
+            mapping["work_instructions"] = text_cols[0]
+        if len(text_cols) > 1:
+            mapping["notes"] = text_cols[1]
+        return mapping
+    return None
+
+
 def _find_header_row(rows: list) -> int:
     """
     Scan rows top-to-bottom and return the index of the first row
@@ -193,27 +270,41 @@ def _find_header_row(rows: list) -> int:
     return -1
 
 
-def _parse_rows(rows: list) -> List[OperationPreview]:
+def _parse_rows(rows: list, inherited_map: Optional[dict] = None) -> tuple:
+    """
+    Return (operations, column map).
+    A table with no header still extracts when the cells match an operation row,
+    using the previous table's columns when this file already had a header.
+    """
     if not rows:
-        return []
+        return [], inherited_map
 
     # Find the actual header row (skip title / meta rows at top)
     header_idx = _find_header_row(rows)
-    if header_idx == -1:
-        return []
-
-    header = rows[header_idx]
-    header_map: dict[str, int] = {}
-    for col_idx, cell in enumerate(header):
-        key = _match_column(str(cell) if cell is not None else "")
-        if key:
-            header_map[key] = col_idx
+    discovered_map = None
+    if header_idx >= 0:
+        header = rows[header_idx]
+        header_map: dict[str, int] = {}
+        for col_idx, cell in enumerate(header):
+            key = _match_column(str(cell) if cell is not None else "")
+            if key and key not in header_map:
+                header_map[key] = col_idx
+        data_rows = rows[header_idx + 1:]
+        discovered_map = header_map
+    elif inherited_map and _table_matches_map(rows, inherited_map):
+        header_map = inherited_map
+        data_rows = rows
+    else:
+        header_map = _infer_header_map(rows) or {}
+        data_rows = rows
+        if header_map:
+            discovered_map = header_map
 
     if "operation_number" not in header_map or "operation_name" not in header_map:
-        return []
+        return [], inherited_map
 
     result: List[OperationPreview] = []
-    for row in rows[header_idx + 1:]:
+    for row in data_rows:
         orig = list(row)
         while len(orig) <= max(header_map.values()):
             orig.append(None)
@@ -245,9 +336,14 @@ def _parse_rows(rows: list) -> List[OperationPreview]:
             if data[k] == "":
                 data[k] = None
 
+        # Headerless sheets can include a stray title row; keep real operation numbers only
+        # when this table had no header to anchor the columns.
+        if header_idx < 0 and not _looks_like_op_number(op_num):
+            continue
+
         result.append(OperationPreview(**data))
 
-    return result
+    return result, (discovered_map or inherited_map)
 
 
 # ── CSV ───────────────────────────────────────────────────────────────────────
@@ -259,7 +355,8 @@ def _parse_csv(content: bytes) -> List[OperationPreview]:
     reader = csv.reader(io.StringIO(text))
     # Keep every row (including blanks) so _find_header_row can locate the header
     rows = list(reader)
-    return _parse_rows(rows)
+    operations, _map = _parse_rows(rows)
+    return operations
 
 
 # ── XLSX ──────────────────────────────────────────────────────────────────────
@@ -270,7 +367,7 @@ def _parse_xlsx(content: bytes) -> List[OperationPreview]:
         rows = []
         for row in ws.iter_rows(values_only=True):
             rows.append(list(row))
-        parsed = _parse_rows(rows)
+        parsed, _map = _parse_rows(rows)
         if parsed:
             return parsed
     return []
@@ -279,12 +376,15 @@ def _parse_xlsx(content: bytes) -> List[OperationPreview]:
 # ── DOCX ──────────────────────────────────────────────────────────────────────
 def _parse_docx(content: bytes) -> List[OperationPreview]:
     doc = DocxDocument(io.BytesIO(content))
+    operations: List[OperationPreview] = []
+    column_map = None
     for table in doc.tables:
         rows = [[cell.text for cell in row.cells] for row in table.rows]
-        parsed = _parse_rows(rows)
-        if parsed:
-            return parsed
-    return []
+        # Word splits a long process plan into a new table on the next page,
+        # and that next table often has no header row.
+        parsed, column_map = _parse_rows(rows, column_map)
+        operations.extend(parsed)
+    return operations
 
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
@@ -293,7 +393,7 @@ def _parse_pdf(content: bytes) -> List[OperationPreview]:
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         for page in pdf.pages:
             for table in page.extract_tables():
-                parsed = _parse_rows(table)
+                parsed, _map = _parse_rows(table)
                 if parsed:
                     operations.extend(parsed)
             if operations:
