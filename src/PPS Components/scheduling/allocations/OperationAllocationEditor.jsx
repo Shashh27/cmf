@@ -1,9 +1,11 @@
 /**
  * Per-operation qty band editor (unit_from / unit_to / machine in WC).
  */
-import React from 'react';
-import { Button, InputNumber, Select, Space, Typography } from 'antd';
+import React, { useState } from 'react';
+import { Button, DatePicker, InputNumber, Select, Space, Typography, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
+import { splitEquallyAcrossMachines } from './allocationValidation.js';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -47,6 +49,7 @@ export default function OperationAllocationEditor({
 }) {
   const machines = operation?.machines || [];
   const approved = Number(operation?.approved_quantity || 0);
+  const [freeOn, setFreeOn] = useState(() => dayjs());
 
   const updateBand = (index, patch) => {
     const next = (bands || []).map((b, i) => (i === index ? { ...b, ...patch } : b));
@@ -79,6 +82,30 @@ export default function OperationAllocationEditor({
 
   const clearBands = () => onChange([]);
 
+  const handleSplitEqually = () => {
+    const result = splitEquallyAcrossMachines({
+      operation,
+      quantity,
+      existingBands: bands || [],
+      freeOnDate: (freeOn || dayjs()).startOf('day').toDate(),
+    });
+    const dateLabel = (freeOn || dayjs()).format('DD-MM-YYYY');
+    if (!result.ok) {
+      if (result.reason === 'no_free_machines') {
+        message.warning(`No machines in this work center are free on ${dateLabel}.`);
+      } else if (result.reason === 'no_remaining_units') {
+        message.warning('All units are already approved for this operation.');
+      } else {
+        message.warning('Cannot split units equally for this operation.');
+      }
+      return;
+    }
+    onChange(result.bands);
+    message.success(
+      `Split ${result.remainingCount} unit(s) across ${result.freeCount} free machine(s). You can tweak the bands before saving.`
+    );
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -86,7 +113,25 @@ export default function OperationAllocationEditor({
           Work center: {(operation.workcenter_name || operation.workcenter_id) ?? '—'}
           {approved > 0 ? ` · ${approved} unit(s) already approved (skipped on rebuild)` : ''}
         </Text>
-        <Space size="small">
+        <Space size="small" wrap>
+          <span className="text-xs text-slate-500">Free on</span>
+          <DatePicker
+            size="small"
+            value={freeOn}
+            allowClear={false}
+            format="DD-MM-YYYY"
+            onChange={(v) => setFreeOn(v || dayjs())}
+            getPopupContainer={() => document.body}
+          />
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            onClick={handleSplitEqually}
+            disabled={!machines.length}
+          >
+            Split equally across free machines
+          </Button>
           <Button size="small" icon={<PlusOutlined />} onClick={addBand} disabled={!machines.length}>
             Add band
           </Button>

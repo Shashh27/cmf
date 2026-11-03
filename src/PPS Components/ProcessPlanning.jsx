@@ -33,6 +33,7 @@ import RebuildToolbar from './scheduling/controls/RebuildToolbar.jsx';
 import QtyMachineAllocationPanel from './scheduling/allocations/QtyMachineAllocationPanel.jsx';
 import { rebuildUnitWiseSchedule } from './scheduling/api/unitWiseApi.js';
 import { fetchQtyMachineAllocations } from './scheduling/api/qtyAllocationApi.js';
+import { fetchSchedulingModes } from './scheduling/api/schedulingModesApi.js';
 
 const getApiErrorMessage = (error, fallback = "Failed updating parts") => {
   const data = error?.response?.data;
@@ -84,6 +85,13 @@ const normalizeAssignmentMode = (value) => {
   return null;
 };
 
+const assignmentModeDisplayLabel = (mode) => {
+  if (mode === 'manual') return 'Manual qty split';
+  if (mode === 'process_plan') return 'As per process plan';
+  if (mode === 'auto') return 'Auto';
+  return null;
+};
+
 const formatPartLabel = (data, partId) => {
   const name = data?.part_name;
   const num = data?.part_number;
@@ -95,7 +103,7 @@ const formatPartLabel = (data, partId) => {
 
 const ProcessPlanning = ({ initialOrderId }) => {
   const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [orderDetails, setOrderDetails] = useState(null);
@@ -213,6 +221,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const [machineLinkRebuilding, setMachineLinkRebuilding] = useState(false);
   const [machineLinkStatusMessage, setMachineLinkStatusMessage] = useState(null);
   const [machineLinkErrorMessage, setMachineLinkErrorMessage] = useState(null);
+  const [machineLinkConfirmOpen, setMachineLinkConfirmOpen] = useState(false);
+  const [machineLinkCurrentPlan, setMachineLinkCurrentPlan] = useState(null);
+  const [processPlanSaveWarning, setProcessPlanSaveWarning] = useState(null);
   const [changeMachineOpen, setChangeMachineOpen] = useState(false);
   const [changeMachineLoading, setChangeMachineLoading] = useState(false);
   const [changeMachineSaving, setChangeMachineSaving] = useState(false);
@@ -302,27 +313,19 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     setPartOpLoading(prev => ({ ...prev, [partId]: true }));
     try {
-      let data = null;
-      try {
-        const res = await axios.get(
-          `${SCHEDULING_API_BASE_URL}/scheduling/unit-wise/part-operation-details/${selectedOrderId}/${partId}`
-        );
-        if (res.status === 200) data = res.data;
-      } catch {
-        const res = await axios.get(
-          `${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`
-        );
-        if (res.status === 200) data = res.data;
-      }
-      if (data) {
+      const modes = await fetchSchedulingModes({ force: true }).catch(() => ({ shop_plan: 'batch' }));
+      const shopPlan = modes?.shop_plan === 'unit_wise' ? 'unit_wise' : 'batch';
+      const detailsPath = shopPlan === 'unit_wise'
+        ? 'unit-wise/part-operation-details'
+        : 'part-operation-details';
+      const res = await axios.get(
+        `${SCHEDULING_API_BASE_URL}/scheduling/${detailsPath}/${selectedOrderId}/${partId}`
+      );
+      const data = res.status === 200 ? res.data : null;
+      if (data && (data.operations?.length || data.message)) {
         setPartOpDetails(prev => ({
           ...prev,
-          [partId]: {
-            operations: data.operations || [],
-            message: data.message || "",
-            planned_start_time: data.planned_start_time,
-            planned_end_time: data.planned_end_time,
-          },
+          [partId]: data,
         }));
       }
     } catch {
@@ -344,6 +347,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setMachineLinkRebuilding(false);
     setMachineLinkStatusMessage(null);
     setMachineLinkErrorMessage(null);
+    setMachineLinkConfirmOpen(false);
+    setMachineLinkCurrentPlan(null);
+    setProcessPlanSaveWarning(null);
   };
 
   const openMachineLinkModal = async (opRow, partId, partRecord) => {
@@ -360,6 +366,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setMachineLinkPreferredMachineId(null);
     setMachineLinkStatusMessage(null);
     setMachineLinkErrorMessage(null);
+    setMachineLinkCurrentPlan(null);
+    setMachineLinkConfirmOpen(false);
+    fetchSchedulingModes({ force: true })
+      .then((modes) => setProcessPlanSaveWarning(modes.process_plan_save_warning || null))
+      .catch(() => setProcessPlanSaveWarning(null));
     
     // Set initial operation info from table row immediately
     setMachineLinkOp({
@@ -397,7 +408,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
           (op) => Number(op.operation_id) === Number(operationId)
         ).length > 1
       );
-      const nextMode = storedMode || rowMode || (hasManualAlloc ? 'manual' : 'auto');
+      const currentPlan = rowMode || storedMode || (hasManualAlloc ? 'manual' : null);
+      const nextMode = currentPlan || 'auto';
+      setMachineLinkCurrentPlan(currentPlan);
       setMachineLinkAssignmentMode(nextMode);
       setMachineLinkPinPreferred(nextMode === 'process_plan');
     } catch (error) {
@@ -408,35 +421,60 @@ const ProcessPlanning = ({ initialOrderId }) => {
     }
   };
 
+  const assignmentModePlainLabel = (mode) => {
+    if (mode === 'manual') return 'manual quantity split';
+    if (mode === 'process_plan') return 'as per process plan';
+    return 'auto';
+  };
+
+  const machineLinkConfirmTitle = () => {
+    const selectedMode = normalizeAssignmentMode(machineLinkAssignmentMode) || 'process_plan';
+    const raw = String(machineLinkOp?.operation || '');
+    let number = machineLinkOp?.operation_number;
+    let name = machineLinkOp?.operation_name;
+    if ((!number || !name) && raw.includes(' - ')) {
+      const [n, ...rest] = raw.split(' - ');
+      number = number || n.trim();
+      name = name || rest.join(' - ').trim();
+    }
+    const nameBit = name ? `${name} operation` : 'this operation';
+    const noBit = number ? ` - Operation No. ${number}` : '';
+    return `Use ${assignmentModePlainLabel(selectedMode)} for ${nameBit}${noBit}?`;
+  };
+
   const handleMachineLinkRebuild = async () => {
     setMachineLinkRebuilding(true);
     setMachineLinkStatusMessage(null);
     setMachineLinkErrorMessage(null);
     try {
-      const data = await rebuildUnitWiseSchedule({
+      const operationId = Number(machineLinkOp?.operation_id);
+      const selectedMode = normalizeAssignmentMode(machineLinkAssignmentMode) || 'process_plan';
+      if (!machineLinkPartId || !operationId) {
+        throw new Error('Select an operation before saving assignment mode');
+      }
+      await rebuildUnitWiseSchedule({
         optimizer: 'greedy',
-        assignmentMode: machineLinkAssignmentMode,
-        pinPreferred: machineLinkAssignmentMode === 'process_plan',
-        partId: machineLinkPartId || undefined,
-        operationId: machineLinkOp?.operation_id,
+        partId: machineLinkPartId,
+        orderId: selectedOrderId || undefined,
+        operationAssignmentModes: { [operationId]: selectedMode },
       });
 
       const modeLabel =
-        machineLinkAssignmentMode === 'manual'
+        selectedMode === 'manual'
           ? 'manual qty→machine'
-          : machineLinkAssignmentMode === 'process_plan'
+          : selectedMode === 'process_plan'
             ? 'as per process plan'
             : 'WC earliest-free / auto qty split';
-      if (machineLinkPartId && machineLinkOp?.operation_id) {
-        storeAssignmentMode(machineLinkPartId, machineLinkOp.operation_id, machineLinkAssignmentMode);
-      }
-      setMachineLinkStatusMessage(`Schedule rebuilt successfully · ${modeLabel}`);
-      message.success(`Schedule rebuilt successfully · ${modeLabel}`);
+      storeAssignmentMode(machineLinkPartId, operationId, selectedMode);
+      setMachineLinkCurrentPlan(selectedMode);
+      setMachineLinkStatusMessage(`Saved · ${modeLabel}`);
+      message.success(`Saved assignment mode · ${modeLabel}`);
 
       // Refresh operation details
       if (machineLinkPartId) {
         await fetchPartOperationDetails(machineLinkPartId, true);
       }
+      setMachineLinkConfirmOpen(false);
     } catch (e) {
       console.error(e);
       const msg = e.message || 'Rebuild failed';
@@ -445,6 +483,17 @@ const ProcessPlanning = ({ initialOrderId }) => {
     } finally {
       setMachineLinkRebuilding(false);
     }
+  };
+
+  const confirmMachineLinkSave = () => {
+    const operationId = Number(machineLinkOp?.operation_id);
+    if (!machineLinkPartId || !operationId) {
+      message.error('Select an operation before saving assignment mode');
+      return;
+    }
+    setMachineLinkStatusMessage(null);
+    setMachineLinkErrorMessage(null);
+    setMachineLinkConfirmOpen(true);
   };
 
   const closeChangeMachineModal = () => {
@@ -1005,6 +1054,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
     {
       title: "Start Time",
       render: (_, record) => {
+        const details = partOpDetails[record.id];
+        const partStart = details && !Array.isArray(details) ? details.planned_start_time : null;
+        if (partStart) return dayjs(partStart).format("DD-MM-YYYY, HH:mm");
         const ops = getPartOperations(partOpDetails, record.id);
         if (ops.length === 0) return "-";
         const startTimes = ops.map(o => o.planned_start_time).filter(Boolean);
@@ -1015,6 +1067,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
     {
       title: "End Time",
       render: (_, record) => {
+        const details = partOpDetails[record.id];
+        const partEnd = details && !Array.isArray(details) ? details.planned_end_time : null;
+        if (partEnd) return dayjs(partEnd).format("DD-MM-YYYY, HH:mm");
         const ops = getPartOperations(partOpDetails, record.id);
         if (ops.length === 0) return "-";
         const endTimes = ops.map(o => o.planned_end_time).filter(Boolean);
@@ -1239,6 +1294,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
         </Space>
       </Card>
 
+      {(ordersLoading || detailsLoading) && !orderDetails && (
+        <div style={{ marginTop: 24 }}>
+          <Spin spinning tip="Loading process plan, please wait" size="large">
+            <div style={{ minHeight: 240 }} />
+          </Spin>
+        </div>
+      )}
+
       {orderDetails && (
         <Card style={{ marginTop: 16 }}>
           <Typography.Title level={5} style={{ margin: 0, marginBottom: 8 }}>
@@ -1419,7 +1482,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                         },
                       },
                       {
-                        title: "Start Time",
+                        title: "Planned Start",
                         dataIndex: "planned_start_time",
                         render: (_, opRow) => (
                           opRow.planned_start_time
@@ -1428,11 +1491,29 @@ const ProcessPlanning = ({ initialOrderId }) => {
                         )
                       },
                       {
-                        title: "End Time",
+                        title: "Planned End",
                         dataIndex: "planned_end_time",
                         render: (_, opRow) => (
                           opRow.planned_end_time
                             ? dayjs(opRow.planned_end_time).format("DD-MM-YYYY, HH:mm")
+                            : "-"
+                        )
+                      },
+                      {
+                        title: "Actual Start",
+                        dataIndex: "actual_start_time",
+                        render: (_, opRow) => (
+                          opRow.actual_start_time
+                            ? dayjs(opRow.actual_start_time).format("DD-MM-YYYY, HH:mm")
+                            : "-"
+                        )
+                      },
+                      {
+                        title: "Actual End",
+                        dataIndex: "actual_end_time",
+                        render: (_, opRow) => (
+                          opRow.actual_end_time
+                            ? dayjs(opRow.actual_end_time).format("DD-MM-YYYY, HH:mm")
                             : "-"
                         )
                       },
@@ -1464,7 +1545,21 @@ const ProcessPlanning = ({ initialOrderId }) => {
                               <Tooltip
                                 title={
                                   linkEnabled
-                                    ? "Change Schedule Plan"
+                                    ? (
+                                      assignmentModeDisplayLabel(
+                                        normalizeAssignmentMode(opRow.assignment_mode || opRow.assignmentMode)
+                                      )
+                                        ? (
+                                          <span>
+                                            Change Schedule Plan
+                                            <br />
+                                            Current plan: {assignmentModeDisplayLabel(
+                                              normalizeAssignmentMode(opRow.assignment_mode || opRow.assignmentMode)
+                                            )}
+                                          </span>
+                                        )
+                                        : "Change Schedule Plan"
+                                    )
                                     : "Plan cannot be changed"
                                 }
                               >
@@ -1553,21 +1648,46 @@ const ProcessPlanning = ({ initialOrderId }) => {
           </div>
         ) : (
           <div>
-            <div style={{ marginBottom: 12, padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
-              <div><strong>Operation No:</strong> {machineLinkOp?.operation || '-'}</div>
-              <div><strong>Part No:</strong> {machineLinkOp?.part_number || '-'}</div>
+            <div style={{ marginBottom: 12, padding: 12, background: '#f5f5f5', borderRadius: 6, display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
+              <div>
+                <div><strong>Operation No:</strong> {machineLinkOp?.operation || '-'}</div>
+                <div><strong>Part No:</strong> {machineLinkOp?.part_number || '-'}</div>
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 160 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+                  Current plan
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#1677ff', lineHeight: 1.2 }}>
+                  {assignmentModeDisplayLabel(machineLinkCurrentPlan) || 'Not saved yet'}
+                </div>
+              </div>
             </div>
 
             <RebuildToolbar
               rebuilding={machineLinkRebuilding}
-              onRebuild={handleMachineLinkRebuild}
+              onRebuild={confirmMachineLinkSave}
+              rebuildLabel="Save"
+              rebuildingLabel="Saving…"
               statusMessage={machineLinkStatusMessage}
               errorMessage={machineLinkErrorMessage}
               assignmentMode={machineLinkAssignmentMode}
-              onAssignmentModeChange={setMachineLinkAssignmentMode}
+              onAssignmentModeChange={(v) => {
+                setMachineLinkConfirmOpen(false);
+                setMachineLinkAssignmentMode(v);
+              }}
               pinPreferred={machineLinkPinPreferred}
               onPinPreferredChange={setMachineLinkPinPreferred}
               showPartFilter={false}
+              confirmOpen={machineLinkConfirmOpen}
+              confirmTitle={machineLinkConfirmTitle()}
+              confirmDescription={
+                processPlanSaveWarning
+                  ? `This reschedules only this operation. Other operations on this part keep their current mode. ${processPlanSaveWarning}`
+                  : "This reschedules only this operation. Other operations on this part keep their current mode."
+              }
+              warningMessage={processPlanSaveWarning}
+              onConfirm={handleMachineLinkRebuild}
+              onCancelConfirm={() => setMachineLinkConfirmOpen(false)}
             />
 
             {machineLinkAssignmentMode === 'manual' && (

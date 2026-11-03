@@ -1,4 +1,4 @@
-import { useState, Suspense, useMemo, memo } from 'react'
+import { useState, Suspense, useMemo, memo, useEffect } from 'react'
 import { Html, useGLTF, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -431,6 +431,10 @@ function matchesMachineStatus(machine, filter) {
 }
 
 export default function MachineGrid({ machines, selected, onSelect, workCenters, workCenterZones = [], statusFilter = 'ALL' }) {
+  useEffect(() => {
+    useGLTF.preload('/assets/shopfloor/cnc1.glb')
+  }, [])
+
   return (
     <group>
       {workCenterZones.map(zone => (
@@ -449,5 +453,3 @@ export default function MachineGrid({ machines, selected, onSelect, workCenters,
     </group>
   )
 }
-
-useGLTF.preload('/assets/shopfloor/cnc1.glb')

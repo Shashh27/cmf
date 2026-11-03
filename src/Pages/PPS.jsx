@@ -1,9 +1,10 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { useLocation } from "react-router-dom";
 import AssetsAvailability from "../PPS Components/AssetsAvailability";
 import CapacityPlanning from "../PPS Components/CapacityPlanning";
-import MachineScheduling from "../PPS Components/MachineScheduling";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
+
+const MachineScheduling = lazy(() => import("../PPS Components/MachineScheduling"));
 
 const PPS = () => {
   const location = useLocation();
@@ -34,7 +35,9 @@ const PPS = () => {
           <h1 style={{ fontSize: "24px", fontWeight: 700 }}>{titleText}</h1>
         </div>
       )}
-      {renderContent()}
+      <Suspense fallback={<div style={{ padding: 24, color: "#595959" }}>Loading schedule…</div>}>
+        {renderContent()}
+      </Suspense>
     </div>
   );
 };

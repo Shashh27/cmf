@@ -16,8 +16,15 @@ import {
   getJobOperationId,
   getJobRemainingQty,
   getJobTotalQty,
+  isJobReviewCompleted,
+  isJobReviewInProgress,
   isUnitWiseJob,
 } from '../PPS Components/scheduling/jobs/unitWiseJobUtils';
+import {
+  fetchSchedulingModes,
+  liveEngineForJob,
+  wrongEngineMessage,
+} from '../PPS Components/scheduling/api/schedulingModesApi';
 
 
 const { TabPane } = Tabs;
@@ -112,7 +119,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     totalApproved: 0,
     hasRework: false,
     reworkRemarks: '',
-    operatorStatus: null
+    reviewStatus: null
   });
 
   // Dashboard is the single source of truth for production-logs.
@@ -124,7 +131,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   useEffect(() => {
     setJustActivated(false);
     setSessionActivationTime(null);
-    setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', operatorStatus: null });
+    setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', reviewStatus: null });
     setLiveOpDocs([]);
     setOpDocsReady(false);
     setUploadFileList([]);
@@ -159,13 +166,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   // The ONLY check for whether this operation is active:
   // 1. The API already returned status IN-PROGRESS for this job, OR
   // 2. The user just clicked Activate in this session (justActivated flag)
+  const canActivateNow = selectedJob?.can_activate === true && !isJobReviewCompleted(selectedJob, effectiveStats);
   const effectivelyActivated =
-    isActivated ||
     justActivated ||
-    [selectedJob?.status, selectedJob?.operation_status, effectiveStats?.operatorStatus].some(s => {
-      const up = s?.toString().toUpperCase();
-      return up === 'INPROGRESS' || up === 'IN-PROGRESS' || up === 'IN PROGRESS';
-    });
+    (!canActivateNow && (isActivated || isJobReviewInProgress(selectedJob, effectiveStats)));
   const isActivationBlocked = Array.isArray(selectedJob?.blocked_by) && selectedJob.blocked_by.length > 0;
   const activationBlockReason = selectedJob?.block_reason || 'This operation cannot be activated until prior operations are completed.';
 
@@ -504,11 +508,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           ? getJobTotalQty(selectedJob)
           : (selectedJob?.total_quantity || record.total_quantity || record.total_qty || record.quantity || selectedJob?.quantity || 0);
 
-        const completedQty = effectiveStats.totalApproved || 0;
-        const remainingQty = getJobRemainingQty(
-          selectedJob,
-          { ...effectiveStats, remainingToClose: isUnitWiseJob(selectedJob) ? undefined : effectiveStats.remainingToClose },
+        const completedQty = Number(
+          effectiveStats.totalApproved
+          || selectedJob?.approved_quantity
+          || selectedJob?.completed_quantity
+          || 0
         );
+        const remainingQty = getJobRemainingQty(selectedJob, effectiveStats);
         const reworkDue = effectiveStats.reworkDue || 0;
         const rejectDue = effectiveStats.rejectDue || 0;
 
@@ -582,13 +588,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             (record.number && record.number.toString() === selectedJob?.operation_number?.toString())
           );
   
-          // Only show activation time if:
-          // 1. It was just activated in this session
-          // 2. The backend says it's currently INPROGRESS
-          const opStatus = isCurrentOp ? (stats.operatorStatus?.toString().toUpperCase()) : null;
-          const isInProgress = opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS';
-          
-          const activationTime = (justActivated && isCurrentOp) ? sessionActivationTime : (isInProgress ? stats.activationTime : null);
+          const activationTime = (justActivated && isCurrentOp)
+            ? sessionActivationTime
+            : (isCurrentOp && effectivelyActivated ? stats.activationTime : null);
           
           if (!activationTime) return '-';
         
@@ -612,18 +614,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     {
       title: 'Action', key: 'action',
       render: (record) => {
-        // Check if operation is completed by status OR by production quota
-        const isCompletedByStatus = [selectedJob?.status, selectedJob?.operation_status].some(s => s?.toString().toUpperCase() === 'COMPLETED');
-        const totalQuantity = getJobTotalQty(selectedJob);
-        const remainingForQuota = getJobRemainingQty(selectedJob, {
-          ...effectiveStats,
-          remainingToClose: isUnitWiseJob(selectedJob) ? undefined : effectiveStats.remainingToClose,
-        });
-        const isCompletedByQuota = totalQuantity > 0 && (
-          remainingForQuota === 0 ||
-          effectiveStats.totalApproved >= totalQuantity
-        );
-        const isCompleted = isCompletedByStatus || isCompletedByQuota;
+        const isCompleted = isJobReviewCompleted(selectedJob, effectiveStats);
         
         // This specific operation's activation status
         const isThisOpActivated = effectivelyActivated && (
@@ -632,6 +623,11 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         );
 
         const isDisabled = effectivelyActivated || activating || isCompleted || isActivationBlocked;
+        const awaitingReview = Boolean(
+          effectiveStats.awaitingReview
+          || String(selectedJob?.blocked_reason || '').toLowerCase().includes('reviewer')
+        );
+        const submitDisabled = !isThisOpActivated || isCompleted || awaitingReview;
 
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
@@ -678,20 +674,32 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               </span>
             </Tooltip>
             
-            <Button
-              type="default"
-              size="small"
-              block
-              icon={<CheckCircleOutlined />}
-              disabled={!isThisOpActivated || isCompleted}
-              onClick={(e) => { e.stopPropagation(); handleOpenCompleteModal(record); }}
-              style={isThisOpActivated && !isCompleted ? {
-                borderColor: '#52c41a',
-                color: '#52c41a'
-              } : {}}
+            <Tooltip
+              title={awaitingReview
+                ? 'Log already sent. Wait until the reviewer has updated the production log.'
+                : null}
+              placement="top"
             >
-              Submit Log
-            </Button>
+              <span style={{ display: 'block', cursor: submitDisabled ? 'not-allowed' : 'pointer' }}>
+                <Button
+                  type="default"
+                  size="small"
+                  block
+                  icon={<CheckCircleOutlined />}
+                  disabled={submitDisabled}
+                  onClick={(e) => { e.stopPropagation(); handleOpenCompleteModal(record); }}
+                  style={{
+                    ...(isThisOpActivated && !isCompleted && !awaitingReview ? {
+                      borderColor: '#52c41a',
+                      color: '#52c41a',
+                    } : {}),
+                    cursor: submitDisabled ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Submit Log
+                </Button>
+              </span>
+            </Tooltip>
           </Space>
         );
       }
@@ -860,8 +868,22 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setActivating(true);
     try {
+      const selectedMachineId = resolveMachineId(machineId);
+      const modes = await fetchSchedulingModes({
+        force: true,
+        machineId: selectedMachineId,
+      }).catch(() => null);
+      const jobIsUnit = isUnitWiseJob(selectedJob);
+      const jobEngine = jobIsUnit ? 'unit_wise' : 'batch';
+      const liveMode = liveEngineForJob(modes, selectedJob);
+      if (liveMode && liveMode !== jobEngine) {
+        notification.error({
+          message: 'Activation Failed',
+          description: wrongEngineMessage(jobEngine, liveMode),
+        });
+        return;
+      }
       if (isUnitWiseJob(selectedJob)) {
-        const selectedMachineId = resolveMachineId(machineId);
         if (!selectedMachineId) {
           notification.error({ message: 'Activation Failed', description: 'No machine selected for this unit-wise job.' });
           return;
@@ -952,8 +974,20 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setCompleteLoading(true);
     try {
+      const selectedMachineId = resolveMachineId(machineId);
+      const modes = await fetchSchedulingModes({
+        force: true,
+        machineId: selectedMachineId,
+      }).catch(() => null);
+      const jobIsUnit = isUnitWiseJob(selectedJob);
+      const jobEngine = jobIsUnit ? 'unit_wise' : 'batch';
+      const liveMode = liveEngineForJob(modes, selectedJob);
+      if (liveMode && liveMode !== jobEngine) {
+        message.error(wrongEngineMessage(jobEngine, liveMode));
+        setCompleteLoading(false);
+        return;
+      }
       if (isUnitWiseJob(selectedJob)) {
-        const selectedMachineId = resolveMachineId(machineId);
         if (!selectedMachineId) {
           message.error('No machine selected for this unit-wise job.');
           setCompleteLoading(false);

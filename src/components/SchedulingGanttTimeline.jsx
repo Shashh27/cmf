@@ -9,13 +9,17 @@ import {
   buildTimelineLabelFormatters,
   buildTimelineStyleSheet,
   buildTooltipTemplate,
-  getComponentColors,
+  getScheduleBarColors,
   getFilteredOperationsWindow,
   getHiddenDatesRange,
-  getTimeAxisScale,
-  getTimeAxisStep,
+  getTimeAxisForWindow,
+  ZOOM_MIN_MS,
+  ZOOM_MAX_MS,
   getTimeRange,
+  getWindowContainingOperations,
   filterScheduledOperations,
+  filterOperationsToVisibleWindow,
+  downsampleOperationsForView,
 } from '../PPS Components/schedulingTimelineUtils.js';
 import { Timeline } from 'vis-timeline';
 import {
@@ -30,23 +34,34 @@ import { message } from 'antd';
 const ROW_HEIGHT = 34;
 const INTERACTION_COOLDOWN_MS = 280;
 
-const upsertDataSet = (dataSet, nextItems, batchSize) => {
-  if (!dataSet) return;
+const upsertDataSet = (dataSet, nextItems, batchSize, generationRef) => {
+  if (!dataSet || !generationRef) return;
+  const generation = generationRef.current + 1;
+  generationRef.current = generation;
   const nextIds = new Set(nextItems.map((item) => item.id));
   dataSet.getIds().forEach((id) => {
+    if (generationRef.current !== generation) return;
     if (!nextIds.has(id)) dataSet.remove(id);
   });
+  if (generationRef.current !== generation) return;
 
-  if (nextItems.length <= batchSize) {
+  if (!nextItems.length) return;
+
+  // A visible window with no bars reports item count 0, and that batch size
+  // was reused for machine groups. A size of 0 never advances, so the rows
+  // stay out of the timeline and only the time axis is drawn.
+  const size = batchSize > 0 ? batchSize : nextItems.length;
+  if (nextItems.length <= size) {
     dataSet.update(nextItems);
     return;
   }
 
   let index = 0;
   const pushBatch = () => {
-    const slice = nextItems.slice(index, index + batchSize);
+    if (generationRef.current !== generation) return;
+    const slice = nextItems.slice(index, index + size);
     dataSet.update(slice);
-    index += batchSize;
+    index += size;
     if (index < nextItems.length) {
       requestAnimationFrame(pushBatch);
     }
@@ -60,6 +75,45 @@ const windowsMatch = (a, b) => {
     && new Date(a.end).getTime() === new Date(b.end).getTime();
 };
 
+const deferredPayload = (minHeight) => ({
+  operations: [],
+  items: [],
+  groups: [],
+  displayWindow: { start: new Date(), end: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+  hiddenDates: [],
+  timeAxis: { scale: 'hour', step: 4 },
+  timelineHeightPx: minHeight,
+  labelFormatters: { minorLabels: () => '', majorLabels: () => '' },
+  tooltipTemplate: () => '',
+  optionsKey: 'deferred',
+});
+
+class GanttErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div role="alert" style={{ padding: 24, background: '#fff', border: '1px solid #ffccc7', borderRadius: 8 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>The schedule chart could not be drawn.</div>
+          <div style={{ color: '#595959', marginBottom: 12 }}>{this.state.error.message}</div>
+          <button type="button" onClick={this.props.onRetry} style={{ padding: '4px 12px', cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const SchedulingGanttTimeline = forwardRef(({
   scheduledOperations = [],
   availableMachines = [],
@@ -68,8 +122,9 @@ const SchedulingGanttTimeline = forwardRef(({
   selectedComponents = [],
   selectedProductionOrders = [],
   dateRange = null,
-  viewType = 'week',
+  viewType = 'day',
   minHeight = 300,
+  colorBy = 'order',
 }, ref) => {
   const rootRef = useRef(null);
   const containerRef = useRef(null);
@@ -84,21 +139,43 @@ const SchedulingGanttTimeline = forwardRef(({
   const lastWindowRef = useRef(null);
   const lastOptionsKeyRef = useRef('');
   const cleanupInteractionRef = useRef(null);
+  const itemBatchGenerationRef = useRef(0);
+  const groupBatchGenerationRef = useRef(0);
+  const windowOwnerRef = useRef('');
+
+  const windowOwnerKey = [
+    viewType,
+    dateRange ? dateRange.map((value) => new Date(value).getTime()).join(',') : '',
+    selectedMachines.join(','),
+    selectedComponents.join(','),
+    selectedProductionOrders.join(','),
+  ].join('|');
+  windowOwnerRef.current = windowOwnerKey;
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isInteracting, setIsInteracting] = useState(false);
+  const [chartFrameReady, setChartFrameReady] = useState(false);
+  const [liveWindow, setLiveWindow] = useState(null);
+  const [liveOwner, setLiveOwner] = useState('');
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setChartFrameReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useImperativeHandle(ref, () => timelineRef.current);
 
   const deferredOperations = useDeferredValue(scheduledOperations);
 
   const colors = useMemo(
-    () => getComponentColors(scheduledOperations),
-    [scheduledOperations]
+    () => (chartFrameReady ? getScheduleBarColors(scheduledOperations, colorBy) : {}),
+    [chartFrameReady, scheduledOperations, colorBy]
   );
+  const colorClassPrefix = colorBy === 'part' ? 'part' : 'order';
 
   const timelinePayload = useMemo(() => {
+    if (!chartFrameReady) return deferredPayload(minHeight);
     const operations = filterScheduledOperations(deferredOperations, {
       selectedComponents,
       selectedProductionOrders,
@@ -109,28 +186,46 @@ const SchedulingGanttTimeline = forwardRef(({
     const timeRange = getTimeRange(viewType, dateRange, scheduleData);
     const hasOrderFilter = selectedProductionOrders.length > 0;
     const filteredWindow = hasOrderFilter ? getFilteredOperationsWindow(operations) : null;
-    const displayWindow = dateRange
+    let computedWindow = dateRange
       ? { start: timeRange.start, end: timeRange.end }
       : (filteredWindow || { start: timeRange.start, end: timeRange.end });
-    const hiddenRange = getHiddenDatesRange(displayWindow, operations);
+    if (!dateRange && !hasOrderFilter && operations.length) {
+      const inView = filterOperationsToVisibleWindow(operations, computedWindow);
+      if (!inView.length) {
+        const snapped = getWindowContainingOperations(operations, viewType);
+        if (snapped) computedWindow = snapped;
+      }
+    }
+    const displayWindow = liveOwner === windowOwnerKey && liveWindow ? liveWindow : computedWindow;
+    const hiddenRange = getHiddenDatesRange(displayWindow);
     const hiddenDates = buildShiftHiddenDates(shiftConfigs, hiddenRange.start, hiddenRange.end);
-    const groupsArr = buildTimelineGroups(availableMachines, operations, {
+    const drawnOperations = downsampleOperationsForView(
+      filterOperationsToVisibleWindow(operations, displayWindow),
+      displayWindow,
+    );
+    const groupsArr = buildTimelineGroups(availableMachines, drawnOperations, {
       selectedComponents,
       selectedProductionOrders,
       selectedMachines,
     });
 
+    const axis = getTimeAxisForWindow(displayWindow.start, displayWindow.end);
+
     return {
-      operations,
-      items: buildTimelineItems(operations, colors, shiftConfigs),
+      operations: drawnOperations,
+      items: buildTimelineItems(drawnOperations, colors, shiftConfigs, { colorBy }),
       groups: groupsArr,
       displayWindow,
       hiddenDates,
+      timeAxis: { scale: axis.scale, step: axis.step },
       timelineHeightPx: Math.max(minHeight, groupsArr.length * ROW_HEIGHT + 28),
       labelFormatters: buildTimelineLabelFormatters(shiftConfigs),
       tooltipTemplate: buildTooltipTemplate(shiftConfigs),
       optionsKey: JSON.stringify({
         viewType,
+        colorBy,
+        axisScale: axis.scale,
+        axisStep: axis.step,
         hiddenDatesLength: hiddenDates.length,
         shiftCount: shiftConfigs.length,
         height: groupsArr.length,
@@ -145,8 +240,13 @@ const SchedulingGanttTimeline = forwardRef(({
     selectedProductionOrders,
     dateRange,
     viewType,
+    chartFrameReady,
     colors,
+    colorBy,
     minHeight,
+    liveWindow,
+    liveOwner,
+    windowOwnerKey,
   ]);
 
   const markInteracting = useCallback(() => {
@@ -173,16 +273,24 @@ const SchedulingGanttTimeline = forwardRef(({
     const onWheel = () => markInteracting();
     const onRangeChange = () => markInteracting();
 
+    const onRangeChanged = (props) => {
+      if (!props?.start || !props?.end) return;
+      const next = { start: new Date(props.start), end: new Date(props.end) };
+      lastWindowRef.current = next;
+      setLiveOwner(windowOwnerRef.current);
+      setLiveWindow((prev) => (windowsMatch(prev, next) ? prev : next));
+    };
+
     rootEl.addEventListener('pointerdown', onPointerDown, { passive: true });
     rootEl.addEventListener('wheel', onWheel, { passive: true });
     timeline.on('rangechange', onRangeChange);
-    timeline.on('rangechanged', onRangeChange);
+    timeline.on('rangechanged', onRangeChanged);
 
     cleanupInteractionRef.current = () => {
       rootEl.removeEventListener('pointerdown', onPointerDown);
       rootEl.removeEventListener('wheel', onWheel);
       timeline.off('rangechange', onRangeChange);
-      timeline.off('rangechanged', onRangeChange);
+      timeline.off('rangechanged', onRangeChanged);
     };
   }, [markInteracting]);
 
@@ -192,8 +300,8 @@ const SchedulingGanttTimeline = forwardRef(({
     try {
       setIsSyncing(true);
 
-      const signature = Object.keys(colors).sort().join('|');
-      const css = buildTimelineStyleSheet(colors);
+      const signature = `${colorClassPrefix}|${Object.keys(colors).sort().join('|')}`;
+      const css = buildTimelineStyleSheet(colors, { classPrefix: colorClassPrefix });
       if (styleSignatureRef.current !== signature || !styleElementRef.current) {
         if (styleElementRef.current) {
           styleElementRef.current.textContent = css;
@@ -211,6 +319,7 @@ const SchedulingGanttTimeline = forwardRef(({
         groups,
         displayWindow,
         hiddenDates,
+        timeAxis,
         timelineHeightPx,
         labelFormatters,
         tooltipTemplate,
@@ -230,8 +339,8 @@ const SchedulingGanttTimeline = forwardRef(({
         margin: { item: { horizontal: 8, vertical: 4 }, axis: 5 },
         start: displayWindow.start,
         end: displayWindow.end,
-        zoomMin: 1000 * 60 * 30,
-        zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
+        zoomMin: ZOOM_MIN_MS,
+        zoomMax: ZOOM_MAX_MS,
         editable: false,
         showCurrentTime: true,
         tooltip: {
@@ -239,7 +348,7 @@ const SchedulingGanttTimeline = forwardRef(({
           overflowMethod: 'cap',
           template: tooltipTemplate,
         },
-        timeAxis: { scale: getTimeAxisScale(viewType), step: getTimeAxisStep(viewType) },
+        timeAxis,
         format: labelFormatters,
         hiddenDates,
       };
@@ -250,8 +359,8 @@ const SchedulingGanttTimeline = forwardRef(({
         && !windowsMatch(lastWindowRef.current, displayWindow);
 
       if (!timelineRef.current) {
-        itemsDataSetRef.current = new DataSet(items);
-        groupsDataSetRef.current = new DataSet(groups);
+        itemsDataSetRef.current = new DataSet();
+        groupsDataSetRef.current = new DataSet();
         timelineRef.current = new Timeline(
           containerRef.current,
           itemsDataSetRef.current,
@@ -259,14 +368,14 @@ const SchedulingGanttTimeline = forwardRef(({
           options
         );
         bindInteractionHandlers(timelineRef.current, rootRef.current);
-      } else {
-        upsertDataSet(itemsDataSetRef.current, items, batchSize);
-        upsertDataSet(groupsDataSetRef.current, groups, batchSize);
-        if (lastOptionsKeyRef.current !== optionsKey) {
-          timelineRef.current.setOptions(options);
-          lastOptionsKeyRef.current = optionsKey;
-        }
+        lastOptionsKeyRef.current = optionsKey;
+      } else if (lastOptionsKeyRef.current !== optionsKey) {
+        timelineRef.current.setOptions(options);
+        lastOptionsKeyRef.current = optionsKey;
       }
+
+      upsertDataSet(itemsDataSetRef.current, items, batchSize, itemBatchGenerationRef);
+      upsertDataSet(groupsDataSetRef.current, groups, batchSize, groupBatchGenerationRef);
 
       if (shouldAnimateWindow) {
         timelineRef.current.setWindow(displayWindow.start, displayWindow.end, {
@@ -284,9 +393,10 @@ const SchedulingGanttTimeline = forwardRef(({
       message.error('Timeline failed: ' + err.message);
       setIsSyncing(false);
     }
-  }, [bindInteractionHandlers, colors, viewType]);
+  }, [bindInteractionHandlers, colors, colorClassPrefix, viewType]);
 
   useEffect(() => {
+    if (!chartFrameReady) return undefined;
     let cancelled = false;
     const debounceMs = getSyncDebounceMs(timelinePayload.items.length);
 
@@ -305,7 +415,7 @@ const SchedulingGanttTimeline = forwardRef(({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [timelinePayload, runSync]);
+  }, [chartFrameReady, timelinePayload, runSync]);
 
   useEffect(() => {
     const updateCurrentTime = () => {
@@ -320,6 +430,8 @@ const SchedulingGanttTimeline = forwardRef(({
   }, []);
 
   useEffect(() => () => {
+    itemBatchGenerationRef.current += 1;
+    groupBatchGenerationRef.current += 1;
     if (interactionTimerRef.current) clearTimeout(interactionTimerRef.current);
     cleanupInteractionRef.current?.();
     if (timelineRef.current) {
@@ -376,4 +488,15 @@ const SchedulingGanttTimeline = forwardRef(({
 
 SchedulingGanttTimeline.displayName = 'SchedulingGanttTimeline';
 
-export default SchedulingGanttTimeline;
+const SchedulingGanttTimelineWithBoundary = forwardRef((props, ref) => {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <GanttErrorBoundary key={attempt} onRetry={() => setAttempt((n) => n + 1)}>
+      <SchedulingGanttTimeline ref={ref} {...props} />
+    </GanttErrorBoundary>
+  );
+});
+
+SchedulingGanttTimelineWithBoundary.displayName = 'SchedulingGanttTimelineWithBoundary';
+
+export default SchedulingGanttTimelineWithBoundary;

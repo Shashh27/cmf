@@ -95,3 +95,107 @@ export function defaultBandForOperation(op, quantity) {
     machine_id: mid,
   };
 }
+
+function startOfLocalDay(value) {
+  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Machine is free on the selected day when occupied_until is missing
+ * or strictly before local midnight of that day.
+ */
+export function isMachineFreeOnDay(machine, freeOnDate) {
+  const until = machine?.occupied_until;
+  if (!until) return true;
+  const busyUntil = new Date(until);
+  if (Number.isNaN(busyUntil.getTime())) return true;
+  return busyUntil < startOfLocalDay(freeOnDate);
+}
+
+/**
+ * Even qty→machine bands across WC machines that are free on freeOnDate.
+ * Keeps locked approved bands; remaining units start after approved_quantity.
+ *
+ * 20 units / 5 free → 4 each. 22 / 5 → 5,5,4,4,4.
+ *
+ * @returns {{ ok: boolean, reason?: string, bands: Array, freeCount: number, remainingCount: number }}
+ */
+export function splitEquallyAcrossMachines({
+  operation,
+  quantity,
+  existingBands = [],
+  freeOnDate = new Date(),
+} = {}) {
+  const qty = Number(quantity) || 0;
+  const opId = Number(operation?.operation_id);
+  const approved = Math.max(0, Number(operation?.approved_quantity || 0));
+  const remainingStart = approved + 1;
+  const remainingCount = qty - approved;
+  const lockedBands = (existingBands || []).filter(
+    (b) => approved > 0 && Number(b.unit_to) <= approved
+  );
+  const freeMachines = (operation?.machines || []).filter((m) =>
+    isMachineFreeOnDay(m, freeOnDate)
+  );
+
+  if (!opId || qty < 1) {
+    return {
+      ok: false,
+      reason: 'no_quantity',
+      bands: existingBands,
+      freeCount: freeMachines.length,
+      remainingCount,
+    };
+  }
+  if (remainingCount < 1) {
+    return {
+      ok: false,
+      reason: 'no_remaining_units',
+      bands: existingBands,
+      freeCount: freeMachines.length,
+      remainingCount,
+    };
+  }
+  if (freeMachines.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_free_machines',
+      bands: existingBands,
+      freeCount: 0,
+      remainingCount,
+    };
+  }
+
+  const n = freeMachines.length;
+  const base = Math.floor(remainingCount / n);
+  const extra = remainingCount % n;
+  const splitBands = [];
+  let cursor = remainingStart;
+  freeMachines.forEach((machine, index) => {
+    const size = base + (index < extra ? 1 : 0);
+    if (size < 1) return;
+    const unitFrom = cursor;
+    const unitTo = cursor + size - 1;
+    splitBands.push({
+      operation_id: opId,
+      unit_from: unitFrom,
+      unit_to: unitTo,
+      machine_id: machine.id,
+    });
+    cursor = unitTo + 1;
+  });
+
+  return {
+    ok: true,
+    bands: [...lockedBands, ...splitBands],
+    freeCount: n,
+    remainingCount,
+  };
+}

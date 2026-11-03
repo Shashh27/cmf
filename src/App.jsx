@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 
 
 
@@ -43,17 +43,13 @@ import Configuration from "./Pages/Configuration";
 
 
 
-import Dashboard from "./Pages/Dashboard";
+const Dashboard = React.lazy(() => import("./Pages/Dashboard"));
 
-
-
-import ShopFloorDashboard from "./Pages/ShopFloorDashboard";
-
-
+const ShopFloorDashboard = React.lazy(() => import("./Pages/ShopFloorDashboard"));
 
 import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 
-import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
+const ProjectCoordinatorProductView = React.lazy(() => import("./ProjectCoordinator Components/ProjectCoordinatorProductView"));
 
 import ProjectCoordinatorPDM from "./ProjectCoordinator Components/PDM";
 
@@ -65,9 +61,9 @@ import PCNotifications from "./ProjectCoordinator Components/PCNotifications";
 
 import AdminRecyclebin from "./Pages/Recyclebin";
 
-import PPS from "./Pages/PPS";
+const PPS = React.lazy(() => import("./Pages/PPS"));
 
-import UnitwiseScheduling from "./PPS Components/UnitwiseScheduling";
+const UnitwiseScheduling = React.lazy(() => import("./PPS Components/UnitwiseScheduling"));
 
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
@@ -112,11 +108,9 @@ import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 
 
 
-import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
+const ManufacturingCoordinator = React.lazy(() => import("./Pages/ManufacturingCoordinator"));
 
-
-
-import MCSShopFloorDashboard from "./ManufacturingCoordinator Components/ShopFloorDashboard";
+const MCSShopFloorDashboard = React.lazy(() => import("./ManufacturingCoordinator Components/ShopFloorDashboard"));
 import { EnergyMonitoring as MCEnergyMonitoring } from "./ManufacturingCoordinator Components/EMS";
 
 
@@ -163,9 +157,7 @@ function App() {
 
 
       <Layout>
-
-
-
+        <Suspense fallback={<div style={{ padding: 24, color: "#595959" }}>Loading…</div>}>
         <Routes>
 
 
@@ -574,9 +566,7 @@ function App() {
 
 
         </Routes>
-
-
-
+        </Suspense>
       </Layout>
 
       {/* Chat Panel - only after login */}

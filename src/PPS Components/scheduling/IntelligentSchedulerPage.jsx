@@ -47,7 +47,8 @@ import {
   fetchOrders,
   fetchOrderParts,
 } from './api/unitWiseApi.js';
-import { mapUnitWiseItemsToOperations, getTimeRange } from '../schedulingTimelineUtils.js';
+import { fetchShopPlan } from './api/schedulingModesApi.js';
+import { mapUnitWiseItemsToOperations } from '../schedulingTimelineUtils.js';
 import {
   CONTROL_BAR_MOTION,
   getWindowAnimation,
@@ -65,7 +66,6 @@ export default function IntelligentSchedulerPage() {
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
 
-  const [viewType, setViewType] = useState('week');
   const [viewTab, setViewTab] = useState('gantt');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
@@ -81,6 +81,7 @@ export default function IntelligentSchedulerPage() {
   const [allocPartId, setAllocPartId] = useState(null);
 
   const [rebuilding, setRebuilding] = useState(false);
+  const [shopPlan, setShopPlan] = useState(null);
   const [planSource, setPlanSource] = useState(null);
   const [statusMessage, setStatusMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -266,7 +267,17 @@ export default function IntelligentSchedulerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machines.length]);
 
+  useEffect(() => {
+    fetchShopPlan()
+      .then((data) => setShopPlan(data.engine === 'unit_wise' ? 'unit_wise' : 'batch'))
+      .catch(() => setShopPlan('batch'));
+  }, []);
+
   const handleRebuild = async () => {
+    if (shopPlan === 'batch') {
+      message.warning('Shop floor follows batch. Unit-wise rebuild is locked.');
+      return;
+    }
     confettiShownRef.current = true; // Don't show confetti on manual rebuilds
     setRebuilding(true);
     setStatusMessage(null);
@@ -362,24 +373,12 @@ export default function IntelligentSchedulerPage() {
     const start = moment(win.start);
     const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
+    const span = Math.max(end.diff(start), 60 * 1000);
     timelineRef.current.setWindow(
-      start.clone().add(delta, unit).toDate(),
-      end.clone().add(delta, unit).toDate(),
+      start.clone().add(delta * span, 'ms').toDate(),
+      end.clone().add(delta * span, 'ms').toDate(),
       { animation: getWindowAnimation(scheduledOperations.length) }
     );
-  };
-
-  const handleViewTypeChange = (v) => {
-    setViewType(v);
-    if (!dateRange) {
-      const r = getTimeRange(v, null, { scheduled_operations: scheduledOperations });
-      if (timelineRef.current) {
-        timelineRef.current.setWindow(r.start, r.end, {
-          animation: getWindowAnimation(scheduledOperations.length),
-        });
-      }
-    }
   };
 
   const handleRefresh = () => {
@@ -407,12 +406,31 @@ export default function IntelligentSchedulerPage() {
           <div>
             <h1 className="text-lg font-semibold text-slate-800 m-0">Intelligent Scheduler</h1>
             <p className="text-sm text-slate-500 m-0">
-              Unit-wise plan (test bed). Does not change batch Machine Scheduling.
+              {shopPlan === 'batch'
+                ? 'Locked while the shop floor follows batch.'
+                : 'Unit-wise plan. Operators follow this plan only when Machine Scheduling is set to Unit-wise.'}
               {planSource ? ` · last source: ${planSource}` : ''}
             </p>
           </div>
         </div>
 
+        {shopPlan === 'batch' && (
+          <div
+            style={{
+              padding: 16,
+              background: '#fff',
+              border: '1px solid #f0f0f0',
+              borderRadius: 8,
+              color: '#595959',
+            }}
+          >
+            Shop floor follows batch. Unit-wise rebuild and job cards are locked.
+            Switch the plan on Machine Scheduling to use this schedule.
+          </div>
+        )}
+
+        {shopPlan === 'unit_wise' && (
+        <>
         <RebuildToolbar
           rebuilding={rebuilding}
           onRebuild={handleRebuild}
@@ -448,12 +466,6 @@ export default function IntelligentSchedulerPage() {
             alignItems: 'center',
           }}
         >
-          <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-            <Option value="day">Daily</Option>
-            <Option value="week">Weekly</Option>
-            <Option value="month">Monthly</Option>
-            <Option value="year">Yearly</Option>
-          </Select>
 
           <DatePicker.RangePicker
             size="small"
@@ -587,7 +599,6 @@ export default function IntelligentSchedulerPage() {
                   selectedComponents={selectedComponents}
                   selectedProductionOrders={selectedProductionOrders}
                   dateRange={dateRange}
-                  viewType={viewType}
                   onToggleOrder={(po) =>
                     setSelectedProductionOrders((prev) =>
                       prev.includes(po) ? prev.filter((p) => p !== po) : [...prev, po]
@@ -624,6 +635,8 @@ export default function IntelligentSchedulerPage() {
             },
           ]}
         />
+        </>
+        )}
 
         <Modal
           title="How to Use Timeline"

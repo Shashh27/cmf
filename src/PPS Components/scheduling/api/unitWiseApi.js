@@ -18,20 +18,35 @@ const UNIT_WISE_BASE = `${SCHEDULING_API_BASE_URL}/scheduling/unit-wise`;
  * @param {number} [opts.partId]
  * @param {number} [opts.orderId]
  * @param {'greedy'|'ga'|'nsga2'} [opts.optimizer]
- * @param {'auto'|'process_plan'|'manual'} [opts.assignmentMode]
+ * @param {'auto'|'process_plan'|'manual'} [opts.assignmentMode] — omitted when operationAssignmentModes is set
+ * @param {Record<number, 'auto'|'process_plan'|'manual'>} [opts.operationAssignmentModes]
  * @param {boolean} [opts.pinPreferred] — true = batch all qty on preferred machine
  * @param {number} [opts.preferredMachineId]
  * @param {number} [opts.preferredWorkcenterId]
  * @param {boolean} [opts.quick]
  */
 export async function rebuildUnitWiseSchedule(opts = {}) {
-  const mode = (opts.assignmentMode || '').toLowerCase() || null;
-  const pinPreferred =
-    mode === 'process_plan' ? true : mode === 'auto' || mode === 'manual' ? false : (opts.pinPreferred ?? false);
+  const opModes = {};
+  Object.entries(opts.operationAssignmentModes || {}).forEach(([opId, raw]) => {
+    const mode = String(raw || '').toLowerCase();
+    if (mode === 'auto' || mode === 'process_plan' || mode === 'manual') {
+      opModes[Number(opId)] = mode;
+    }
+  });
+  const hasOpModes = Object.keys(opModes).length > 0;
+  const hasManualOp = Object.values(opModes).includes('manual');
+  const mode = hasOpModes ? null : ((opts.assignmentMode || '').toLowerCase() || null);
+  const pinPreferred = hasOpModes
+    ? false
+    : mode === 'process_plan'
+      ? true
+      : mode === 'auto' || mode === 'manual'
+        ? false
+        : (opts.pinPreferred ?? false);
 
   const body = {
     optimizer:
-      mode === 'manual'
+      mode === 'manual' || hasManualOp
         ? 'greedy'
         : opts.optimizer === 'ga' || opts.optimizer === 'nsga2'
           ? 'nsga2'
@@ -39,10 +54,12 @@ export async function rebuildUnitWiseSchedule(opts = {}) {
     quick: opts.optimizer === 'ga' ? true : undefined,
     part_id: opts.partId ?? undefined,
     order_id: opts.orderId ?? undefined,
-    assignment_mode: mode || undefined,
+    assignment_mode: hasOpModes ? undefined : (mode || undefined),
+    operation_assignment_modes: hasOpModes ? opModes : undefined,
     pin_preferred: pinPreferred,
     preferred_machine_id: pinPreferred ? (opts.preferredMachineId ?? null) : null,
     preferred_workcenter_id: pinPreferred ? (opts.preferredWorkcenterId ?? null) : null,
+    manufacturing_coordinator_id: opts.manufacturingCoordinatorId ?? undefined,
   };
 
   const res = await fetch(`${UNIT_WISE_BASE}/rebuild`, {
@@ -64,10 +81,18 @@ export async function rebuildUnitWiseSchedule(opts = {}) {
   return data;
 }
 
-export async function fetchUnitWiseSchedule({ partId, orderId, latestOnly = true } = {}) {
+export async function fetchUnitWiseSchedule({
+  partId,
+  orderId,
+  latestOnly = true,
+  manufacturingCoordinatorId,
+} = {}) {
   const q = new URLSearchParams();
   if (partId) q.set('part_id', String(partId));
   if (orderId) q.set('order_id', String(orderId));
+  if (manufacturingCoordinatorId) {
+    q.set('manufacturing_coordinator_id', String(manufacturingCoordinatorId));
+  }
   if (latestOnly) q.set('latest_only', 'true');
   const res = await fetch(`${UNIT_WISE_BASE}?${q.toString()}`);
   if (!res.ok) {
@@ -164,10 +189,14 @@ export async function fetchShiftHours() {
 }
 
 /** Orders from scheduling host (not config.js :8000). */
-export async function fetchOrders() {
+export async function fetchOrders({ manufacturingCoordinatorId } = {}) {
   try {
+    const q = new URLSearchParams();
+    if (manufacturingCoordinatorId) {
+      q.set('manufacturing_coordinator_id', String(manufacturingCoordinatorId));
+    }
     const res = await fetch(
-      `${SCHEDULING_API_BASE_URL}/scheduling/orders-by-project-coordinator`
+      `${SCHEDULING_API_BASE_URL}/scheduling/orders-by-project-coordinator?${q.toString()}`
     );
     if (res.ok) {
       const data = await res.json();
