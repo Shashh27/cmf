@@ -491,3 +491,41 @@ class NotificationService:
             db.rollback()
             print(f"Error logging MC document acknowledgment: {e}")
             return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def log_right_now_job_review(
+        db: Session,
+        indent_id: int,
+        pc_user_id: Optional[int],
+        status: str,
+        user_id: Optional[int],
+        user_name: Optional[str],
+        user_role: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Notify the Project Coordinator when a Right Now Job is approved or rejected."""
+        try:
+            if not pc_user_id:
+                return {"success": False, "error": "PC user not found"}
+
+            status_value = (status or "").strip().lower()
+            action = "approved" if status_value in {"accepted", "approved", "assigned"} else "rejected"
+
+            activity_log = NotificationService._create_activity_log(
+                db=db,
+                entity_type="right_now_job",
+                entity_id=indent_id,
+                action=action,
+                user_id=user_id,
+                user_name=user_name,
+                user_role=user_role,
+                order_id=None,
+                details=details or {},
+            )
+            NotificationService._create_pc_notifications(db, activity_log.id, [pc_user_id])
+            db.commit()
+            return {"success": True, "activity_log_id": activity_log.id}
+        except Exception as e:
+            db.rollback()
+            print(f"Error logging right now job review: {e}")
+            return {"success": False, "error": str(e)}

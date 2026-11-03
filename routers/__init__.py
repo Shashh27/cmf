@@ -47,6 +47,7 @@ from .transaction_history import router as transaction_history_router
 from .tool_issues import router as tool_issues_router
 
 from .maintenance import router as maintenance_router
+from .urgent_job_indents import router as urgent_job_indents_router
 
 from .out_source_parts_status import router as out_source_parts_status_router
 
@@ -111,6 +112,7 @@ __all__ = [
     "tool_issues_router",
 
     "maintenance_router",
+    "urgent_job_indents_router",
 
     "out_source_parts_status_router",
     "order_tracking_router",

@@ -86,6 +86,7 @@ from routers import (
     out_source_parts_status_router,
 
     maintenance_router,
+    urgent_job_indents_router,
     order_tracking_router,
     monitoring_router,
     production_analytics_router,
@@ -335,6 +336,7 @@ api_router.include_router(transaction_history_router)
 api_router.include_router(tool_issues_router)
 api_router.include_router(out_source_parts_status_router)
 api_router.include_router(maintenance_router)
+api_router.include_router(urgent_job_indents_router)
 api_router.include_router(ems_router)
 api_router.include_router(order_tracking_router)
 api_router.include_router(monitoring_router)

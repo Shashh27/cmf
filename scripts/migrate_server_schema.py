@@ -229,6 +229,53 @@ NEW_TABLES = [
         )
         """,
     ),
+    (
+        "maintenance.urgent_job_indents",
+        """
+        CREATE TABLE IF NOT EXISTS maintenance.urgent_job_indents (
+            id SERIAL PRIMARY KEY,
+            created_by INTEGER NOT NULL REFERENCES accesscontrol.access_users(id),
+            order_id INTEGER NOT NULL REFERENCES oms.orders(id),
+            part_id INTEGER REFERENCES oms.parts(id),
+            operation_id INTEGER REFERENCES oms.operations(id),
+            description TEXT NOT NULL,
+            status VARCHAR NOT NULL DEFAULT 'pending',
+            mc_id INTEGER REFERENCES accesscontrol.access_users(id),
+            mc_remark TEXT,
+            reviewed_at TIMESTAMP,
+            operator_id INTEGER REFERENCES accesscontrol.access_users(id),
+            workcenter_id INTEGER REFERENCES configuration.work_centers(id),
+            machine_id INTEGER REFERENCES configuration.machines(id),
+            assigned_at TIMESTAMP,
+            operator_ack BOOLEAN NOT NULL DEFAULT FALSE,
+            operator_ack_at TIMESTAMP,
+            from_dept VARCHAR,
+            to_dept VARCHAR,
+            created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC' + INTERVAL '5 hours 30 minutes'),
+            mc_ack BOOLEAN NOT NULL DEFAULT FALSE,
+            mc_ack_at TIMESTAMP,
+            CONSTRAINT ck_urgent_job_indents_status
+                CHECK (status IN ('pending', 'accepted', 'rejected', 'assigned'))
+        )
+        """,
+    ),
+    (
+        "maintenance.urgent_job_indent_attachments",
+        """
+        CREATE TABLE IF NOT EXISTS maintenance.urgent_job_indent_attachments (
+            id SERIAL PRIMARY KEY,
+            indent_id INTEGER NOT NULL REFERENCES maintenance.urgent_job_indents(id) ON DELETE CASCADE,
+            kind VARCHAR NOT NULL,
+            file_name VARCHAR NOT NULL,
+            file_type VARCHAR NOT NULL,
+            file_size INTEGER NOT NULL,
+            minio_url VARCHAR NOT NULL,
+            uploaded_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC' + INTERVAL '5 hours 30 minutes'),
+            CONSTRAINT ck_urgent_job_indent_attachments_kind
+                CHECK (kind IN ('2d', '3d'))
+        )
+        """,
+    ),
     # ---- Audit log --------------------------------------------------------
     (
         "audit.change_log",
@@ -292,6 +339,23 @@ ADD_COLUMNS = [
     ALTER TABLE inventory.stock_quality_documents
         ADD COLUMN IF NOT EXISTS unit_id INTEGER
     """,
+    """
+    ALTER TABLE maintenance.urgent_job_indents
+        ADD COLUMN IF NOT EXISTS from_dept VARCHAR,
+        ADD COLUMN IF NOT EXISTS to_dept VARCHAR,
+        ADD COLUMN IF NOT EXISTS project_no VARCHAR,
+        ADD COLUMN IF NOT EXISTS project_name VARCHAR,
+        ADD COLUMN IF NOT EXISTS mc_ack BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS mc_ack_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS mc_ack_by VARCHAR,
+        ADD COLUMN IF NOT EXISTS activated_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS supervisor_ack BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS supervisor_ack_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS mc_completion_ack BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS mc_completion_ack_at TIMESTAMP
+    """,
+    "ALTER TABLE maintenance.urgent_job_indents ALTER COLUMN order_id DROP NOT NULL",
     """
     DO $$
     BEGIN

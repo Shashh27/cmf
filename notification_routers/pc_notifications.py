@@ -211,9 +211,13 @@ def get_pc_notifications(
         elif activity_log.entity_type == "order_document":
             order_doc = db.query(OrderDocumentModel).filter(OrderDocumentModel.id == activity_log.entity_id).first()
             entity_name = order_doc.document_name if order_doc else None
+        elif activity_log.entity_type in ("right_now_job", "urgent_job"):
+            details = activity_log.details or {}
+            entity_name = details.get("project_name") or details.get("project_no") or "Right Now Job"
         
         # Enrich details with names instead of IDs
         enriched_details = enrich_details_with_names(db, activity_log.details, activity_log.entity_type)
+        details = activity_log.details or {}
         
         result.append({
             "id": notif.id,
@@ -227,8 +231,12 @@ def get_pc_notifications(
             "entity_name": entity_name,
             "action": activity_log.action,
             "order_id": activity_log.order_id,
-            "sale_order_number": getattr(order, "sale_order_number", None) if order else None,
-            "product_name": getattr(getattr(order, "product", None), "product_name", None) if order else None,
+            "sale_order_number": (
+                getattr(order, "sale_order_number", None) if order else details.get("project_no")
+            ),
+            "product_name": (
+                getattr(getattr(order, "product", None), "product_name", None) if order else details.get("project_name")
+            ),
             "user_name": activity_log.user_name,
             "user_role": activity_log.user_role,
             "timestamp": activity_log.timestamp,
