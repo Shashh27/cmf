@@ -50,7 +50,9 @@ const UrgentJobNotifications = ({ dateRange, onCount, refreshKey = 0, query = ''
       if (!response.ok) throw new Error('Failed to fetch notifications');
       const data = await response.json();
       let list = (Array.isArray(data) ? data : []).filter((row) => {
-        const completedForMe = row.completed_at && Number(row.mc_id) === Number(userId);
+        const completedForMe = Boolean(row.completed_at) && (
+          row.mc_id == null || Number(row.mc_id) === Number(userId)
+        );
         if (completedForMe) return true;
         if (Number(row.created_by) === Number(userId)) return false;
         return row.mc_id == null || Number(row.created_by) !== Number(row.mc_id);
@@ -64,9 +66,12 @@ const UrgentJobNotifications = ({ dateRange, onCount, refreshKey = 0, query = ''
         });
       }
       setNotifications(list);
-      onCountRef.current?.(list.filter((row) => (
-        row.completed_at && Number(row.mc_id) === Number(userId) ? !row.mc_completion_ack : !row.mc_ack
-      )).length);
+      onCountRef.current?.(list.filter((row) => {
+        const completedForMe = Boolean(row.completed_at) && (
+          row.mc_id == null || Number(row.mc_id) === Number(userId)
+        );
+        return completedForMe ? !(row.mc_decision || row.supervisor_decision) : !row.mc_ack;
+      }).length);
     } catch (error) {
       message.error(error.message || 'Failed to fetch notifications');
     } finally {
@@ -78,7 +83,9 @@ const UrgentJobNotifications = ({ dateRange, onCount, refreshKey = 0, query = ''
     fetchNotifications();
   }, [fetchNotifications, refreshKey]);
 
-  const isCompletionForMe = (row) => Boolean(row?.completed_at) && Number(row?.mc_id) === Number(userId);
+  const isCompletionForMe = (row) => Boolean(row?.completed_at) && (
+    row?.mc_id == null || Number(row?.mc_id) === Number(userId)
+  );
 
   const handleAcknowledge = async (record) => {
     if (!userId) {
@@ -86,16 +93,31 @@ const UrgentJobNotifications = ({ dateRange, onCount, refreshKey = 0, query = ''
       return;
     }
     try {
-      const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${record.id}/acknowledge`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          as_role: isCompletionForMe(record) ? 'mc_completion' : 'mc',
-        }),
-      });
-      if (!response.ok) throw new Error('Failed to acknowledge notification');
-      message.success('Notification acknowledged');
+      if (isCompletionForMe(record)) {
+        const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${record.id}/completion-review`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            as_role: 'mc',
+            status: 'approved',
+            remark: null,
+          }),
+        });
+        if (!response.ok) throw new Error('Failed to approve log');
+        message.success('Log approved');
+      } else {
+        const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${record.id}/acknowledge`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            as_role: 'mc',
+          }),
+        });
+        if (!response.ok) throw new Error('Failed to acknowledge notification');
+        message.success('Notification acknowledged');
+      }
       fetchNotifications();
     } catch (error) {
       message.error(error.message);
@@ -182,8 +204,12 @@ const UrgentJobNotifications = ({ dateRange, onCount, refreshKey = 0, query = ''
         sorter: false,
         render: (_, record) =>
           renderAckCell({
-            isAck: isCompletionForMe(record) ? !!record.mc_completion_ack : !!record.mc_ack,
-            ackBy: record.mc_ack_by || record.mc_name,
+            isAck: isCompletionForMe(record)
+              ? !!(record.mc_decision || record.supervisor_decision)
+              : !!record.mc_ack,
+            ackBy: isCompletionForMe(record)
+              ? (record.mc_decision_by || (record.supervisor_decision ? 'Supervisor' : null) || record.mc_ack_by || record.mc_name)
+              : (record.mc_ack_by || record.mc_name),
             onAcknowledge: () => handleAcknowledge(record),
           }),
       },

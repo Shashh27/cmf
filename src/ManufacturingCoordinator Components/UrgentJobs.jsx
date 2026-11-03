@@ -11,6 +11,7 @@ import { api, authFetch, readStoredUser } from '../api/client.js';
 import { API_BASE_URL } from '../Config/auth.js';
 import ModelViewer3D from '../ProjectCoordinator Components/PDM Components/ModelViewer3D';
 import { downloadUrgentAttachment } from '../Utils/urgentJobDownload.js';
+import UrgentJobsPdfDownload from '../DownloadReports/UrgentJobsPdfDownload.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -112,6 +113,15 @@ const isLockedStatus = (status) => {
   return value === 'accepted' || value === 'rejected' || value === 'assigned';
 };
 
+/** MC can still edit/delete own assigned jobs until the operator activates. */
+const isManageRowLocked = (record, { audience } = {}) => {
+  const status = String(record?.status || 'pending').toLowerCase();
+  if (status === 'rejected') return true;
+  if (record?.activated_at || record?.completed_at) return true;
+  if (audience === 'mc') return false;
+  return isLockedStatus(status);
+};
+
 const readError = async (response) => {
   try {
     const data = await response.json();
@@ -188,6 +198,8 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
 
   const [review, setReview] = useState(null);
   const [reviewForm] = Form.useForm();
+  const [completionReview, setCompletionReview] = useState(null);
+  const [completionForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [operators, setOperators] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -289,7 +301,7 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
   };
 
   const openEdit = async (record) => {
-    if (isLockedStatus(record.status)) return;
+    if (isManageRowLocked(record, { audience })) return;
     createForm.resetFields();
     setEditingRecord(record);
     const attachments = Array.isArray(record.attachments) ? record.attachments : [];
@@ -311,8 +323,12 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
   };
 
   const deleteRow = async (record) => {
-    if (isLockedStatus(record.status)) {
-      message.error('Approved or rejected jobs cannot be deleted');
+    if (isManageRowLocked(record, { audience })) {
+      message.error(
+        record?.activated_at || record?.completed_at
+          ? 'Activated or completed jobs cannot be deleted'
+          : 'Approved or rejected jobs cannot be deleted',
+      );
       return;
     }
     try {
@@ -439,6 +455,46 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
     }
   };
 
+  const openCompletionReview = (record, status) => {
+    completionForm.resetFields();
+    setCompletionReview({ record, status });
+  };
+
+  const submitCompletionReview = async (values) => {
+    if (!userId || !completionReview?.record) {
+      message.error('User not found in session. Please log in again.');
+      return;
+    }
+    if (completionReview.status === 'rejected' && !String(values.remark || '').trim()) {
+      message.error('Remarks are required to reject');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${completionReview.record.id}/completion-review`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          as_role: 'mc',
+          status: completionReview.status,
+          remark: values.remark || null,
+        }),
+      });
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      message.success(completionReview.status === 'approved' ? 'Log approved' : 'Log rejected');
+      setCompletionReview(null);
+      await loadRows();
+    } catch {
+      message.error('Failed to submit review');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const submitReview = async (values) => {
     if (!userId || !review?.record) {
       message.error('User not found in session. Please log in again.');
@@ -543,6 +599,8 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
         row.created_by_name,
         row.mc_remark,
         row.from_dept,
+        row.from_name,
+        row.mc_decision,
         row.to_dept,
       ].some((value) => String(value || '').toLowerCase().includes(query));
     });
@@ -593,19 +651,26 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
       render: (_, __, index) => (page - 1) * pageSize + index + 1,
     },
     ...(audience === 'pc' ? [] : [{
-      title: isManagePage ? 'SENT BY' : 'Sent by',
-      dataIndex: 'created_by_name',
-      key: 'created_by_name',
+      title: isManagePage ? 'FROM' : 'From',
+      key: 'from',
       align: isManagePage ? 'center' : undefined,
-      sorter: textSort((record) => record.created_by_name),
-      render: (name, record) => (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: isManagePage ? 'center' : 'flex-start', lineHeight: 1.3 }}>
-          <span>{name || '-'}</span>
-          {record.from_dept && (
-            <span style={{ color: '#8c8c8c', fontSize: 12 }}>{record.from_dept}</span>
-          )}
-        </div>
-      ),
+      sorter: textSort((record) => record.from_name || record.created_by_name),
+      render: (_, record) => {
+        const name = record.from_name
+          || (record.created_by != null && record.mc_id != null && Number(record.created_by) !== Number(record.mc_id)
+            ? record.created_by_name
+            : null)
+          || record.created_by_name
+          || '-';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: isManagePage ? 'center' : 'flex-start', lineHeight: 1.3 }}>
+            <span>{name}</span>
+            {!record.from_name && record.from_dept ? (
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>{record.from_dept}</span>
+            ) : null}
+          </div>
+        );
+      },
     }]),
     {
       title: isManagePage ? 'PROJECT NO.' : 'Proj. No.',
@@ -674,10 +739,45 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
       sorter: dateSort((record) => record.completed_at || record.activated_at),
       render: (_, record) => (
         <div style={{ lineHeight: 1.35 }}>
-          <div>Activated: {formatWhen(record.activated_at)}</div>
-          <div>Completed: {formatWhen(record.completed_at)}</div>
+          <div>From: {formatWhen(record.activated_at)}</div>
+          <div>To: {formatWhen(record.completed_at)}</div>
         </div>
       ),
+    }] : []),
+    ...(audience === 'mc' ? [{
+      title: isManagePage ? 'LOG REVIEW' : 'Log review',
+      key: 'log_review',
+      align: isManagePage ? 'center' : undefined,
+      width: 160,
+      render: (_, record) => {
+        if (!record.completed_at) return '-';
+        let label = 'Pending';
+        let color = '#8c8c8c';
+        let remark = null;
+        if (record.mc_decision === 'approved') {
+          label = `Approved by ${record.mc_decision_by || 'MC'}`;
+          color = '#52c41a';
+          remark = record.mc_decision_remark;
+        } else if (record.supervisor_decision === 'approved') {
+          label = `Approved by ${record.supervisor_decision_by || 'Supervisor'}`;
+          color = '#52c41a';
+          remark = record.supervisor_decision_remark;
+        } else if (record.mc_decision === 'rejected') {
+          label = `Rejected by ${record.mc_decision_by || 'MC'}`;
+          color = '#ff4d4f';
+          remark = record.mc_decision_remark;
+        } else if (record.supervisor_decision === 'rejected') {
+          label = `Rejected by ${record.supervisor_decision_by || 'Supervisor'}`;
+          color = '#ff4d4f';
+          remark = record.supervisor_decision_remark;
+        }
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <span style={{ color, fontWeight: 600 }}>{label}</span>
+            {remark ? <div style={{ color: '#8c8c8c', fontSize: 12 }}>{remark}</div> : null}
+          </div>
+        );
+      },
     }] : []),
     ...(audience === 'pc' ? [{
       title: isManagePage ? 'SENT AT' : 'Sent at',
@@ -706,8 +806,16 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
       fixed: 'right',
       render: (_, record) => {
         if (isManagePage) {
-          const locked = isLockedStatus(record.status);
+          const locked = isManageRowLocked(record, { audience });
+          const lockReason = record?.activated_at || record?.completed_at
+            ? 'Locked after operator activation'
+            : 'Locked after approval or rejection';
           const canReview = audience === 'mc' && record.status === 'pending' && Number(record.created_by) !== Number(userId);
+          const logSettled = Boolean(record.mc_decision || record.supervisor_decision);
+          const canCompletionReview = audience === 'mc'
+            && Boolean(record.completed_at)
+            && !logSettled
+            && (record.mc_id == null || Number(record.mc_id) === Number(userId));
           if (canReview) {
             return (
               <Space>
@@ -720,9 +828,33 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
               </Space>
             );
           }
+          if (canCompletionReview) {
+            return (
+              <Space>
+                <Tooltip title="Approve log">
+                  <Button type="text" icon={<CheckOutlined />} style={{ color: '#52c41a' }} onClick={() => openCompletionReview(record, 'approved')} />
+                </Tooltip>
+                <Tooltip title="Reject log">
+                  <Button type="text" danger icon={<CloseOutlined />} onClick={() => openCompletionReview(record, 'rejected')} />
+                </Tooltip>
+              </Space>
+            );
+          }
+          if (audience === 'mc' && record.completed_at && logSettled) {
+            return (
+              <Space>
+                <Tooltip title="Already reviewed">
+                  <Button type="text" icon={<CheckOutlined />} disabled />
+                </Tooltip>
+                <Tooltip title="Already reviewed">
+                  <Button type="text" icon={<CloseOutlined />} disabled />
+                </Tooltip>
+              </Space>
+            );
+          }
           return (
             <Space>
-              <Tooltip title={locked ? 'Locked after approval or rejection' : 'Edit'}>
+              <Tooltip title={locked ? lockReason : 'Edit'}>
                 <Button type="text" icon={<EditOutlined />} disabled={locked} onClick={() => openEdit(record)} />
               </Tooltip>
               <Popconfirm
@@ -734,7 +866,7 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
                 okButtonProps={{ danger: true }}
                 disabled={locked}
               >
-                <Tooltip title={locked ? 'Locked after approval or rejection' : 'Delete'}>
+                <Tooltip title={locked ? lockReason : 'Delete'}>
                   <Button type="text" danger icon={<DeleteOutlined />} disabled={locked} />
                 </Tooltip>
               </Popconfirm>
@@ -837,6 +969,11 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        <UrgentJobsPdfDownload
+          rows={filteredRows}
+          rowCount={filteredRows.length}
+          label={audience === 'mc' ? 'MC Right Now Jobs' : 'PC Right Now Jobs'}
+        />
         <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
           Refresh
         </Button>
@@ -858,9 +995,16 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
         }}
         style={{ width: 280 }}
       />
-      <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
-        Refresh
-      </Button>
+      <Space wrap>
+        <UrgentJobsPdfDownload
+          rows={filteredRows}
+          rowCount={filteredRows.length}
+          label="Right Now Jobs"
+        />
+        <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
+          Refresh
+        </Button>
+      </Space>
     </div>
   );
 
@@ -1088,6 +1232,30 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
             rules={review?.status === 'rejected' ? [{ required: true, message: 'Remarks are required to reject' }] : []}
           >
             <TextArea rows={3} placeholder={review?.status === 'rejected' ? 'Reason for rejection' : 'Optional remarks'} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={completionReview?.status === 'approved' ? 'Approve log' : 'Reject log'}
+        open={Boolean(completionReview)}
+        onCancel={() => setCompletionReview(null)}
+        onOk={() => completionForm.submit()}
+        okText={completionReview?.status === 'approved' ? 'Approve' : 'Reject'}
+        okButtonProps={{ danger: completionReview?.status === 'rejected' }}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form form={completionForm} layout="vertical" onFinish={submitCompletionReview}>
+          <Form.Item
+            name="remark"
+            label="Remarks"
+            rules={completionReview?.status === 'rejected' ? [{ required: true, message: 'Remarks are required to reject' }] : []}
+          >
+            <TextArea
+              rows={3}
+              placeholder={completionReview?.status === 'rejected' ? 'Reason for rejection' : 'Optional remarks'}
+            />
           </Form.Item>
         </Form>
       </Modal>

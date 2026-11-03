@@ -1,12 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd';
-import { EyeOutlined, FileOutlined, PaperClipOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Input, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd';
+import { CheckOutlined, CloseOutlined, EyeOutlined, FileOutlined, PaperClipOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 import { api, authFetch } from '../api/client.js';
 import ModelViewer3D from '../ProjectCoordinator Components/PDM Components/ModelViewer3D';
 import { downloadUrgentAttachment } from '../utils/urgentJobDownload.js';
 
 const { Text } = Typography;
+const { TextArea } = Input;
+
+const getUserId = () => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('user') || '{}');
+    return stored.id ?? stored.user_id ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const readError = async (response) => {
+  try {
+    const data = await response.json();
+    if (typeof data.detail === 'string') return data.detail;
+  } catch {
+    // ignore
+  }
+  return 'Request failed';
+};
 
 const machineLabel = (machine) => {
   if (!machine) return '-';
@@ -19,6 +39,29 @@ const sentByName = (row) => (
     ? (row.created_by_name || '-')
     : '-'
 );
+
+const fromDisplay = (row) => {
+  if (row?.from_name) return row.from_name;
+  const sent = sentByName(row);
+  if (sent && sent !== '-') return sent;
+  return row?.created_by_name || '-';
+};
+
+const logReviewInfo = (record) => {
+  if (record.mc_decision === 'approved') {
+    return { label: `Approved by ${record.mc_decision_by || 'MC'}`, color: '#52c41a', remark: record.mc_decision_remark };
+  }
+  if (record.supervisor_decision === 'approved') {
+    return { label: `Approved by ${record.supervisor_decision_by || 'Supervisor'}`, color: '#52c41a', remark: record.supervisor_decision_remark };
+  }
+  if (record.mc_decision === 'rejected') {
+    return { label: `Rejected by ${record.mc_decision_by || 'MC'}`, color: '#ff4d4f', remark: record.mc_decision_remark };
+  }
+  if (record.supervisor_decision === 'rejected') {
+    return { label: `Rejected by ${record.supervisor_decision_by || 'Supervisor'}`, color: '#ff4d4f', remark: record.supervisor_decision_remark };
+  }
+  return { label: 'Pending', color: '#8c8c8c', remark: null };
+};
 
 const formatWhen = (value) => {
   if (!value) return '-';
@@ -69,6 +112,9 @@ const RightNowJobs = () => {
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [attachmentRows, setAttachmentRows] = useState([]);
   const [previewFile, setPreviewFile] = useState(null);
+  const [review, setReview] = useState(null);
+  const [reviewForm] = Form.useForm();
+  const [reviewing, setReviewing] = useState(false);
 
   const loadRows = async () => {
     setLoading(true);
@@ -128,12 +174,55 @@ const RightNowJobs = () => {
         row.machine_name,
         row.operator_name,
         row.from_dept,
+        row.from_name,
         row.to_dept,
         sentByName(row),
         row.mc_name,
+        row.supervisor_decision,
       ].some((value) => String(value || '').toLowerCase().includes(query));
     });
   }, [rows, search, machineFilter]);
+
+  const openReview = (record, status) => {
+    reviewForm.resetFields();
+    setReview({ record, status });
+  };
+
+  const submitReview = async (values) => {
+    const userId = getUserId();
+    if (!userId || !review?.record) {
+      message.error('User not found in session. Please log in again.');
+      return;
+    }
+    if (review.status === 'rejected' && !String(values.remark || '').trim()) {
+      message.error('Remarks are required to reject');
+      return;
+    }
+    setReviewing(true);
+    try {
+      const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${review.record.id}/completion-review`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          user_id: Number(userId),
+          as_role: 'supervisor',
+          status: review.status,
+          remark: values.remark || null,
+        }),
+      });
+      if (!response.ok) {
+        message.error(await readError(response));
+        return;
+      }
+      message.success(review.status === 'approved' ? 'Log approved' : 'Log rejected');
+      setReview(null);
+      await loadRows();
+    } catch {
+      message.error('Failed to submit review');
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const columns = [
     {
@@ -158,9 +247,14 @@ const RightNowJobs = () => {
     { title: 'Description', dataIndex: 'description', align: 'center', ellipsis: true, render: (value) => value || '-' },
     { title: 'Operator', dataIndex: 'operator_name', align: 'center', sorter: textSort((row) => row.operator_name), render: (value) => value || '-' },
     { title: 'Machine', dataIndex: 'machine_name', align: 'center', sorter: textSort((row) => row.machine_name), render: (value) => value || '-' },
-    { title: 'From', dataIndex: 'from_dept', align: 'center', render: (value) => value || '-' },
-    { title: 'Dept', dataIndex: 'to_dept', align: 'center', render: (value) => value || '-' },
-    { title: 'Sent by', key: 'sent_by', align: 'center', render: (_, record) => sentByName(record) },
+    { title: 'Center', dataIndex: 'from_dept', align: 'center', render: (value) => value || '-' },
+    {
+      title: 'From',
+      key: 'from',
+      align: 'center',
+      sorter: textSort((row) => fromDisplay(row)),
+      render: (_, record) => fromDisplay(record),
+    },
     { title: 'Assigned by', dataIndex: 'mc_name', align: 'center', render: (value) => value || '-' },
     {
       title: 'Files',
@@ -185,8 +279,66 @@ const RightNowJobs = () => {
         );
       },
     },
-    { title: 'Activated at', dataIndex: 'activated_at', align: 'center', width: 170, sorter: dateSort((row) => row.activated_at), render: (value) => formatWhen(value) },
-    { title: 'Completed at', dataIndex: 'completed_at', align: 'center', width: 170, sorter: dateSort((row) => row.completed_at), render: (value) => formatWhen(value) },
+    {
+      title: 'Duration',
+      key: 'duration',
+      align: 'center',
+      width: 220,
+      sorter: dateSort((row) => row.completed_at || row.activated_at),
+      render: (_, record) => (
+        <div style={{ lineHeight: 1.35 }}>
+          <div>From: {formatWhen(record.activated_at)}</div>
+          <div>To: {formatWhen(record.completed_at)}</div>
+        </div>
+      ),
+    },
+    {
+      title: 'Log review',
+      key: 'log_review',
+      align: 'center',
+      width: 160,
+      render: (_, record) => {
+        const info = logReviewInfo(record);
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <span style={{ color: info.color, fontWeight: 600 }}>{info.label}</span>
+            {info.remark ? <div style={{ color: '#8c8c8c', fontSize: 12 }}>{info.remark}</div> : null}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      align: 'center',
+      width: 120,
+      fixed: 'right',
+      render: (_, record) => {
+        const settled = Boolean(record.supervisor_decision || record.mc_decision);
+        return (
+          <Space>
+            <Tooltip title={settled ? 'Already reviewed' : 'Approve'}>
+              <Button
+                type="text"
+                icon={<CheckOutlined />}
+                style={settled ? undefined : { color: '#52c41a' }}
+                disabled={settled}
+                onClick={() => openReview(record, 'approved')}
+              />
+            </Tooltip>
+            <Tooltip title={settled ? 'Already reviewed' : 'Reject'}>
+              <Button
+                type="text"
+                danger={!settled}
+                icon={<CloseOutlined />}
+                disabled={settled}
+                onClick={() => openReview(record, 'rejected')}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
+    },
   ];
 
   const previewKind = String(previewFile?.file_type || '').toLowerCase();
@@ -248,6 +400,30 @@ const RightNowJobs = () => {
           }}
         />
       </Card>
+
+      <Modal
+        title={review?.status === 'approved' ? 'Approve log' : 'Reject log'}
+        open={Boolean(review)}
+        onCancel={() => setReview(null)}
+        onOk={() => reviewForm.submit()}
+        confirmLoading={reviewing}
+        okText={review?.status === 'approved' ? 'Approve' : 'Reject'}
+        okButtonProps={{ danger: review?.status === 'rejected' }}
+        destroyOnClose
+      >
+        <Form form={reviewForm} layout="vertical" onFinish={submitReview}>
+          <Form.Item
+            name="remark"
+            label="Remarks"
+            rules={review?.status === 'rejected' ? [{ required: true, message: 'Remarks are required to reject' }] : []}
+          >
+            <TextArea
+              rows={3}
+              placeholder={review?.status === 'rejected' ? 'Reason for rejection' : 'Optional remarks'}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="Attachments"

@@ -11,6 +11,7 @@ import { api, authFetch, readStoredUser } from '../api/client.js';
 import { API_BASE_URL } from '../Config/auth.js';
 import ModelViewer3D from './PDM Components/ModelViewer3D';
 import { downloadUrgentAttachment } from '../Utils/urgentJobDownload.js';
+import UrgentJobsPdfDownload from '../DownloadReports/UrgentJobsPdfDownload.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -773,6 +774,11 @@ const UrgentJobs = ({ audience = 'pc', onUnreadCountChange }) => {
         />
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        <UrgentJobsPdfDownload
+          rows={filteredRows}
+          rowCount={filteredRows.length}
+          label="PC Right Now Jobs"
+        />
         <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
           Refresh
         </Button>
@@ -794,9 +800,16 @@ const UrgentJobs = ({ audience = 'pc', onUnreadCountChange }) => {
         }}
         style={{ width: 280 }}
       />
-      <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
-        Refresh
-      </Button>
+      <Space wrap>
+        <UrgentJobsPdfDownload
+          rows={filteredRows}
+          rowCount={filteredRows.length}
+          label="Right Now Jobs"
+        />
+        <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
+          Refresh
+        </Button>
+      </Space>
     </div>
   );
 

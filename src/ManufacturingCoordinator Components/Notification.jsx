@@ -159,7 +159,9 @@ const Notification = () => {
         urgentJobs: Array.isArray(urgentJobs)
           ? urgentJobs.filter((row) => {
               const userId = user?.id ?? user?.user_id;
-              if (row.completed_at && Number(row.mc_id) === Number(userId)) return !row.mc_completion_ack;
+              if (row.completed_at && (row.mc_id == null || Number(row.mc_id) === Number(userId))) {
+                return !(row.mc_decision || row.supervisor_decision);
+              }
               if (row.mc_ack) return false;
               if (Number(row.created_by) === Number(userId)) return false;
               return row.mc_id == null || Number(row.created_by) !== Number(row.mc_id);
@@ -272,22 +274,39 @@ const Notification = () => {
           const itemsRes = await authFetch(`${config.API_BASE_URL}/urgent-job-indents/?for_mc_id=${userId}`);
           const items = itemsRes.ok ? await itemsRes.json() : [];
           const pending = (items || []).filter((row) => {
-            if (row.completed_at && Number(row.mc_id) === Number(userId)) return !row.mc_completion_ack;
+            if (row.completed_at && (row.mc_id == null || Number(row.mc_id) === Number(userId))) {
+              return !(row.mc_decision || row.supervisor_decision);
+            }
             if (row.mc_ack) return false;
             if (Number(row.created_by) === Number(userId)) return false;
             return row.mc_id == null || Number(row.created_by) !== Number(row.mc_id);
           });
           await Promise.all(
-            pending.map((row) =>
-              authFetch(`${config.API_BASE_URL}/urgent-job-indents/${row.id}/acknowledge`, {
+            pending.map((row) => {
+              const isCompletion = Boolean(row.completed_at) && (
+                row.mc_id == null || Number(row.mc_id) === Number(userId)
+              );
+              if (isCompletion) {
+                return authFetch(`${config.API_BASE_URL}/urgent-job-indents/${row.id}/completion-review`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_id: userId,
+                    as_role: 'mc',
+                    status: 'approved',
+                    remark: null,
+                  }),
+                });
+              }
+              return authFetch(`${config.API_BASE_URL}/urgent-job-indents/${row.id}/acknowledge`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   user_id: userId,
-                  as_role: row.completed_at && Number(row.mc_id) === Number(userId) ? 'mc_completion' : 'mc',
+                  as_role: 'mc',
                 }),
-              }),
-            ),
+              });
+            }),
           );
           total += pending.length;
         }

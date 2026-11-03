@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Select, Space, Table, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, DatePicker, Form, Input, Modal, Select, Space, Table, Tooltip, Typography, Upload, message } from 'antd';
 import {
   CheckOutlined, EyeOutlined, FileOutlined, PaperClipOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, UploadOutlined,
 } from '@ant-design/icons';
@@ -7,7 +7,9 @@ import { API_BASE_URL } from '../Config/auth.js';
 import { api, authFetch } from '../api/client.js';
 import ModelViewer3D from '../ProjectCoordinator Components/PDM Components/ModelViewer3D';
 import DocumentPreviewer from './Document Components/DocumentPreviewer';
-import { downloadUrgentAttachment } from '../Utils/urgentJobDownload.js';
+import UrgentJobsPdfDownload from '../DownloadReports/UrgentJobsPdfDownload.jsx';
+
+const { RangePicker } = DatePicker;
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -69,7 +71,30 @@ const isFromPc = (row) => (
 );
 
 const sentByName = (row) => (isFromPc(row) ? (row.created_by_name || '-') : '-');
+const fromDisplay = (row) => {
+  if (row?.from_name) return row.from_name;
+  const sent = sentByName(row);
+  if (sent && sent !== '-') return sent;
+  return row?.created_by_name || '-';
+};
 const assignedByName = (row) => row?.mc_name || '-';
+
+const logReviewInfo = (record) => {
+  if (!record?.completed_at) return null;
+  if (record.mc_decision === 'approved') {
+    return { label: `Approved by ${record.mc_decision_by || 'MC'}`, color: '#52c41a', remark: record.mc_decision_remark };
+  }
+  if (record.supervisor_decision === 'approved') {
+    return { label: `Approved by ${record.supervisor_decision_by || 'Supervisor'}`, color: '#52c41a', remark: record.supervisor_decision_remark };
+  }
+  if (record.mc_decision === 'rejected') {
+    return { label: `Rejected by ${record.mc_decision_by || 'MC'}`, color: '#ff4d4f', remark: record.mc_decision_remark };
+  }
+  if (record.supervisor_decision === 'rejected') {
+    return { label: `Rejected by ${record.supervisor_decision_by || 'Supervisor'}`, color: '#ff4d4f', remark: record.supervisor_decision_remark };
+  }
+  return { label: 'Pending', color: '#8c8c8c', remark: null };
+};
 
 const textSort = (pick) => (a, b) =>
   String(pick(a) || '').localeCompare(String(pick(b) || ''), undefined, { sensitivity: 'base' });
@@ -201,6 +226,7 @@ const RightNowJobs = () => {
         row.description,
         row.machine_name,
         row.from_dept,
+        row.from_name,
         row.to_dept,
         sentByName(row),
         assignedByName(row),
@@ -233,10 +259,13 @@ const RightNowJobs = () => {
           project_name: values.proj_name,
           description: values.description,
           from_dept: values.center || getOperatorCenter() || null,
+          from_name: values.from_name || null,
           to_dept: null,
           machine_id: values.machine_id,
           workcenter_id: selected?.work_center_id || null,
           work_done: true,
+          activated_at: values.duration?.[0] ? values.duration[0].format('YYYY-MM-DDTHH:mm:ss') : null,
+          completed_at: values.duration?.[1] ? values.duration[1].format('YYYY-MM-DDTHH:mm:ss') : null,
         }),
       });
       if (!response.ok) {
@@ -336,11 +365,11 @@ const RightNowJobs = () => {
       render: (value) => value || '-',
     },
     {
-      title: 'Sent by',
-      key: 'sent_by',
+      title: 'From',
+      key: 'from',
       align: 'center',
-      sorter: textSort(sentByName),
-      render: (_, record) => sentByName(record),
+      sorter: textSort((row) => fromDisplay(row)),
+      render: (_, record) => fromDisplay(record),
     },
     {
       title: 'Assigned by',
@@ -382,22 +411,33 @@ const RightNowJobs = () => {
       },
     },
     {
-      title: 'Activated at',
-      dataIndex: 'activated_at',
-      key: 'activated_at',
+      title: 'Duration',
+      key: 'duration',
       align: 'center',
-      width: 170,
-      sorter: dateSort((row) => row.activated_at),
-      render: (value) => formatWhen(value),
+      width: 220,
+      sorter: dateSort((row) => row.completed_at || row.activated_at),
+      render: (_, record) => (
+        <div style={{ lineHeight: 1.35 }}>
+          <div>From: {formatWhen(record.activated_at)}</div>
+          <div>To: {formatWhen(record.completed_at)}</div>
+        </div>
+      ),
     },
     {
-      title: 'Completed at',
-      dataIndex: 'completed_at',
-      key: 'completed_at',
+      title: 'Log review',
+      key: 'log_review',
       align: 'center',
-      width: 170,
-      sorter: dateSort((row) => row.completed_at),
-      render: (value) => formatWhen(value),
+      width: 160,
+      render: (_, record) => {
+        const info = logReviewInfo(record);
+        if (!info) return '-';
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <span style={{ color: info.color, fontWeight: 600 }}>{info.label}</span>
+            {info.remark ? <div style={{ color: '#8c8c8c', fontSize: 12 }}>{info.remark}</div> : null}
+          </div>
+        );
+      },
     },
     {
       title: 'Action',
@@ -468,7 +508,12 @@ const RightNowJobs = () => {
               maxTagCount="responsive"
             />
           </Space>
-          <Space>
+          <Space wrap>
+            <UrgentJobsPdfDownload
+              rows={filteredRows}
+              rowCount={filteredRows.length}
+              label="Operator Right Now Jobs"
+            />
             <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>
               Refresh
             </Button>
@@ -523,14 +568,9 @@ const RightNowJobs = () => {
                       </Text>
                     </div>
                   </Space>
-                  <Space>
-                    <Tooltip title="Preview">
-                      <Button type="text" icon={<EyeOutlined />} onClick={() => setPreviewFile(attachment)} />
-                    </Tooltip>
-                    <Button type="link" onClick={() => downloadUrgentAttachment(attachment)}>
-                      Download
-                    </Button>
-                  </Space>
+                  <Tooltip title="Preview">
+                    <Button type="text" icon={<EyeOutlined />} onClick={() => setPreviewFile(attachment)} />
+                  </Tooltip>
                 </div>
               </Card>
             ))}
@@ -543,9 +583,6 @@ const RightNowJobs = () => {
         open={Boolean(previewFile)}
         onCancel={() => setPreviewFile(null)}
         footer={[
-          <Button key="download" type="primary" onClick={() => downloadUrgentAttachment(previewFile)}>
-            Download
-          </Button>,
           <Button key="close" onClick={() => setPreviewFile(null)}>Close</Button>,
         ]}
         width="90%"
@@ -572,7 +609,7 @@ const RightNowJobs = () => {
               height="100%"
             />
           ) : (
-            <p>Preview is not available for this file type. Download to open the file.</p>
+            <p>Preview is not available for this file type.</p>
           )}
         </div>
       </Modal>
@@ -598,8 +635,16 @@ const RightNowJobs = () => {
                   <Input disabled autoComplete="off" />
                 </Form.Item>
                 <div style={{ fontWeight: 700, marginBottom: 8 }}>Center</div>
-                <Form.Item name="center" style={{ marginBottom: 0 }}>
+                <Form.Item name="center" style={{ marginBottom: 8 }}>
                   <Input disabled autoComplete="off" />
+                </Form.Item>
+                <Form.Item
+                  name="from_name"
+                  label={<span style={{ fontWeight: 700 }}>From</span>}
+                  style={{ marginBottom: 0 }}
+                  rules={[{ required: true, message: 'Enter MC or PC name' }]}
+                >
+                  <Input placeholder="MC or PC name" autoComplete="off" />
                 </Form.Item>
               </div>
               <div style={{ ...slipCell, borderRight: 'none' }}>
@@ -640,28 +685,59 @@ const RightNowJobs = () => {
                   placeholder="Enter the work done. Attach photos, a document, or a PDF below."
                 />
               </Form.Item>
-              <Form.Item label="Photos, documents or PDF" style={{ marginBottom: 0 }}>
-                <Upload
-                  multiple
-                  fileList={workFiles}
-                  beforeUpload={() => false}
-                  accept={WORK_EXT.join(',')}
-                  onChange={({ fileList }) => {
-                    const next = [];
-                    let rejected = false;
-                    fileList.forEach((file) => {
-                      const name = String(file.name || '').toLowerCase();
-                      if (WORK_EXT.some((ext) => name.endsWith(ext))) next.push(file);
-                      else rejected = true;
-                    });
-                    if (rejected) message.error('Only photos, PDF, DOC and DOCX files are allowed');
-                    setWorkFiles(next);
-                  }}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+                <Form.Item
+                  name="duration"
+                  label={<span style={{ fontWeight: 700 }}>Duration</span>}
+                  style={{ marginBottom: 0, width: 340, maxWidth: '100%' }}
+                  rules={[
+                    { required: true, message: 'Select start and end time' },
+                    {
+                      validator: (_, value) => {
+                        if (!value?.[0] || !value?.[1]) return Promise.reject(new Error('Select start and end time'));
+                        if (value[1].isBefore(value[0])) return Promise.reject(new Error('End time must be after start time'));
+                        return Promise.resolve();
+                      },
+                    },
+                  ]}
                 >
-                  <Button icon={<UploadOutlined />}>Upload files</Button>
-                </Upload>
-                <Text type="secondary" style={{ fontSize: 12 }}>PNG, JPG, WEBP, PDF, DOC, DOCX</Text>
-              </Form.Item>
+                  <RangePicker
+                    showTime
+                    format="DD/MM/YYYY HH:mm:ss"
+                    style={{ width: 340, maxWidth: '100%' }}
+                    placeholder={['Start Time', 'End Time']}
+                  />
+                </Form.Item>
+                <div style={{ minWidth: 180 }}>
+                  <Form.Item
+                    label={<span style={{ fontWeight: 700 }}>Upload</span>}
+                    style={{ marginBottom: 4 }}
+                  >
+                    <Upload
+                      multiple
+                      fileList={workFiles}
+                      beforeUpload={() => false}
+                      accept={WORK_EXT.join(',')}
+                      onChange={({ fileList }) => {
+                        const next = [];
+                        let rejected = false;
+                        fileList.forEach((file) => {
+                          const name = String(file.name || '').toLowerCase();
+                          if (WORK_EXT.some((ext) => name.endsWith(ext))) next.push(file);
+                          else rejected = true;
+                        });
+                        if (rejected) message.error('Only photos, PDF, DOC and DOCX files are allowed');
+                        setWorkFiles(next);
+                      }}
+                    >
+                      <Button icon={<UploadOutlined />}>Upload</Button>
+                    </Upload>
+                  </Form.Item>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    PNG, JPG, WEBP, PDF, DOC, DOCX
+                  </Text>
+                </div>
+              </div>
             </div>
           </div>
         </Form>
