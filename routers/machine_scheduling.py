@@ -115,11 +115,11 @@ def _check_part_has_2d_drawing(part_id: int, db: Session) -> tuple[bool, str]:
         (has_2d, message): Tuple where has_2d is True if 2D drawing exists,
                           and message explains the status.
     
-    Logic:
-        - If part has 2D drawing (any of: 2D, 2d, 2D Drawing, drawing) → allow
-        - If part has both 2D and 3D → allow
-        - If part has only 3D (no 2D) → block
-        - If part has no documents → block
+    Logic (informational only — activation is not gated on 2D drawing):
+        - If part has 2D drawing (any of: 2D, 2d, 2D Drawing, drawing) → has_2d True
+        - If part has both 2D and 3D → has_2d True
+        - If part has only 3D (no 2D) → has_2d False
+        - If part has no documents → has_2d False
     """
     # Get all documents for this part
     documents = db.query(Document).filter(
@@ -147,9 +147,9 @@ def _check_part_has_2d_drawing(part_id: int, db: Session) -> tuple[bool, str]:
     if has_2d:
         return True, "2D drawing available"
     elif has_3d and not has_2d:
-        return False, "Only 3D model uploaded. 2D drawing is required for activation"
+        return False, "Only 3D model uploaded; no 2D drawing (optional for activation)"
     else:
-        return False, "No 2D drawing uploaded for this part"
+        return False, "No 2D drawing uploaded for this part (optional for activation)"
 
 
 _OPEN_PRODUCTION_LOG_STATUSES = ("pending", "inprogress", "rework", "rejected")
@@ -963,16 +963,16 @@ def set_order_status(
         all_inhouse_parts = parts
 
     # -----------------------------
-    # Check 2D drawing availability for ALL in-house parts
+    # 2D drawing status (informational only — does NOT gate activation)
+    # Activation requires raw material only; 2D drawing is optional.
     # -----------------------------
     if status == "active":
         parts_with_2d_drawing = []
         parts_without_2d_drawing = []
         parts_drawing_status = {}  # Store drawing status for each part
         
-        print(f"[DEBUG] 2D drawing check for Order {sale_order_id}: checking {len(all_inhouse_parts)} parts")
+        print(f"[DEBUG] 2D drawing check (informational) for Order {sale_order_id}: checking {len(all_inhouse_parts)} parts")
         
-        # Check ALL in-house parts for 2D drawing status
         for part in all_inhouse_parts:
             has_2d, drawing_message = _check_part_has_2d_drawing(part.id, db)
             parts_drawing_status[part.id] = {
@@ -989,9 +989,8 @@ def set_order_status(
         
         print(f"[DEBUG] 2D drawing summary for Order {sale_order_id}: {len(parts_with_2d_drawing)} parts with 2D drawings, {len(parts_without_2d_drawing)} parts without 2D drawings")
         
-        # Only activate parts that have both raw material AND 2D drawing
-        # Filter parts_with_raw_material to only those that also have 2D drawing
-        parts = [p for p in parts_with_raw_material if p in parts_with_2d_drawing]
+        # Activate based on raw material only (2D drawing optional)
+        parts = parts_with_raw_material
     else:
         parts_drawing_status = {}
 
@@ -1155,11 +1154,11 @@ def set_order_status(
     # Prepare detailed response
     if status == "active":
         if len(parts) == 0:
-            message = f"No parts of Order {sale_order_id} could be activated - parts missing required pre-requisites (raw material or 2D drawing)"
-        elif len(parts_without_2d_drawing) == 0 and len(parts_without_raw_material) == 0:
+            message = f"No parts of Order {sale_order_id} could be activated - parts missing required raw material"
+        elif len(parts_without_raw_material) == 0:
             message = f"All in-house parts of Order {sale_order_id} set to active"
         else:
-            message = f"Order {sale_order_id} partially activated - {len(parts)} of {len(all_inhouse_parts)} parts activated (require both raw material and 2D drawing)"
+            message = f"Order {sale_order_id} partially activated - {len(parts)} of {len(all_inhouse_parts)} parts activated (require raw material; 2D drawing optional)"
     else:
         message = f"In-house parts of Order {sale_order_id} set to {status}"
     
@@ -1176,38 +1175,29 @@ def set_order_status(
     
     # Add detailed information for active status
     if status == "active":
-        # Add activated parts details (parts that passed both checks)
+        # Add activated parts details (raw material linked; 2D drawing optional)
         for part in parts:
+            has_2d = parts_drawing_status.get(part.id, {}).get("has_2d", False)
             response_data["activated_parts"].append({
                 "part_id": part.id,
                 "part_number": part.part_number,
                 "part_name": part.part_name,
-                "status": "activated (raw materials and 2D drawing available)"
+                "status": (
+                    "activated (raw material linked; 2D drawing available)"
+                    if has_2d
+                    else "activated (raw material linked; 2D drawing optional/not uploaded)"
+                ),
             })
         
-        # Add skipped parts details (parts that failed either check)
+        # Add skipped parts details (missing raw material only)
         for part in all_inhouse_parts:
             if part not in parts:
-                # Determine the reason for skipping
-                has_rm = part in parts_with_raw_material
-                has_2d = parts_drawing_status.get(part.id, {}).get("has_2d", False)
-                drawing_msg = parts_drawing_status.get(part.id, {}).get("message", "Unknown")
-                
-                if not has_rm and not has_2d:
-                    reason = "Missing both raw material and 2D drawing"
-                elif not has_rm and has_2d:
-                    reason = "Has 2D drawing but missing raw material. Link raw material first, then activate the part."
-                elif has_rm and not has_2d:
-                    reason = drawing_msg
-                else:
-                    reason = "Unknown reason"
-                
                 response_data["skipped_parts"].append({
                     "part_id": part.id,
                     "part_number": part.part_number,
                     "part_name": part.part_name,
                     "status": "not activated",
-                    "reason": reason
+                    "reason": "Missing raw material. Link raw material first, then activate the part.",
                 })
         
         # Add raw material summary
@@ -1215,15 +1205,15 @@ def set_order_status(
             "total_inhouse_parts": len(all_inhouse_parts),
             "parts_with_raw_materials": len(parts_with_raw_material),
             "parts_without_raw_materials": len(parts_without_raw_material),
-            "note": "Raw material check completed"
+            "note": "Raw material is required for activation"
         }
         
-        # Add drawing summary
+        # Add drawing summary (informational only)
         response_data["drawing_summary"] = {
             "total_inhouse_parts": len(all_inhouse_parts),
             "parts_with_2d_drawings": len(parts_with_2d_drawing),
             "parts_without_2d_drawings": len(parts_without_2d_drawing),
-            "note": "2D drawing check completed. Parts require at least one 2D drawing (types: 2D, 2d, 2D Drawing, drawing) for activation"
+            "note": "2D drawing is optional for activation (informational only)"
         }
     
     return response_data
@@ -1511,7 +1501,7 @@ def update_part_status(
         #     ... in-progress deactivation block ...
 
     # ----------------------------
-    # Check pre-requisites for activation (raw material and 2D drawing)
+    # Check pre-requisites for activation (raw material required; 2D drawing optional)
     # ----------------------------
     raw_material_status = "No Raw Material Assigned"
     raw_material_available = False
@@ -1540,7 +1530,7 @@ def update_part_status(
         else:
             raw_material_status = "Raw Material Not Linked"
         
-        # Check 2D drawing availability
+        # 2D drawing status (informational only — does NOT gate activation)
         has_2d, drawing_message = _check_part_has_2d_drawing(part_id, db)
         
         print(f"[DEBUG] 2D drawing query result for Part {part_id}: {'FOUND' if has_2d else 'NOT FOUND'} - {drawing_message}")
@@ -1551,21 +1541,12 @@ def update_part_status(
         else:
             drawing_status = "2D Drawing Not Available"
         
-        # Determine if activation should proceed
-        if not raw_material_available or not drawing_available:
-            # Build comprehensive error message
-            missing_items = []
-            if not raw_material_available:
-                missing_items.append("raw material")
-            if not drawing_available:
-                missing_items.append("2D drawing")
-            
-            missing_str = " and ".join(missing_items)
-            
-            print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION BLOCKED: Missing {missing_str}")
+        # Block activation only when raw material is missing (2D drawing optional)
+        if not raw_material_available:
+            print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION BLOCKED: Missing raw material")
             
             return {
-                "message": f"Cannot activate this part. Missing {missing_str}.",
+                "message": "Cannot activate this part. Missing raw material.",
                 "sale_order_id": sale_order_id,
                 "part_id": part_id,
                 "part_name": part.part_name,
@@ -1577,10 +1558,10 @@ def update_part_status(
                 "raw_material_status": raw_material_status,
                 "drawing_status": drawing_status,
                 "drawing_message": drawing_message,
-                "note": f"Part requires both raw material and 2D drawing for activation. Current status: {raw_material_status}, {drawing_status}"
+                "note": f"Part requires raw material for activation (2D drawing optional). Current status: {raw_material_status}, {drawing_status}"
             }
         
-        print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION ALLOWED: All pre-requisites met")
+        print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION ALLOWED: Raw material linked (2D drawing optional)")
 
     # ----------------------------
     # Existing status record?
