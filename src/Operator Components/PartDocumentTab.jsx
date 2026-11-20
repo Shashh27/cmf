@@ -163,13 +163,14 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // The ONLY check for whether this operation is active:
-  // 1. The API already returned status IN-PROGRESS for this job, OR
-  // 2. The user just clicked Activate in this session (justActivated flag)
-  const canActivateNow = selectedJob?.can_activate === true && !isJobReviewCompleted(selectedJob, effectiveStats);
-  const effectivelyActivated =
-    justActivated ||
-    (!canActivateNow && (isActivated || isJobReviewInProgress(selectedJob, effectiveStats)));
+  // Open working run = operator activated and has not submitted yet.
+  // status=inprogress alone can mean rework/remaining after review — Activate must stay available then.
+  const openWorking = Boolean(effectiveStats?.openWorking) || justActivated;
+  const canActivateNow =
+    !openWorking
+    && !isJobReviewCompleted(selectedJob, effectiveStats)
+    && selectedJob?.can_activate !== false;
+  const effectivelyActivated = openWorking;
   const isActivationBlocked = Array.isArray(selectedJob?.blocked_by) && selectedJob.blocked_by.length > 0;
   const activationBlockReason = selectedJob?.block_reason || 'This operation cannot be activated until prior operations are completed.';
 

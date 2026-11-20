@@ -39,6 +39,7 @@ const EMPTY_PRODUCTION_STATS = {
   hasRework: false,
   reworkRemarks: '',
   reviewStatus: null,
+  openWorking: false,
   activationTime: null,
   remainingToClose: null,
   reworkDue: 0,
@@ -57,6 +58,10 @@ const buildProductionStatsFromLogs = (logs) => {
   const totalApprovedSum = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
   const totalRejectedSum = logs.reduce((sum, log) => sum + (log.rejected_quantity || 0), 0);
 
+  const openWorking = Boolean(
+    String(latestLog.operator_status || '').toLowerCase() === 'inprogress'
+    && !latestLog.to_time
+  );
   return {
     totalProduced: totalProducedSum,
     totalRework: totalReworkSum,
@@ -71,6 +76,7 @@ const buildProductionStatsFromLogs = (logs) => {
     hasRework: Number(latestLog.rework_due || latestLog.rework_quantity || 0) > 0 || (latestLog.reject_due || 0) > 0,
     reworkRemarks: latestLog.remarks || '',
     reviewStatus: latestLog.status,
+    openWorking,
     activationTime: latestLog.from_date && latestLog.from_time
       ? `${latestLog.from_date} ${latestLog.from_time}`
       : null,
@@ -365,12 +371,35 @@ const Dashboard = () => {
           localStorage.setItem('isActivated', JSON.stringify(running));
         } else if (job) {
           stats.remainingToClose = getJobRemainingQty(job, stats);
+          const latest = logs.length
+            ? [...logs].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0]
+            : null;
+          const openWorking = Boolean(stats.openWorking);
+          const hasRemainingWork = Number(stats.remainingToClose ?? stats.reworkDue ?? 0) > 0
+            || Number(latest?.rework_quantity || 0) > 0
+            || Number(latest?.remaining_quantity_to_be_produced ?? latest?.remaining_to_close ?? 0) > 0
+            || String(latest?.status || '').toLowerCase() === 'inprogress';
+          const reviewStatus = openWorking
+            ? 'inprogress'
+            : (hasRemainingWork ? 'inprogress' : (latest?.status || job.operation_status || 'pending'));
+          stats.reviewStatus = reviewStatus;
+          setSelectedJob((prev) => {
+            if (!prev || getJobOperationId(prev) !== getJobOperationId(job)) return prev;
+            const next = {
+              ...prev,
+              status: reviewStatus,
+              operation_status: hasRemainingWork || openWorking ? 'inprogress' : (job.operation_status || prev.operation_status),
+              // After review with rework: allow Activate again (not an open working run).
+              can_activate: openWorking ? false : true,
+            };
+            localStorage.setItem('selectedJob', JSON.stringify(next));
+            return next;
+          });
+          // Only an unsubmitted active run locks Activate.
+          setIsActivated(openWorking);
+          localStorage.setItem('isActivated', JSON.stringify(openWorking));
         }
         setProductionStats(stats);
-
-        if (job && !isUnitWiseJob(job) && isJobReviewInProgress(job, stats)) {
-          setIsActivated(true);
-        }
       } else {
         setProductionStats({ ...EMPTY_PRODUCTION_STATS });
       }
@@ -914,15 +943,16 @@ const Dashboard = () => {
         currentSelectedJob={selectedJob}
         onSelectJob={(job) => {
           setSelectedJob(job);
-          const isJobActivated = job.can_activate === false && isJobReviewInProgress(job);
-          setIsActivated(isJobActivated);
+          // Tentative; fetchReworkData confirms open working vs rework-due.
+          const isJobActivated = job.can_activate === false && !job.block_reason;
+          setIsActivated(Boolean(isJobActivated));
           setShowSelectJob(false);
           fetchReworkData(job);
           if (job.sale_order_id) {
             fetchOrderDetails(job.sale_order_id);
           }
           localStorage.setItem('selectedJob', JSON.stringify(job));
-          localStorage.setItem('isActivated', JSON.stringify(isJobActivated));
+          localStorage.setItem('isActivated', JSON.stringify(Boolean(isJobActivated)));
         }}
       />
 
