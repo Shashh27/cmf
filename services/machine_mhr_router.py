@@ -5,6 +5,7 @@ from sqlalchemy import text
 from typing import List, Optional
 
 from DB.database import get_db
+from DB.models.access_control import AccessUser
 from DB.models.configuration import Machine as MachineModel, MHRParticular, MachineMHRValue
 from DB.schemas.configuration import (
     MachineMHRResponse,
@@ -13,9 +14,23 @@ from DB.schemas.configuration import (
     MachineMHRValueWithDetails,
     MHRParticular as MHRParticularSchema,
 )
+from auth.deps import get_current_user
 from .machine_mhr_service import recalculate_machine_mhr
 
 router = APIRouter(prefix="/machines/{machine_id}/mhr", tags=["machine-mhr"])
+
+
+def _resolve_actor_id(
+    current_user: AccessUser,
+    user_id: Optional[int] = None,
+) -> int:
+    """Prefer JWT user; allow legacy query user_id only when it matches the token."""
+    if user_id is not None and user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user_id does not match the authenticated user",
+        )
+    return current_user.id
 
 
 @router.get("", response_model=MachineMHRResponse)
@@ -86,9 +101,12 @@ def upsert_mhr_values(
     machine_id: int,
     payload: List[MHRValueUpdate],
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
     user_id: Optional[int] = Query(None),
 ):
     """Bulk update input_value for one or more particulars, then recalculate."""
+    actor_id = _resolve_actor_id(current_user, user_id)
+
     # Check machine exists
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
@@ -103,10 +121,19 @@ def upsert_mhr_values(
             (machine_id, particular_id, input_value, updated_by, is_applicable)
             VALUES (:mid, :pid, :val, :uid, true)
             ON CONFLICT (machine_id, particular_id)
-            DO UPDATE SET input_value = :val, updated_by = :uid, updated_at = now()
-        """), {"mid": machine_id, "pid": item.particular_id, "val": item.value, "uid": user_id})
+            DO UPDATE SET
+                input_value = EXCLUDED.input_value,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = now()
+        """), {"mid": machine_id, "pid": item.particular_id, "val": item.value, "uid": actor_id})
     db.commit()
-    result = recalculate_machine_mhr(db, machine_id, user_id)
+    try:
+        result = recalculate_machine_mhr(db, machine_id, actor_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     return {"context": result, "final_mhr": result.get("MHR")}
 
 
@@ -116,9 +143,12 @@ def toggle_applicable(
     particular_id: int,
     is_applicable: bool,
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
     user_id: Optional[int] = Query(None),
 ):
     """Turn a row on/off for this specific machine."""
+    actor_id = _resolve_actor_id(current_user, user_id)
+
     # Check machine exists
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
@@ -143,13 +173,13 @@ def toggle_applicable(
 
     if existing:
         existing.is_applicable = is_applicable
-        existing.updated_by = user_id
+        existing.updated_by = actor_id
     else:
         new_value = MachineMHRValue(
             machine_id=machine_id,
             particular_id=particular_id,
             is_applicable=is_applicable,
-            updated_by=user_id
+            updated_by=actor_id
         )
         db.add(new_value)
 
@@ -162,9 +192,12 @@ def add_particular_to_machine(
     machine_id: int,
     particular_id: int,
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
     user_id: Optional[int] = Query(None),
 ):
     """Add a particular to a machine."""
+    actor_id = _resolve_actor_id(current_user, user_id)
+
     # Check machine exists
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
@@ -197,7 +230,7 @@ def add_particular_to_machine(
         machine_id=machine_id,
         particular_id=particular_id,
         is_applicable=True,
-        updated_by=user_id
+        updated_by=actor_id
     )
     db.add(new_value)
     db.commit()
@@ -209,9 +242,12 @@ def remove_particular_from_machine(
     machine_id: int,
     particular_id: int,
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
     user_id: Optional[int] = Query(None),
 ):
     """Remove a particular from a machine."""
+    _resolve_actor_id(current_user, user_id)
+
     # Check machine exists
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
@@ -260,9 +296,12 @@ def update_recommended_mhr(
     machine_id: int,
     recommended_mhr: int,
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
     user_id: Optional[int] = Query(None),
 ):
     """Update the human-adjusted recommended MHR."""
+    actor_id = _resolve_actor_id(current_user, user_id)
+
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
         raise HTTPException(
@@ -271,6 +310,6 @@ def update_recommended_mhr(
         )
 
     machine.recommended_mhr = recommended_mhr
-    machine.mhr_updated_by = user_id
+    machine.mhr_updated_by = actor_id
     db.commit()
     return {"message": "Recommended MHR updated successfully", "recommended_mhr": recommended_mhr}

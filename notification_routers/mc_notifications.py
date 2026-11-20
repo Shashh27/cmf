@@ -92,6 +92,14 @@ def get_mc_notifications(
     if part_ids:
         parts_query = db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
         parts = {p.id: p for p in parts_query}
+
+    uploader_ids = [d.user_id for d in documents.values() if d.user_id]
+    uploaders = {}
+    if uploader_ids:
+        uploaders = {
+            u.id: u
+            for u in db.query(AccessUserModel).filter(AccessUserModel.id.in_(uploader_ids)).all()
+        }
     
     # Build result with enriched details
     result = []
@@ -101,6 +109,7 @@ def get_mc_notifications(
             continue
         
         part = parts.get(document.part_id) if document.part_id else None
+        uploader = uploaders.get(document.user_id) if document.user_id else None
         
         result.append({
             "id": notif.id,
@@ -120,6 +129,8 @@ def get_mc_notifications(
                 "document_version": document.document_version,
                 "document_url": document.document_url,
                 "part_id": document.part_id,
+                "user_id": document.user_id,
+                "user_role": uploader.role if uploader else None,
                 "created_at": document.created_at,
             },
             "part": {
