@@ -25,6 +25,7 @@ from .rawmaterial_extract import extract_pdf_data
 from services.notification_service import NotificationService
 from DB.models.oms import Assembly as AssemblyModel
 from auth.deps import get_current_user
+from auth.roles import ensure_can_download_document
 from sqlalchemy import or_
 
 
@@ -226,7 +227,7 @@ def _quality_documents_for_part(db: Session, part_id: int) -> List[Document]:
 def _resolve_file_document(db: Session, document_id: int):
     """
     Resolve OMS part document or stock quality document (negative id from part listing).
-    Returns (document_name, document_url) or raises 404.
+    Returns (document_name, document_url, uploader_user_id) or raises 404.
     """
     if document_id < 0:
         qd = db.query(StockQualityDocumentModel).filter(
@@ -237,7 +238,7 @@ def _resolve_file_document(db: Session, document_id: int):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document with id {document_id} not found",
             )
-        return qd.document_name, qd.document_url
+        return qd.document_name, qd.document_url, qd.user_id
 
     document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
     if not document:
@@ -245,7 +246,7 @@ def _resolve_file_document(db: Session, document_id: int):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found",
         )
-    return document.document_name, document.document_url
+    return document.document_name, document.document_url, document.user_id
 
 
 def _create_mc_notification_for_document(db: Session, db_document: DocumentModel) -> None:
@@ -903,11 +904,22 @@ def get_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/preview")
-async def preview_document(document_id: int, db: Session = Depends(get_db)):
+async def preview_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Preview document file from MinIO (inline display)"""
     from fastapi.responses import StreamingResponse
 
-    document_name, document_url = _resolve_file_document(db, document_id)
+    document_name, document_url, uploader_user_id = _resolve_file_document(db, document_id)
+    # Stock quality docs (negative ids) are QA uploads → any logged-in role
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=uploader_user_id,
+        current_user=current_user,
+        uploader_role="quality_assurance" if document_id < 0 else None,
+    )
 
     try:
         # Extract object name and extension from URL
@@ -942,10 +954,20 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/3d")
-async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
+async def preview_document_3d(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     from fastapi.responses import StreamingResponse
 
-    document_name, document_url = _resolve_file_document(db, document_id)
+    document_name, document_url, uploader_user_id = _resolve_file_document(db, document_id)
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=uploader_user_id,
+        current_user=current_user,
+        uploader_role="quality_assurance" if document_id < 0 else None,
+    )
 
     try:
         minio_client = get_minio_client()
@@ -997,11 +1019,21 @@ async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/download")
-async def download_document(document_id: int, db: Session = Depends(get_db)):
+async def download_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Download document file from MinIO"""
     from fastapi.responses import StreamingResponse
 
-    document_name, document_url = _resolve_file_document(db, document_id)
+    document_name, document_url, uploader_user_id = _resolve_file_document(db, document_id)
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=uploader_user_id,
+        current_user=current_user,
+        uploader_role="quality_assurance" if document_id < 0 else None,
+    )
 
     try:
         # Extract object name and extension from URL
@@ -1401,12 +1433,32 @@ def delete_document(
             detail=f"Document with id {document_id} not found"
         )
 
-    # Quality Assurance may only delete documents they uploaded
+    # PC / QA uploads: only the uploading user may delete
     role = (getattr(current_user, "role", None) or "").strip().lower().replace(" ", "_")
-    if role in ("quality_assurance", "qa") and db_document.user_id != current_user.id:
+    uploader = None
+    if db_document.user_id:
+        uploader = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+    uploader_role = (
+        (getattr(uploader, "role", None) or "").strip().lower().replace(" ", "_")
+        if uploader
+        else ""
+    )
+    pc_roles = {"project_coordinator", "pc", "coordinator"}
+    qa_roles = {"quality_assurance", "qa"}
+    if uploader_role in pc_roles and db_document.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete documents you uploaded."
+            detail="Only the Project Coordinator who uploaded this document can delete it.",
+        )
+    if role in qa_roles and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete documents you uploaded.",
+        )
+    if role in pc_roles and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete documents you uploaded.",
         )
 
     # Check if document has child documents (revisions) - prevent deletion of parent

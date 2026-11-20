@@ -9,6 +9,7 @@ from DB.minio_client import get_minio_client
 from DB.schemas.oms import OrderDocument as OrderDocumentResponse, OrderDocumentCreate, OrderDocumentUpdate
 from services.notification_service import NotificationService
 from auth.deps import get_current_user
+from auth.roles import ensure_can_download_document
 import uuid
 import os
 from datetime import datetime, timedelta
@@ -26,6 +27,10 @@ def _normalize_role(role: Optional[str]) -> str:
 
 def _is_quality_assurance(role: Optional[str]) -> bool:
     return _normalize_role(role) in ("quality_assurance", "qa")
+
+
+def _is_project_coordinator(role: Optional[str]) -> bool:
+    return _normalize_role(role) in ("project_coordinator", "pc", "coordinator")
 
 
 def _can_upload_order_document(order, user_id: Optional[int], user_role: Optional[str] = None) -> bool:
@@ -366,20 +371,31 @@ def delete_order_document(
     if not db_document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Quality Assurance may only delete documents they uploaded
-    if _is_quality_assurance(getattr(current_user, "role", None)) and db_document.user_id != current_user.id:
+    # PC / QA uploads: only the uploading user may delete
+    user = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+    uploader_role = getattr(user, "role", None) if user else None
+    current_role = getattr(current_user, "role", None)
+    if _is_project_coordinator(uploader_role) and db_document.user_id != current_user.id:
         raise HTTPException(
             status_code=403,
-            detail="You can only delete documents you uploaded."
+            detail="Only the Project Coordinator who uploaded this document can delete it.",
+        )
+    if _is_quality_assurance(current_role) and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete documents you uploaded.",
+        )
+    if _is_project_coordinator(current_role) and db_document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete documents you uploaded.",
         )
 
     # Log order document deletion for PC notifications before deletion
-    user_name = None
-    user_role = None
-    if db_document.user_id:
-        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
-        user_name = user.user_name if user else None
-        user_role = user.role if user else None
+    user_name = user.user_name if user else None
+    user_role = user.role if user else None
     
     NotificationService.log_order_document_change(
         db=db,
@@ -502,12 +518,22 @@ def get_order_documents(
 
 
 @router.get("/{document_id}/preview")
-async def preview_order_document(document_id: int, db: Session = Depends(get_db)):
+async def preview_order_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Preview an order document file from MinIO (inline display)"""
     # Get document from database
     document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=document.user_id,
+        current_user=current_user,
+    )
 
     try:
         # Get MinIO client
@@ -535,12 +561,22 @@ async def preview_order_document(document_id: int, db: Session = Depends(get_db)
 
 
 @router.get("/{document_id}/download")
-async def download_order_document(document_id: int, db: Session = Depends(get_db)):
+async def download_order_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Download an order document file from MinIO"""
     # Get document from database
     document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=document.user_id,
+        current_user=current_user,
+    )
 
     try:
         # Get MinIO client

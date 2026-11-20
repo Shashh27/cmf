@@ -22,6 +22,8 @@ from DB.schemas.oms import (
     OperationDocumentWithDetails
 )
 from services.notification_service import NotificationService
+from auth.deps import get_current_user
+from auth.roles import ensure_can_download_document
 
 router = APIRouter(
     prefix="/operation-documents",
@@ -536,7 +538,11 @@ def get_operation_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/download")
-def download_operation_document(document_id: int, db: Session = Depends(get_db)):
+def download_operation_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Download an operation document"""
     document = db.query(OperationDocumentModel).filter(OperationDocumentModel.id == document_id).first()
     if not document:
@@ -544,6 +550,12 @@ def download_operation_document(document_id: int, db: Session = Depends(get_db))
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
         )
+
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=document.user_id,
+        current_user=current_user,
+    )
 
     # Extract object name from URL
     # URL format: http://endpoint/bucket/object_name
@@ -594,7 +606,11 @@ def download_operation_document(document_id: int, db: Session = Depends(get_db))
 
 
 @router.get("/{document_id}/preview")
-def preview_operation_document(document_id: int, db: Session = Depends(get_db)):
+def preview_operation_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Preview an operation document (inline display)"""
     document = db.query(OperationDocumentModel).filter(OperationDocumentModel.id == document_id).first()
     if not document:
@@ -602,7 +618,13 @@ def preview_operation_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
         )
-    
+
+    ensure_can_download_document(
+        db=db,
+        uploader_user_id=document.user_id,
+        current_user=current_user,
+    )
+
     # Extract object name from URL
     parsed_url = urlparse(document.document_url)
     path_parts = parsed_url.path.lstrip('/').split('/', 1)
@@ -768,13 +790,45 @@ def update_operation_document(document_id: int, document_update: OperationDocume
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
+def delete_operation_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
+):
     """Delete an operation document and its file from MinIO"""
     document = db.query(OperationDocumentModel).filter(OperationDocumentModel.id == document_id).first()
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
+        )
+
+    # PC / QA uploads: only the uploading user may delete
+    role = (getattr(current_user, "role", None) or "").strip().lower().replace(" ", "_")
+    uploader = None
+    if document.user_id:
+        uploader = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
+    uploader_role = (
+        (getattr(uploader, "role", None) or "").strip().lower().replace(" ", "_")
+        if uploader
+        else ""
+    )
+    pc_roles = {"project_coordinator", "pc", "coordinator"}
+    qa_roles = {"quality_assurance", "qa"}
+    if uploader_role in pc_roles and document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the Project Coordinator who uploaded this document can delete it.",
+        )
+    if role in qa_roles and document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete documents you uploaded.",
+        )
+    if role in pc_roles and document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete documents you uploaded.",
         )
 
     # Prevent deletion of parent document when child revisions exist
@@ -786,12 +840,8 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
         )
 
     # Log operation document deletion for PC notifications before deletion
-    user_name = None
-    user_role = None
-    if document.user_id:
-        user = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
-        user_name = user.user_name if user else None
-        user_role = user.role if user else None
+    user_name = uploader.user_name if uploader else None
+    user_role = uploader.role if uploader else None
     
     NotificationService.log_document_change(
         db=db,
