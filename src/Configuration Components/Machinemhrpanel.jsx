@@ -103,7 +103,8 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
       }));
 
       const res = await api.put(`/machines/${machine.id}/mhr/values`,
-        updates
+        updates,
+        { params: userId ? { user_id: userId } : undefined }
       );
       await fetchMhrData();
       message.success("All values updated and MHR recalculated");
@@ -126,7 +127,7 @@ const MachineMhrPanel = ({ machine, isOpen, onClose, onCalculated, userId }) => 
     try {
       await api.post(`/machines/${machine.id}/mhr/particulars/${valueRecord.particular_id}/toggle`,
         null,
-        { params: { is_applicable: isApplicable } }
+        { params: { is_applicable: isApplicable, ...(userId ? { user_id: userId } : {}) } }
       );
       await fetchMhrData();
       message.success("Particular toggled");

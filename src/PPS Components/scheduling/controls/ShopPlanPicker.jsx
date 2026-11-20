@@ -64,6 +64,7 @@ export default function ShopPlanPicker() {
   const [allowed, setAllowed] = useState(true);
   const [reason, setReason] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
 
   useEffect(() => {
     fetchShopPlan()
@@ -116,141 +117,159 @@ export default function ShopPlanPicker() {
   };
 
   return (
-    <section
-      style={{
-        marginBottom: 16,
-        padding: 16,
-        background: '#fff',
-        border: '1px solid #e6e8ee',
-        borderRadius: 12,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <SettingOutlined style={{ color: '#1677ff', fontSize: 18, marginTop: 2 }} />
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 650, color: '#1f1f1f' }}>Shopfloor Execution Mode</div>
-            <div style={{ fontSize: 13, color: '#8c8c8c', marginTop: 2 }}>
-              Choose which schedule the shopfloor should follow. Only one mode can be active at a time.
-            </div>
-          </div>
-        </div>
+    <>
+      <button
+        type="button"
+        onClick={() => setModalVisible(true)}
+        style={{
+          position: 'fixed',
+          top: 80,
+          right: 20,
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 14px',
+          background: '#fff',
+          border: '1px solid #e6e8ee',
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          cursor: 'pointer',
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#1f1f1f',
+        }}
+      >
+        <SettingOutlined style={{ color: '#1677ff', fontSize: 16 }} />
+        <span>{active === 'unit_wise' ? 'Unit-wise' : 'Batch'}</span>
         <span
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            borderRadius: 999,
-            background: '#f6ffed',
-            border: '1px solid #b7eb8f',
-            color: '#389e0d',
-            fontSize: 12,
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: '#52c41a',
           }}
-        >
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#52c41a' }} />
-          {active === 'unit_wise' ? 'Unit-wise mode active' : 'Batch mode active'}
-        </span>
-      </div>
+        />
+      </button>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {MODES.map((mode) => {
-          const selected = active === mode.value;
-          return (
-            <button
-              key={mode.value}
-              type="button"
-              onClick={() => onChange(mode.value)}
-              disabled={saving}
-              aria-pressed={selected}
-              style={{
-                textAlign: 'left',
-                cursor: canToggle || selected ? 'pointer' : 'not-allowed',
-                padding: 14,
-                borderRadius: 10,
-                border: selected ? '1.5px solid #1677ff' : '1px solid #e6e8ee',
-                background: selected ? '#f5f9ff' : '#fff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      marginTop: 4,
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      border: selected ? '5px solid #1677ff' : '1.5px solid #bfbfbf',
-                      boxSizing: 'border-box',
-                      flex: '0 0 auto',
-                    }}
-                  />
-                  <ModeIcon kind={mode.icon} active={selected} />
-                  <div>
-                    <div style={{ fontWeight: 650, color: '#1f1f1f' }}>{mode.title}</div>
-                    <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>{mode.description}</div>
+      <Modal
+        title="Shopfloor Execution Mode"
+        open={modalVisible}
+        onCancel={() => setModalVisible(false)}
+        footer={null}
+        width={700}
+        centered
+        style={{ top: 80 }}
+        getContainer={() => document.body}
+      >
+        <div style={{ marginBottom: 16, fontSize: 14, color: '#8c8c8c', lineHeight: 1.5 }}>
+          Choose which schedule the shopfloor should follow. Only one mode can be active at a time.
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+          {MODES.map((mode) => {
+            const selected = active === mode.value;
+            return (
+              <button
+                key={mode.value}
+                type="button"
+                onClick={() => {
+                  onChange(mode.value);
+                  setModalVisible(false);
+                }}
+                disabled={saving}
+                aria-pressed={selected}
+                style={{
+                  textAlign: 'left',
+                  cursor: canToggle || selected ? 'pointer' : 'not-allowed',
+                  padding: 16,
+                  borderRadius: 12,
+                  border: selected ? '2px solid #1677ff' : '1px solid #e6e8ee',
+                  background: selected ? '#f5f9ff' : '#fff',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 14,
+                  transition: 'all 0.2s',
+                  minHeight: 140,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        marginTop: 3,
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        border: selected ? '5px solid #1677ff' : '2px solid #bfbfbf',
+                        boxSizing: 'border-box',
+                        flex: '0 0 auto',
+                      }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 650, color: '#1f1f1f', fontSize: 15, marginBottom: 4 }}>{mode.title}</div>
+                      <div style={{ fontSize: 13, color: '#8c8c8c', lineHeight: 1.4 }}>{mode.description}</div>
+                    </div>
                   </div>
+                  <span
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: selected ? '#1677ff' : '#8c8c8c',
+                      background: selected ? '#e6f4ff' : '#f5f5f5',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {selected ? 'Selected' : 'Available'}
+                  </span>
                 </div>
-                <span
-                  style={{
-                    alignSelf: 'flex-start',
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: selected ? '#1677ff' : '#8c8c8c',
-                    background: selected ? '#e6f4ff' : '#f5f5f5',
-                  }}
-                >
-                  {selected ? 'Selected' : 'Available'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-end' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {mode.points.map((point) => (
-                    <span key={point} style={{ fontSize: 12, color: '#595959', display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <CheckCircleFilled style={{ color: '#52c41a', fontSize: 12 }} />
-                      {point}
+                    <span key={point} style={{ fontSize: 13, color: '#595959', display: 'flex', gap: 8, alignItems: 'flex-start', lineHeight: 1.4 }}>
+                      <CheckCircleFilled style={{ color: '#52c41a', fontSize: 13, flexShrink: 0, marginTop: 1 }} />
+                      <span>{point}</span>
                     </span>
                   ))}
                 </div>
-                <span style={{ fontSize: 12, color: '#8c8c8c', display: 'inline-flex', gap: 4, alignItems: 'center', whiteSpace: 'nowrap' }}>
-                  <LockOutlined />
-                  {mode.lockedLabel}
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 12, color: '#8c8c8c', display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <LockOutlined />
+                    {mode.lockedLabel}
+                  </span>
+                  <ModeIcon kind={mode.icon} active={selected} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          padding: '8px 12px',
-          borderRadius: 8,
-          background: '#f0f7ff',
-          color: '#595959',
-          fontSize: 13,
-          display: 'flex',
-          gap: 8,
-          alignItems: 'flex-start',
-        }}
-      >
-        <InfoCircleOutlined style={{ color: '#1677ff', marginTop: 3 }} />
-        <span>
-          Currently, the shopfloor is following the <strong>{activeTitle}</strong>. {lockedTitle} is locked.
-          {!editor.allowed && ' Only admin or manufacturing coordinator can update the shop plan.'}
-          {editor.allowed && !allowed && reason ? ` ${reason}` : ''}
-        </span>
-      </div>
-    </section>
+        <div
+          style={{
+            marginTop: 20,
+            padding: '12px 16px',
+            borderRadius: 8,
+            background: '#f0f7ff',
+            color: '#595959',
+            fontSize: 14,
+            display: 'flex',
+            gap: 10,
+            alignItems: 'flex-start',
+            lineHeight: 1.5,
+          }}
+        >
+          <InfoCircleOutlined style={{ color: '#1677ff', fontSize: 16, marginTop: 2, flexShrink: 0 }} />
+          <span>
+            Currently, the shopfloor is following the <strong>{activeTitle}</strong>. {lockedTitle} is locked.
+            {!editor.allowed && ' Only admin or manufacturing coordinator can update the shop plan.'}
+            {editor.allowed && !allowed && reason ? ` ${reason}` : ''}
+          </span>
+        </div>
+      </Modal>
+    </>
   );
 }
 

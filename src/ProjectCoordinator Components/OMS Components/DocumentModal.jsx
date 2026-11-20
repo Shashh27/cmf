@@ -3,6 +3,7 @@ import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip, Spin } from "antd";
 import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import { api } from '../../api/client.js';
+import { canDeleteDocument, DELETE_OWNER_TOOLTIP } from '../../utils/documentAccess.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -279,14 +280,20 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
               onClick={() => handleDownload(doc.id, doc.document_name)}
             />
           </Tooltip>
-          <Popconfirm
-            title="Delete this document?"
-            onConfirm={() => handleDelete(doc.id)}
-            okText="Yes"
-            cancelText="No"
-          >
-            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {canDeleteDocument(doc) ? (
+            <Popconfirm
+              title="Delete this document?"
+              onConfirm={() => handleDelete(doc.id)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          ) : (
+            <Tooltip title={DELETE_OWNER_TOOLTIP}>
+              <Button type="text" size="small" danger disabled icon={<DeleteOutlined />} />
+            </Tooltip>
+          )}
         </Space>
       </div>
     </div>

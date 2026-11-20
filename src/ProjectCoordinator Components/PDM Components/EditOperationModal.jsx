@@ -15,6 +15,7 @@ import { API_BASE_URL } from '../../Config/auth';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
 import DurationHmsInput, { durationHmsRules, toDurationHms } from './DurationHmsInput.jsx';
 import OperationToolsSelector from './OperationToolsSelector';
+import { canDeleteDocument, DELETE_OWNER_TOOLTIP } from '../../utils/documentAccess.js';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
@@ -392,7 +393,9 @@ const EditOperationModal = ({
   const fmtV            = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
 
   // ── documents tab ──────────────────────────────────────────────────────────
-  const DocActions = ({ doc, rootId, latestV }) => (
+  const DocActions = ({ doc, rootId, latestV }) => {
+    const canDelete = canDeleteDocument(doc);
+    return (
     <div className="flex gap-1 shrink-0">
       <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined className="text-blue-500" />} onClick={() => handlePreview(doc)} /></Tooltip>
       <Tooltip title="Upload New Version">
@@ -402,11 +405,18 @@ const EditOperationModal = ({
       <Tooltip title="Download">
         <Button type="text" size="small" icon={<DownloadOutlined className="text-green-600" />} onClick={() => handleDownloadFile(doc)} />
       </Tooltip>
-      <Popconfirm title="Delete?" onConfirm={() => handleDeleteDocument(doc.id)} okText="Yes" cancelText="No" icon={<ExclamationCircleOutlined className="text-red-500" />}>
-        <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-      </Popconfirm>
+      {canDelete ? (
+        <Popconfirm title="Delete?" onConfirm={() => handleDeleteDocument(doc.id)} okText="Yes" cancelText="No" icon={<ExclamationCircleOutlined className="text-red-500" />}>
+          <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ) : (
+        <Tooltip title={DELETE_OWNER_TOOLTIP}>
+          <Button type="text" danger size="small" disabled icon={<DeleteOutlined />} className="text-slate-300" />
+        </Tooltip>
+      )}
     </div>
-  );
+    );
+  };
 
   const documentsTab = (() => {
     const rootDocs = documents.filter(d => !d.parent_id);

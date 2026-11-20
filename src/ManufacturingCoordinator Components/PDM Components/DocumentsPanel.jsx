@@ -15,6 +15,13 @@ import OperationImportModal from "./OperationImportModal";
 import OperationChecklistsModal from "./OperationChecklistsModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
 import ModelViewer3D from "./ModelViewer3D";
+import {
+  canDownloadDocument,
+  canDeleteDocument,
+  DOWNLOAD_ROLE_TOOLTIP,
+  DELETE_OWNER_TOOLTIP,
+  getStoredUserRole,
+} from "../../utils/documentAccess.js";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -83,14 +90,20 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
     { title: 'Actions', key: 'actions', width: 80, align: 'center', render: (_, doc) => (
         <div className="flex gap-1 justify-center">
           <Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EyeOutlined />} onClick={() => onPreview(doc)} />
-          <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
-            onClick={async () => {
-              try {
-                await downloadBlobWithAuth(`/operation-documents/${doc.id}/download`, doc.document_name);
-              } catch (e) {
-                console.error(e);
-              }
-            }} />
+          {canDownloadDocument(doc, getStoredUserRole()) ? (
+            <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
+              onClick={async () => {
+                try {
+                  await downloadBlobWithAuth(`/operation-documents/${doc.id}/download`, doc.document_name);
+                } catch (e) {
+                  console.error(e);
+                }
+              }} />
+          ) : (
+            <Tooltip title={DOWNLOAD_ROLE_TOOLTIP}>
+              <Button size="small" type="text" disabled icon={<DownloadOutlined />} className="text-slate-300" />
+            </Tooltip>
+          )}
         </div>
       )
     },
@@ -114,13 +127,19 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
                     </div>
                     <div className="flex gap-2">
                       <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => onPreview(ver)} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
-                      <Tooltip title="Download"><Button size="small" type="text" icon={<DownloadOutlined />} onClick={async () => {
-                        try {
-                          await downloadBlobWithAuth(`/operation-documents/${ver.id}/download`, ver.document_name);
-                        } catch (e) {
-                          console.error(e);
-                        }
-                      }} className="text-green-500 hover:bg-green-50" /></Tooltip>
+                      {canDownloadDocument(ver, getStoredUserRole()) ? (
+                        <Tooltip title="Download"><Button size="small" type="text" icon={<DownloadOutlined />} onClick={async () => {
+                          try {
+                            await downloadBlobWithAuth(`/operation-documents/${ver.id}/download`, ver.document_name);
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }} className="text-green-500 hover:bg-green-50" /></Tooltip>
+                      ) : (
+                        <Tooltip title={DOWNLOAD_ROLE_TOOLTIP}>
+                          <Button size="small" type="text" disabled icon={<DownloadOutlined />} className="text-slate-300" />
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -361,6 +380,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   };
 
   const handleDownload = (doc) => {
+    if (!canDownloadDocument(doc, getCurrentUserRole() || getStoredUserRole())) {
+      message.error(DOWNLOAD_ROLE_TOOLTIP);
+      return;
+    }
     const filename = getDocumentDisplayName(doc) || doc.document_name || `document-${doc.id}`;
     downloadWithAuth(`/documents/${doc.id}/download`, filename);
   };
@@ -433,6 +456,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
 
   const previewDownload = () => {
     if (!previewDoc) return;
+    if (!canDownloadDocument(previewDoc.doc, getCurrentUserRole() || getStoredUserRole())) {
+      message.error(DOWNLOAD_ROLE_TOOLTIP);
+      return;
+    }
     const path =
       previewDoc.source === 'part'
         ? `/documents/${previewDoc.doc.id}/download`
@@ -827,6 +854,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: (_, r) => {
         const cur = selectedVersions[String(r.parent_id ?? r.id)] || r;
         const qualityDoc = isQualityDocument(cur);
+        const canDownload = canDownloadDocument(cur, getCurrentUserRole() || getStoredUserRole());
+        const canDelete = canDeleteDocument(cur);
         return (
           <div className="flex gap-1 justify-center">
             <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" /></Tooltip>
@@ -836,11 +865,23 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             {!qualityDoc && (
               <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
             )}
-            <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur)} /></Tooltip>
+            {canDownload ? (
+              <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur)} /></Tooltip>
+            ) : (
+              <Tooltip title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button size="small" type="text" disabled icon={<DownloadOutlined />} className="text-slate-300" />
+              </Tooltip>
+            )}
             {!qualityDoc && (
-              <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
-                <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
-              </Popconfirm>
+              canDelete ? (
+                <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
+                </Popconfirm>
+              ) : (
+                <Tooltip title={DELETE_OWNER_TOOLTIP}>
+                  <Button size="small" type="text" disabled danger icon={<DeleteOutlined />} className="text-slate-300" />
+                </Tooltip>
+              )
             )}
           </div>
         );
@@ -1074,7 +1115,13 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           destroyOnHidden
           styles={{ body: { height: '75vh', padding: 0, minHeight: 200 } }}
           footer={[
-            <Button key="dl" icon={<DownloadOutlined />} onClick={previewDownload}>Download</Button>,
+            canDownloadDocument(previewDoc.doc, getCurrentUserRole() || getStoredUserRole()) ? (
+              <Button key="dl" icon={<DownloadOutlined />} onClick={previewDownload}>Download</Button>
+            ) : (
+              <Tooltip key="dl" title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button icon={<DownloadOutlined />} disabled>Download</Button>
+              </Tooltip>
+            ),
             <Button key="cl" type="primary" onClick={closePreview}>Close</Button>
           ]}
         >
