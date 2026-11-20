@@ -529,11 +529,7 @@ async def preview_order_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    ensure_can_download_document(
-        db=db,
-        uploader_user_id=document.user_id,
-        current_user=current_user,
-    )
+    # Preview: any authenticated user (role gate applies to /download only)
 
     try:
         # Get MinIO client

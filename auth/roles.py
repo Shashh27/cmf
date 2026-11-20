@@ -75,9 +75,10 @@ def can_download_by_uploader_role(
     current_user_role: str | None,
 ) -> bool:
     """
-    Download / preview rules (matches frontend documentAccess):
+    Download rules (matches frontend documentAccess):
     - QA-uploaded docs → any logged-in role may download
     - otherwise → only when current user role matches uploader role
+    Preview endpoints stay auth-only (no role match).
     """
     if is_qa_role(uploader_role):
         return True

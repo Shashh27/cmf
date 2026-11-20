@@ -619,11 +619,7 @@ def preview_operation_document(
             detail=f"Operation document with id {document_id} not found"
         )
 
-    ensure_can_download_document(
-        db=db,
-        uploader_user_id=document.user_id,
-        current_user=current_user,
-    )
+    # Preview: any authenticated user (role gate applies to /download only)
 
     # Extract object name from URL
     parsed_url = urlparse(document.document_url)
