@@ -49,9 +49,36 @@ export const logsForJob = (logs, job) => {
   );
 };
 
+const SCHEDULE_ENGINE_STATUSES = new Set([
+  'scheduled',
+  'rescheduled',
+  'planned',
+  'unit_scheduled',
+]);
+
+const isReviewLikeStatus = (raw) => {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s || SCHEDULE_ENGINE_STATUSES.has(s)) return false;
+  return true;
+};
+
+/**
+ * Production/review status for operator UI — not schedule-engine status.
+ * Batch machine-operations puts rescheduling status on job.status
+ * ('scheduled'/'rescheduled'); prefer production log / operation_status.
+ */
 export const getJobReviewStatus = (job, stats = {}) => {
-  const raw = job?.status || stats.status || stats.reviewStatus || '';
-  return String(raw).toLowerCase();
+  const candidates = [
+    stats.reviewStatus,
+    stats.status,
+    job?.operation_status,
+    job?.status,
+  ];
+  for (const raw of candidates) {
+    if (!isReviewLikeStatus(raw)) continue;
+    return String(raw).toLowerCase().trim();
+  }
+  return '';
 };
 
 export const isJobReviewCompleted = (job, stats = {}) => {
@@ -70,7 +97,12 @@ export const isJobReviewCompleted = (job, stats = {}) => {
 
 export const isJobReviewInProgress = (job, stats = {}) => {
   const status = getJobReviewStatus(job, stats);
-  return status === 'inprogress' || status === 'in-progress' || status === 'in progress';
+  if (status === 'inprogress' || status === 'in-progress' || status === 'in progress') {
+    return true;
+  }
+  // Open working log / activated card: can_activate false + operation in progress
+  const opStatus = String(job?.operation_status || '').toLowerCase();
+  return opStatus === 'inprogress' || opStatus === 'in-progress' || opStatus === 'in progress';
 };
 
 export const jobStatusLabel = (job, stats = {}) => {
