@@ -14,7 +14,7 @@ import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOu
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig.js';
-import { ShopPlanActualNote } from '../../PPS Components/scheduling/controls/ShopPlanPicker.jsx';
+import ShopPlanPicker from '../../PPS Components/scheduling/controls/ShopPlanPicker.jsx';
 import useLenis from '../../hooks/useLenis.js';
 
 const { Content } = Layout;
@@ -272,7 +272,7 @@ const ActualScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
-        <ShopPlanActualNote />
+        <ShopPlanPicker />
         <motion.div
           {...CONTROL_BAR_MOTION}
           style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}

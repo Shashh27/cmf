@@ -5,7 +5,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import { API_BASE_URL } from '../Config/auth.js';
 import NotificationPokaYoke from './NotificationPokaYoke';
 import OTNotification from './OTNotification';
-import RightNowJobNotifications from '../Notification Components/RightNowJobNotifications';
+import RightNowJobNotify from './RightNowJobNotify';
 import { authFetch } from '../api/client.js';
 
 const Notifications = () => {
@@ -774,10 +774,7 @@ const Notifications = () => {
                 </Badge>
               ),
               children: (
-                <RightNowJobNotifications
-                  audience="operator"
-                  onUnreadCountChange={setRightNowJobCount}
-                />
+                <RightNowJobNotify onUnreadCountChange={setRightNowJobCount} />
               ),
             },
             {

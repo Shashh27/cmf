@@ -187,11 +187,16 @@ const MachineMHRs = ({ userId }) => {
     setSaving(true);
     try {
       for (const [machineId, updates] of Object.entries(byMachine)) {
-        await api.put(`/machines/${machineId}/mhr/values`, updates);
+        await api.put(`/machines/${machineId}/mhr/values`, updates, {
+          params: userId ? { user_id: userId } : undefined,
+        });
       }
       for (const [machineId, recommended] of Object.entries(editedRecommendedMhr)) {
         await api.put(`/machines/${machineId}/mhr/recommended-mhr`, null, {
-          params: { recommended_mhr: recommended },
+          params: {
+            recommended_mhr: recommended,
+            ...(userId ? { user_id: userId } : {}),
+          },
         });
       }
       message.success("All MHR changes saved");

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import OMS from '../ProjectCoordinator Components/OMS';
 import ProjectCoordinatorProductView from '../ProjectCoordinator Components/ProjectCoordinatorProductView';
 import Configuration from '../ProjectCoordinator Components/Configuration';
+import UrgentJobs from '../ProjectCoordinator Components/UrgentJobs';
 
 const ProjectCoordinatorDashboard = () => {
   const location = useLocation();
@@ -15,6 +16,9 @@ const ProjectCoordinatorDashboard = () => {
     }
     if (path.includes('/project_coordinator/configuration')) {
       return <Configuration />;
+    }
+    if (path.includes('/project_coordinator/right-now-jobs') || path.includes('/project_coordinator/urgent-jobs')) {
+      return <UrgentJobs />;
     }
     if (path.includes('/project_coordinator/oms')) {
       return <OMS />;

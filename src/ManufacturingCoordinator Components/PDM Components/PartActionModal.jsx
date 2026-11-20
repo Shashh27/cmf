@@ -328,6 +328,51 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     if (results.length > 0) { onActionCreated(results[0], actionType); onCancel(); form.resetFields(); }
   };
 
+  const handleFinishFailed = ({ errorFields }) => {
+    const labels = {
+      operation_name: 'Operation Name',
+      custom_operation_name: 'Operation Name',
+      part_type_id: 'Operation Type',
+      setup_time: 'Setup Time',
+      cycle_time: 'Cycle Time',
+      from_date: 'From Date',
+      to_date: 'To Date',
+      workcenter_id: 'Work Center',
+      machine_id: 'Machine',
+      vendor_id: 'Vendor',
+      document_type: 'Document Type',
+      document_type_other: 'Document Type',
+      document_version: 'Revision',
+      document_name: 'Document Name',
+      file: 'File',
+      files: 'File',
+    };
+    const byItem = new Map();
+    (errorFields || []).forEach((field) => {
+      const path = field?.name || [];
+      const itemIndex = path[0] === 'items' && typeof path[1] === 'number' ? path[1] : null;
+      const leaf = [...path].reverse().find((part) => typeof part === 'string' && labels[part]);
+      const label = leaf ? labels[leaf] : 'required field';
+      const key = itemIndex == null ? -1 : itemIndex;
+      if (!byItem.has(key)) byItem.set(key, new Set());
+      byItem.get(key).add(label);
+    });
+    const noun = actionType === 'document' ? 'Document' : 'Operation';
+    const pieces = [...byItem.entries()].map(([index, names]) => {
+      const where = index < 0 ? 'the form' : `${noun} ${index + 1}`;
+      return `${where} (${[...names].join(', ')})`;
+    });
+    const shown = pieces.slice(0, 3);
+    const more = pieces.length > 3 ? ` and ${pieces.length - 3} more` : '';
+    message.warning(
+      pieces.length
+        ? `A few fields are missing. Check ${shown.join('; ')}${more}.`
+        : 'A few fields are missing. Please check the form.'
+    );
+    const firstName = errorFields?.[0]?.name;
+    if (firstName) form.scrollToField(firstName, { block: 'center', behavior: 'smooth' });
+  };
+
   const actionLabel = actionType ? actionType.charAt(0).toUpperCase() + actionType.slice(1) + 's' : 'Items';
 
   return (
@@ -338,7 +383,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         <Badge count={`For Part: ${selectedPart?.part_name}`} style={{ backgroundColor: '#e6f7ff', color: '#1890ff', padding: '0 12px', borderRadius: 0, border: '1px solid #91d5ff' }} />
       </div>
 
-      <Form form={form} layout="vertical" onFinish={handleFinish}>
+      <Form form={form} layout="vertical" onFinish={handleFinish} onFinishFailed={handleFinishFailed}>
         <Form.List name="items">
           {(fields, { add, remove }) => (
             <>

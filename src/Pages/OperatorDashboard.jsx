@@ -9,7 +9,7 @@ import LeaveLog from '../Operator Components/LeaveLog';
 import PokaYokeChecklist from '../Operator Components/PokaYokeChecklist';
 import OperatorNotifications from '../Operator Components/Notifications';
 import ProductionLogsHistory from '../Operator Components/ProductionLogsHistory';
-import OperatorNotes from '../Operator Components/Notes';
+import RightNowJobs from '../Operator Components/RightNowJobs';
 
 const OperatorDashboard = () => {
   const location = useLocation();
@@ -32,11 +32,11 @@ const OperatorDashboard = () => {
     if (path.includes('/preventive-maintenance')) {
       return <PokaYokeChecklist open={true} onClose={() => {}} isPage={true} />;
     }
+    if (path.includes('/right-now-jobs')) {
+      return <RightNowJobs />;
+    }
     if (path.includes('/notifications')) {
       return <OperatorNotifications />;
-    }
-    if (path.includes('/notes')) {
-      return <OperatorNotes />;
     }
     if (path.includes('/production-logs')) {
       return (

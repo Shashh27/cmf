@@ -13,6 +13,7 @@ import {
   getOpQtyTotals,
 } from '../../utils/productionLogDisplay';
 import { api } from '../../api/client.js';
+import { isInHouseType } from '../../utils/partType';
 import ProductionStagesPanel from '../../components/ProductionStagesPanel';
 
 const { Text } = Typography;
@@ -162,7 +163,9 @@ const OrderTrackingModule = () => {
     const extractPartsFromAssembly = (assembly) => {
       // Add parts from this assembly
       assembly.parts?.forEach(pd => {
+        if (!isInHouseType(pd.part.type_name)) return;
         const tp = trackingMap[pd.part.id];
+        const operations = (pd.operations || []).filter((op) => isInHouseType(op.part_type_name));
         parts.push({
           key: pd.part.id, part_id: pd.part.id,
           part_name: pd.part.part_name, part_number: pd.part.part_number,
@@ -170,9 +173,9 @@ const OrderTrackingModule = () => {
           type_name: pd.part.type_name, qty: pd.part.qty,
           status: tp?.status || 'Not Started',
           completion_percentage: tp?.completion_percentage || 0,
-          total_operations: tp?.total_operations || pd.operations?.length || 0,
+          total_operations: tp?.total_operations || operations.length,
           completed_operations: tp?.completed_operations || 0,
-          operations: pd.operations || [],
+          operations,
         });
       });
 
@@ -187,16 +190,18 @@ const OrderTrackingModule = () => {
     });
 
     details.product_hierarchy.direct_parts?.forEach(pd => {
+      if (!isInHouseType(pd.part.type_name)) return;
       const tp = trackingMap[pd.part.id];
+      const operations = (pd.operations || []).filter((op) => isInHouseType(op.part_type_name));
       parts.push({
         key: pd.part.id, part_id: pd.part.id,
         part_name: pd.part.part_name, part_number: pd.part.part_number,
         assembly_name: 'Direct Part', type_name: pd.part.type_name, qty: pd.part.qty,
         status: tp?.status || 'Not Started',
         completion_percentage: tp?.completion_percentage || 0,
-        total_operations: tp?.total_operations || pd.operations?.length || 0,
+        total_operations: tp?.total_operations || operations.length,
         completed_operations: tp?.completed_operations || 0,
-        operations: pd.operations || [],
+        operations,
       });
     });
     return parts;
@@ -382,7 +387,7 @@ const OrderTrackingModule = () => {
     );
 
   const kpiItems = [
-    { key: 'all', label: 'Total Parts', value: totalParts, color: '#1677ff', icon: <AppstoreOutlined /> },
+    { key: 'all', label: 'Inhouse Parts', value: totalParts, color: '#1677ff', icon: <AppstoreOutlined /> },
     { key: 'completed', label: 'Completed', value: completedParts, color: '#52c41a', icon: <CheckCircleOutlined /> },
     { key: 'in_progress', label: 'In Progress', value: inProgressParts, color: '#1890ff', icon: <SyncOutlined /> },
     { key: 'pending', label: 'Pending', value: pendingParts, color: '#faad14', icon: <ClockCircleOutlined /> },

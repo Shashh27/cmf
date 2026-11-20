@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
 import { parseMasterBocBboxToPdfRect, parseMasterBocIdFromStageBbox } from '../Quality Management Components/InspectorComponents/bocMappers';
 import PokayokeOperationNotification from './PokayokeOperationNotification';
-import RightNowJobNotifications from '../Notification Components/RightNowJobNotifications';
+import RightNowJobNotify from './RightNowJobNotify';
 import { API_BASE_URL } from '../Config/auth.js';
 import { authFetch } from '../api/client.js';
 
@@ -1606,10 +1606,7 @@ const Notifications = () => {
                 </Badge>
               ),
               children: (
-                <RightNowJobNotifications
-                  audience="supervisor"
-                  onUnreadCountChange={setRightNowJobCount}
-                />
+                <RightNowJobNotify onUnreadCountChange={setRightNowJobCount} />
               ),
             },
             {

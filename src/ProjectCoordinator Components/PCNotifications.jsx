@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { BellOutlined, CheckOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined, FileTextFilled, ToolFilled, AppstoreFilled, ShoppingFilled, CalendarOutlined, SearchOutlined, FolderFilled, SettingFilled, BuildFilled } from "@ant-design/icons";
+import { BellOutlined, CheckOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined, FileTextFilled, ToolFilled, AppstoreFilled, ShoppingFilled, CalendarOutlined, SearchOutlined, FolderFilled, SettingFilled, BuildFilled, FormOutlined } from "@ant-design/icons";
 import { Card, Badge, Button, App, message, Typography, Tag, Empty, Spin, Space, Drawer, Tooltip, Row, Col, Statistic, DatePicker, Select, Input } from "antd";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -102,19 +102,45 @@ const PCNotifications = () => {
     }
   };
 
-  const getActionColor = (action) => {
-    const colors = {
-      created: "green",
-      updated: "blue",
-      deleted: "red",
-      soft_deleted: "orange",
-      restored: "cyan",
-      schedule_activated: "purple",
-      order_approved: "green",
-      order_rejected: "red",
+  const getActionTheme = (action) => {
+    const value = String(action || "").toLowerCase();
+    if (
+      value.includes("reject") ||
+      value.includes("delet")
+    ) {
+      return {
+        tag: "red",
+        bg: "#fff2f0",
+        border: "#ff4d4f",
+        icon: "#ff4d4f",
+        shadow: "rgba(255, 77, 79, 0.18)",
+      };
+    }
+    if (
+      value.includes("creat") ||
+      value.includes("approv") ||
+      value.includes("accept") ||
+      value.includes("ack") ||
+      value === "restored"
+    ) {
+      return {
+        tag: "green",
+        bg: "#f6ffed",
+        border: "#52c41a",
+        icon: "#52c41a",
+        shadow: "rgba(82, 196, 26, 0.18)",
+      };
+    }
+    return {
+      tag: "blue",
+      bg: "#e6f7ff",
+      border: "#1890ff",
+      icon: "#1890ff",
+      shadow: "rgba(24, 144, 255, 0.15)",
     };
-    return colors[action] || "default";
   };
+
+  const getActionColor = (action) => getActionTheme(action).tag;
 
   const getActionLabel = (action) => {
     const labels = {
@@ -126,6 +152,12 @@ const PCNotifications = () => {
       schedule_activated: "Schedule Activated",
       order_approved: "Order Approved",
       order_rejected: "Order Rejected",
+      approved: "Approved",
+      accepted: "Approved",
+      rejected: "Rejected",
+      acknowledged: "Acknowledged",
+      mc_acknowledged: "Acknowledged",
+      mc_rejected: "Rejected",
     };
     return labels[action] || action;
   };
@@ -138,6 +170,8 @@ const PCNotifications = () => {
       assembly: "Assembly",
       order: "Order",
       order_document: "Order Document",
+      right_now_job: "Right Now Job",
+      urgent_job: "Right Now Job",
     };
     return labels[entityType] || entityType;
   };
@@ -150,6 +184,8 @@ const PCNotifications = () => {
       order: <ShoppingFilled />,
       order_document: <FolderFilled />,
       assembly: <SettingFilled />,
+      right_now_job: <FormOutlined />,
+      urgent_job: <FormOutlined />,
     };
     return icons[entityType] || <BellOutlined />;
   };
@@ -179,6 +215,8 @@ const PCNotifications = () => {
     // Filter by entity type
     if (entityFilter === "order") {
       filtered = filtered.filter(n => n.sale_order_number);
+    } else if (entityFilter === "right_now_job") {
+      filtered = filtered.filter(n => n.entity_type === "right_now_job" || n.entity_type === "urgent_job");
     } else if (entityFilter !== "all") {
       filtered = filtered.filter(n => n.entity_type === entityFilter);
     }
@@ -201,6 +239,8 @@ const PCNotifications = () => {
           (n.entity_name && n.entity_name.toLowerCase().includes(searchLower)) ||
           (n.product_name && n.product_name.toLowerCase().includes(searchLower)) ||
           (n.user_name && n.user_name.toLowerCase().includes(searchLower)) ||
+          (n.details?.project_no && String(n.details.project_no).toLowerCase().includes(searchLower)) ||
+          (n.details?.project_name && String(n.details.project_name).toLowerCase().includes(searchLower)) ||
           (n.entity_id && n.entity_id.toString().includes(searchLower))
         );
       });
@@ -222,6 +262,8 @@ const PCNotifications = () => {
       if (notif.details.operation_name) return notif.details.operation_name;
       if (notif.details.operation_number) return notif.details.operation_number;
       if (notif.details.document_name) return notif.details.document_name;
+      if (notif.details.project_name) return notif.details.project_name;
+      if (notif.details.description) return notif.details.description;
     }
     
     // Last resort: show nothing instead of ID
@@ -322,6 +364,7 @@ const PCNotifications = () => {
               <Option value="part">Part</Option>
               <Option value="operation">Operation</Option>
               <Option value="document">Document</Option>
+              <Option value="right_now_job">Right Now Job</Option>
             </Select>
             <Search
               placeholder="Search..."
@@ -363,16 +406,18 @@ const PCNotifications = () => {
           />
         ) : (
           <div>
-            {getFilteredNotifications().map((notif) => (
+            {getFilteredNotifications().map((notif) => {
+              const theme = getActionTheme(notif.action);
+              return (
               <div
                 key={notif.id}
                 style={{
-                  background: notif.is_read ? "white" : "#e6f7ff",
+                  background: notif.is_read ? "white" : theme.bg,
                   padding: "16px",
                   marginBottom: "12px",
                   borderRadius: "12px",
-                  border: notif.is_read ? "1px solid #d9d9d9" : "2px solid #1890ff",
-                  boxShadow: notif.is_read ? "none" : "0 2px 8px rgba(24, 144, 255, 0.15)",
+                  border: notif.is_read ? "1px solid #d9d9d9" : `2px solid ${theme.border}`,
+                  boxShadow: notif.is_read ? "none" : `0 2px 8px ${theme.shadow}`,
                   transition: "all 0.3s ease",
                   display: "flex",
                   justifyContent: "space-between",
@@ -385,7 +430,7 @@ const PCNotifications = () => {
                       width: "40px",
                       height: "40px",
                       borderRadius: "10px",
-                      background: notif.is_read ? "#f0f0f0" : "#1890ff",
+                      background: notif.is_read ? "#f0f0f0" : theme.icon,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -479,13 +524,14 @@ const PCNotifications = () => {
                     size="small"
                     icon={<CheckOutlined />}
                     onClick={() => markAsRead(notif.id)}
-                    style={{ flexShrink: 0 }}
+                    style={{ flexShrink: 0, background: theme.icon, borderColor: theme.icon }}
                   >
                     Mark Read
                   </Button>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

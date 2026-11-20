@@ -27,6 +27,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import dayjs from 'dayjs';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InspectionPlanNotifications from '../Notification Components/InspectionPlanNotifications';
+import RightNowJobsNotification from '../Notification Components/RightNowJobsNotification';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
@@ -56,6 +57,7 @@ const TAB_KEYS = {
   components: '4',
   calibrations: '5',
   inspectionPlans: '6',
+  rightNowJobs: '7',
 };
 
 const Notification = () => {
@@ -74,6 +76,7 @@ const Notification = () => {
     components: 0,
     calibrations: 0,
     inspectionPlans: 0,
+    rightNowJobs: 0,
   });
   const [refreshKey, setRefreshKey] = useState(0);
   const [ackAllOpen, setAckAllOpen] = useState(false);
@@ -95,6 +98,7 @@ const Notification = () => {
       components: setCount('components'),
       calibrations: setCount('calibrations'),
       inspectionPlans: setCount('inspectionPlans'),
+      rightNowJobs: setCount('rightNowJobs'),
     }),
     [setCount],
   );
@@ -103,7 +107,7 @@ const Notification = () => {
     if (supervisorInspectionOnly) return;
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t && ['1', '2', '3', '4', '5', '6'].includes(t)) setActiveKey(t);
+    if (t && ['1', '2', '3', '4', '5', '6', '7'].includes(t)) setActiveKey(t);
   }, [location.search, supervisorInspectionOnly]);
 
   const dateParams = useCallback(() => {
@@ -245,6 +249,7 @@ const Notification = () => {
         [TAB_KEYS.components]: 'components',
         [TAB_KEYS.calibrations]: 'calibrations',
         [TAB_KEYS.inspectionPlans]: 'inspectionPlans',
+        [TAB_KEYS.rightNowJobs]: 'rightNowJobs',
       };
       const scopes =
         ackAllScope === 'all'
@@ -275,6 +280,9 @@ const Notification = () => {
           );
         } else if (key === 'inspectionPlans') {
           total += await ackInspectionPlans();
+        } else if (key === 'rightNowJobs') {
+          // Right Now Jobs uses its own acknowledgment logic within the component
+          // Skip here as it's handled by the component itself
         }
       }
       message.success(total ? `Acknowledged ${total} notification(s)` : 'No pending notifications to acknowledge');
@@ -296,6 +304,7 @@ const Notification = () => {
     [TAB_KEYS.components]: 'Search component issues...',
     [TAB_KEYS.calibrations]: 'Search machines...',
     [TAB_KEYS.inspectionPlans]: 'Search project, part, operator...',
+    [TAB_KEYS.rightNowJobs]: 'Search jobs...',
   }[activeKey] || 'Search...';
 
   const tabItems = [
@@ -370,6 +379,18 @@ const Notification = () => {
         </span>
       ),
       children: <InspectionPlanNotifications {...sharedProps} onCount={countSetters.inspectionPlans} />,
+    },
+    {
+      key: TAB_KEYS.rightNowJobs,
+      label: (
+        <span>
+          <CheckOutlined />{' '}
+          <Badge count={counts.rightNowJobs} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+            <span>Right Now Jobs</span>
+          </Badge>
+        </span>
+      ),
+      children: <RightNowJobsNotification {...sharedProps} onCount={countSetters.rightNowJobs} />,
     },
   ];
 

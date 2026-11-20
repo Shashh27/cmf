@@ -11,7 +11,7 @@ const { Text } = Typography;
 
 const modelCache = new Map();
 
-const ModelViewer3D = ({ documentId, height = 160, showControls = false, initialView = 'default', showEdgeButton = true, restrictZoom = true }) => {
+const ModelViewer3D = ({ documentId, modelEndpoint, height = 160, showControls = false, initialView = 'default', showEdgeButton = true, restrictZoom = true }) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
@@ -26,7 +26,8 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
   const [showEdges, setShowEdges] = useState(false);
 
   useEffect(() => {
-    if (!documentId) {
+    const sourceKey = modelEndpoint || documentId;
+    if (!sourceKey) {
       return;
     }
 
@@ -122,15 +123,16 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
           setError("");
 
           let arrayBuffer;
-          if (modelCache.has(documentId)) {
-            arrayBuffer = modelCache.get(documentId);
+          if (modelCache.has(sourceKey)) {
+            arrayBuffer = modelCache.get(sourceKey);
           } else {
             try {
-              const response = await api.get(`/documents/${documentId}/3d`,
+              const response = await api.get(
+                modelEndpoint || `/documents/${documentId}/3d`,
                 { responseType: "arraybuffer" }
               );
               arrayBuffer = response.data;
-              modelCache.set(documentId, arrayBuffer);
+              modelCache.set(sourceKey, arrayBuffer);
             } catch (apiError) {
               // Extract detailed error message from response
               let errorMessage = "Unable to load 3D model";
@@ -373,7 +375,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
     return () => {
       cleanup();
     };
-  }, [documentId, height, showControls, initialView]);
+  }, [documentId, modelEndpoint, height, showControls, initialView]);
 
   useEffect(() => {
     if (modelRef.current) {
