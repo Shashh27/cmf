@@ -4,6 +4,11 @@ import { Badge, Button, Modal, Input, Empty, Spin, Tag, Typography, Tooltip, mes
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ModelViewer3D from './PDM Components/ModelViewer3D';
+import {
+  canDownloadDocument,
+  DOWNLOAD_ROLE_TOOLTIP,
+  getStoredUserRole,
+} from '../utils/documentAccess.js';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -423,7 +428,7 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
             {getPreviewType(previewDoc) === 'pdf' ? (
               previewUrl ? (
                 <iframe
-                  src={previewUrl}
+                  src={`${previewUrl}#toolbar=0`}
                   style={{ width: '100%', height: '700px', border: 'none' }}
                   title="PDF Preview"
                 />
@@ -450,29 +455,33 @@ const MCDocumentNotifications = ({ currentUserId, orderId }) => {
               <div style={{ padding: '40px' }}>
                 <FileTextOutlined style={{ fontSize: '48px', color: '#8c8c8c' }} />
                 <p>Preview not available for this file type</p>
-                <Button
-                  type="primary"
-                  onClick={async () => {
-                    try {
-                      const response = await api.get(`/documents/${previewDoc.id}/download`, {
-                        responseType: 'blob'
-                      });
-                      const url = URL.createObjectURL(response.data);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.setAttribute('download', previewDoc.document_name);
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      URL.revokeObjectURL(url);
-                    } catch (error) {
-                      console.error("Error downloading document:", error);
-                      message.error("Failed to download document");
-                    }
-                  }}
-                >
-                  Download
-                </Button>
+                {canDownloadDocument(previewDoc, getStoredUserRole()) ? (
+                  <Button
+                    type="primary"
+                    onClick={async () => {
+                      try {
+                        const response = await api.get(`/documents/${previewDoc.id}/download`, {
+                          responseType: 'blob'
+                        });
+                        const url = URL.createObjectURL(response.data);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.setAttribute('download', previewDoc.document_name);
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                      } catch (error) {
+                        console.error("Error downloading document:", error);
+                        message.error("Failed to download document");
+                      }
+                    }}
+                  >
+                    Download
+                  </Button>
+                ) : (
+                  <p style={{ color: '#8c8c8c', marginTop: 8 }}>{DOWNLOAD_ROLE_TOOLTIP}</p>
+                )}
               </div>
             )}
           </div>

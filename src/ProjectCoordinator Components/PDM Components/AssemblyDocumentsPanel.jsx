@@ -4,6 +4,11 @@ import { Badge, Button, Empty, Input, Modal, Popconfirm, Select, Space, Table, T
 import ModelViewer3D from "./ModelViewer3D";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import { api } from '../../api/client.js';
+import {
+  canDownloadDocument,
+  DOWNLOAD_ROLE_TOOLTIP,
+  getStoredUserRole,
+} from "../../utils/documentAccess.js";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -159,8 +164,17 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     }
   };
 
-  const handleDownload = (documentId, fileName) => {
-    downloadBlobWithAuth(documentId, fileName);
+  const handleDownload = (docOrId, fileName) => {
+    const doc =
+      typeof docOrId === "object" && docOrId != null
+        ? docOrId
+        : documents.find((d) => d.id === docOrId);
+    if (!canDownloadDocument(doc, getStoredUserRole())) {
+      message.error(DOWNLOAD_ROLE_TOOLTIP);
+      return;
+    }
+    const id = typeof docOrId === "object" ? docOrId.id : docOrId;
+    downloadBlobWithAuth(id, fileName);
   };
 
   const is3DFile = (doc) => {
@@ -561,15 +575,21 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                 />
               </Tooltip>
             )}
-            <Tooltip title="Download">
-              <Button
-                size="small"
-                type="text"
-                icon={<DownloadOutlined />}
-                onClick={() => handleDownload(currentDoc.id, currentDoc.document_name)}
-                className="hover:text-green-500 hover:bg-green-50"
-              />
-            </Tooltip>
+            {canDownloadDocument(currentDoc, getStoredUserRole()) ? (
+              <Tooltip title="Download">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<DownloadOutlined />}
+                  onClick={() => handleDownload(currentDoc, currentDoc.document_name)}
+                  className="hover:text-green-500 hover:bg-green-50"
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button size="small" type="text" disabled icon={<DownloadOutlined />} className="text-slate-300" />
+              </Tooltip>
+            )}
             <Tooltip title="Update Revision">
               <Button
                 size="small"
@@ -902,12 +922,29 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         destroyOnHidden
         styles={{ body: { padding: 8 } }}
         footer={[
-          <Button key="dl" icon={<DownloadOutlined />} onClick={() => {
-            const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
-            if (selectedDoc?.id) {
-              downloadBlobWithAuth(selectedDoc.id, selectedDoc.document_name);
+          (() => {
+            const selectedDoc = get3DDocuments().find((doc) => doc.id === selectedThreeDDocumentId);
+            if (canDownloadDocument(selectedDoc, getStoredUserRole())) {
+              return (
+                <Button
+                  key="dl"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    if (selectedDoc?.id) {
+                      handleDownload(selectedDoc, selectedDoc.document_name);
+                    }
+                  }}
+                >
+                  Download
+                </Button>
+              );
             }
-          }}>Download</Button>,
+            return (
+              <Tooltip key="dl" title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button icon={<DownloadOutlined />} disabled>Download</Button>
+              </Tooltip>
+            );
+          })(),
           <Button key="cl" type="primary" onClick={() => {
             setIs3DModalOpen(false);
             setSelected3DDocument(null);

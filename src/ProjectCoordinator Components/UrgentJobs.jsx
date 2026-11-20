@@ -10,7 +10,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { api, authFetch, readStoredUser } from '../api/client.js';
 import { API_BASE_URL } from '../Config/auth.js';
 import ModelViewer3D from './PDM Components/ModelViewer3D';
-import { downloadUrgentAttachment } from '../Utils/urgentJobDownload.js';
+import { downloadUrgentAttachment } from '../utils/urgentJobDownload.js';
 import UrgentJobsPdfDownload from '../DownloadReports/UrgentJobsPdfDownload.jsx';
 
 const { Text } = Typography;

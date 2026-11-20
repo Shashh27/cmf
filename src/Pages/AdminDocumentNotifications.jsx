@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import { BellOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, FileTextOutlined, ClockCircleOutlined, SearchOutlined } from "@ant-design/icons";
 import { Badge, Button, Modal, Input, Empty, Spin, Tag, Typography, Tooltip, message, Table, Space, Select, Card } from "antd";
 import { api } from '../api/client.js';
+import {
+  canDownloadDocument,
+  DOWNLOAD_ROLE_TOOLTIP,
+  getStoredUserRole,
+} from '../utils/documentAccess.js';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -428,16 +433,20 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
               <div style={{ padding: '40px' }}>
                 <FileTextOutlined style={{ fontSize: '48px', color: '#8c8c8c' }} />
                 <p>Preview unavailable</p>
-                <Button
-                  type="primary"
-                  onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
-                >
-                  Download
-                </Button>
+                {canDownloadDocument(previewDoc, getStoredUserRole()) ? (
+                  <Button
+                    type="primary"
+                    onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
+                  >
+                    Download
+                  </Button>
+                ) : (
+                  <p style={{ color: '#8c8c8c', marginTop: 8 }}>{DOWNLOAD_ROLE_TOOLTIP}</p>
+                )}
               </div>
             ) : getPreviewType(previewDoc) === 'pdf' ? (
               <iframe
-                src={previewBlobUrl}
+                src={`${previewBlobUrl}#toolbar=0`}
                 style={{ width: '100%', height: '700px', border: 'none' }}
                 title="PDF Preview"
               />
@@ -451,12 +460,16 @@ const AdminDocumentNotifications = ({ currentUserId, orderId }) => {
               <div style={{ padding: '40px' }}>
                 <FileTextOutlined style={{ fontSize: '48px', color: '#8c8c8c' }} />
                 <p>Preview not available for this file type</p>
-                <Button
-                  type="primary"
-                  onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
-                >
-                  Download
-                </Button>
+                {canDownloadDocument(previewDoc, getStoredUserRole()) ? (
+                  <Button
+                    type="primary"
+                    onClick={() => downloadBlobWithAuth(previewDoc.id, previewDoc.document_name)}
+                  >
+                    Download
+                  </Button>
+                ) : (
+                  <p style={{ color: '#8c8c8c', marginTop: 8 }}>{DOWNLOAD_ROLE_TOOLTIP}</p>
+                )}
               </div>
             )}
           </div>

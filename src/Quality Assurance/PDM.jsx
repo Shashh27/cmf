@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Layout, Drawer, Button, Tabs, Tooltip } from "antd";
+import { Layout, Drawer, Button, Tooltip } from "antd";
 import { MenuOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "./PDM Components/BillOfMaterials";
@@ -7,8 +7,6 @@ import ProductDetails from "./PDM Components/ProductDetails";
 import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
-import ProcessPlanning from "../PPS Components/ProcessPlanning";
-import QualityManagement from "../Quality Management Components/QualityManagement";
 import { useAuth } from "../auth/AuthContext.jsx";
 import "./PDM Components/pdm-theme.css";
 
@@ -41,7 +39,6 @@ const PDM = () => {
     typeof window !== "undefined" ? window.innerWidth : 1280
   );
   const [productHierarchies, setProductHierarchies] = useState({});
-  const [activeTopTab, setActiveTopTab] = useState("pdm");
   const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
   const [bomCollapsed, setBomCollapsed] = useState(false);
 
@@ -147,13 +144,6 @@ const PDM = () => {
           flex-wrap: wrap;
           gap: 8px;
         }
-        .pdm-top-bar .ant-tabs {
-          flex: 1 1 auto;
-          min-width: 0;
-        }
-        .pdm-top-bar .ant-tabs-nav {
-          margin-bottom: 0 !important;
-        }
       `}</style>
 
       <div className="pdm-container pdm-shell">
@@ -163,31 +153,18 @@ const PDM = () => {
             style={{
               padding: "8px 12px",
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               alignItems: "center",
               flexShrink: 0,
             }}
           >
-            <Tabs
-              activeKey={activeTopTab}
-              onChange={setActiveTopTab}
-              size={viewportWidth < 1100 ? "small" : "middle"}
-              items={[
-                { key: "pdm", label: "PDM" },
-                { key: "pps", label: "PPS" },
-                { key: "quality", label: viewportWidth < 1100 ? "Quality" : "Quality Management" },
-              ]}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-              <Button size="small" onClick={() => navigate("/quality_assurance/oms/orders")}>
-                {viewportWidth < 900 ? "Back" : "Back to Orders"}
-              </Button>
-            </div>
+            <Button size="small" onClick={() => navigate("/quality_assurance/oms/orders")}>
+              {viewportWidth < 900 ? "Back" : "Back to Orders"}
+            </Button>
           </div>
         )}
 
-        {!fromOms || activeTopTab === "pdm" ? (
-          <Layout className="pdm-main-layout">
+        <Layout className="pdm-main-layout">
             {useBomDrawer && (
               <Button
                 type="default"
@@ -324,20 +301,7 @@ const PDM = () => {
                 </>
               )}
             </Content>
-          </Layout>
-        ) : activeTopTab === "pps" ? (
-          <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-            <ProcessPlanning initialOrderId={initialOrderId} />
-          </div>
-        ) : activeTopTab === "quality" ? (
-          <div className="pdm-container" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-            <QualityManagement
-              initialProductId={fromOms ? initialProductId : null}
-              initialOrderId={initialOrderId}
-              fromOms={fromOms}
-            />
-          </div>
-        ) : null}
+        </Layout>
       </div>
     </>
   );

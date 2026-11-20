@@ -35,6 +35,11 @@ import {
 import ModelViewer3D from "./ModelViewer3D";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import { normalizeVersion } from "./operationUtils";
+import {
+  canDownloadDocument,
+  DOWNLOAD_ROLE_TOOLTIP,
+  getStoredUserRole,
+} from "../../utils/documentAccess.js";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -337,8 +342,17 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated, 
     }
   };
 
-  const handleDownload = (documentId, fileName) => {
-    downloadBlobWithAuth(documentId, fileName);
+  const handleDownload = (docOrId, fileName) => {
+    const doc =
+      typeof docOrId === "object" && docOrId != null
+        ? docOrId
+        : documents.find((d) => d.id === docOrId);
+    if (!canDownloadDocument(doc, getStoredUserRole())) {
+      message.error(DOWNLOAD_ROLE_TOOLTIP);
+      return;
+    }
+    const id = typeof docOrId === "object" ? docOrId.id : docOrId;
+    downloadBlobWithAuth(id, fileName);
   };
 
   const handleDelete = async (documentId) => {
@@ -632,6 +646,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated, 
         const currentUserId = getCurrentUserId();
         const isOwnDoc = currentUserId != null && Number(currentDoc.user_id) === Number(currentUserId);
         const canMutateDoc = !readOnly || isOwnDoc;
+        const canDownload = canDownloadDocument(currentDoc, getStoredUserRole());
         return (
           <div className="flex gap-1 justify-center">
             <Button
@@ -642,13 +657,19 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated, 
               className="hover:text-blue-500 hover:bg-blue-50"
             />
            
-            <Button
-              size="small"
-              type="text"
-              icon={<DownloadOutlined />}
-              onClick={() => handleDownload(currentDoc.id, getDocumentDisplayName(currentDoc) || currentDoc.document_name)}
-              className="hover:text-green-500 hover:bg-green-50"
-            />
+            {canDownload ? (
+              <Button
+                size="small"
+                type="text"
+                icon={<DownloadOutlined />}
+                onClick={() => handleDownload(currentDoc, getDocumentDisplayName(currentDoc) || currentDoc.document_name)}
+                className="hover:text-green-500 hover:bg-green-50"
+              />
+            ) : (
+              <Tooltip title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button size="small" type="text" disabled icon={<DownloadOutlined />} className="text-slate-300" />
+              </Tooltip>
+            )}
             {canMutateDoc && (
               <>
                 <Button
@@ -982,7 +1003,25 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated, 
         destroyOnHidden
         styles={{ body: { height: "75vh", padding: 0, minHeight: 200 } }}
         footer={[
-          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { if (previewDocument?.id) { downloadBlobWithAuth(previewDocument.id, previewDocument.document_name); } setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Download</Button>,
+          canDownloadDocument(previewDocument, getStoredUserRole()) ? (
+            <Button
+              key="dl"
+              icon={<DownloadOutlined />}
+              onClick={() => {
+                if (previewDocument?.id) {
+                  handleDownload(previewDocument, previewDocument.document_name);
+                }
+                setIsPreviewModalOpen(false);
+                setPreviewDocument(null);
+              }}
+            >
+              Download
+            </Button>
+          ) : (
+            <Tooltip key="dl" title={DOWNLOAD_ROLE_TOOLTIP}>
+              <Button icon={<DownloadOutlined />} disabled>Download</Button>
+            </Tooltip>
+          ),
           <Button key="cl" type="primary" onClick={() => { setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Close</Button>
         ]}
       >
@@ -1045,12 +1084,29 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated, 
         destroyOnHidden
         styles={{ body: { padding: 8 } }}
         footer={[
-          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { 
-            const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
-            if (selectedDoc?.id) { 
-              downloadBlobWithAuth(selectedDoc.id, selectedDoc.document_name); 
-            } 
-          }}>Download</Button>,
+          (() => {
+            const selectedDoc = get3DDocuments().find((doc) => doc.id === selectedThreeDDocumentId);
+            if (canDownloadDocument(selectedDoc, getStoredUserRole())) {
+              return (
+                <Button
+                  key="dl"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    if (selectedDoc?.id) {
+                      handleDownload(selectedDoc, selectedDoc.document_name);
+                    }
+                  }}
+                >
+                  Download
+                </Button>
+              );
+            }
+            return (
+              <Tooltip key="dl" title={DOWNLOAD_ROLE_TOOLTIP}>
+                <Button icon={<DownloadOutlined />} disabled>Download</Button>
+              </Tooltip>
+            );
+          })(),
           <Button key="cl" type="primary" onClick={() => { 
             setIs3DModalOpen(false); 
             setSelected3DDocument(null); 
