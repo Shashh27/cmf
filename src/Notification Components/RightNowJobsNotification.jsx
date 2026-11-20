@@ -187,8 +187,6 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
     { title: 'Machine', dataIndex: 'machine_name', align: 'center', render: (value) => value || '-' },
     { title: 'Sent by', key: 'sent_by', align: 'center', render: (_, record) => sentByName(record) },
     { title: 'Assigned by', dataIndex: 'mc_name', align: 'center', render: (value) => value || '-' },
-    { title: 'Activated at', dataIndex: 'activated_at', align: 'center', width: 170, render: (value) => formatWhen(value) },
-    { title: 'Completed at', dataIndex: 'completed_at', align: 'center', width: 170, render: (value) => formatWhen(value) },
     {
       title: 'Action',
       key: 'action',
@@ -230,7 +228,7 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
             showSearch
             allowClear
             placeholder="Filter by machine"
-            style={{ minWidth: 220, maxWidth: 320 }}
+            style={{ minWidth: 280, maxWidth: 450 }}
             value={machineFilter}
             onChange={(value) => {
               setMachineFilter(value || []);
@@ -239,7 +237,7 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
             options={machineFilterOptions}
             optionFilterProp="label"
             filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-            maxTagCount="responsive"
+            maxTagCount={2}
           />
         </Space>
         <Space>

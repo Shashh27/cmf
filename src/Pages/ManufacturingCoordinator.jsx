@@ -40,6 +40,9 @@ const ManufacturingCoordinator = () => {
   if (path.startsWith("/manufacturing_coordinator/pps")) {
     return <MCPPS />;
   }
+  if (path.startsWith("/manufacturing_coordinator/product-monitoring/right-now-jobs")) {
+    return <MCUrgentJobs />;
+  }
   if (path.startsWith("/manufacturing_coordinator/product-monitoring")) {
     return <MCProductionMonitoring />;
   }

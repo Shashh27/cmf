@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../Config/auth.js';
 import { api, authFetch } from '../api/client.js';
 import ModelViewer3D from '../ProjectCoordinator Components/PDM Components/ModelViewer3D';
 import { downloadUrgentAttachment } from '../utils/urgentJobDownload.js';
+import UrgentJobsPdfDownload from '../DownloadReports/UrgentJobsPdfDownload.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -244,7 +245,11 @@ const RightNowJobs = () => {
         </div>
       ),
     },
-    { title: 'Description', dataIndex: 'description', align: 'center', ellipsis: true, render: (value) => value || '-' },
+    { title: 'Description', dataIndex: 'description', align: 'center', ellipsis: true, render: (value) => (
+      <Tooltip title={value}>
+        <span>{value || '-'}</span>
+      </Tooltip>
+    ) },
     { title: 'Operator', dataIndex: 'operator_name', align: 'center', sorter: textSort((row) => row.operator_name), render: (value) => value || '-' },
     { title: 'Machine', dataIndex: 'machine_name', align: 'center', sorter: textSort((row) => row.machine_name), render: (value) => value || '-' },
     { title: 'Center', dataIndex: 'from_dept', align: 'center', render: (value) => value || '-' },
@@ -365,7 +370,7 @@ const RightNowJobs = () => {
               showSearch
               allowClear
               placeholder="Filter by machine"
-              style={{ minWidth: 220, maxWidth: 320 }}
+              style={{ minWidth: 280, maxWidth: 450 }}
               value={machineFilter}
               onChange={(value) => {
                 setMachineFilter(value || []);
@@ -374,10 +379,17 @@ const RightNowJobs = () => {
               options={machineFilterOptions}
               optionFilterProp="label"
               filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-              maxTagCount="responsive"
+              maxTagCount={2}
             />
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>Refresh</Button>
+          <Space>
+            <UrgentJobsPdfDownload
+              rows={filteredRows}
+              rowCount={filteredRows.length}
+              label="Supervisor Right Now Jobs"
+            />
+            <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>Refresh</Button>
+          </Space>
         </div>
         <Table
           rowKey="id"

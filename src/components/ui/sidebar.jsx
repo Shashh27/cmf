@@ -591,6 +591,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         { key: `${prefix}/product-monitoring/oee-overview`, label: <Link to={`${prefix}/product-monitoring/oee-overview`}>OEE Overview</Link> },
         { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
         { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Project Tracking</Link> },
+        { key: `${prefix}/product-monitoring/right-now-jobs`, label: <Link to={`${prefix}/product-monitoring/right-now-jobs`}>Right Now Jobs</Link> },
       ],
     },
     {
@@ -620,11 +621,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       key: `${prefix}/document-management`,
       label: <Link to={`${prefix}/document-management`} onClick={() => setMobileDrawerOpen(false)}>Document Management</Link>,
       icon: <FileTextOutlined />,
-    },
-    {
-      key: `${prefix}/right-now-jobs`,
-      label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
-      icon: <FormOutlined />,
     },
     {
       key: `${prefix}/notification`,
@@ -804,6 +800,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
           { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Project Tracking</Link> },
           { key: `${prefix}/product-monitoring/production-log`, label: <Link to={`${prefix}/product-monitoring/production-log`} onClick={() => setMobileDrawerOpen(false)}>Production Log</Link> },
+          { key: `${prefix}/product-monitoring/right-now-jobs`, label: <Link to={`${prefix}/product-monitoring/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link> },
         ],
       },
       {
@@ -834,11 +831,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/document-management`,
         label: <Link to={`${prefix}/document-management`} onClick={() => setMobileDrawerOpen(false)}>Document Management</Link>,
         icon: <FileTextOutlined />,
-      },
-      {
-        key: `${prefix}/right-now-jobs`,
-        label: <Link to={`${prefix}/right-now-jobs`} onClick={() => setMobileDrawerOpen(false)}>Right Now Jobs</Link>,
-        icon: <FormOutlined />,
       },
       {
         key: `${prefix}/notification`,

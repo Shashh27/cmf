@@ -970,7 +970,6 @@ const BillOfMaterials = ({
       part.document_row_status
       || part.document_info?.row_status
       || (part.has_unacknowledged_documents ? 'released' : 'none');
-    const revision = getDocRevision(part);
 
     return (
       <DraggablePartRow
@@ -1013,17 +1012,6 @@ const BillOfMaterials = ({
                 }`}>
                   {searchTerm ? highlightText(part.part_name, searchTerm) : part.part_name}
                 </Text>
-                {revision && (
-                  <Tooltip title={`Document revision ${revision}`}>
-                    <Tag
-                      color="blue"
-                      className="m-0 shrink-0"
-                      style={{ fontSize: 9, lineHeight: '14px', padding: '0 4px' }}
-                    >
-                      {/^v/i.test(String(part.latest_document_version || '')) ? String(part.latest_document_version) : `v${revision}`}
-                    </Tag>
-                  </Tooltip>
-                )}
               </div>
               {part.part_number && (
                 <Text className={`text-xs truncate ${

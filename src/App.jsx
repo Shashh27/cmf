@@ -336,7 +336,7 @@ function App() {
 
 
 
-          <Route path="/admin/right-now-jobs" element={<RightNowJobs />} />
+          <Route path="/admin/product-monitoring/right-now-jobs" element={<RightNowJobs />} />
 
 
 
@@ -450,7 +450,7 @@ function App() {
           <Route path="/manufacturing_coordinator/inventory-management/overview-data" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/document-management" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/notification" element={<ManufacturingCoordinator />} />
-          <Route path="/manufacturing_coordinator/right-now-jobs" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/right-now-jobs" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/access_control" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
 

@@ -955,7 +955,7 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
             showSearch
             allowClear
             placeholder="Filter by machine"
-            style={{ minWidth: 220, maxWidth: 320 }}
+            style={{ minWidth: 280, maxWidth: 450 }}
             value={machineFilter}
             onChange={(value) => {
               setMachineFilter(value || []);
@@ -964,7 +964,7 @@ const UrgentJobs = ({ audience = 'mc', onUnreadCountChange }) => {
             options={machineFilterOptions}
             optionFilterProp="label"
             filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-            maxTagCount="responsive"
+            maxTagCount={2}
           />
         )}
       </div>

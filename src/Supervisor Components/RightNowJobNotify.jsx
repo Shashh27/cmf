@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Space, Spin, Table, Tooltip, message } from 'antd';
-import { CheckOutlined, CloseOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Input, Select, Space, Spin, Table, Tooltip, message } from 'antd';
+import { CheckOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 import { api, authFetch } from '../api/client.js';
-
-const { TextArea } = Input;
 
 const machineLabel = (machine) => {
   if (!machine) return '-';
@@ -44,8 +42,6 @@ const formatWhen = (value) => {
   return date.toLocaleString('en-GB', { hour12: false });
 };
 
-const isPendingReview = (row) => !row.supervisor_decision && !row.mc_decision;
-
 const fromDisplay = (row) => {
   if (row?.from_name) return row.from_name;
   const sent = sentByName(row);
@@ -60,9 +56,8 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
   const [machineFilter, setMachineFilter] = useState([]);
   const [machines, setMachines] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-  const [review, setReview] = useState(null);
-  const [reviewForm] = Form.useForm();
-  const [reviewing, setReviewing] = useState(false);
+  const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [ackingAll, setAckingAll] = useState(false);
 
   const loadRows = async () => {
     setLoading(true);
@@ -109,7 +104,7 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
       .map(([value, label]) => ({ value, label }));
   }, [machines, rows]);
 
-  const unreadCount = useMemo(() => rows.filter(isPendingReview).length, [rows]);
+  const unreadCount = useMemo(() => rows.filter((row) => !row.supervisor_acknowledged_at).length, [rows]);
 
   useEffect(() => {
     onUnreadCountChange?.(unreadCount);
@@ -134,44 +129,75 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
     });
   }, [rows, search, machineFilter]);
 
-  const openReview = (record, status) => {
-    reviewForm.resetFields();
-    setReview({ record, status });
-  };
+  const handleAcknowledgeAll = async () => {
+    const pending = rows.filter((row) => !row.supervisor_acknowledged_at);
+    if (!pending.length) return;
 
-  const submitReview = async (values) => {
     const userId = getUserId();
-    if (!userId || !review?.record) {
+    if (!userId) {
       message.error('User not found in session. Please log in again.');
       return;
     }
-    if (review.status === 'rejected' && !String(values.remark || '').trim()) {
-      message.error('Remarks are required to reject');
+
+    setAckingAll(true);
+    try {
+      const results = await Promise.allSettled(pending.map((row) =>
+        authFetch(`${API_BASE_URL}/urgent-job-indents/${row.id}/acknowledge`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({
+            user_id: Number(userId),
+            as_role: 'supervisor',
+          }),
+        }).then((response) => {
+          if (!response.ok) throw new Error('failed');
+        })
+      ));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      await loadRows();
+      if (failed) message.warning(`Acknowledged ${pending.length - failed} of ${pending.length}`);
+      else message.success('All notifications acknowledged');
+    } catch {
+      message.error('Failed to acknowledge');
+    } finally {
+      setAckingAll(false);
+    }
+  };
+
+  const acknowledge = async (record) => {
+    const userId = getUserId();
+    if (!userId) {
+      message.error('User not found in session. Please log in again.');
       return;
     }
-    setReviewing(true);
     try {
-      const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${review.record.id}/completion-review`, {
+      setAcknowledgingIds((prev) => new Set(prev).add(record.id));
+      const response = await authFetch(`${API_BASE_URL}/urgent-job-indents/${record.id}/acknowledge`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
           user_id: Number(userId),
           as_role: 'supervisor',
-          status: review.status,
-          remark: values.remark || null,
         }),
       });
       if (!response.ok) {
         message.error(await readError(response));
+        setAcknowledgingIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(record.id);
+          return newSet;
+        });
         return;
       }
-      message.success(review.status === 'approved' ? 'Log approved' : 'Log rejected');
-      setReview(null);
+      message.success('Acknowledged');
       await loadRows();
     } catch {
-      message.error('Failed to submit review');
-    } finally {
-      setReviewing(false);
+      message.error('Failed to acknowledge');
+      setAcknowledgingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(record.id);
+        return newSet;
+      });
     }
   };
 
@@ -199,49 +225,24 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
     { title: 'Machine', dataIndex: 'machine_name', align: 'center', render: (value) => value || '-' },
     { title: 'From', key: 'from', align: 'center', render: (_, record) => fromDisplay(record) },
     { title: 'Assigned by', dataIndex: 'mc_name', align: 'center', render: (value) => value || '-' },
-    {
-      title: 'Duration',
-      key: 'duration',
-      align: 'center',
-      width: 220,
-      render: (_, record) => (
-        <div style={{ lineHeight: 1.35 }}>
-          <div>From: {formatWhen(record.activated_at)}</div>
-          <div>To: {formatWhen(record.completed_at)}</div>
-        </div>
-      ),
-    },
+    
     {
       title: 'Action',
       key: 'action',
       align: 'center',
       width: 120,
       fixed: 'right',
-      render: (_, record) => {
-        const settled = !isPendingReview(record);
-        return (
-          <Space>
-            <Tooltip title={settled ? 'Already reviewed' : 'Approve'}>
-              <Button
-                type="text"
-                icon={<CheckOutlined />}
-                style={settled ? undefined : { color: '#52c41a' }}
-                disabled={settled}
-                onClick={() => openReview(record, 'approved')}
-              />
-            </Tooltip>
-            <Tooltip title={settled ? 'Already reviewed' : 'Reject'}>
-              <Button
-                type="text"
-                danger={!settled}
-                icon={<CloseOutlined />}
-                disabled={settled}
-                onClick={() => openReview(record, 'rejected')}
-              />
-            </Tooltip>
-          </Space>
-        );
-      },
+      render: (_, record) => (
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          size="small"
+          onClick={() => acknowledge(record)}
+          disabled={Boolean(record.supervisor_acknowledged_at) || acknowledgingIds.has(record.id)}
+        >
+          Acknowledge
+        </Button>
+      ),
     },
   ];
 
@@ -265,7 +266,7 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
             showSearch
             allowClear
             placeholder="Filter by machine"
-            style={{ minWidth: 220, maxWidth: 320 }}
+            style={{ minWidth: 280, maxWidth: 450 }}
             value={machineFilter}
             onChange={(value) => {
               setMachineFilter(value || []);
@@ -274,10 +275,21 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
             options={machineFilterOptions}
             optionFilterProp="label"
             filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-            maxTagCount="responsive"
+            maxTagCount={2}
           />
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>Refresh</Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            onClick={handleAcknowledgeAll}
+            loading={ackingAll}
+            disabled={!rows.some((row) => !row.supervisor_acknowledged_at)}
+          >
+            Acknowledge All
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={loadRows} loading={loading}>Refresh</Button>
+        </Space>
       </div>
       <Table
         rowKey="id"
@@ -304,30 +316,6 @@ const RightNowJobNotify = ({ onUnreadCountChange }) => {
           },
         }}
       />
-
-      <Modal
-        title={review?.status === 'approved' ? 'Approve log' : 'Reject log'}
-        open={Boolean(review)}
-        onCancel={() => setReview(null)}
-        onOk={() => reviewForm.submit()}
-        confirmLoading={reviewing}
-        okText={review?.status === 'approved' ? 'Approve' : 'Reject'}
-        okButtonProps={{ danger: review?.status === 'rejected' }}
-        destroyOnClose
-      >
-        <Form form={reviewForm} layout="vertical" onFinish={submitReview}>
-          <Form.Item
-            name="remark"
-            label="Remarks"
-            rules={review?.status === 'rejected' ? [{ required: true, message: 'Remarks are required to reject' }] : []}
-          >
-            <TextArea
-              rows={3}
-              placeholder={review?.status === 'rejected' ? 'Reason for rejection' : 'Optional remarks'}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Spin>
   );
 };

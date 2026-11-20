@@ -347,7 +347,11 @@ const RightNowJobs = () => {
       align: 'center',
       ellipsis: true,
       sorter: textSort((row) => row.description),
-      render: (value) => value || '-',
+      render: (value) => (
+        <Tooltip title={value}>
+          <span>{value || '-'}</span>
+        </Tooltip>
+      ),
     },
     {
       title: 'Machine',
@@ -496,7 +500,7 @@ const RightNowJobs = () => {
               showSearch
               allowClear
               placeholder="Filter by machine"
-              style={{ minWidth: 220, maxWidth: 320 }}
+              style={{ minWidth: 280, maxWidth: 450 }}
               value={machineFilter}
               onChange={(value) => {
                 setMachineFilter(value || []);
@@ -505,7 +509,7 @@ const RightNowJobs = () => {
               options={machineFilterOptions}
               optionFilterProp="label"
               filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-              maxTagCount="responsive"
+              maxTagCount={2}
             />
           </Space>
           <Space wrap>
