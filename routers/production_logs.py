@@ -1096,7 +1096,7 @@ def submit_production_log(
             awaiting_review = db.query(ProductionLog).filter(
                 ProductionLog.operation_id == operation_id,
                 ProductionLog.operator_status == "completed",
-                ProductionLog.status == "pending",
+                ProductionLog.user_id.is_(None),
             ).first()
             if awaiting_review:
                 logger.warning(
@@ -1180,6 +1180,8 @@ def submit_production_log(
         db_log.to_date = current_time.date()
         db_log.to_time = current_time.time()
         db_log.operator_status = "completed"
+        # status stays inprogress while qty remains; completed only when nothing left.
+        db_log.status = "completed" if remaining_quantity <= 0 else "inprogress"
         db_log.remaining_quantity_to_be_produced = remaining_quantity
 
         db.commit()

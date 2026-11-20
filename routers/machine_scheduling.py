@@ -6044,9 +6044,20 @@ def get_machine_operations(
             order_id = group.pop("_order_id_key")
             this_op_num = group.pop("_op_number")
 
-            current_status = group["operation_status"]
             op_id = group["operation_id"]
             total_qty = group.get("total_quantity") or 0
+
+            # Prefer live production_logs over stale operation_status rows so an
+            # activated card (operator working) is treated as inprogress.
+            open_working = db.query(ProductionLog.id).filter(
+                ProductionLog.operation_id == op_id,
+                ProductionLog.operator_status == "inprogress",
+                ProductionLog.to_time.is_(None),
+            ).first()
+            if open_working:
+                group["operation_status"] = "inprogress"
+
+            current_status = group["operation_status"]
 
             work_due = get_operation_work_due(db, op_id, total_qty)
             activation_block = get_job_card_activation_block_message(
@@ -6087,13 +6098,18 @@ def get_machine_operations(
                 group["remaining_quantity"] = rem_close
                 group["completed_quantity"] = max(0, int(total_qty) - rem_close)
 
-                if activation_block:
+                group["blocked_by"] = []
+                if open_working:
+                    # Operator has an active unsubmitted run — Activate stays off.
+                    # (status=inprogress alone can mean rework/remaining after review;
+                    # that must keep Activate available.)
                     group["can_activate"] = False
-                    group["blocked_by"] = []
+                    group["block_reason"] = activation_block
+                elif activation_block:
+                    group["can_activate"] = False
                     group["block_reason"] = activation_block
                 else:
                     group["can_activate"] = True
-                    group["blocked_by"] = []
                     group["block_reason"] = None
 
             else:
@@ -6234,8 +6250,24 @@ def get_machine_operations(
                 group["remaining_quantity"] = rem_close
                 group["completed_quantity"] = max(0, int(total_qty) - rem_close)
 
-            if int(total_qty) > 0 and int(work_due.get("remaining_to_close") or 0) <= 0:
+            rem_close = int(work_due.get("remaining_to_close") or 0)
+            rework_due = int(work_due.get("rework_due") or 0)
+            reject_due = int(work_due.get("reject_due") or 0)
+            has_log_history = db.query(ProductionLog.id).filter(
+                ProductionLog.operation_id == op_id
+            ).first() is not None
+            if int(total_qty) > 0 and rem_close <= 0:
                 group["operation_status"] = "completed"
+            elif open_working:
+                group["operation_status"] = "inprogress"
+            elif has_log_history and (
+                rem_close > 0 or rework_due > 0 or reject_due > 0
+            ):
+                # Started before (logs exist) with remaining/rework — In Progress.
+                # Never-started ops (no logs) stay pending even if rem_close == qty.
+                group["operation_status"] = "inprogress"
+            else:
+                group["operation_status"] = "pending"
 
             result.append({
                 **group,
@@ -6878,9 +6910,10 @@ def activate_job_card(
     db: Session = Depends(get_db)
 ):
     """
-    Activate a job card - creates production log with operator_status 'inprogress'
-    and automatic from_date/from_time. Uses only Rescheduling table.
-    
+    Activate a job card — creates/heals a production log with
+    operator_status='inprogress' and status='inprogress', plus from_date/from_time.
+    Uses only Rescheduling table for machine assignment.
+
     Args:
         operation_id: ID of the operation to activate
         operator_id: ID of the operator activating the job card
@@ -6944,6 +6977,76 @@ def activate_job_card(
         if operation:
             part_for_qty = db.query(Part).filter(Part.id == operation.part_id).first()
             total_quantity = (part_for_qty.qty or 0) if part_for_qty else 0
+
+        def _link_machine_live_status() -> None:
+            try:
+                db.execute(
+                    text(
+                        """
+                        UPDATE production_monitoring.machine_live_status
+                        SET current_order_id = :order_id,
+                            current_part_id = :part_id,
+                            current_operation_id = :operation_id
+                        WHERE machine_id = :machine_id
+                        """
+                    ),
+                    {
+                        "machine_id": machine_id,
+                        "order_id": rescheduling_item.order_id,
+                        "part_id": rescheduling_item.part_id,
+                        "operation_id": operation_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Could not update machine_live_status",
+                    extra={
+                        "event": "machine_live_status_update_failed",
+                        "machine_id": machine_id,
+                        "operation_id": operation_id,
+                        "order_id": rescheduling_item.order_id,
+                        "part_id": rescheduling_item.part_id,
+                    },
+                )
+
+        # Open working log = already activated. Heal status if a prior bug left
+        # status='pending' while operator_status='inprogress', then return success.
+        # Must run BEFORE reviewer-block checks (those treat open logs as blocked).
+        existing_log = db.query(ProductionLog).filter(
+            ProductionLog.operation_id == operation_id,
+            ProductionLog.operator_status == "inprogress",
+            ProductionLog.to_time.is_(None),
+        ).first()
+
+        if existing_log:
+            if (existing_log.status or "").lower() != "inprogress":
+                existing_log.status = "inprogress"
+            _link_machine_live_status()
+            db.commit()
+            logger.info(
+                "Job card already active — healed status to inprogress",
+                extra={
+                    "event": "job_card_activation_idempotent",
+                    "operator_id": operator_id,
+                    "operation_id": operation_id,
+                    "log_id": existing_log.id,
+                    "machine_id": machine_id,
+                },
+            )
+            return {
+                "message": "Job card activated successfully",
+                "order_id": rescheduling_item.order_id,
+                "order_number": rescheduling_item.order_number,
+                "part_id": rescheduling_item.part_id,
+                "part_number": rescheduling_item.part_number,
+                "operation_id": operation_id,
+                "operation_number": rescheduling_item.operation_number,
+                "machine_id": machine_id,
+                "operator_id": operator_id,
+                "status": "inprogress",
+            }
+
+        if operation:
             production_block = get_operator_activation_block_reason(
                 db, operation_id, total_quantity
             )
@@ -6987,60 +7090,24 @@ def activate_job_card(
             )
             raise HTTPException(400, breakdown_block)
 
-        # Create or update production log
+        # Create production log — status must be inprogress (operator is working).
+        # Model default for status is 'pending' (= not activated); do not rely on it.
         current_time = now_ist()
-        current_date = current_time.date()
-        current_time_only = current_time.time()
-        
-        # Check if there's an existing production log with operator_status 'inprogress'
-        existing_log = db.query(ProductionLog).filter(
-            ProductionLog.operation_id == operation_id,
-            ProductionLog.operator_status == "inprogress"
-        ).first()
-        
-        if not existing_log:
-            # Create new production log
-            new_log = ProductionLog(
-                operation_id=operation_id,
-                operator_id=operator_id,
-                machine_id=machine_id,
-                from_date=current_date,
-                from_time=current_time_only,
-                operator_status="inprogress"
-            )
-            db.add(new_log)
-        
+        new_log = ProductionLog(
+            operation_id=operation_id,
+            operator_id=operator_id,
+            machine_id=machine_id,
+            from_date=current_time.date(),
+            from_time=current_time.time(),
+            operator_status="inprogress",
+            status="inprogress",
+        )
+        db.add(new_log)
+
         # Link active job to machine_live_status when a row already exists for this machine.
         # Do not change status/last_updated and do not insert a new row.
-        try:
-            update_sql = """
-            UPDATE production_monitoring.machine_live_status
-            SET current_order_id = :order_id,
-                current_part_id = :part_id,
-                current_operation_id = :operation_id
-            WHERE machine_id = :machine_id
-            """
-            db.execute(
-                text(update_sql),
-                {
-                    "machine_id": machine_id,
-                    "order_id": rescheduling_item.order_id,
-                    "part_id": rescheduling_item.part_id,
-                    "operation_id": operation_id,
-                },
-            )
-        except Exception as e:
-            logger.exception(
-                "Could not update machine_live_status",
-                extra={
-                    "event": "machine_live_status_update_failed",
-                    "machine_id": machine_id,
-                    "operation_id": operation_id,
-                    "order_id": rescheduling_item.order_id,
-                    "part_id": rescheduling_item.part_id,
-                },
-            )
-        
+        _link_machine_live_status()
+
         db.commit()
         handoff = get_operation_work_due(db, operation_id, total_quantity)
         logger.info(
@@ -7083,7 +7150,7 @@ def activate_job_card(
             "operation_number": rescheduling_item.operation_number,
             "machine_id": machine_id,
             "operator_id": operator_id,
-            "status": "inprogress"
+            "status": "inprogress",
         }
         
     except HTTPException:

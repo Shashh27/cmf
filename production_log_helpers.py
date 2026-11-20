@@ -702,18 +702,20 @@ def total_presented_on_log(produced_quantity: int, operator_rework_quantity: int
 
 def operation_has_unreviewed_production_log(db: Session, operation_id: int) -> bool:
     """
-    True when operator submitted a log (or one is still in progress) and a
-    reviewer (supervisor / manufacturing_coordinator) has not updated log status yet.
+    True when the operator has submitted a log and a reviewer
+    (supervisor / manufacturing_coordinator) has not updated it yet.
+
+    Submitted-but-unreviewed: operator_status='completed' and user_id IS NULL.
+    Active working logs (operator_status='inprogress') are not awaiting review.
     """
     count = (
         db.execute(
             text(
                 """
                 SELECT COUNT(*) FROM scheduling.production_logs
-                WHERE operation_id = :op_id AND (
-                    operator_status = 'inprogress'
-                    OR (operator_status = 'completed' AND status = 'pending')
-                )
+                WHERE operation_id = :op_id
+                  AND operator_status = 'completed'
+                  AND user_id IS NULL
                 """
             ),
             {"op_id": operation_id},
