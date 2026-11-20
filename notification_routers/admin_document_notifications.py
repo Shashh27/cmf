@@ -81,12 +81,15 @@ def get_all_document_notifications(
         parts_query = db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
         parts = {p.id: p for p in parts_query}
     
-    # Preload MC users
+    # Preload MC users + document uploaders (for download role checks)
     mc_user_ids = [n.mc_user_id for n in notifications]
-    mc_users = {}
-    if mc_user_ids:
-        users_query = db.query(AccessUserModel).filter(AccessUserModel.id.in_(mc_user_ids)).all()
-        mc_users = {u.id: u for u in users_query}
+    uploader_ids = [d.user_id for d in documents.values() if d.user_id]
+    user_ids = list({*mc_user_ids, *uploader_ids})
+    users_by_id = {}
+    if user_ids:
+        users_query = db.query(AccessUserModel).filter(AccessUserModel.id.in_(user_ids)).all()
+        users_by_id = {u.id: u for u in users_query}
+    mc_users = users_by_id
     
     # Build result with enriched details
     result = []
@@ -97,6 +100,7 @@ def get_all_document_notifications(
         
         part = parts.get(document.part_id) if document.part_id else None
         mc_user = mc_users.get(notif.mc_user_id)
+        uploader = users_by_id.get(document.user_id) if document.user_id else None
         
         result.append({
             "id": notif.id,
@@ -117,6 +121,8 @@ def get_all_document_notifications(
                 "document_version": document.document_version,
                 "document_url": document.document_url,
                 "part_id": document.part_id,
+                "user_id": document.user_id,
+                "user_role": uploader.role if uploader else None,
                 "created_at": document.created_at,
             },
             "part": {

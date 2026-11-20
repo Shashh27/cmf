@@ -1,4 +1,6 @@
 from fastapi import FastAPI, APIRouter, Depends
+from fastapi.openapi.docs import get_redoc_html
+from fastapi.responses import HTMLResponse
 
 from dotenv import load_dotenv
 
@@ -170,7 +172,8 @@ app = FastAPI(
 
     docs_url="/docs",
 
-    redoc_url="/redoc"
+    # Custom /redoc below — FastAPI default uses redoc@next which fails on many networks
+    redoc_url=None,
 
 )
 
@@ -181,6 +184,16 @@ from auth.migrate_refresh_tokens import ensure_refresh_tokens_schema
 from auth.openapi import configure_openapi_jwt
 
 configure_openapi_jwt(app)
+
+
+@app.get("/redoc", include_in_schema=False, response_class=HTMLResponse)
+async def redoc_html() -> HTMLResponse:
+    """ReDoc with a pinned CDN build (redoc@next often 404s / times out)."""
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2.1.3/bundles/redoc.standalone.js",
+    )
 
 # Open CORS — allow all origins (no credentials; Bearer JWT in Authorization header)
 app.add_middleware(

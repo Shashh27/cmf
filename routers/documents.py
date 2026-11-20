@@ -56,12 +56,78 @@ def _check_assembly_recycle_bin_recursive(assembly_id: int, db: Session) -> Opti
 
 
 def _normalize_role(role: Optional[str]) -> str:
-    return (role or "").strip().lower().replace(" ", "_")
+    return normalize_role(role) or (role or "").strip().lower().replace(" ", "_")
 
 
 def _is_qa_role(role: Optional[str]) -> bool:
     """Quality Assurance uploads are auto-acknowledged (no PC release step)."""
     return _normalize_role(role) in ("quality_assurance", "qa")
+
+
+def _roles_match(role_a: Optional[str], role_b: Optional[str]) -> bool:
+    """True when both roles normalize to the same canonical role (qa ↔ quality_assurance)."""
+    a = _normalize_role(role_a)
+    b = _normalize_role(role_b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    qa = {"quality_assurance", "qa"}
+    return a in qa and b in qa
+
+
+def _assert_can_download_document(
+    db: Session,
+    document_id: int,
+    current_user: AccessUser,
+) -> None:
+    """
+    Download rules:
+    - QA-uploaded documents → any authenticated role may download
+    - PC / Admin / MC (and other) uploads → only the same uploading role may download
+    """
+    uploader_id: Optional[int] = None
+    if document_id < 0:
+        qd = db.query(StockQualityDocumentModel).filter(
+            StockQualityDocumentModel.id == -document_id
+        ).first()
+        if not qd:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document with id {document_id} not found",
+            )
+        uploader_id = qd.user_id
+    else:
+        document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document with id {document_id} not found",
+            )
+        uploader_id = document.user_id
+
+    if not uploader_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the uploading role can download this document",
+        )
+
+    uploader = db.query(AccessUser).filter(AccessUser.id == uploader_id).first()
+    if not uploader:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the uploading role can download this document",
+        )
+
+    # Quality Assurance uploads are shareable across roles
+    if _is_qa_role(getattr(uploader, "role", None)):
+        return
+
+    if not _roles_match(getattr(current_user, "role", None), getattr(uploader, "role", None)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the uploading role can download this document",
+        )
 
 
 QUALITY_DOCUMENT_TYPE = "Quality Document"
