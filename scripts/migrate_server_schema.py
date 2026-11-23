@@ -70,6 +70,19 @@ NEW_TABLES = [
         )
         """,
     ),
+    (
+        "accesscontrol.access_user_roles",
+        """
+        CREATE TABLE IF NOT EXISTS accesscontrol.access_user_roles (
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL
+                        REFERENCES accesscontrol.access_users(id) ON DELETE CASCADE,
+            role        VARCHAR NOT NULL,
+            created_at  TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_access_user_roles_user_role UNIQUE (user_id, role)
+        )
+        """,
+    ),
     # ---- Order chatbox -----------------------------------------------------
     (
         "chatbox.chat_conversations",
@@ -384,6 +397,9 @@ ADD_COLUMNS = [
     CREATE INDEX IF NOT EXISTS ix_stock_quality_documents_unit_id
         ON inventory.stock_quality_documents (unit_id)
     """,
+    "ALTER TABLE oms.documents ADD COLUMN IF NOT EXISTS uploaded_role VARCHAR",
+    "ALTER TABLE oms.operation_documents ADD COLUMN IF NOT EXISTS uploaded_role VARCHAR",
+    "ALTER TABLE oms.order_documents ADD COLUMN IF NOT EXISTS uploaded_role VARCHAR",
 ]
 
 # --------------------------------------------------------------------------
@@ -427,6 +443,46 @@ BACKFILL = [
         UPDATE configuration.pm_checklist_items
         SET item_code = 'CP-' || id::text
         WHERE item_code IS NULL
+        """,
+    ),
+    (
+        "backfill access_user_roles from access_users.role",
+        """
+        INSERT INTO accesscontrol.access_user_roles (user_id, role)
+        SELECT u.id, u.role
+        FROM accesscontrol.access_users u
+        WHERE u.role IS NOT NULL AND TRIM(u.role) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM accesscontrol.access_user_roles r
+            WHERE r.user_id = u.id AND r.role = u.role
+          )
+        """,
+    ),
+    (
+        "backfill documents.uploaded_role from uploader primary role",
+        """
+        UPDATE oms.documents d
+        SET uploaded_role = u.role
+        FROM accesscontrol.access_users u
+        WHERE d.user_id = u.id AND d.uploaded_role IS NULL AND u.role IS NOT NULL
+        """,
+    ),
+    (
+        "backfill operation_documents.uploaded_role",
+        """
+        UPDATE oms.operation_documents d
+        SET uploaded_role = u.role
+        FROM accesscontrol.access_users u
+        WHERE d.user_id = u.id AND d.uploaded_role IS NULL AND u.role IS NOT NULL
+        """,
+    ),
+    (
+        "backfill order_documents.uploaded_role",
+        """
+        UPDATE oms.order_documents d
+        SET uploaded_role = u.role
+        FROM accesscontrol.access_users u
+        WHERE d.user_id = u.id AND d.uploaded_role IS NULL AND u.role IS NOT NULL
         """,
     ),
 ]
@@ -564,6 +620,7 @@ INDEXES = [
     # refresh tokens
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON accesscontrol.refresh_tokens (user_id)",
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_jti ON accesscontrol.refresh_tokens (jti)",
+    "CREATE INDEX IF NOT EXISTS ix_access_user_roles_user_id ON accesscontrol.access_user_roles (user_id)",
     # chatbox
     "CREATE INDEX IF NOT EXISTS ix_chat_conversations_order_id ON chatbox.chat_conversations (order_id)",
     "CREATE INDEX IF NOT EXISTS ix_chat_conversations_id ON chatbox.chat_conversations (id)",

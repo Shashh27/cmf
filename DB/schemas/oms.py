@@ -396,6 +396,7 @@ class DocumentBase(BaseModel):
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     user_role: Optional[str] = None
+    uploaded_role: Optional[str] = None  # session role at upload (download gate)
     is_acknowledged: bool = False
     mc_ack_remarks: Optional[str] = None
     mc_reject_remarks: Optional[str] = None
@@ -646,6 +647,7 @@ class OrderDocumentBase(BaseModel):
     document_version: str
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    uploaded_role: Optional[str] = None
 
 
 class OrderDocumentCreate(OrderDocumentBase):
@@ -683,6 +685,7 @@ class OperationDocumentBase(BaseModel):
     operation_id: int
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    uploaded_role: Optional[str] = None
 
 
 class OperationDocumentCreate(OperationDocumentBase):
@@ -713,6 +716,7 @@ class OperationDocumentWithDetails(OperationDocument):
     operation_number: Optional[str] = None
     user_name: Optional[str] = None
     user_role: Optional[str] = None
+    uploaded_role: Optional[str] = None
 
     class Config:
         from_attributes = True

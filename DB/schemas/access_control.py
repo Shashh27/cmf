@@ -1,18 +1,20 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional
 from datetime import datetime
 
 
 class AccessUserBase(BaseModel):
     user_name: str
     gmail: str
-    role: str
+    role: str  # primary / default role
     center: Optional[str] = None
     group: Optional[str] = None
 
 
 class AccessUserCreate(AccessUserBase):
     password: str
+    # Optional extra roles (primary is always included server-side)
+    roles: Optional[List[str]] = None
 
 
 class AccessUserUpdate(BaseModel):
@@ -22,12 +24,14 @@ class AccessUserUpdate(BaseModel):
     center: Optional[str] = None
     group: Optional[str] = None
     password: Optional[str] = None
+    roles: Optional[List[str]] = None
 
 
 class AccessUserResponse(AccessUserBase):
     id: int
     createdAt: datetime
     updatedAt: datetime
+    roles: List[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -36,12 +40,15 @@ class AccessUserResponse(AccessUserBase):
 class LoginRequest(BaseModel):
     user_name: str
     password: str
+    # Selected portal role (multi-role users). Optional for single-role back-compat.
+    role: Optional[str] = None
 
 
 class LoginUserInfo(AccessUserBase):
     id: int
     createdAt: datetime
     updatedAt: datetime
+    roles: List[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

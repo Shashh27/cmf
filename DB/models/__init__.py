@@ -34,7 +34,7 @@ from .configuration import (
     PMSchedule,
     PMCheckpointSubmission,
 )
-from .access_control import AccessUser
+from .access_control import AccessUser, AccessUserRole
 from .refresh_token import RefreshToken
 from .inventory import (
     RawMaterial,

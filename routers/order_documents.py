@@ -9,7 +9,7 @@ from DB.minio_client import get_minio_client
 from DB.schemas.oms import OrderDocument as OrderDocumentResponse, OrderDocumentCreate, OrderDocumentUpdate
 from services.notification_service import NotificationService
 from auth.deps import get_current_user
-from auth.roles import ensure_can_download_document
+from auth.roles import ensure_can_download_document, normalize_role
 import uuid
 import os
 from datetime import datetime, timedelta
@@ -140,7 +140,8 @@ async def upload_order_document(
             content_type=file.content_type
         )
 
-        # Save to database (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)
+        session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
+        # Save to database (user_id = uploader; uploaded_role = session role at upload)
         db_document = OrderDocument(
             order_id=order_id,
             document_name=file.filename,
@@ -148,7 +149,8 @@ async def upload_order_document(
             document_type=document_type or file.content_type,
             document_version=document_version,
             parent_id=parent_id,
-            user_id=user_id
+            user_id=user_id,
+            uploaded_role=session_role,
         )
 
         db.add(db_document)
@@ -156,12 +158,8 @@ async def upload_order_document(
         db.refresh(db_document)
 
         # Log order document creation for PC notifications
-        user_name = None
-        user_role = None
-        if user_id:
-            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
-            user_name = user.user_name if user else None
-            user_role = user.role if user else None
+        user_name = getattr(current_user, "user_name", None)
+        user_role = session_role
         
         NotificationService.log_order_document_change(
             db=db,
@@ -224,6 +222,8 @@ async def upload_order_documents_bulk(
     if not files:
         return []
 
+    session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
+
     minio_client = get_minio_client()
     created_docs: List[OrderDocument] = []
 
@@ -284,6 +284,7 @@ async def upload_order_documents_bulk(
                 document_version=effective_version,
                 parent_id=parent_id,
                 user_id=user_id,
+                uploaded_role=session_role,
             )
             db.add(db_document)
             created_docs.append(db_document)
@@ -572,6 +573,7 @@ async def download_order_document(
         db=db,
         uploader_user_id=document.user_id,
         current_user=current_user,
+        uploader_role=getattr(document, "uploaded_role", None),
     )
 
     try:

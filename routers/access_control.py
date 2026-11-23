@@ -6,6 +6,7 @@ from DB.database import get_db
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.access_control import AccessUserResponse, AccessUserCreate, AccessUserUpdate
 from DB.utils.password import encrypt_password, decrypt_password, is_encrypted
+from auth.roles import get_user_roles, normalize_role, sync_user_roles
 
 router = APIRouter(
     prefix="/access-users",
@@ -13,7 +14,7 @@ router = APIRouter(
 )
 
 
-def _to_response(db_user: AccessUserModel) -> AccessUserResponse:
+def _to_response(db_user: AccessUserModel, db: Session) -> AccessUserResponse:
     return AccessUserResponse(
         id=db_user.id,
         user_name=db_user.user_name,
@@ -23,6 +24,7 @@ def _to_response(db_user: AccessUserModel) -> AccessUserResponse:
         group=db_user.group,
         createdAt=db_user.createdAt,
         updatedAt=db_user.updatedAt,
+        roles=get_user_roles(db, db_user),
     )
 
 
@@ -43,20 +45,28 @@ def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
             detail=f"User with username {user.user_name} already exists",
         )
 
-    user_data = user.model_dump()
+    user_data = user.model_dump(exclude={"roles"})
     user_data["password"] = encrypt_password(user_data["password"])
+    user_data["role"] = normalize_role(user_data["role"]) or user_data["role"]
     db_user = AccessUserModel(**user_data)
     db.add(db_user)
+    db.flush()
+    sync_user_roles(
+        db,
+        db_user.id,
+        primary_role=db_user.role,
+        roles=user.roles,
+    )
     db.commit()
     db.refresh(db_user)
-    return _to_response(db_user)
+    return _to_response(db_user, db)
 
 
 @router.get("/", response_model=List[AccessUserResponse])
 def get_access_users(db: Session = Depends(get_db)):
     """Get all access users (no limits)"""
     users = db.query(AccessUserModel).all()
-    return [_to_response(user) for user in users]
+    return [_to_response(user, db) for user in users]
 
 
 @router.get("/{user_id}/", response_model=AccessUserResponse)
@@ -68,7 +78,7 @@ def get_access_user(user_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id {user_id} not found",
         )
-    return _to_response(user)
+    return _to_response(user, db)
 
 
 @router.put("/{user_id}/", response_model=AccessUserResponse)
@@ -99,17 +109,28 @@ def update_access_user(user_id: int, user: AccessUserUpdate, db: Session = Depen
                 detail=f"User with username {user.user_name} already exists",
             )
 
-    update_data = user.model_dump(exclude_unset=True)
+    update_data = user.model_dump(exclude_unset=True, exclude={"roles"})
     if not update_data.get("password"):
         update_data.pop("password", None)
     elif "password" in update_data:
         update_data["password"] = encrypt_password(update_data["password"])
+    if "role" in update_data and update_data["role"] is not None:
+        update_data["role"] = normalize_role(update_data["role"]) or update_data["role"]
     for field, value in update_data.items():
         setattr(db_user, field, value)
 
+    # Sync junction when primary role or roles list is provided
+    if user.roles is not None or user.role is not None:
+        sync_user_roles(
+            db,
+            db_user.id,
+            primary_role=db_user.role,
+            roles=user.roles if user.roles is not None else get_user_roles(db, db_user),
+        )
+
     db.commit()
     db.refresh(db_user)
-    return _to_response(db_user)
+    return _to_response(db_user, db)
 
 
 @router.delete("/{user_id}/", status_code=status.HTTP_204_NO_CONTENT)

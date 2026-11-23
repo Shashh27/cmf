@@ -23,7 +23,7 @@ from DB.schemas.oms import (
 )
 from services.notification_service import NotificationService
 from auth.deps import get_current_user
-from auth.roles import ensure_can_download_document
+from auth.roles import ensure_can_download_document, normalize_role
 
 router = APIRouter(
     prefix="/operation-documents",
@@ -172,7 +172,8 @@ async def upload_operation_documents(
     document_version: str = Form(""),
     parent_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """Upload multiple documents for an operation (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)."""
     # Check if operation exists
@@ -182,6 +183,9 @@ async def upload_operation_documents(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
+
+    user_id = current_user.id
+    session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
     
     uploaded_documents = []
     minio_client = get_minio_client()
@@ -239,7 +243,7 @@ async def upload_operation_documents(
                 }
             )
             
-            # Create database record (user_id = uploader)
+            # Create database record (user_id = uploader, uploaded_role = session role)
             db_document = OperationDocumentModel(
                 document_name=file.filename,
                 document_url=document_url,
@@ -247,7 +251,8 @@ async def upload_operation_documents(
                 document_version=document_version,
                 operation_id=operation_id,
                 parent_id=parent_id,
-                user_id=user_id
+                user_id=user_id,
+                uploaded_role=session_role,
             )
             
             db.add(db_document)
@@ -277,6 +282,7 @@ async def upload_operation_documents_bulk(
     parent_id: List[Optional[int]] = Form([]),
     user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """Upload many operation documents with per-file metadata in one request."""
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
@@ -289,6 +295,8 @@ async def upload_operation_documents_bulk(
     if not files:
         return []
 
+    user_id = current_user.id
+    session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
     uploaded_documents: List[OperationDocumentModel] = []
     minio_client = get_minio_client()
 
@@ -361,7 +369,8 @@ async def upload_operation_documents_bulk(
                 document_version=effective_version,
                 operation_id=operation_id,
                 parent_id=effective_parent,
-                user_id=user_id
+                user_id=user_id,
+                uploaded_role=session_role,
             )
             db.add(db_document)
             uploaded_documents.append(db_document)
@@ -389,6 +398,7 @@ async def upload_operation_documents_bulk_multi(
     parent_id: List[str] = Form([]),
     user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
+    current_user: AccessUser = Depends(get_current_user),
 ):
     """
     Upload many operation documents across multiple operations in one request.
@@ -401,6 +411,8 @@ async def upload_operation_documents_bulk_multi(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="operation_id and files length must match"
         )
+    user_id = current_user.id
+    session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
 
     op_ids = set(operation_id)
     existing = db.query(OperationModel.id).filter(OperationModel.id.in_(op_ids)).all()
@@ -488,7 +500,8 @@ async def upload_operation_documents_bulk_multi(
                 document_version=effective_version,
                 operation_id=op_id,
                 parent_id=effective_parent,
-                user_id=user_id
+                user_id=user_id,
+                uploaded_role=session_role,
             )
             db.add(db_document)
             uploaded_documents.append(db_document)
@@ -555,6 +568,7 @@ def download_operation_document(
         db=db,
         uploader_user_id=document.user_id,
         current_user=current_user,
+        uploader_role=getattr(document, "uploaded_role", None),
     )
 
     # Extract object name from URL
@@ -683,11 +697,12 @@ def get_documents_by_operation(operation_id: int, user_id: int | None = None, db
     for document in documents:
         # Get user information for filtering
         user_name = None
-        user_role = None
+        account_role = None
         if document.user_id:
             user = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
             user_name = user.user_name if user else None
-            user_role = user.role if user else None
+            account_role = user.role if user else None
+        stored_role = getattr(document, "uploaded_role", None) or account_role
         
         # Create document dict with operation details and user info
         document_dict = {
@@ -702,7 +717,8 @@ def get_documents_by_operation(operation_id: int, user_id: int | None = None, db
             "operation_number": operation.operation_number,
             "user_id": document.user_id,
             "user_name": user_name,
-            "user_role": user_role
+            "user_role": stored_role,
+            "uploaded_role": stored_role,
         }
         result.append(document_dict)
     return result

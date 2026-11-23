@@ -227,7 +227,7 @@ def _quality_documents_for_part(db: Session, part_id: int) -> List[Document]:
 def _resolve_file_document(db: Session, document_id: int):
     """
     Resolve OMS part document or stock quality document (negative id from part listing).
-    Returns (document_name, document_url, uploader_user_id) or raises 404.
+    Returns (document_name, document_url, uploader_user_id, uploaded_role) or raises 404.
     """
     if document_id < 0:
         qd = db.query(StockQualityDocumentModel).filter(
@@ -238,7 +238,7 @@ def _resolve_file_document(db: Session, document_id: int):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document with id {document_id} not found",
             )
-        return qd.document_name, qd.document_url, qd.user_id
+        return qd.document_name, qd.document_url, qd.user_id, "quality_assurance"
 
     document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
     if not document:
@@ -246,7 +246,12 @@ def _resolve_file_document(db: Session, document_id: int):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found",
         )
-    return document.document_name, document.document_url, document.user_id
+    return (
+        document.document_name,
+        document.document_url,
+        document.user_id,
+        getattr(document, "uploaded_role", None),
+    )
 
 
 def _create_mc_notification_for_document(db: Session, db_document: DocumentModel) -> None:
@@ -604,7 +609,8 @@ async def create_document(
 
         # Create database record (user_id = uploader). QA uploads are auto-acknowledged.
         processed_parent_id = None if parent_id in (0, None) else parent_id
-        auto_ack = _is_qa_role(getattr(current_user, "role", None))
+        session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
+        auto_ack = _is_qa_role(session_role)
         db_document = DocumentModel(
             document_name=document_name,
             document_url=document_url,
@@ -614,6 +620,7 @@ async def create_document(
             assembly_id=assembly_id,
             parent_id=processed_parent_id,
             user_id=user_id,
+            uploaded_role=session_role,
             is_acknowledged=auto_ack,
         )
 
@@ -625,20 +632,14 @@ async def create_document(
         db.refresh(db_document)
 
         # Log document creation for PC notifications
-        user_name = None
-        user_role = None
-        if user_id:
-            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
-            user_name = user.user_name if user else None
-            user_role = user.role if user else None
-        
+        user_name = getattr(current_user, "user_name", None)
         NotificationService.log_document_change(
             db=db,
             document_id=db_document.id,
             action="created",
             user_id=user_id,
             user_name=user_name,
-            user_role=user_role,
+            user_role=session_role,
             details={"document_name": db_document.document_name, "document_type": db_document.document_type}
         )
 
@@ -752,7 +753,8 @@ async def create_documents_bulk(
 
     created_docs: List[DocumentModel] = []
     extraction_jobs = []
-    auto_ack = _is_qa_role(getattr(current_user, "role", None))
+    session_role = normalize_role(getattr(current_user, "role", None)) or getattr(current_user, "role", None)
+    auto_ack = _is_qa_role(session_role)
 
     try:
         for idx, file in enumerate(files):
@@ -832,6 +834,7 @@ async def create_documents_bulk(
                 assembly_id=assembly_id,
                 parent_id=effective_parent,
                 user_id=user_id,
+                uploaded_role=session_role,
                 is_acknowledged=auto_ack,
             )
             db.add(db_document)
@@ -913,7 +916,7 @@ async def preview_document(
     from fastapi.responses import StreamingResponse
 
     # Preview: any authenticated user (role gate applies to /download only)
-    document_name, document_url, _uploader_user_id = _resolve_file_document(db, document_id)
+    document_name, document_url, _uploader_user_id, _uploaded_role = _resolve_file_document(db, document_id)
 
     try:
         # Extract object name and extension from URL
@@ -956,7 +959,7 @@ async def preview_document_3d(
     from fastapi.responses import StreamingResponse
 
     # 3D preview: any authenticated user (role gate applies to /download only)
-    document_name, document_url, _uploader_user_id = _resolve_file_document(db, document_id)
+    document_name, document_url, _uploader_user_id, _uploaded_role = _resolve_file_document(db, document_id)
 
     try:
         minio_client = get_minio_client()
@@ -1016,12 +1019,12 @@ async def download_document(
     """Download document file from MinIO"""
     from fastapi.responses import StreamingResponse
 
-    document_name, document_url, uploader_user_id = _resolve_file_document(db, document_id)
+    document_name, document_url, uploader_user_id, uploaded_role = _resolve_file_document(db, document_id)
     ensure_can_download_document(
         db=db,
         uploader_user_id=uploader_user_id,
         current_user=current_user,
-        uploader_role="quality_assurance" if document_id < 0 else None,
+        uploader_role=uploaded_role or ("quality_assurance" if document_id < 0 else None),
     )
 
     try:
@@ -1125,10 +1128,15 @@ def get_documents_by_part(
         else:
             doc.user_name = None
         
-        if doc.user and hasattr(doc.user, 'role'):
+        # Prefer role stored at upload (session role); fall back to account primary role
+        stored_role = getattr(doc, "uploaded_role", None)
+        if stored_role:
+            doc.user_role = stored_role
+        elif doc.user and hasattr(doc.user, "role"):
             doc.user_role = doc.user.role
         else:
             doc.user_role = None
+        doc.uploaded_role = stored_role or doc.user_role
         
         # Add MC notification details if available
         if doc.id in mc_notifications:
@@ -1168,7 +1176,18 @@ def get_documents_by_assembly(
     query = db.query(DocumentModel).filter(DocumentModel.assembly_id == assembly_id)
     if user_id is not None:
         query = query.filter(DocumentModel.user_id == user_id)
-    return query.all()
+    documents = query.all()
+    for doc in documents:
+        stored = getattr(doc, "uploaded_role", None)
+        if stored:
+            doc.user_role = stored
+        elif doc.user_id:
+            u = db.query(AccessUser).filter(AccessUser.id == doc.user_id).first()
+            doc.user_role = u.role if u else None
+        else:
+            doc.user_role = None
+        doc.uploaded_role = stored or doc.user_role
+    return documents
 
 
 @router.get("/parent/{parent_id}", response_model=List[Document])

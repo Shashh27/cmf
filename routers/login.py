@@ -25,24 +25,38 @@ from auth.refresh_store import (
     get_valid_refresh_row,
     revoke_all_for_user,
     revoke_refresh_by_jti,
-    rotate_refresh_token,
     store_refresh_token,
 )
-from auth.roles import normalize_role
+from auth.roles import get_user_roles, normalize_role, resolve_login_role, user_has_role
 
 login_router = APIRouter(prefix="/login", tags=["login"])
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_info(user: AccessUserModel) -> LoginUserInfo:
-    info = LoginUserInfo.model_validate(user)
-    info.role = normalize_role(info.role) or (info.role or "")
-    return info
+def _user_info(user: AccessUserModel, db: Session, active_role: Optional[str] = None) -> LoginUserInfo:
+    roles = get_user_roles(db, user)
+    role = normalize_role(active_role) if active_role else (normalize_role(user.role) or (user.role or ""))
+    return LoginUserInfo(
+        id=user.id,
+        user_name=user.user_name,
+        gmail=user.gmail,
+        role=role,
+        center=user.center,
+        group=user.group,
+        createdAt=user.createdAt,
+        updatedAt=user.updatedAt,
+        roles=roles,
+    )
 
 
-def _issue_tokens(response: Response, db: Session, user: AccessUserModel) -> tuple[str, str]:
-    access = create_access_token(user.id, user.role)
-    refresh, jti, expires_at = create_refresh_token(user.id, user.role)
+def _issue_tokens(
+    response: Response,
+    db: Session,
+    user: AccessUserModel,
+    active_role: str,
+) -> tuple[str, str]:
+    access = create_access_token(user.id, active_role)
+    refresh, jti, expires_at = create_refresh_token(user.id, active_role)
     store_refresh_token(
         db,
         user_id=user.id,
@@ -91,12 +105,19 @@ def login(
         db.commit()
         db.refresh(user)
 
-    access, refresh = _issue_tokens(response, db, user)
+    active_role = resolve_login_role(db, user, login_data.role)
+    if not active_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User has no role assigned",
+        )
+
+    access, refresh = _issue_tokens(response, db, user, active_role)
     return LoginResponse(
         access_token=access,
         refresh_token=refresh,
         token_type="bearer",
-        user=_user_info(user),
+        user=_user_info(user, db, active_role),
     )
 
 
@@ -138,13 +159,20 @@ def refresh_access_token(
         clear_refresh_cookie(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
+    # Keep the session role from the refresh token when still allowed
+    token_role = normalize_role(payload.get("role"))
+    if token_role and user_has_role(db, user, token_role):
+        active_role = token_role
+    else:
+        active_role = normalize_role(user.role) or resolve_login_role(db, user, None)
+
     set_refresh_cookie(response, raw)
-    access = create_access_token(user.id, user.role)
+    access = create_access_token(user.id, active_role)
     return TokenResponse(
         access_token=access,
         refresh_token=raw,
         token_type="bearer",
-        user=_user_info(user),
+        user=_user_info(user, db, active_role),
     )
 
 
@@ -175,8 +203,13 @@ def logout(
 
 
 @auth_router.get("/me", response_model=LoginUserInfo)
-def me(current_user: AccessUserModel = Depends(get_current_user)):
-    return _user_info(current_user)
+def me(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: AccessUserModel = Depends(get_current_user),
+):
+    # current_user.role is already the JWT active role (see deps)
+    return _user_info(current_user, db, getattr(current_user, "role", None))
 
 
 # Back-compat export name used by routers.__init__

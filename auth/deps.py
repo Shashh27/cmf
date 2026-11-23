@@ -75,6 +75,8 @@ async def get_bearer_token(
 
 
 def _load_user_from_access_token(token: str, db: Session) -> AccessUser:
+    from sqlalchemy.orm.attributes import set_committed_value
+
     payload = decode_token(token, "access")
     try:
         user_id = int(payload["sub"])
@@ -91,6 +93,10 @@ def _load_user_from_access_token(token: str, db: Session) -> AccessUser:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Active session role comes from JWT (multi-role login). Do not dirty the ORM row.
+    token_role = normalize_role(payload.get("role"))
+    if token_role:
+        set_committed_value(user, "role", token_role)
     return user
 
 

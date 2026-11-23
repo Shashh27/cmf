@@ -386,6 +386,9 @@ class Document(Base):
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
+    # Role active at upload time (JWT session role). Used for download gating.
+    uploaded_role = Column(String, nullable=True)
+
     is_acknowledged = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -568,6 +571,9 @@ class OrderDocument(Base):
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
+    # Role active at upload time (JWT session role). Used for download gating.
+    uploaded_role = Column(String, nullable=True)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -615,6 +621,9 @@ class OperationDocument(Base):
     parent_id = Column(Integer, ForeignKey("oms.operation_documents.id"), nullable=True)
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    # Role active at upload time (JWT session role). Used for download gating.
+    uploaded_role = Column(String, nullable=True)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
