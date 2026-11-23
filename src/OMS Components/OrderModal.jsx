@@ -3,6 +3,7 @@ import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collap
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { api } from '../api/client.js';
+import { userHasRole } from '../auth/roleHomes.js';
 
 // Shared utility: normalise a revision string as the user types
 const normalizeVersion = (raw) => {
@@ -159,14 +160,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       const list = Array.isArray(response.data) ? response.data : [];
       setUsers(list);
       
-      // For admin OrderModal: show all project coordinators for selection
-      const pcs = list.filter(
-        (u) => (u.role || "").toLowerCase() === "project_coordinator"
-      );
-      const mcs = list.filter((u) => {
-        const r = (u.role || "").toLowerCase();
-        return r === "manufacturing_coordinator" || r === "mc";
-      });
+      // Include multi-role users who have PC / MC among allowed roles
+      const pcs = list.filter((u) => userHasRole(u, "project_coordinator"));
+      const mcs = list.filter((u) => userHasRole(u, "manufacturing_coordinator"));
       setProjectCoordinators(pcs);
       setManufacturingCoordinators(mcs);
     } catch (error) {

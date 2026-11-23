@@ -375,20 +375,29 @@ const Dashboard = () => {
             ? [...logs].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0]
             : null;
           const openWorking = Boolean(stats.openWorking);
-          const hasRemainingWork = Number(stats.remainingToClose ?? stats.reworkDue ?? 0) > 0
-            || Number(latest?.rework_quantity || 0) > 0
-            || Number(latest?.remaining_quantity_to_be_produced ?? latest?.remaining_to_close ?? 0) > 0
-            || String(latest?.status || '').toLowerCase() === 'inprogress';
-          const reviewStatus = openWorking
+          const latestStatus = String(latest?.status || '').toLowerCase().trim();
+          const opStatus = String(job.operation_status || '').toLowerCase().trim();
+          // In Progress only when actually working / log says so — not merely because qty remains.
+          const isInProgress = openWorking
+            || latestStatus === 'inprogress'
+            || opStatus === 'inprogress'
+            || opStatus === 'in-progress'
+            || opStatus === 'in progress';
+          const reviewStatus = isInProgress
             ? 'inprogress'
-            : (hasRemainingWork ? 'inprogress' : (latest?.status || job.operation_status || 'pending'));
+            : (latestStatus === 'completed' || opStatus === 'completed'
+              ? 'completed'
+              : (latest?.status || job.operation_status || 'pending'));
           stats.reviewStatus = reviewStatus;
           setSelectedJob((prev) => {
             if (!prev || getJobOperationId(prev) !== getJobOperationId(job)) return prev;
             const next = {
               ...prev,
               status: reviewStatus,
-              operation_status: hasRemainingWork || openWorking ? 'inprogress' : (job.operation_status || prev.operation_status),
+              // Keep API operation_status; only flip to inprogress while an open run exists.
+              operation_status: openWorking
+                ? 'inprogress'
+                : (job.operation_status || prev.operation_status),
               // After review with rework: allow Activate again (not an open working run).
               can_activate: openWorking ? false : true,
             };
@@ -803,35 +812,45 @@ const Dashboard = () => {
                   {selectedJob?.priority ?? 'N/A'}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  {isJobReviewCompleted(selectedJob, productionStats) ? (
-                    <Tag
-                      color="success"
-                      style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
-                    >
-                      Completed
-                    </Tag>
-                  ) : isJobReviewInProgress(selectedJob, productionStats) ? (
-                    <Tag
-                      color="processing"
-                      style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
-                    >
-                      In Progress
-                    </Tag>
-                  ) : (
-                    <Tag
-                      style={{
-                        borderRadius: 20,
-                        fontWeight: 600,
-                        fontSize: 12,
-                        padding: '2px 12px',
-                        color: '#94a3b8',
-                        borderColor: '#d9d9d9',
-                        background: '#fafafa',
-                      }}
-                    >
-                      Pending
-                    </Tag>
-                  )}
+                  {(() => {
+                    const completed = isJobReviewCompleted(selectedJob, productionStats);
+                    const inProgress = !completed && isJobReviewInProgress(selectedJob, productionStats);
+                    if (completed) {
+                      return (
+                        <Tag
+                          color="success"
+                          style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
+                        >
+                          Completed
+                        </Tag>
+                      );
+                    }
+                    if (inProgress) {
+                      return (
+                        <Tag
+                          color="processing"
+                          style={{ borderRadius: 20, fontWeight: 600, fontSize: 12, padding: '2px 12px' }}
+                        >
+                          In Progress
+                        </Tag>
+                      );
+                    }
+                    return (
+                      <Tag
+                        style={{
+                          borderRadius: 20,
+                          fontWeight: 600,
+                          fontSize: 12,
+                          padding: '2px 12px',
+                          color: '#94a3b8',
+                          borderColor: '#d9d9d9',
+                          background: '#fafafa',
+                        }}
+                      >
+                        Pending
+                      </Tag>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

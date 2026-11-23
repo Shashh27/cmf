@@ -367,7 +367,6 @@ const SelectJob = ({ open, onClose, onSelectJob, currentSelectedJob }) => {
                     transition: 'all 0.2s ease',
                     cursor: isCompleted ? 'not-allowed' : 'pointer',
                     opacity: isCompleted ? 0.85 : 1,
-                    pointerEvents: isCompleted ? 'none' : 'auto',
                     ...cardHighlightStyle,
                   }}
                   bodyStyle={{ padding: 16 }}

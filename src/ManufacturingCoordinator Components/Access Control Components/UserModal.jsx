@@ -21,10 +21,14 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
   useEffect(() => {
     if (open) {
       if (editingUser) {
+        const allRoles = Array.isArray(editingUser.roles) && editingUser.roles.length
+          ? editingUser.roles
+          : [editingUser.role].filter(Boolean);
         form.setFieldsValue({
           username: editingUser.username || editingUser.user_name,
           gmail: editingUser.gmail,
           role: editingUser.role,
+          roles: allRoles.filter((r) => r !== editingUser.role),
           center: editingUser.center,
           group: editingUser.group,
           password: '',
@@ -36,10 +40,11 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
   }, [open, editingUser, form]);
 
   const handleFormSubmit = async (values) => {
-    const { username, password, ...rest } = values;
+    const { username, password, roles: extraRoles, ...rest } = values;
     const payload = {
       ...rest,
       user_name: username,
+      roles: [rest.role, ...(extraRoles || [])].filter(Boolean),
     };
     if (password?.trim()) {
       payload.password = password.trim();
@@ -153,14 +158,44 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
 
         <Form.Item
           name="role"
-          label="Role"
-          rules={[{ required: true, message: 'Please select role' }]}
+          label="Primary Role"
+          rules={[{ required: true, message: 'Please select primary role' }]}
+          extra="Default portal when no role is chosen at login"
         >
-          <Select placeholder="Select role">
+          <Select placeholder="Select primary role">
             {Object.entries(roleLabels).map(([value, label]) => (
               <Option key={value} value={value}>{label}</Option>
             ))}
           </Select>
+        </Form.Item>
+
+        <Form.Item
+          noStyle
+          shouldUpdate={(prev, cur) => prev.role !== cur.role}
+        >
+          {({ getFieldValue }) => {
+            const primary = getFieldValue('role');
+            return (
+              <Form.Item
+                name="roles"
+                label="Additional Roles"
+                extra="Same person can log into these portals without a duplicate account"
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Optional extra roles (e.g. Project Coordinator)"
+                  optionFilterProp="children"
+                >
+                  {Object.entries(roleLabels)
+                    .filter(([value]) => value !== primary)
+                    .map(([value, label]) => (
+                      <Option key={value} value={value}>{label}</Option>
+                    ))}
+                </Select>
+              </Form.Item>
+            );
+          }}
         </Form.Item>
 
         <Form.Item

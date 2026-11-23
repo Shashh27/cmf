@@ -4,6 +4,7 @@ import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@
 import { message } from "antd";
 import dayjs from "dayjs";
 import { api } from '../../api/client.js';
+import { userHasRole } from '../../auth/roleHomes.js';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -139,13 +140,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
       const response = await api.get(`/access-users/`);
       const list = Array.isArray(response.data) ? response.data : [];
       setUsers(list);
-      const pcs = list.filter(
-        (u) => (u.role || "").toLowerCase() === "project_coordinator"
-      );
-      const mcs = list.filter((u) => {
-        const r = (u.role || "").toLowerCase();
-        return r === "manufacturing_coordinator" || r === "mc";
-      });
+      const pcs = list.filter((u) => userHasRole(u, "project_coordinator"));
+      const mcs = list.filter((u) => userHasRole(u, "manufacturing_coordinator"));
       setProjectCoordinators(pcs);
       setManufacturingCoordinators(mcs);
     } catch (error) {

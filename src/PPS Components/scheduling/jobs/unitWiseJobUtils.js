@@ -96,13 +96,15 @@ export const isJobReviewCompleted = (job, stats = {}) => {
 };
 
 export const isJobReviewInProgress = (job, stats = {}) => {
-  const status = getJobReviewStatus(job, stats);
-  if (status === 'inprogress' || status === 'in-progress' || status === 'in progress') {
+  // Prefer explicit operation_status when it is still pending
+  const opStatus = String(job?.operation_status || '').toLowerCase().trim();
+  if (opStatus === 'pending') return false;
+  if (opStatus === 'inprogress' || opStatus === 'in-progress' || opStatus === 'in progress') {
     return true;
   }
-  // Open working log / activated card: can_activate false + operation in progress
-  const opStatus = String(job?.operation_status || '').toLowerCase();
-  return opStatus === 'inprogress' || opStatus === 'in-progress' || opStatus === 'in progress';
+  if (stats.openWorking) return true;
+  const status = getJobReviewStatus(job, stats);
+  return status === 'inprogress' || status === 'in-progress' || status === 'in progress';
 };
 
 export const jobStatusLabel = (job, stats = {}) => {

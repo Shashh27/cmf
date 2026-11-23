@@ -17,6 +17,16 @@ export function normalizeRoleKey(role) {
   return n.replace(/\s+/g, '_');
 }
 
+/** True if user.role or user.roles includes the given role. */
+export function userHasRole(user, role) {
+  const want = normalizeRoleKey(role);
+  if (!want || !user) return false;
+  const list = [user.role, ...(Array.isArray(user.roles) ? user.roles : [])]
+    .map(normalizeRoleKey)
+    .filter(Boolean);
+  return list.includes(want);
+}
+
 export const ROLE_HOME_PATHS = {
   admin: '/admin/dashboard',
   project_coordinator: '/project_coordinator/oms/orders',

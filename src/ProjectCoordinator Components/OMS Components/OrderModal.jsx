@@ -3,6 +3,7 @@ import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collap
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { api } from '../../api/client.js';
+import { userHasRole } from '../../auth/roleHomes.js';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -186,27 +187,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         currentRole = null;
       }
 
-      const pcs = list.filter((u) => {
-        const role = (u.role || "").toLowerCase().replace(/_/g, " ").trim();
-        const isCurrentPc =
-          currentRole &&
-          (currentRole.includes("project coordinator") ||
-           currentRole === "coordinator");
+      const isCurrentPc =
+        currentRole &&
+        (currentRole.includes("project coordinator") || currentRole === "coordinator");
 
-        // When the logged-in user is a Project Coordinator, show Admins in the dropdown.
-        if (isCurrentPc) {
-          return role === "admin";
-        }
-
-        // For other roles (e.g., admin viewing this screen), keep original behavior:
-        // show users whose role is Project Coordinator / Coordinator.
-        return role.includes("project coordinator") || role === "coordinator";
-      });
-
-      const mcs = list.filter((u) => {
-        const r = (u.role || "").toLowerCase();
-        return r === "manufacturing_coordinator" || r === "mc";
-      });
+      // When the logged-in user is a Project Coordinator, show Admins in the dropdown.
+      const pcs = list.filter((u) =>
+        isCurrentPc ? userHasRole(u, "admin") : userHasRole(u, "project_coordinator")
+      );
+      const mcs = list.filter((u) => userHasRole(u, "manufacturing_coordinator"));
 
       setProjectCoordinators(pcs);
       setManufacturingCoordinators(mcs);

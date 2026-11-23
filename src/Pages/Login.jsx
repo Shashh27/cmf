@@ -105,12 +105,12 @@ const Login = () => {
         userName = values.operator_id;
       }
 
-      const data = await login(userName, values.password);
-      const selected = normalizeRoleKey(role);
+      const selected = normalizeRoleKey(role) || normalizeRoleKey(activeRole);
+      const data = await login(userName, values.password, selected);
       const actual = normalizeRoleKey(data.user?.role);
-      const home = roleHomePath(data.user?.role);
+      const home = roleHomePath(data.user?.role || selected);
 
-      if (selected !== actual) {
+      if (selected && actual && selected !== actual) {
         message.warning(
           `Logged in as ${data.user?.role || actual}. Opening that portal (you selected ${role}).`
         );
@@ -121,7 +121,12 @@ const Login = () => {
       navigate(home, { replace: true });
     } catch (error) {
       console.error('Login error:', error);
-      message.error('invalid credential');
+      const detail = error?.response?.data?.detail;
+      if (error?.response?.status === 403 && detail) {
+        message.error(typeof detail === 'string' ? detail : 'You do not have this role');
+      } else {
+        message.error('invalid credential');
+      }
     } finally {
       setLoading(false);
     }

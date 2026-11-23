@@ -51,13 +51,15 @@ export function getStoredUserRole() {
 }
 
 /**
- * Download rules:
+ * Download rules (session role at upload time):
  * - QA-uploaded docs → any logged-in role may download
- * - PC / Admin / MC uploads → only the same uploading role may download
+ * - otherwise → only the same uploading role (MC upload ≠ PC download,
+ *   even for the same person)
  */
 export function canDownloadDocument(doc, currentUserRole = getStoredUserRole()) {
-  if (isQaRole(doc?.user_role)) return true;
-  return rolesMatch(doc?.user_role, currentUserRole);
+  const uploadRole = doc?.uploaded_role || doc?.user_role;
+  if (isQaRole(uploadRole)) return true;
+  return rolesMatch(uploadRole, currentUserRole);
 }
 
 export const DOWNLOAD_ROLE_TOOLTIP =

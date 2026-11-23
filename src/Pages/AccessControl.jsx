@@ -174,15 +174,26 @@ const AccessControl = () => {
         { text: 'Operator', value: 'operator' },
         { text: 'Quality Assurance', value: 'quality_assurance' },
       ],
-      onFilter: (value, record) => record.role === value,
-      render: (role) => {
-        let color = 'geekblue';
-        if (role === 'admin') color = 'volcano';
-        if (role === 'operator') color = 'green';
+      onFilter: (value, record) => {
+        const all = [record.role, ...(record.roles || [])];
+        return all.includes(value);
+      },
+      render: (role, record) => {
+        const all = Array.from(new Set([role, ...(record.roles || [])].filter(Boolean)));
         return (
-          <Tag color={color} key={role}>
-            {roleLabels[role] ? roleLabels[role].toUpperCase() : role.toUpperCase()}
-          </Tag>
+          <Space size={[4, 4]} wrap>
+            {all.map((r) => {
+              let color = 'geekblue';
+              if (r === 'admin') color = 'volcano';
+              if (r === 'operator') color = 'green';
+              if (r === role) color = r === 'admin' ? 'volcano' : 'blue';
+              return (
+                <Tag color={color} key={r}>
+                  {roleLabels[r] ? roleLabels[r].toUpperCase() : String(r).toUpperCase()}
+                </Tag>
+              );
+            })}
+          </Space>
         );
       },
     },
